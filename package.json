@@ -1,0 +1,16 @@
+{
+  "name": "klean",
+  "version": "1.0.0",
+  "description": "KLEAN — Les services à domicile à la demande en Côte d'Ivoire",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "pg": "^8.12.0"
+  },
+  "license": "UNLICENSED"
+}
