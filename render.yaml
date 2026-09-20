@@ -1,0 +1,17 @@
+# Déploiement Render.com (blueprint) — https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: klean
+    runtime: node
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "node server.js"
+    healthCheckPath: /api/health
+    envVars:
+      # → OBLIGATOIRE pour garder les comptes en cas de redémarrage :
+      #   collez l'URL "Connection string" de votre base Neon (gratuit) — voir DEPLOIEMENT.md
+      - key: DATABASE_URL
+        sync: false
+      # → Option : pré-créer le mot de passe HQ au 1er démarrage (ne pas le mettre en clair ici)
+      - key: ADMIN_PIN
+        sync: false
