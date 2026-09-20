@@ -274,7 +274,7 @@ function handleMissionUpdate(msg){
   clearTimeout(NET.searchTimeout);
   const st = msg.status;
   if(st === 'accepted' && msg.agent){
-    mission.agent = { nom: msg.agent.nom, note: msg.agent.note || 5, missions: msg.agent.missions || 0, tel: (msg.agent.tel||'').replace(/\D/g,'') };
+    mission.agent = { nom: msg.agent.nom, note: msg.agent.note || 5, missions: msg.agent.missions || 0, tel: (msg.agent.tel||'').replace(/\D/g,''), photo: msg.agent.photo || null };
     mission.dist = msg.dist || mission.dist || 2;
     // 📍 distance réelle si le serveur a la position GPS de l'agent
     if(msg.agentPos && typeof mission.lat === 'number' && mission.lat !== null){

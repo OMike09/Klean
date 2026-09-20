@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KLEAN HQ — Tableau de bord · Côte d'Ivoire</title>
+<link rel="icon" href="/klean-icon-192.png" type="image/png">
 <style>
   :root{
     --bg:#0b1512; --card:#122019; --card2:#16261f; --line:#1e332a;
@@ -297,13 +298,14 @@ function renderCands(list){
       ['📞', (a.tel1||a.tel||'') + (a.tel2 ? ' / '+a.tel2 : '')],
       ['📍', (a.quartier||'—') + ' — ' + (a.adresse||'')],
       ['🪪', (a.pieceType||'') + ' N° ' + (a.pieceNum||'') + (a.hasPhoto ? ' · 📷 photo jointe' : ' · ⚠️ pas de photo')],
-      ['⚖️', 'Casier : ' + (a.casier==='fourni'?'fourni ✓ ('+(a.casierDate||'date ?')+')':a.casier==='en-cours'?'en cours d\'obtention':'non fourni')],
       ['🚨', 'Urgence : ' + (a.urgenceNom||'') + ' · ' + (a.urgenceTel||'')],
       ['🗣️', 'Réf. 1 : ' + (a.ref1Nom||'') + ' ' + (a.ref1Tel||'') + (a.ref2Nom ? ' · Réf. 2 : '+a.ref2Nom+' '+(a.ref2Tel||'') : '')],
       ['💼', (a.experience||0) + ' an(s) d\'expérience · ' + ((a.services||[]).map(s=>(SVC_N[s]||s)).join(', ') || 'services ?')],
     ];
     return `<div class="agrow" style="align-items:flex-start">
-      <div class="avatar">${(a.nom||'?')[0].toUpperCase()}<span class="${a.online?'doton':'dotof'}"></span></div>
+      ${a.photo
+        ? `<div style="position:relative;width:44px;height:44px;flex-shrink:0"><img src="${a.photo}" style="width:44px;height:44px;border-radius:50%;object-fit:cover"><span class="${a.online?'doton':'dotof'}" style="position:absolute;right:0;bottom:0"></span></div>`
+        : `<div class="avatar">${(a.nom||'?')[0].toUpperCase()}<span class="${a.online?'doton':'dotof'}"></span></div>`}
       <div style="flex:1;min-width:0">
         <b>${a.nom}</b> <span class="badge ${cls}">${txt}</span><br>
         <small>${hhmm(a.createdAt||'')} · ${a.id}</small>
@@ -338,7 +340,7 @@ async function decideCand(id, action, nom){
   if(action === 'approve'){
     if(!confirm('✅ Valider le dossier de '+nom+' ?\nIl pourra recevoir des missions.')) return;
   } else {
-    const reason = prompt('✕ Motif du rejet du dossier de '+nom+' (ex : pièce illisible, casier manquant) :', 'Dossier incomplet');
+    const reason = prompt('✕ Motif du rejet du dossier de '+nom+' (ex : pièce illisible, références injoignables) :', 'Dossier incomplet');
     if(reason === null) return;
     await fetch('/api/admin/agents/'+id+'/reject', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({reason})});
     setTimeout(loadAll, 300); return;
@@ -429,6 +431,5 @@ loadAll();
 connectWS();
 setInterval(loadAll, 12000); // secours
 </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3de3f326e87e27e',t:'MTc4OTg4MDIyMA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
 </body>
 </html>

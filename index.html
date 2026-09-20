@@ -3,7 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<link rel="icon" href="/klean-icon-192.png" type="image/png">
 <title>KLEAN — Le Yango des services à domicile | Côte d'Ivoire</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0da678">
+<link rel="apple-touch-icon" href="/klean-icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KLEAN">
 <style>
   :root{
     --p:#0da678; --pd:#0a8a62; --pl:#e7f7f1;
@@ -283,6 +290,42 @@
   .req-gain{display:flex;justify-content:space-between;align-items:center;background:var(--pl);border-radius:14px;padding:13px 14px;margin-bottom:16px}
   .req-gain span{font-size:12.5px;color:var(--pd);font-weight:700}
   .req-gain b{font-size:19px;color:var(--pd)}
+  /* ══ LISIBILITÉ : textes agrandis ══ */
+  body{font-size:16.5px}
+  .inp{font-size:16.5px}
+  .svc b{font-size:15px}
+  .svc span{font-size:12.5px}
+  .svc i{font-size:13.5px}
+  .svc-cat{font-size:15px}
+  .note{font-size:13px}
+  .pill{font-size:16px}
+  .seg button{font-size:15px !important}
+  .field-label{font-size:13.5px}
+  .extra b{font-size:14.5px}
+  .extra span span{font-size:12.5px}
+  .rline{font-size:15px}
+  .btn-main{font-size:17px}
+  .btn-ghost{font-size:16.5px}
+  .btn-line{font-size:16px}
+  .pay b{font-size:15px}
+  .pay span span{font-size:12.5px}
+  .city-row b{font-size:16px !important}
+  .city-row small{font-size:13px !important}
+  .step-label{font-size:13.5px}
+  .step-label b{font-size:18px}
+  .sect-title{font-size:17px}
+  .how-step span{font-size:13.5px}
+  .nav-btn span:last-child{font-size:12px}
+  .fake-search{font-size:15.5px}
+  .stat b{font-size:19px}
+  .stat span{font-size:12.5px}
+  .track-card b{font-size:17px}
+  .eta-cell b{font-size:17px}
+  .agent-row b{font-size:16px}
+  .acc-field b{font-size:16px}
+  label,.inp-row label{font-size:13.5px}
+  /* Bouton flottant « Installer l'app » (PWA) */
+  .ins-fab{position:fixed;right:14px;bottom:88px;z-index:80;border:none;border-radius:99px;background:linear-gradient(135deg,#0da678,#076e4f);color:#fff;font-family:'Manrope',sans-serif;font-weight:800;font-size:14px;padding:13px 18px;box-shadow:0 10px 26px rgba(7,110,79,.4);display:flex;align-items:center;gap:7px;cursor:pointer}
   /* Villes */
   .city-row{display:flex;align-items:center;gap:12px;width:100%;padding:13px 14px;border:1.5px solid var(--line);border-radius:14px;background:#fff;margin-bottom:9px;cursor:pointer;font-family:'Manrope',sans-serif;text-align:left}
   .city-row:active{transform:scale(.985)}
@@ -312,10 +355,9 @@
 <!-- ═══════ TOP ═══════ -->
 <div class="topbar">
   <div class="topbar-in">
-    <div class="logo"><span class="bubble">✨</span>KLEAN</div>
+    <div class="logo"><img src="/klean-icon-192.png" alt="KLEAN" style="width:34px;height:34px;border-radius:10px;vertical-align:-10px;margin-right:4px;box-shadow:0 3px 10px rgba(7,110,79,.35)">KLEAN</div>
     <div style="display:flex;align-items:center;gap:8px">
       <div class="city-chip" id="city-chip" onclick="cityInfo()">📍 Bouaké</div>
-      <a class="hq-top" href="/admin" title="Espace propriétaire (HQ)" style="width:32px;height:32px;border-radius:10px;background:var(--pl);border:1.5px solid var(--p);display:flex;align-items:center;justify-content:center;font-size:16px;text-decoration:none">🎛️</a>
     </div>
   </div>
   <div class="modebar">
@@ -369,8 +411,7 @@
       <p><span id="home-banner-p">Vous êtes à Bouaké ? Recevez des missions près de chez vous, quand vous voulez.</span><br><b style="font-size:14px">75% du montant de chaque mission vous revient.</b></p>
       <button onclick="setMode('agent')">Rejoindre la flotte →</button>
     </div>
-    <p class="note">KLEAN — La plateforme ivoirienne des services à domicile à la demande.<br>📍 Côte d'Ivoire 🇨🇮 — 7 villes actives</p>
-    <p class="note"><a id="hq-link" href="/admin" style="color:var(--pd);font-weight:800;text-decoration:none">🎛️ Accès propriétaire (HQ) →</a></p>
+    <p class="note">KLEAN — La plateforme ivoirienne des services à domicile à la demande.<br>📍 Côte d'Ivoire 🇨🇮 — 5 villes actives</p>
   </div>
 </div>
 
@@ -409,7 +450,8 @@
     <div class="inp-row" style="margin-top:18px">
       <label>📍 Quartier <span id="lbl-quart-city">(Bouaké)</span></label>
       <button class="btn-loc" onclick="detectPos()">📡 Utiliser ma position actuelle</button>
-      <select class="inp" id="sel-quartier"></select>
+      <input class="inp" id="sel-quartier" list="dl-quartier" placeholder="🔍 Tapez le début de votre quartier…" autocomplete="off">
+      <datalist id="dl-quartier"></datalist>
     </div>
     <div class="inp-row">
       <label>🏠 Adresse précise</label>
@@ -579,7 +621,7 @@
       <div class="inp-row"><label>📞 Téléphone</label><div class="phone-wrap"><span class="prefix">+225</span><input type="tel" id="prof-tel" placeholder="07 00 00 00 00"></div></div>
       <button class="btn-main" style="width:100%;flex:none" onclick="saveProfile()">💾 Enregistrer</button>
     </div>
-    <p class="note">🛡️ Chaque agent KLEAN est vérifié (pièce d'identité + casier) avant activation, puis noté après chaque mission.</p>
+    <p class="note">🛡️ Chaque agent KLEAN est vérifié (pièce d'identité + références) par le propriétaire avant activation, puis noté après chaque mission.</p>
   </div>
 </div>
 
@@ -590,6 +632,7 @@
       <div style="font-size:30px">🏙️</div>
       <div><b>Choisissez votre ville</b><small>KLEAN se déploie dans toute la Côte d'Ivoire 🇨🇮</small></div>
     </div>
+    <input class="inp" id="city-search" placeholder="🔍 Rechercher une ville… (ex. Bouaké)" oninput="renderCityModal(this.value)" style="margin-bottom:12px" autocomplete="off">
     <div id="city-list"></div>
     <button class="btn-ghost" style="width:100%" onclick="closeCityModal()">Fermer</button>
   </div>
@@ -652,39 +695,39 @@ function fmtNum(n){ return (n||'').replace(/(\d{2})(?=\d)/g,'$1 ').trim(); }
 
 const SERVICES = [
   /* — 🧹 MÉNAGE & NETTOYAGE — */
-  {id:'maison',      ic:'🏠', nom:'Nettoyage maison',       desc:'Appartement, villa, studio',      base:8000, cat:'clean'},
-  {id:'bureaux',     ic:'🏢', nom:'Nettoyage bureaux',      desc:'Bureaux, commerces, agences',     base:12000, cat:'clean'},
+  {id:'maison',      ic:'🏠', nom:'Nettoyage maison',       desc:'Appartement, villa, studio',      base:7000, cat:'clean'},
+  {id:'bureaux',     ic:'🏢', nom:'Nettoyage bureaux',      desc:'Bureaux, commerces, agences',     base:15000, cat:'clean'},
   {id:'canapes',     ic:'🛋️', nom:'Canapés & fauteuils',   desc:'Injection-extraction, détachage', base:6000, cat:'clean'},
-  {id:'vitres',      ic:'🪟', nom:'Vitres & baies',         desc:'Intérieur et extérieur',          base:5000, cat:'clean'},
+  {id:'vitres',      ic:'🪟', nom:'Vitres & baies',         desc:'Intérieur et extérieur',          base:4500, cat:'clean'},
   {id:'demenagement',ic:'🧼', nom:'Après déménagement',     desc:'Avant emménagement / état des lieux', base:15000, cat:'clean'},
-  {id:'sdb',         ic:'🚿', nom:'Salles de bains',        desc:'Détartrage, joints, faïence',     base:5000, cat:'clean'},
-  {id:'grand',       ic:'🧹', nom:'Grand ménage',           desc:'Nettoyage complet de fond en comble', base:14000, cat:'clean'},
+  {id:'sdb',         ic:'🚿', nom:'Salles de bains',        desc:'Détartrage, joints, faïence',     base:5500, cat:'clean'},
+  {id:'grand',       ic:'🧹', nom:'Grand ménage',           desc:'Nettoyage complet de fond en comble', base:16000, cat:'clean'},
   /* — 🔧 DÉPANNAGE & TECHNIQUE (visite + diagnostic inclus) — */
-  {id:'plomberie',   ic:'🔧', nom:'Plomberie',              desc:'Fuites, robinets, WC, canalisations', base:5000, cat:'tech', opts:[
-    {id:'robinet', nom:'Remplacement robinet', prix:3000},{id:'fuite', nom:'Réparation fuite', prix:5000},
-    {id:'debouch', nom:'Débouchage canalisation', prix:6000},{id:'chauffe', nom:'Chauffe-eau', prix:8000}]},
-  {id:'electricite', ic:'💡', nom:'Électricité',            desc:'Pannes, prises, installations',   base:5000, cat:'tech', opts:[
-    {id:'prise', nom:'Prise / interrupteur', prix:2500},{id:'tableau', nom:'Tableau électrique', prix:8000},
+  {id:'plomberie',   ic:'🔧', nom:'Plomberie',              desc:'Fuites, robinets, WC, canalisations', base:6000, cat:'tech', opts:[
+    {id:'robinet', nom:'Remplacement robinet', prix:3500},{id:'fuite', nom:'Réparation fuite', prix:5000},
+    {id:'debouch', nom:'Débouchage canalisation', prix:7000},{id:'chauffe', nom:'Chauffe-eau', prix:10000}]},
+  {id:'electricite', ic:'💡', nom:'Électricité',            desc:'Pannes, prises, installations',   base:6000, cat:'tech', opts:[
+    {id:'prise', nom:'Prise / interrupteur', prix:2500},{id:'tableau', nom:'Tableau électrique', prix:9000},
     {id:'plaf', nom:'Ventilateur / plafonnier', prix:4500},{id:'court', nom:'Court-circuit / panne', prix:6000}]},
-  {id:'clim',        ic:'❄️', nom:'Climatisation',         desc:'Entretien, réparation, installation', base:8000, cat:'tech', opts:[
-    {id:'gaz', nom:'Recharge de gaz', prix:15000},{id:'repar', nom:'Réparation panne', prix:12000},
-    {id:'instal', nom:'Installation split', prix:20000},{id:'split2', nom:'Split supplémentaire', prix:5000}]},
-  {id:'serrurerie',  ic:'🔑', nom:'Serrurerie',             desc:'Ouverture de porte, serrures',    base:4000, cat:'tech', opts:[
+  {id:'clim',        ic:'❄️', nom:'Climatisation',         desc:'Entretien, réparation, installation', base:10000, cat:'tech', opts:[
+    {id:'gaz', nom:'Recharge de gaz', prix:16000},{id:'repar', nom:'Réparation panne', prix:12000},
+    {id:'instal', nom:'Installation split', prix:25000},{id:'split2', nom:'Split supplémentaire', prix:5000}]},
+  {id:'serrurerie',  ic:'🔑', nom:'Serrurerie',             desc:'Ouverture de porte, serrures',    base:5000, cat:'tech', opts:[
     {id:'ouvert', nom:'Ouverture de porte', prix:5000},{id:'serrure', nom:'Remplacement serrure', prix:6000},
     {id:'cylindre', nom:'Cylindre haute sécurité', prix:9000}]},
-  {id:'electro',     ic:'🔌', nom:'Électroménager',         desc:'Frigo, machine à laver, four…',  base:4500, cat:'tech', opts:[
+  {id:'electro',     ic:'🔌', nom:'Électroménager',         desc:'Frigo, machine à laver, four…',  base:5000, cat:'tech', opts:[
     {id:'frigo2', nom:'Réparation frigo/congélo', prix:9000},{id:'mav', nom:'Machine à laver', prix:8000},{id:'four2', nom:'Four / cuisinière', prix:7000}]},
   /* — 🏡 EXTÉRIEUR & MAISON — */
-  {id:'jardinage',   ic:'🌿', nom:'Jardinage',              desc:'Tonte, taille, entretien jardin', base:6000, cat:'home', opts:[
-    {id:'tonte', nom:'Tonte de pelouse', prix:4000},{id:'haie', nom:'Taille de haie', prix:3000},{id:'desherb', nom:'Désherbage', prix:3500}]},
+  {id:'jardinage',   ic:'🌿', nom:'Jardinage',              desc:'Tonte, taille, entretien jardin', base:7000, cat:'home', opts:[
+    {id:'tonte', nom:'Tonte de pelouse', prix:4000},{id:'haie', nom:'Taille de haie', prix:3500},{id:'desherb', nom:'Désherbage', prix:3500}]},
   {id:'lavageauto',  ic:'🚗', nom:'Lavage auto à domicile', desc:'Extérieur + intérieur, chez vous', base:4000, cat:'home', piecesLabel:'véhicule(s)', opts:[
-    {id:'inter', nom:'Intérieur complet', prix:3000},{id:'suv', nom:'SUV / 4x4', prix:2000},{id:'cire', nom:'Cire de protection', prix:2500},{id:'moteur', nom:'Nettoyage moteur', prix:3500}]},
-  {id:'bricolage',   ic:'🪛', nom:'Bricolage & montage',    desc:'Meubles, fixations, petits travaux', base:5000, cat:'home', opts:[
-    {id:'meuble', nom:'Montage de meuble', prix:5000},{id:'etagere', nom:'Fixation étagère/TV', prix:2500},{id:'tringle', nom:'Tringles & rideaux', prix:2000}]},
-  {id:'demen',       ic:'📦', nom:'Déménagement & portage', desc:'Porteurs, emballage, transport', base:25000, cat:'home', piecesLabel:'pièce(s) à vider', opts:[
+    {id:'inter', nom:'Intérieur complet', prix:3000},{id:'suv', nom:'SUV / 4x4', prix:2500},{id:'cire', nom:'Cire de protection', prix:2500},{id:'moteur', nom:'Nettoyage moteur', prix:3500}]},
+  {id:'bricolage',   ic:'🪛', nom:'Bricolage & montage',    desc:'Meubles, fixations, petits travaux', base:6000, cat:'home', opts:[
+    {id:'meuble', nom:'Montage de meuble', prix:6000},{id:'etagere', nom:'Fixation étagère/TV', prix:2500},{id:'tringle', nom:'Tringles & rideaux', prix:2000}]},
+  {id:'demen',       ic:'📦', nom:'Déménagement & portage', desc:'Porteurs, emballage, transport', base:30000, cat:'home', piecesLabel:'pièce(s) à vider', opts:[
     {id:'cartons', nom:'Cartons & emballage', prix:5000},{id:'porteur', nom:'Porteur supplémentaire', prix:8000},{id:'demont', nom:'Montage / démontage meubles', prix:6000}]},
-  {id:'cuisine',     ic:'🍳', nom:'Cuisinier à domicile',   desc:'Repas ivoirien ou international', base:8000, cat:'home', opts:[
-    {id:'courses', nom:'Courses incluses', prix:3000},{id:'groupe', nom:'Repas 5+ personnes', prix:4000},{id:'patiss', nom:'Pâtisserie / dessert', prix:3500}]},
+  {id:'cuisine',     ic:'🍳', nom:'Cuisinier à domicile',   desc:'Repas ivoirien ou international', base:10000, cat:'home', opts:[
+    {id:'courses', nom:'Courses incluses', prix:4000},{id:'groupe', nom:'Repas 5+ personnes', prix:4000},{id:'patiss', nom:'Pâtisserie / dessert', prix:3500}]},
 ];
 /* Services prévus ensuite :
 const UPCOMING = ['🧸 Garde d\'enfants','💊 Soins à domicile','📚 Cours particuliers','🛵 Livraison & courses','🐕 Garde d\'animaux']; */
@@ -697,17 +740,15 @@ const EXTRAS = [
   {id:'cour',   ic:'🌿', nom:'Cour / balcon',        desc:'Balayage + lavage',     prix:1000},
   {id:'eco',    ic:'🌱', nom:'Produits écologiques', desc:'Sans chimique',         prix:1500},
 ];
-/* 🏙️ VILLES ACTIVES — toute la Côte d'Ivoire, étape par étape */
+/* 🏙️ VILLES ACTIVES — Bouaké · Abidjan · Yamoussoukro · Touba · Kounahiri */
 const CITIES = [
   {id:'bouake',     nom:'Bouaké',       actif:true, agents:48,  quartiers:['Air France','Commerce','Koko','Nimbo','Dar-Es-Salam','Ahougnanssou','Belleville','Kennedy','Houphouët-Boigny','Esso','Bro Fodio','N\'Gattakro','Sokoura','Municipalité']},
-  {id:'abidjan',    nom:'Abidjan',      actif:true, agents:120, quartiers:['Plateau','Cocody','Angré','Riviera','Marcory','Treichville','Koumassi','Port-Bouët','Adjamé','Yopougon','Abobo','Bingerville','Anyama','Songon']},
+  {id:'abidjan',    nom:'Abidjan',      actif:true, agents:120, quartiers:['Plateau','Cocody','Angré','Riviera','Marcory','Zone 4','Treichville','Koumassi','Port-Bouët','Vridi','Adjamé','Williamsville','Attecoubé','Yopougon','Abobo','Bingerville','Anyama','Brofodoumé','Songon']},
   {id:'yamoussoukro',nom:'Yamoussoukro',actif:true, agents:22,  quartiers:['Habitat','Morofé','Dioulakro','Millionnaire','Tokpokro','Attiégouakro','Centre','Énergie']},
-  {id:'korhogo',    nom:'Korhogo',      actif:true, agents:16,  quartiers:['Commerce','Koko','Teguéré','Napié','Delafosse','Sinistré','Soba','Centre']},
-  {id:'sanpedro',   nom:'San Pedro',    actif:true, agents:14,  quartiers:['Bardot','Cascade','Seweké','Balmer','Marc Championnet','Centre']},
-  {id:'daloa',      nom:'Daloa',        actif:true, agents:12,  quartiers:['Kennedy','Commerce','Dioulabougou','Soleil','Huberson','Centre']},
-  {id:'man',        nom:'Man',          actif:true, agents:10,  quartiers:['Centre','Grand-Gbapleu','Dioulabougou','Sandoungué','Camp Militaire','Libreville']},
+  {id:'touba',      nom:'Touba',        actif:true, agents:8,   quartiers:['Touba-Centre','Dioulassoba','Centre-Commercial','Sokoura','Camp-Militaire','Gare Routière','Marché']},
+  {id:'kounahiri',  nom:'Kounahiri',    actif:true, agents:6,   quartiers:['Kounahiri-Centre','Dioulabougou','Sokoura','Camp-Militaire','Marché','Gare']},
 ];
-const CITIES_SOON = ['Bondoukou','Soubré','Gagnoa','Odienné'];
+const CITIES_SOON = [];
 function currentCity(){ return CITIES.find(x=>x.id===(c.city||'bouake')) || CITIES[0]; }
 function currentQuartiers(){ return currentCity().quartiers; }
 const QUARTIERS = CITIES[0].quartiers; // compat (Bouaké par défaut)
@@ -742,11 +783,16 @@ function setCity(id, silent){
 function cityInfo(){ renderCityModal(); $('#city-modal-bg').classList.add('show'); }
 function closeCityModal(){ $('#city-modal-bg').classList.remove('show'); }
 function pickCity(id){ setCity(id); closeCityModal(); }
-function renderCityModal(){
+function renderCityModal(filter){
   const el = $('#city-list'); if(!el) return;
+  const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const f = norm(filter);
+  const list = CITIES.filter(x => !f || norm(x.nom).includes(f));
   el.innerHTML =
-    CITIES.map(x=>`<button class="city-row ${c.city===x.id?'on':''}" onclick="pickCity('${x.id}')"><span style="font-size:20px">🏙️</span><span style="text-align:left"><b style="display:block;font-size:14.5px">${x.nom}</b><small style="color:var(--muted);font-size:11.5px">${x.quartiers.length} quartiers · ${x.agents} agents</small></span><span class="st">${c.city===x.id?'Votre ville':'✅ Actif'}</span></button>`).join('') +
-    CITIES_SOON.map(n=>`<div class="city-row soon"><span style="font-size:20px">🏗️</span><span><b style="display:block;font-size:14.5px">${n}</b><small style="font-size:11.5px">Arrive bientôt</small></span><span class="st">🔜 Bientôt</span></div>`).join('');
+    (list.length
+      ? list.map(x=>`<button class="city-row ${c.city===x.id?'on':''}" onclick="pickCity('${x.id}')"><span style="font-size:20px">🏙️</span><span style="text-align:left"><b style="display:block;font-size:14.5px">${x.nom}</b><small style="color:var(--muted);font-size:11.5px">${x.quartiers.length} quartiers · ${x.agents} agents</small></span><span class="st">${c.city===x.id?'Votre ville':'✅ Actif'}</span></button>`).join('')
+      : `<p class="note">Aucune ville ne correspond à « ${filter} »</p>`) +
+    (f ? '' : CITIES_SOON.map(n=>`<div class="city-row soon"><span style="font-size:20px">🏗️</span><span><b style="display:block;font-size:14.5px">${n}</b><small style="font-size:11.5px">Arrive bientôt</small></span><span class="st">🔜 Bientôt</span></div>`).join(''));
 }
 function renderHomeRoad(){
   const el = $('#home-road'); if(!el) return;
@@ -903,9 +949,10 @@ function toggleExtra(id){ c.extras[id]=!c.extras[id]; renderExtras(); updatePric
 function renderTimes(){ $('#times-grid').innerHTML = TIMES.map(t=>`<button class="time ${c.time===t?'sel':''}" onclick="c.time='${t}';renderTimes()">${t}</button>`).join(''); }
 function renderQuartiers(){
   const qs = currentQuartiers();
-  $('#sel-quartier').innerHTML = qs.map(q=>`<option ${c.quartier===q?'selected':''}>${q}</option>`).join('');
-  $('#prof-quartier').innerHTML = qs.map(q=>`<option ${agent.quartier===q?'selected':''}>${q}</option>`).join('');
-  const ap = $('#ap-quartier'); if(ap) ap.innerHTML = qs.map(q=>`<option>${q}</option>`).join('');
+  const dl = $('#dl-quartier'); if(dl) dl.innerHTML = qs.map(q=>`<option value="${q}">`).join('');
+  if($('#sel-quartier')) $('#sel-quartier').value = c.quartier;
+  const prof = $('#prof-quartier'); if(prof) prof.innerHTML = qs.map(q=>`<option ${agent.quartier===q?'selected':''}>${q}</option>`).join('');
+  const dlap = $('#dl-ap-quartier'); if(dlap) dlap.innerHTML = qs.map(q=>`<option value="${q}">`).join('');
 }
 function renderPays(){
   $('#pay-grid').innerHTML = PAYS.map(p=>`<button class="pay ${c.paiement===p.id?'sel':''}" onclick="c.paiement='${p.id}';renderPays()"><span class="bd" style="background:${p.bg}">${p.txt}</span><span><b>${p.nom}</b><span>${p.sub}</span></span></button>`).join('');
@@ -995,7 +1042,7 @@ function assignAgent(){
   searchTimers.push(setTimeout(()=>{ goTrackLive(); }, 2200));
 }
 function agentRowHTML(a, dist){
-  return `<div class="avatar">${a.nom[0]}</div>
+  return `${avatarHTML(a.photo, a.nom[0], 44)}
     <div><b>🧹 Agent : ${a.nom}</b><small>⭐ ${a.note.toFixed(1)}/5 · ${a.missions} missions</small></div>
     <div class="dist">📍 ${dist.toFixed(1)} km<br><span style="color:var(--muted);font-weight:600">🛵 ~${Math.max(2,Math.round(dist*4))} min</span></div>`;
 }
@@ -1073,7 +1120,8 @@ function renderTrack(){
   const st = mission.status;
   const a = mission.agent;
   if(a){
-    $('#trk-avatar').textContent = a.nom[0];
+    if(a.photo) $('#trk-avatar').innerHTML = '<img src="'+a.photo+'" style="width:100%;height:100%;border-radius:50%;object-fit:cover">';
+    else $('#trk-avatar').textContent = a.nom[0];
     $('#trk-name').textContent = '🧹 '+a.nom;
     $('#trk-sub').textContent = '⭐ '+a.note.toFixed(1)+'/5 · '+a.missions+' missions';
     $('#trk-dist').innerHTML = '📍 '+Math.max(mission.dist,0).toFixed(1)+' km<br><span style="color:var(--muted);font-weight:600">🛵 Moto</span>';
@@ -1215,7 +1263,7 @@ function renderAgentGate(){
     el.innerHTML = `<div class="gate-card status-card">
       <div class="big">⏳</div>
       <h4>Dossier en cours de vérification</h4>
-      <p class="sub">Votre candidature est entre les mains de l'équipe KLEAN.<br>Nous vérifions : pièce d'identité, casier judiciaire, références.<br><b>Vous serez appelé au ${agent.apply.tel || '…'}.</b></p>
+      <p class="sub">Votre candidature est entre les mains de l'équipe KLEAN.<br>Nous vérifions : pièce d'identité, références, expérience.<br><b>Vous serez appelé au ${agent.apply.tel || '…'}.</b></p>
       <button class="btn-ghost" style="flex:none;padding:12px 22px" onclick="refreshApplyStatus()">↻ Actualiser le statut</button>
     </div>`;
     return;
@@ -1249,8 +1297,11 @@ function renderAgentGate(){
       <div class="inp-row"><label>📞 Tél. principal *</label><input class="inp" id="ap-tel1" type="tel" placeholder="01 02 03 04 05"></div>
       <div class="inp-row"><label>Tél. secondaire</label><input class="inp" id="ap-tel2" type="tel" placeholder="07 08 09 10 11"></div>
     </div>
-    <div class="inp-row"><label>🏠 Quartier de résidence *</label><select class="inp" id="ap-quartier">${QUARTIERS.map(q=>`<option>${q}</option>`).join('')}</select></div>
+    <div class="inp-row"><label>🏠 Quartier de résidence *</label><input class="inp" id="ap-quartier" list="dl-ap-quartier" placeholder="🔍 Tapez votre quartier…" autocomplete="off"><datalist id="dl-ap-quartier">${QUARTIERS.map(q=>`<option value="${q}">`).join('')}</datalist></div>
     <div class="inp-row"><label>Adresse précise *</label><textarea class="inp" id="ap-adresse" placeholder="Rue, repère…"></textarea></div>
+    <button class="photo-btn" onclick="document.getElementById('ap-avatar').click()">🙂 Votre photo de profil — visible par les clients</button>
+    <input type="file" id="ap-avatar" accept="image/*" capture="user" style="display:none" onchange="onAgentAvatar(this)">
+    <div id="ap-avatar-prev"></div>
 
     <h4><span class="step-n">2</span> Pièce d'identité *</h4>
     <div class="two">
@@ -1261,13 +1312,7 @@ function renderAgentGate(){
     <input type="file" id="ap-photo" accept="image/*" capture="environment" style="display:none" onchange="onPiecePhoto(this)">
     <div id="ap-photo-prev"></div>
 
-    <h4 style="margin-top:14px"><span class="step-n">3</span> Casier judiciaire *</h4>
-    <div class="two">
-      <div class="inp-row"><label>Attestation de casier</label><select class="inp" id="ap-casier"><option value="fourni">Fournie ✓</option><option value="en-cours">En cours d'obtention</option><option value="non">Non</option></select></div>
-      <div class="inp-row"><label>Date de l'attestation</label><input class="inp" id="ap-casierdate" type="date"></div>
-    </div>
-
-    <h4 style="margin-top:14px"><span class="step-n">4</span> Références</h4>
+    <h4 style="margin-top:14px"><span class="step-n">3</span> Références</h4>
     <div class="two">
       <div class="inp-row"><label>Personne à alerter (nom) *</label><input class="inp" id="ap-urgencenom" placeholder="Parent, ami…"></div>
       <div class="inp-row"><label>Son téléphone *</label><input class="inp" id="ap-urgencetel" type="tel"></div>
@@ -1281,7 +1326,7 @@ function renderAgentGate(){
       <div class="inp-row"><label>Son téléphone</label><input class="inp" id="ap-ref2tel" type="tel"></div>
     </div>
 
-    <h4 style="margin-top:14px"><span class="step-n">5</span> Services maîtrisés *</h4>
+    <h4 style="margin-top:14px"><span class="step-n">4</span> Services maîtrisés *</h4>
     <div class="svc-check" id="ap-services">${SERVICES.map(s=>`<button data-s="${s.id}" onclick="toggleApplySvc('${s.id}',this)">${s.ic} ${s.nom.split(' ')[1]||s.nom}</button>`).join('')}</div>
 
     <p class="note" style="text-align:left">🛡️ En soumettant, je certifie l'exactitude de ces informations. Elles seront vérifiées par le propriétaire KLEAN avant validation.</p>
@@ -1289,6 +1334,8 @@ function renderAgentGate(){
   </div>`;
   applySvc = {};
   window._piecePhoto = null;
+  window._agentAvatar = null;
+  renderQuartiers();
 }
 function toggleApplySvc(id, btn){ applySvc[id] = !applySvc[id]; btn.classList.toggle('sel', !!applySvc[id]); }
 function onPiecePhoto(input){
@@ -1309,6 +1356,47 @@ function onPiecePhoto(input){
   };
   rd.readAsDataURL(f);
 }
+/* ═══ PHOTOS DE PROFIL (clients & agents) ═══ */
+function fileToThumb(file, max, q){
+  return new Promise(res=>{
+    const rd = new FileReader();
+    rd.onload = e => { const img = new Image();
+      img.onload = () => { const cv = document.createElement('canvas');
+        const sc = Math.min(1, max/Math.max(img.width, img.height));
+        cv.width = Math.round(img.width*sc); cv.height = Math.round(img.height*sc);
+        cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+        res(cv.toDataURL('image/jpeg', q));
+      };
+      img.src = e.target.result; };
+    rd.readAsDataURL(file);
+  });
+}
+function avatarHTML(photo, txt, size){
+  size = size || 44;
+  if(photo) return `<img src="${photo}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0;border:2.5px solid var(--p)">`;
+  return `<div class="avatar" style="${size!==44?'width:'+size+'px;height:'+size+'px;font-size:'+Math.round(size*0.4)+'px;flex-shrink:0':''}">${txt}</div>`;
+}
+function onAvatarPick(input, cb){ const f = input.files && input.files[0]; if(!f) return; fileToThumb(f, 280, .72).then(cb); }
+function onAgentAvatar(input){
+  onAvatarPick(input, d => {
+    window._agentAvatar = d;
+    $('#ap-avatar-prev').innerHTML = '<div style="display:flex;align-items:center;gap:10px;margin:8px 0">'+avatarHTML(d,'A',64)+'<b style="color:var(--pd)">✅ Photo ajoutée</b></div>';
+    toast('🙂 Photo de profil ajoutée ✓');
+  });
+}
+async function onClientAvatar(input){
+  onAvatarPick(input, async d => {
+    client.photo = d;
+    localStorage.setItem('k2_client', JSON.stringify(client));
+    renderAccount();
+    if(typeof NET!=='undefined' && NET.on && client.id){
+      try{
+        await fetch('/api/clients/me/photo', {method:'PUT', headers:{'Content-Type':'application/json','X-Client-Token':client.token}, body:JSON.stringify({clientId:client.id, photo:d})});
+        toast('📷 Photo de profil enregistrée ✓');
+      }catch(e){ toast('📷 Photo gardée sur cet appareil'); }
+    } else toast('📷 Photo de profil enregistrée ✓');
+  });
+}
 const V_AP = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
 async function submitApplication(){
   const dossier = {
@@ -1316,7 +1404,7 @@ async function submitApplication(){
     tel1: V_AP('ap-tel1').replace(/\D/g,''), tel2: V_AP('ap-tel2').replace(/\D/g,''),
     quartier: V_AP('ap-quartier'), adresse: V_AP('ap-adresse'),
     pieceType: V_AP('ap-piecetype'), pieceNum: V_AP('ap-piecenum'), piecePhoto: window._piecePhoto || '',
-    casier: V_AP('ap-casier'), casierDate: V_AP('ap-casierdate'),
+    photo: window._agentAvatar || '',
     urgenceNom: V_AP('ap-urgencenom'), urgenceTel: V_AP('ap-urgencetel'),
     experience: V_AP('ap-experience'),
     ref1Nom: V_AP('ap-ref1nom'), ref1Tel: V_AP('ap-ref1tel'),
@@ -1376,8 +1464,10 @@ function renderAccount(){
     const ini = (client.nom||'?')[0].toUpperCase();
     box.innerHTML = `
     <div class="acc-profile" style="text-align:center;margin-bottom:14px">
-      <div class="avatar" style="margin:0 auto 10px;width:64px;height:64px;font-size:26px;border-radius:20px">${ini}</div>
-      <b style="font-size:18px;display:block">${client.nom}</b>
+      <div style="margin:0 auto 10px;width:72px;height:72px;display:flex;align-items:center;justify-content:center">${avatarHTML(client.photo, ini, 72)}</div>
+      <b style="font-size:19px;display:block">${client.nom}</b>
+      <button class="photo-btn" style="margin:8px auto 0;padding:9px 16px" onclick="document.getElementById('acc-photo').click()">📷 ${client.photo?'Changer ma photo':'Ajouter ma photo'}</button>
+      <input type="file" id="acc-photo" accept="image/*" capture="user" style="display:none" onchange="onClientAvatar(this)">
       <small style="color:var(--muted)">📞 +225 ${client.tel || ''}${client.quartier ? ' · 📍 '+client.quartier : ''}</small>
       <div style="margin-top:10px"><span class="status st-ok">🔒 Compte sécurisé ✓</span></div>
     </div>
@@ -1668,7 +1758,7 @@ function fallbackCopy(txt, done){
   const d = new Date(); const iso = d.toISOString().split('T')[0];
   $('#inp-date').min = iso; $('#inp-date').value = iso; c.date = iso;
   $('#inp-date').addEventListener('change',e=>{c.date=e.target.value; updatePriceBar();});
-  $('#sel-quartier').addEventListener('change',e=>{c.quartier=e.target.value;});
+  $('#sel-quartier').addEventListener('input',e=>{c.quartier=e.target.value;});
   $('#inp-adresse').addEventListener('input',e=>{c.adresse=e.target.value;});
   $('#bk-desc').addEventListener('input',e=>{c.desc=e.target.value;});
   renderStep2Meta();
@@ -1685,9 +1775,44 @@ function fallbackCopy(txt, done){
       hq.href = 'https://8000-i67iht4n1jhu1v8pumi3x.e2b.app/admin'; hq.target = '_blank';
     });
   }
+  // Deep-link « Mode agent » (raccourcis du manifest / ?mode=agent)
+  if(new URLSearchParams(location.search).get('mode') === 'agent') setMode('agent');
+  /* ══ PWA : service worker + bouton « Installer l'app » ══ */
+  if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+    navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  }
+})();
+
+/* ══════════ PWA — installation ══════════ */
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault(); deferredPrompt = e; showInstallFab();
+});
+function showInstallFab(){
+  if(document.getElementById('ins-fab')) return;
+  const b = document.createElement('button');
+  b.id = 'ins-fab'; b.className = 'ins-fab'; b.textContent = '📲 Installer l\'app';
+  b.onclick = async () => {
+    if(!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const r = await deferredPrompt.userChoice;
+    if(r.outcome === 'accepted'){ b.remove(); toast('✅ KLEAN s\'installe sur votre écran d\'accueil !'); }
+    deferredPrompt = null;
+  };
+  document.body.appendChild(b);
+}
+// iPhone : Safari ne déclenche pas beforeinstallprompt → astuce affichée une seule fois
+(function iosInstallTip(){
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if(ios && !standalone && !localStorage.getItem('k2_ios_tip')){
+    setTimeout(() => {
+      localStorage.setItem('k2_ios_tip', '1');
+      toast('📲 iPhone : touchez « Partager » ⬆ puis « Sur l\'écran d\'accueil » pour installer KLEAN comme une app');
+    }, 9000);
+  }
 })();
 </script>
 <script src="net.js"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3de408a5835e27e',t:'MTc4OTg4MDI3NQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
 </body>
 </html>

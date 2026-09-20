@@ -220,7 +220,11 @@ function sendJson(res, code, obj) {
   res.end(b);
 }
 function readBody(req) {
-  return new Promise(r => { let d = ''; req.on('data', c => d += c); req.on('end', () => { try { r(JSON.parse(d || '{}')); } catch (e) { r({}); } }); });
+  return new Promise(r => {
+    let d = '';
+    req.on('data', c => { d += c; if (d.length > 8e6) req.destroy(); });
+    req.on('end', () => { try { r(JSON.parse(d || '{}')); } catch (e) { r({}); } });
+  });
 }
 function agentStats(ag) {
   const done = db.missions.filter(x => x.agentId === ag.id && x.status === 'terminee');
@@ -274,7 +278,7 @@ const server = http.createServer(async (req, res) => {
     // informer les autres agents que la mission est prise
     broadcast(onlineAgents().filter(s => s.meta.agentId !== ag.id), { type: 'mission_taken', missionId: m.id });
     emitToMission(m, { type: 'mission_update', status: 'accepted', missionId: m.id,
-      agent: { nom: ag.nom, note: agentStats(ag).rating, missions: agentStats(ag).missionsDone, tel: ag.tel },
+      agent: { nom: ag.nom, note: agentStats(ag).rating, missions: agentStats(ag).missionsDone, tel: ag.tel, photo: ag.photo || '' },
       dist: m.dist, agentPos: ag.pos || null, lat: m.lat, lng: m.lng });
     console.log(`✅ ${ag.nom} a accepté ${m.id}`);
     emitAdmin('accept', `✅ ${ag.nom} a accepté la mission ${m.id} (${m.prixTotal.toLocaleString('fr-FR')} F)`);
@@ -393,7 +397,18 @@ const server = http.createServer(async (req, res) => {
     const cl = db.clients.find(x => x.tel === tel);
     if (!cl || hashPassword(cl.salt, b.password || '') !== cl.passHash)
       return sendJson(res, 401, { error: 'Téléphone ou mot de passe incorrect' });
-    return sendJson(res, 200, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom, quartier: cl.quartier });
+    return sendJson(res, 200, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom, quartier: cl.quartier, photo: cl.photo || '' });
+  }
+
+  /* 📷 Photo de profil client — PUT /api/clients/me/photo */
+  if (p === '/api/clients/me/photo' && req.method === 'PUT') {
+    const b = await readBody(req);
+    const cl = db.clients.find(x => x.id === b.clientId);
+    if (!cl || findClientByToken(req) !== cl) return sendJson(res, 401, { error: 'Session invalide' });
+    if (typeof b.photo !== 'string' || b.photo.length > 600000) return sendJson(res, 400, { error: 'Photo trop lourde' });
+    cl.photo = b.photo; saveDb();
+    console.log('📷 Photo de profil mise à jour : ' + cl.nom);
+    return sendJson(res, 200, { ok: true });
   }
 
   if (p === '/api/clients/password' && req.method === 'POST') {
@@ -420,7 +435,7 @@ const server = http.createServer(async (req, res) => {
   /* --- DOSSIERS AGENTS (candidature vérifiée par le propriétaire) --- */
   if (p === '/api/agents/apply' && req.method === 'POST') {
     const b = await readBody(req);
-    const need = ['nom', 'prenom', 'naissance', 'tel1', 'quartier', 'adresse', 'pieceType', 'pieceNum', 'casier', 'urgenceNom', 'urgenceTel', 'ref1Nom', 'ref1Tel'];
+    const need = ['nom', 'prenom', 'naissance', 'tel1', 'quartier', 'adresse', 'pieceType', 'pieceNum', 'urgenceNom', 'urgenceTel', 'ref1Nom', 'ref1Tel'];
     for (const k of need) if (!b[k] || String(b[k]).trim() === '') return sendJson(res, 400, { error: 'Champ manquant : ' + k });
     const tel1 = String(b.tel1).replace(/\D/g, '');
     if (tel1.length < 8) return sendJson(res, 400, { error: 'Téléphone principal invalide' });
@@ -434,11 +449,11 @@ const server = http.createServer(async (req, res) => {
       quartier: b.quartier, adresse: b.adresse,
       pieceType: b.pieceType, pieceNum: b.pieceNum,
       piecePhoto: typeof b.piecePhoto === 'string' && b.piecePhoto.length < 900000 ? b.piecePhoto : '',
-      casier: b.casier, casierDate: b.casierDate || '',
       urgenceNom: b.urgenceNom.trim(), urgenceTel: String(b.urgenceTel).replace(/\D/g, ''),
       experience: Math.min(30, Math.max(0, parseInt(b.experience) || 0)),
       ref1Nom: b.ref1Nom.trim(), ref1Tel: String(b.ref1Tel).replace(/\D/g, ''),
       ref2Nom: String(b.ref2Nom || '').trim(), ref2Tel: String(b.ref2Tel || '').replace(/\D/g, ''),
+      photo: typeof b.photo === 'string' ? b.photo.slice(0, 600000) : '',
       services: Array.isArray(b.services) ? b.services.slice(0, 10) : [],
       online: false
     };
