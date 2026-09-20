@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KLEAN HQ — Tableau de bord · Côte d'Ivoire</title>
+<link rel="icon" href="/klean-icon-192.png" type="image/png">
+<style>
+  :root{
+    --bg:#0b1512; --card:#122019; --card2:#16261f; --line:#1e332a;
+    --p:#15c98a; --pd:#0da678; --pl:rgba(21,201,138,.12);
+    --ink:#e8f2ed; --muted:#7f948a; --amber:#ffb020; --blue:#4aa3ff; --red:#ff6b6b;
+    --r:16px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+  .wrap{max-width:1000px;margin:0 auto;padding:16px}
+
+  header{position:sticky;top:0;z-index:10;background:rgba(11,21,18,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 16px}
+  .h-in{max-width:1000px;margin:0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:18px}
+  .logo .bubble{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--p),var(--pd));display:flex;align-items:center;justify-content:center;font-size:15px}
+  .hq-tag{font-size:11px;font-weight:800;color:var(--muted);background:var(--card2);padding:5px 10px;border-radius:99px;margin-left:2px}
+  .live{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:var(--p);background:var(--pl);border:1px solid rgba(21,201,138,.3);padding:7px 13px;border-radius:99px}
+  .live .pt{width:8px;height:8px;border-radius:50%;background:var(--p);animation:blink 1.4s infinite}
+  .live.off{color:var(--red);background:rgba(255,107,107,.1);border-color:rgba(255,107,107,.3)}
+  .live.off .pt{background:var(--red)}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0 10px}
+  .kpi{background:linear-gradient(160deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:var(--r);padding:16px 14px}
+  .kpi span{font-size:11px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:6px}
+  .kpi b{font-size:24px;font-weight:900;display:block;line-height:1.1}
+  .kpi small{font-size:11px;color:var(--muted);display:block;margin-top:4px}
+  .kpi.green b{color:var(--p)} .kpi.gold b{color:var(--amber)} .kpi.blue b{color:var(--blue)}
+
+  .substrip{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 14px;font-size:12.5px;color:var(--muted);font-weight:700}
+  .chip b{color:var(--ink)}
+
+  .grid{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;align-items:start}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .panel h3{font-size:13.5px;padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .panel h3 .cnt{margin-left:auto;font-size:11px;color:var(--muted);background:var(--card2);padding:3px 9px;border-radius:99px}
+  .panel .body{padding:6px 0}
+
+  /* Chart */
+  .chart{display:flex;align-items:flex-end;gap:8px;height:110px;padding:16px 18px 6px}
+  .bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+  .bar{width:100%;max-width:44px;background:linear-gradient(180deg,var(--p),rgba(21,201,138,.35));border-radius:7px 7px 3px 3px;min-height:4px;transition:height .6s ease}
+  .bar-lbl{font-size:10px;color:var(--muted);font-weight:700;text-transform:capitalize}
+  .bar-val{font-size:9.5px;color:var(--p);font-weight:800}
+
+  /* Missions */
+  .mrow{display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid var(--line);font-size:13px;animation:fadein .3s}
+  .mrow:last-child{border-bottom:none}
+  @keyframes fadein{from{opacity:0;transform:translateY(-4px)}}
+  .mrow .ic{width:36px;height:36px;border-radius:11px;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+  .mrow b{font-size:13.5px;display:block}
+  .mrow small{color:var(--muted);font-size:11.5px;display:block;margin-top:1px}
+  .mrow .right{margin-left:auto;text-align:right;flex-shrink:0}
+  .mrow .right b{color:var(--p);font-size:14px}
+  .mrow .right small{color:var(--muted);font-size:10.5px}
+  .badge{font-size:10px;font-weight:800;padding:4px 9px;border-radius:99px;display:inline-block;margin-top:3px;text-transform:uppercase;letter-spacing:.3px}
+  .b-pending{background:rgba(74,163,255,.15);color:var(--blue)}
+  .b-active{background:rgba(255,176,32,.15);color:var(--amber)}
+  .b-done{background:rgba(21,201,138,.15);color:var(--p)}
+  .b-cancel{background:rgba(255,107,107,.15);color:var(--red)}
+  .empty{padding:34px 18px;text-align:center;color:var(--muted);font-size:13px}
+
+  /* Feed */
+  .feed-item{display:flex;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:12.5px;animation:glow 1.6s ease}
+  .feed-item:last-child{border-bottom:none}
+  @keyframes glow{0%{background:rgba(21,201,138,.18)}100%{background:transparent}}
+  .feed-item .t{color:var(--muted);font-size:10.5px;flex-shrink:0;padding-top:2px;font-weight:700;width:42px}
+  .feed-item p{line-height:1.4}
+
+  /* Agents */
+  .agrow{display:flex;align-items:center;gap:11px;padding:11px 16px;border-bottom:1px solid var(--line)}
+  .agrow:last-child{border-bottom:none}
+  .avatar{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--p),var(--pd));display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px;flex-shrink:0;position:relative}
+  .doton{position:absolute;bottom:-2px;right:-2px;width:11px;height:11px;border-radius:50%;background:var(--p);border:2.5px solid var(--card)}
+  .dotof{position:absolute;bottom:-2px;right:-2px;width:11px;height:11px;border-radius:50%;background:#4a5d55;border:2.5px solid var(--card)}
+  .agrow b{font-size:13.5px;display:block}
+  .agrow small{color:var(--muted);font-size:11.5px}
+  .agrow .right{margin-left:auto;text-align:right}
+  .agrow .right b{color:var(--p);font-size:13.5px}
+  .agrow .right small{display:block;color:var(--muted)}
+
+  footer{text-align:center;color:var(--muted);font-size:11.5px;padding:26px 0}
+
+  @media (max-width: 760px){
+    .kpis{grid-template-columns:1fr 1fr}
+    .grid{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="h-in">
+    <div class="logo"><span class="bubble">✨</span>KLEAN <span class="hq-tag">HQ · Côte d'Ivoire 🇨🇮</span></div>
+    <button onclick="changePwd()" title="Changer le mot de passe" style="margin-left:auto;background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">🔑 Mot de passe</button>
+    <button onclick="logout()" title="Se déconnecter" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">⏻ Quitter</button>
+    <div class="live" id="live-pill"><span class="pt"></span><span id="live-txt">EN DIRECT</span></div>
+  </div>
+</header>
+
+<div class="wrap">
+  <!-- KPI -->
+  <div class="kpis">
+    <div class="kpi green"><span>🟢 Agents en ligne</span><b id="k-agents">0</b><small id="k-agents-sub">sur 0 agent(s)</small></div>
+    <div class="kpi blue"><span>📋 Missions aujourd'hui</span><b id="k-missions">0</b><small id="k-missions-sub">0 en cours</small></div>
+    <div class="kpi"><span>💵 CA aujourd'hui</span><b id="k-ca">0 F</b><small>prestations livrées</small></div>
+    <div class="kpi gold"><span>🏦 Commissions (25%)</span><b id="k-comm">0 F</b><small>encaissées aujourd'hui</small></div>
+  </div>
+  <div class="substrip">
+    <div class="chip">📊 CA total : <b id="c-ca">0 F</b></div>
+    <div class="chip">🏦 Commissions totales : <b id="c-comm">0 F</b></div>
+    <div class="chip">🧹 Reversé aux agents : <b id="c-gains">0 F</b></div>
+    <div class="chip">⭐ Note moyenne : <b id="c-note">5,0</b></div>
+    <div class="chip">✅ Missions terminées : <b id="c-done">0</b></div>
+    <div class="chip">👤 Clients inscrits : <b id="c-clients">0</b></div>
+    <div class="chip" id="chip-cands" style="border-color:rgba(255,176,32,.4)">🛡️ Dossiers en attente : <b id="c-cands" style="color:var(--amber)">0</b></div>
+  </div>
+
+  <!-- Chart 7 jours -->
+  <div class="panel" style="margin-bottom:14px">
+    <h3>📈 Chiffre d'affaires — 7 derniers jours <span class="cnt" id="chart-total"></span></h3>
+    <div class="chart" id="chart"></div>
+  </div>
+
+  <!-- Dossiers agents à vérifier -->
+  <div class="panel" style="margin-bottom:14px" id="panel-cands">
+    <h3>🛡️ Vérification des agents <span class="cnt" id="cand-cnt">0 en attente</span></h3>
+    <div class="body" id="cands"><div class="empty">Aucun dossier en attente. Les candidatures d'agents apparaîtront ici pour vérification.</div></div>
+  </div>
+
+  <div class="grid">
+    <!-- Missions live -->
+    <div class="panel">
+      <h3>🧾 Missions <span class="cnt" id="m-cnt">—</span></h3>
+      <div class="body" id="missions"><div class="empty">Aucune mission pour le moment</div></div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Journal temps réel -->
+      <div class="panel">
+        <h3>⚡ Journal temps réel</h3>
+        <div class="body" id="feed"><div class="empty">En attente d'événements…<br>Les demandes apparaîtront ici en direct.</div></div>
+      </div>
+      <!-- Agents -->
+      <div class="panel">
+        <h3>🧹 Agents <span class="cnt" id="a-cnt">—</span></h3>
+        <div class="body" id="agents"><div class="empty">Aucun agent inscrit</div></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>KLEAN HQ — pilotez votre flotte dans toute la Côte d'Ivoire · les données se mettent à jour en temps réel ⚡</footer>
+</div>
+
+<script>
+const SVC = {maison:'🏠',bureaux:'🏢',canapes:'🛋️',vitres:'🪟',demenagement:'🧼',sdb:'🚿',grand:'🧹'};
+const SVC_N = {maison:'Maison',bureaux:'Bureaux',canapes:'Canapés',vitres:'Vitres',demenagement:'Après dém.',sdb:'SDB',grand:'Grand ménage'};
+const fmt = n => Math.round(n||0).toLocaleString('fr-FR')+' F';
+const hhmm = iso => iso ? new Date(iso).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
+const STATUS = {
+  pending:['b-pending','En diffusion'], accepted:['b-active','Acceptée'], enroute:['b-active','En route 🛵'],
+  arrive:['b-active','Arrivé'], encours:['b-active','En cours 🧽'], terminee:['b-done','Terminée'], annulee:['b-cancel','Annulée']
+};
+const PAYTAG = {wave:'🌊 Wave', om:'🟠 Orange Money', moov:'🔵 Moov', cash:'💵 Espèces', mtn:'🟡 MTN'};
+let feedStarted = false;
+let DEMO = false;
+
+/* ─── MODE DÉMO (aperçu sans serveur : données d'exemple) ─── */
+function enterDemo(){
+  if(DEMO) return;
+  DEMO = true;
+  renderOverview({
+    agentsEnLigne:2, agentsTotal:5, missionsToday:8, missionsActive:2,
+    missionsTotal:37, missionsDone:29,
+    caToday:47000, caTotal:231500, commToday:11750, commTotal:57875,
+    gainAgentsTotal:173625, noteMoyenne:4.8,
+    ca7:[{day:'lun',ca:18000,n:3},{day:'mar',ca:0,n:0},{day:'mer',ca:25500,n:4},{day:'jeu',ca:12000,n:2},{day:'ven',ca:31500,n:5},{day:'sam',ca:44000,n:7},{day:'dim',ca:47000,n:8}]
+  });
+  renderMissions([
+    {id:'KN-DEMO08',service:'vitres',quartier:'Commerce',time:'10:00',pieces:2,prixTotal:9000,comm:2250,status:'pending',client:'Salimata',agent:null,at:new Date(Date.now()-6*60000).toISOString()},
+    {id:'KN-DEMO07',service:'maison',quartier:'Koko',time:'09:00',pieces:2,prixTotal:10400,comm:2600,status:'encours',client:'Awa',agent:'Koffi',at:new Date(Date.now()-34*60000).toISOString()},
+    {id:'KN-DEMO06',service:'grand',quartier:'Nimbo',time:'14:00',pieces:3,prixTotal:22400,comm:5600,status:'accepted',client:'Moussa',agent:'Mariam',at:new Date(Date.now()-48*60000).toISOString()},
+    {id:'KN-DEMO05',service:'sdb',quartier:'Air France',time:'11:00',pieces:1,prixTotal:6500,comm:1625,status:'terminee',client:'Konan',agent:'Koffi',at:new Date(Date.now()-3*3600000).toISOString()},
+    {id:'KN-DEMO04',service:'canapes',quartier:'Belleville',time:'15:00',pieces:3,prixTotal:7800,comm:1950,status:'terminee',client:'Nadia',agent:'Mariam',at:new Date(Date.now()-4*3600000).toISOString()},
+    {id:'KN-DEMO03',service:'maison',quartier:'Dar-Es-Salam',time:'08:00',pieces:4,prixTotal:15200,comm:3800,status:'terminee',client:'Yaya',agent:'Adama',at:new Date(Date.now()-5*3600000).toISOString()},
+    {id:'KN-DEMO02',service:'bureaux',quartier:'Commerce',time:'16:00',pieces:4,prixTotal:22800,comm:5700,status:'terminee',client:'Pharmacie du Centre',agent:'Koffi',at:new Date(Date.now()-6*3600000).toISOString()},
+    {id:'KN-DEMO01',service:'demenagement',quartier:'Kennedy',time:'09:00',pieces:5,prixTotal:30000,comm:7500,status:'annulee',client:'Serge',agent:null,at:new Date(Date.now()-8*3600000).toISOString()}
+  ]);
+  renderAgents([
+    {nom:'Koffi',quartier:'Nimbo',online:true,missionsDone:12,gain:84000,rating:4.9},
+    {nom:'Mariam',quartier:'Koko',online:true,missionsDone:9,gain:61500,rating:4.8},
+    {nom:'Adama',quartier:'Commerce',online:false,missionsDone:6,gain:39000,rating:4.7},
+    {nom:'Awa',quartier:'Belleville',online:false,missionsDone:2,gain:10500,rating:5.0},
+    {nom:'Siaka',quartier:'Air France',online:false,missionsDone:0,gain:0,rating:5.0}
+  ]);
+  ['📥 Nouvelle demande KN-DEMO08 — vitres · Commerce · 9 000 F',
+   '✅ Mariam a accepté la mission KN-DEMO06 (22 400 F)',
+   '🧽 KN-DEMO07 : nettoyage en cours',
+   '✅ KN-DEMO05 terminée — +1 625 F de commission',
+   '🟢 Mariam en ligne (Koko) — 2 agent(s) en ligne'].forEach(addFeed);
+  const b = document.createElement('div');
+  b.style.cssText = 'background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.45);color:#ffb020;font-size:12px;font-weight:800;padding:10px 14px;border-radius:12px;margin:14px 0 2px;text-align:center';
+  b.textContent = '🧪 MODE DÉMO — chiffres d\'exemple. Le vrai HQ affichera les données en direct une fois le serveur en ligne.';
+  const w = document.querySelector('.wrap');
+  w.insertBefore(b, w.firstChild);
+}
+
+async function fetchJ(url){
+  const r = await fetch(url);
+  if(r.status === 401){ location.href = '/admin-login.html'; throw 0; }
+  if(!r.ok) throw 0;
+  return r.json();
+}
+async function loadAll(){
+  try{
+    const [ov, ms, ags, cands] = await Promise.all([
+      fetchJ('/api/admin/overview'),
+      fetchJ('/api/admin/missions'),
+      fetchJ('/api/admin/agents'),
+      fetchJ('/api/admin/candidatures')
+    ]);
+    renderOverview(ov); renderMissions(ms); renderAgents(ags); renderCands(cands);
+  }catch(e){
+    // Aperçu sans serveur : exiger la connexion locale avant la démo
+    if(localStorage.getItem('k2_hq_ok') !== '1'){ location.href = 'admin-login.html'; return; }
+    OFFLINE = true;
+    enterDemo(); setLive(false);
+  }
+}
+let OFFLINE = false;
+const hp2 = s => { try{ return btoa(unescape(encodeURIComponent('klean::'+s))); }catch(e){ return btoa('klean::'+s); } };
+function strongPw(v){
+  if(v.length<8) return 'Au moins 8 caractères requis';
+  if(!/[A-Za-z]/.test(v)) return 'Ajoutez au moins une lettre';
+  if(!/[0-9]/.test(v)) return 'Ajoutez au moins un chiffre';
+  if(!/[^A-Za-z0-9\s]/.test(v)) return 'Ajoutez au moins un symbole (! @ # $ …)';
+  return null;
+}
+async function changePwd(){
+  const cur = prompt('🔑 Mot de passe actuel :'); if(cur === null) return;
+  const n1 = prompt('🆕 Nouveau mot de passe (8+ caractères, lettres + chiffres + symboles) :'); if(!n1) return;
+  const bad = strongPw(n1); if(bad) return alert('❌ ' + bad);
+  const n2 = prompt('✅ Confirmez le nouveau mot de passe :');
+  if(n1 !== n2) return alert('❌ Les deux saisies ne correspondent pas');
+  if(OFFLINE){
+    if(hp2(cur) !== localStorage.getItem('k2_hq_pass')) return alert('❌ Mot de passe actuel incorrect');
+    localStorage.setItem('k2_hq_pass', hp2(n1));
+    return alert('✓ Mot de passe modifié !');
+  }
+  const r = await fetch('/api/admin/password', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({current: cur, next: n1})});
+  if(r.ok) alert('✓ Mot de passe modifié ! Vos anciennes sessions ont été fermées.');
+  else {
+    const d = await r.json().catch(()=>({}));
+    alert('❌ ' + (d.error || 'Erreur serveur'));
+  }
+}
+async function logout(){
+  localStorage.removeItem('k2_hq_ok');
+  await fetch('/api/admin/logout', {method:'POST'}).catch(()=>{});
+  location.href = '/admin-login.html';
+}
+function renderOverview(o){
+  setLive(true);
+  document.querySelector('#k-agents').textContent = o.agentsEnLigne;
+  document.querySelector('#k-agents-sub').textContent = 'sur '+o.agentsTotal+' agent(s) inscrits';
+  document.querySelector('#k-missions').textContent = o.missionsToday;
+  document.querySelector('#k-missions-sub').textContent = o.missionsActive+' en cours actuellement';
+  document.querySelector('#k-ca').textContent = fmt(o.caToday);
+  document.querySelector('#k-comm').textContent = fmt(o.commToday);
+  document.querySelector('#c-ca').textContent = fmt(o.caTotal);
+  document.querySelector('#c-comm').textContent = fmt(o.commTotal);
+  document.querySelector('#c-gains').textContent = fmt(o.gainAgentsTotal);
+  document.querySelector('#c-note').textContent = (o.noteMoyenne||5).toFixed(1).replace('.',',');
+  document.querySelector('#c-done').textContent = o.missionsDone;
+  document.querySelector('#c-clients').textContent = o.clientsTotal || 0;
+  document.querySelector('#c-cands').textContent = o.candsPending || 0;
+  renderChart(o.ca7||[]);
+}
+
+/* ─── Vérification des dossiers agents ─── */
+const CST = {pending:['b-active','⏳ En attente'], approved:['b-done','✓ Validé'], rejected:['b-cancel','Rejeté']};
+function renderCands(list){
+  const pend = list.filter(a=>a.status==='pending').length;
+  document.querySelector('#cand-cnt').textContent = pend + ' en attente / ' + list.length + ' dossier(s)';
+  const el = document.querySelector('#cands');
+  if(!list.length){ el.innerHTML = '<div class="empty">Aucun dossier pour le moment.</div>'; return; }
+  el.innerHTML = list.map(a=>{
+    const [cls, txt] = CST[a.status] || ['b-pending', a.status];
+    const infos = [
+      ['👤', a.nom + ' · né(e) le ' + (a.naissance||'—')],
+      ['📞', (a.tel1||a.tel||'') + (a.tel2 ? ' / '+a.tel2 : '')],
+      ['📍', (a.quartier||'—') + ' — ' + (a.adresse||'')],
+      ['🪪', (a.pieceType||'') + ' N° ' + (a.pieceNum||'') + (a.hasPhoto ? ' · 📷 photo jointe' : ' · ⚠️ pas de photo')],
+      ['🚨', 'Urgence : ' + (a.urgenceNom||'') + ' · ' + (a.urgenceTel||'')],
+      ['🗣️', 'Réf. 1 : ' + (a.ref1Nom||'') + ' ' + (a.ref1Tel||'') + (a.ref2Nom ? ' · Réf. 2 : '+a.ref2Nom+' '+(a.ref2Tel||'') : '')],
+      ['💼', (a.experience||0) + ' an(s) d\'expérience · ' + ((a.services||[]).map(s=>(SVC_N[s]||s)).join(', ') || 'services ?')],
+    ];
+    return `<div class="agrow" style="align-items:flex-start">
+      ${a.photo
+        ? `<div style="position:relative;width:44px;height:44px;flex-shrink:0"><img src="${a.photo}" style="width:44px;height:44px;border-radius:50%;object-fit:cover"><span class="${a.online?'doton':'dotof'}" style="position:absolute;right:0;bottom:0"></span></div>`
+        : `<div class="avatar">${(a.nom||'?')[0].toUpperCase()}<span class="${a.online?'doton':'dotof'}"></span></div>`}
+      <div style="flex:1;min-width:0">
+        <b>${a.nom}</b> <span class="badge ${cls}">${txt}</span><br>
+        <small>${hhmm(a.createdAt||'')} · ${a.id}</small>
+        <div id="det-${a.id}" style="display:none;margin-top:8px;background:var(--card2);border-radius:10px;padding:10px 12px;font-size:11.5px;line-height:1.7">
+          ${infos.map(x=>`<div>${x[0]} ${x[1]||'—'}</div>`).join('')}
+          ${a.reason ? `<div style="color:var(--red)">❌ Rejet : ${a.reason}</div>` : ''}
+          <div id="photo-${a.id}"></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;margin-left:auto">
+        <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="toggleCandDet('${a.id}', ${a.hasPhoto?'true':'false'})">🔍 Détails</button>
+        ${a.status==='pending' ? `
+        <button style="background:rgba(21,201,138,.15);border:1px solid rgba(21,201,138,.4);color:var(--p);font-size:10.5px;font-weight:900;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="decideCand('${a.id}','approve','${(a.nom||'').replace(/'/g,'')}')">✅ Valider</button>
+        <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="decideCand('${a.id}','reject','${(a.nom||'').replace(/'/g,'')}')">✕ Rejeter</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+async function toggleCandDet(id, hasPhoto){
+  const d = document.getElementById('det-'+id);
+  const show = d.style.display === 'none';
+  d.style.display = show ? 'block' : 'none';
+  if(show && hasPhoto && !d.dataset.photoLoaded){
+    d.dataset.photoLoaded = '1';
+    try{
+      const r = await fetchJ('/api/admin/candidatures/'+id);
+      if(r.piecePhoto) document.getElementById('photo-'+id).innerHTML = '<img src="'+r.piecePhoto+'" style="max-width:220px;border-radius:10px;margin-top:8px;border:1px solid var(--line)">';
+    }catch(e){}
+  }
+}
+async function decideCand(id, action, nom){
+  if(action === 'approve'){
+    if(!confirm('✅ Valider le dossier de '+nom+' ?\nIl pourra recevoir des missions.')) return;
+  } else {
+    const reason = prompt('✕ Motif du rejet du dossier de '+nom+' (ex : pièce illisible, références injoignables) :', 'Dossier incomplet');
+    if(reason === null) return;
+    await fetch('/api/admin/agents/'+id+'/reject', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({reason})});
+    setTimeout(loadAll, 300); return;
+  }
+  await fetch('/api/admin/agents/'+id+'/approve', {method:'POST'});
+  setTimeout(loadAll, 300);
+}
+function renderChart(days){
+  const max = Math.max(1, ...days.map(d=>d.ca));
+  document.querySelector('#chart').innerHTML = days.map(d=>`
+    <div class="bar-wrap">
+      <span class="bar-val">${d.ca?fmt(d.ca).replace(' F',''):''}</span>
+      <div class="bar" title="${d.day} : ${fmt(d.ca)} (${d.n} mission(s))" style="height:${Math.max(4, Math.round(d.ca/max*72))}px"></div>
+      <span class="bar-lbl">${d.day}.</span>
+    </div>`).join('');
+  document.querySelector('#chart-total').textContent = fmt(days.reduce((s,d)=>s+d.ca,0))+' sur 7 j';
+}
+function renderMissions(list){
+  document.querySelector('#m-cnt').textContent = list.length ? list.length+' récentes' : '—';
+  const el = document.querySelector('#missions');
+  if(!list.length){ el.innerHTML = '<div class="empty">Aucune mission pour le moment.<br>Créez-en une depuis l\'app client !</div>'; return; }
+  el.innerHTML = list.map(m=>{
+    const [cls,txt] = STATUS[m.status]||['b-pending',m.status];
+    return `<div class="mrow">
+      <div class="ic">${SVC[m.service]||'🧹'}</div>
+      <div>
+        <b>${SVC_N[m.service]||m.service} · ${m.quartier}</b>
+        <small>#${m.id} · ${m.client||'—'}${m.agent?' → '+m.agent:''} · ${hhmm(m.at)}${m.paiement?' · '+(PAYTAG[m.paiement]||m.paiement):''}${m.gps?' · 📡GPS':''}</small>
+        <span class="badge ${cls}">${txt}</span>
+      </div>
+      <div class="right"><b>${fmt(m.prixTotal)}</b><small>+${fmt(m.comm)} KLEAN</small></div>
+    </div>`;
+  }).join('');
+}
+function renderAgents(list){
+  document.querySelector('#a-cnt').textContent = list.length ? list.length+' inscrit(s)' : '—';
+  const el = document.querySelector('#agents');
+  if(!list.length){ el.innerHTML = '<div class="empty">Aucun agent inscrit.<br>Ouvrez l\'app en mode Agent pour en créer un.</div>'; return; }
+  el.innerHTML = [...list].sort((a,b)=> (b.online-a.online) || (b.gain-a.gain)).map(a=>`
+    <div class="agrow">
+      <div class="avatar">${(a.nom||'?')[0].toUpperCase()}<span class="${a.online?'doton':'dotof'}"></span></div>
+      <div><b>${a.nom}</b><small>📍 ${a.quartier||'—'} · ${a.missionsDone} mission(s) · ⭐ ${(a.rating||5).toFixed(1)}</small></div>
+      <div class="right"><b>${fmt(a.gain)}</b><small>gagnés · ${a.online?'en ligne':'hors ligne'}</small></div>
+    </div>`).join('');
+}
+function addFeed(text, at){
+  const el = document.querySelector('#feed');
+  if(!feedStarted){ el.innerHTML=''; feedStarted=true; }
+  const d = document.createElement('div');
+  d.className = 'feed-item';
+  d.innerHTML = `<span class="t">${hhmm(at)||new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span><p>${text}</p>`;
+  el.prepend(d);
+  while(el.children.length>40) el.lastChild.remove();
+}
+function setLive(on){
+  if(DEMO){
+    document.querySelector('#live-pill').classList.add('off');
+    document.querySelector('#live-txt').textContent = 'MODE DÉMO';
+    return;
+  }
+  document.querySelector('#live-pill').classList.toggle('off', !on);
+  document.querySelector('#live-txt').textContent = on ? 'EN DIRECT' : 'HORS LIGNE';
+}
+
+/* ─── Temps réel ─── */
+let retry = null;
+function connectWS(){
+  const proto = location.protocol==='https:' ? 'wss' : 'ws';
+  let ws;
+  try{ ws = new WebSocket(proto+'://'+location.host+'/ws'); }catch(e){ return scheduleRetry(); }
+  ws.onopen = ()=>{ setLive(true); ws.send(JSON.stringify({type:'hello', role:'admin'})); };
+  ws.onmessage = ev=>{
+    try{
+      const m = JSON.parse(ev.data);
+      if(m.type==='admin_event'){
+        addFeed(m.text, m.at);
+        setTimeout(loadAll, 400); // rafraîchit KPIs & listes
+      }
+    }catch(e){}
+  };
+  ws.onclose = ()=>{ setLive(false); scheduleRetry(); };
+  ws.onerror = ()=>{ try{ws.close();}catch(e){} };
+  setInterval(()=>{ if(ws.readyState===1) ws.send('{"type":"ping"}'); }, 25000);
+}
+function scheduleRetry(){ clearTimeout(retry); retry = setTimeout(connectWS, 4000); }
+
+loadAll();
+connectWS();
+setInterval(loadAll, 12000); // secours
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3dfe2a1ee452a48',t:'MTc4OTg5NzQwMA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>
