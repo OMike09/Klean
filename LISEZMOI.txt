@@ -1,0 +1,40 @@
+# 📤 LOT N°2 — LES 5 FICHIERS À ENVOYER (remplace et complète le lot 1)
+
+## ⚠️ SI VOUS N'AVEZ PAS ENCORE ENVOYÉ LE LOT 1
+**Ignorez-le complètement** — ce lot 2 contient TOUT (lot 1 inclus).
+Envoyez UNIQUEMENT ce dossier. Règle : toujours le numéro le plus grand. ✅
+
+## Les 5 fichiers (tailles exactes de contrôle)
+
+| Fichier | Taille | ✔ |
+|---|---:|:---:|
+| index.html | 123 431 octets | ☐ |
+| server.js | 40 393 octets | ☐ |
+| admin.html | 35 619 octets | ☐ |
+| net.js | 23 478 octets | ☐ |
+| admin-login.html | 9 214 octets | ☐ |
+
+*(Ou tout-en-un : 📦 `A_ENVOYER 2.zip` à la racine)*
+
+## 🆕 Ce que le lot 2 ajoute par rapport au lot 1
+
+| Nouveauté |
+|---|
+| 💰 Commission 25 % **modifiable depuis votre HQ** (panneau Réglages) |
+| 📜 **Journal d'audit** dans le HQ (qui a fait quoi, quand) |
+| 📝Agents : statut **« Infos demandées »** (vous demandez un complément → l'agent renvoie) |
+| 🧾 **Historique complet** de chaque dossier agent (envoyé → infos demandées → validé…) |
+| 👥 Nouveau service **Placement de personnel** (nounou, gardien, aide-ménagère…) |
+| 🎉 Nouveaux services **Après événement** + **Entretien régulier** |
+| 📡 Canal + : options **renouvellement abonnement** + **assistance réglages** |
+| 🛠️ **Demande sur mesure** « Je ne trouve pas mon service » : photos (3 max) + budget indicatif → devis |
+| 🔒 **Anti force-brute** sur votre page HQ (blocage 10 min après 6 échecs) |
+| 📊 Données **réelles** au lieu des faux compteurs d'agents |
+
+## Contenu du lot 1 (déjà inclus)
+
+📚 Cours particuliers · 📡 Canal+ à domicile · ⏱️ splash 3 s · 👥 panneau Personnes inscrites avec recherche · 🎓 niveau d'étude agents
+
+## Procédure (identique)
+
+GitHub → Upload files → les 5 fichiers → 5 barres vertes → Commit → 🟢 Live (~3 min) → dites-lui « en ligne ».

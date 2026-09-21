@@ -18,7 +18,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8000;
-const PLATFORM_FEE = 0.25;            // ← COMMISSION PLATEFORME (25%)
+const PLATFORM_FEE = 0.25;            // taux par défaut si le PDG n'a rien réglé
+const feePct = () => { const c = db.config && db.config.commission; return ((typeof c === 'number' && isFinite(c) && c >= 0 && c <= 50) ? c : 25) / 100; };
+const loginTries = new Map();          // anti force-brute connexion HQ (mémoire, par IP)
+function auditLog(kind, data) { try { (db.audit = db.audit || []).push({ at: nowISO(), kind, ...(data || {}) }); if (db.audit.length > 800) db.audit = db.audit.slice(-800); } catch (e) { } }            // ← COMMISSION PLATEFORME (25%)
 const DB_FILE = path.join(__dirname, 'db.json');
 
 /* ───────── Sécurité HQ : mot de passe robuste créé par le propriétaire ─────────
@@ -77,6 +80,8 @@ async function initStorage() {
     console.log('  💾 Stockage : fichier db.json (local)');
   }
   db.agents = db.agents || []; db.missions = db.missions || []; db.clients = db.clients || [];
+  if (!db.config || typeof db.config.commission !== 'number') db.config = { commission: 25, updatedAt: null };
+  if (!db.audit) db.audit = [];
   /* Pré-initialisation optionnelle du mot de passe via ADMIN_PIN (1er démarrage seulement) */
   if (!db.admin && process.env.ADMIN_PIN) {
     const salt = crypto.randomBytes(12).toString('hex');
@@ -196,7 +201,10 @@ function publicMissionForAgent(m) {
     quartier: m.quartier, time: m.time, date: m.date,
     dist: m.dist, prixTotal: m.prixTotal,
     lat: m.lat, lng: m.lng,               // 📍 position GPS du client (pour l'agent)
-    clientNom: m.client.nom
+    clientNom: m.client.nom,
+    desc: m.desc || '',                   // 📝 description/matière précisée par le client
+    photos: Array.isArray(m.photos) ? m.photos : [],
+    budget: m.budget || 0
   };
 }
 function emitToMission(m, obj) {
@@ -228,13 +236,13 @@ function readBody(req) {
 }
 function agentStats(ag) {
   const done = db.missions.filter(x => x.agentId === ag.id && x.status === 'terminee');
-  const gain = done.reduce((s, x) => s + Math.round(x.prixTotal * (1 - PLATFORM_FEE)), 0);
-  const comm = done.reduce((s, x) => s + Math.round(x.prixTotal * PLATFORM_FEE), 0);
+  const gain = done.reduce((s, x) => s + Math.round(x.prixTotal * (1 - feePct())), 0);
+  const comm = done.reduce((s, x) => s + Math.round(x.prixTotal * feePct()), 0);
   const notes = done.filter(x => x.note).map(x => x.note);
   return {
     missionsDone: done.length, gain, comm,
     rating: notes.length ? notes.reduce((s, n) => s + n, 0) / notes.length : 5.0,
-    hist: done.slice(-30).reverse().map(x => ({ id: x.id, service: x.service, quartier: x.quartier, date: x.finishedAt && x.finishedAt.slice(5, 10), montant: x.prixTotal, gain: Math.round(x.prixTotal * (1 - PLATFORM_FEE)), comm: Math.round(x.prixTotal * PLATFORM_FEE), note: x.note || 5 }))
+    hist: done.slice(-30).reverse().map(x => ({ id: x.id, service: x.service, quartier: x.quartier, date: x.finishedAt && x.finishedAt.slice(5, 10), montant: x.prixTotal, gain: Math.round(x.prixTotal * (1 - feePct())), comm: Math.round(x.prixTotal * feePct()), note: x.note || 5 }))
   };
 }
 
@@ -253,6 +261,9 @@ const server = http.createServer(async (req, res) => {
       extras: b.extras || {}, prixTotal: Math.round(b.prixTotal || 0), promo: b.promo || '',
       date: b.date || '', time: b.time || '', quartier: b.quartier || '', adresse: b.adresse || '',
       paiement: b.paiement || 'cash',
+      desc: (typeof b.desc === 'string' ? b.desc : '').slice(0, 280),
+      photos: Array.isArray(b.photos) ? b.photos.filter(x => typeof x === 'string' && x.length < 600000).slice(0, 3) : [],
+      budget: Math.max(0, parseInt(b.budget) || 0),
       lat: typeof b.lat === 'number' ? b.lat : null,
       lng: typeof b.lng === 'number' ? b.lng : null,
       client: { nom: b.nom, tel: b.tel || '', deviceId: b.deviceId || '' },
@@ -295,11 +306,11 @@ const server = http.createServer(async (req, res) => {
     saveDb();
     emitToMission(m, { type: 'mission_update', status, missionId: m.id });
     console.log(`➡️  ${m.id} : ${status}`);
-    const LBL = { enroute: '🛵 en route', arrive: '📍 arrivé sur place', encours: '🧽 nettoyage en cours', terminee: `✅ terminée — +${Math.round(m.prixTotal * PLATFORM_FEE).toLocaleString('fr-FR')} F de commission` };
+    const LBL = { enroute: '🛵 en route', arrive: '📍 arrivé sur place', encours: '🧽 nettoyage en cours', terminee: `✅ terminée — +${Math.round(m.prixTotal * feePct()).toLocaleString('fr-FR')} F de commission` };
     emitAdmin('status', `${LBL[status] || status} · ${m.id}`);
     const ag = db.agents.find(a => a.id === agentId);
     const st = agentStats(ag);
-    return sendJson(res, 200, { ok: true, gain: Math.round(m.prixTotal * (1 - PLATFORM_FEE)), comm: Math.round(m.prixTotal * PLATFORM_FEE), stats: st });
+    return sendJson(res, 200, { ok: true, gain: Math.round(m.prixTotal * (1 - feePct())), comm: Math.round(m.prixTotal * feePct()), stats: st });
   }
 
   const mCancel = p.match(/^\/api\/missions\/(.+)\/cancel$/);
@@ -333,6 +344,26 @@ const server = http.createServer(async (req, res) => {
   /* --- AUTH HQ (mot de passe robuste) --- */
   if (p === '/api/admin/status') return sendJson(res, 200, { setup: !!db.admin });
 
+  /* --- RECUPERATION TEMPORAIRE DU MOT DE PASSE PROPRIETAIRE ---
+     Double sécurité : (1) ne fait rien sauf si la variable ADMIN_RESET_CODE
+     existe sur Render ET que ?code= correspond EXACTEMENT ;
+     (2) à usage unique : le code est détruit en mémoire après utilisation. --- */
+  if (p === '/api/admin/reset') {
+    const code = url.searchParams.get('code') || '';
+    if (!process.env.ADMIN_RESET_CODE || code !== process.env.ADMIN_RESET_CODE || !db.admin) {
+      return sendJson(res, 403, { error: 'Réinitialisation non disponible' });
+    }
+    delete process.env.ADMIN_RESET_CODE; // usage unique
+    db.admin = null;
+    saveDbNow();
+    console.log('🔑 Mot de passe propriétaire réinitialisé (code usage unique)');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end('<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+      + '<body style="font-family:system-ui;background:#08120c;color:#e8f5ee;display:flex;align-items:center;justify-content:center;min-height:90vh;margin:0;text-align:center">'
+      + '<div><div style="font-size:56px">✅</div><h1 style="color:#4ade80;margin:8px 0">Mot de passe effacé</h1>'
+      + '<p style="max-width:340px;line-height:1.6">Ouvrez <a style="color:#22c55e;font-weight:700" href="/admin">votre page /admin</a> : elle vous proposera maintenant de <b>créer un nouveau mot de passe</b>. Faites-le tout de suite.</p></div></body>');
+  }
+
   if (p === '/api/admin/setup' && req.method === 'POST') {
     const { password } = await readBody(req);
     if (db.admin) return sendJson(res, 409, { error: 'Le mot de passe est déjà créé' });
@@ -347,12 +378,18 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/admin/login' && req.method === 'POST') {
+    const ip = req.socket.remoteAddress || '?';
+    const rec = loginTries.get(ip) || { n: 0, t: 0 };
+    if (rec.n >= 6 && Date.now() - rec.t < 600000) { auditLog('hq_login_bloque', { ip }); return sendJson(res, 429, { error: 'Trop de tentatives — réessayez dans 10 min' }); }
     const b = await readBody(req);
     const pw = b.password || b.pin || '';
     if (db.admin && hashPassword(db.admin.salt, pw) === db.admin.passHash) {
+      loginTries.delete(ip); auditLog('hq_connexion', { ip });
       res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + adminToken() + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800' });
       return res.end('{"ok":true}');
     }
+    loginTries.set(ip, { n: rec.n + 1, t: rec.t || Date.now() });
+    auditLog('hq_login_echec', { ip });
     return sendJson(res, 401, { error: 'Mot de passe incorrect' });
   }
 
@@ -437,10 +474,12 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const need = ['nom', 'prenom', 'naissance', 'tel1', 'quartier', 'adresse', 'pieceType', 'pieceNum', 'urgenceNom', 'urgenceTel', 'ref1Nom', 'ref1Tel'];
     for (const k of need) if (!b[k] || String(b[k]).trim() === '') return sendJson(res, 400, { error: 'Champ manquant : ' + k });
+    if (Array.isArray(b.services) && b.services.includes('cours') && !(b.niveau && String(b.niveau).trim())) return sendJson(res, 400, { error: 'Niveau d\'étude requis pour les Cours particuliers' });
     const tel1 = String(b.tel1).replace(/\D/g, '');
     if (tel1.length < 8) return sendJson(res, 400, { error: 'Téléphone principal invalide' });
-    let ag = db.agents.find(a => a.tel === tel1 && a.status !== 'rejected');
+    let ag = db.agents.find(a => a.tel === tel1 && a.status !== 'rejected' && a.status !== 'moreinfo');
     if (ag) return sendJson(res, 409, { error: 'Un dossier existe déjà pour ce numéro', agentId: ag.id, status: ag.status });
+    const reApply = db.agents.find(a => a.tel === tel1 && a.status === 'moreinfo');
     ag = {
       id: uid('AG'), createdAt: nowISO(), status: 'pending',
       // identité
@@ -451,12 +490,19 @@ const server = http.createServer(async (req, res) => {
       piecePhoto: typeof b.piecePhoto === 'string' && b.piecePhoto.length < 900000 ? b.piecePhoto : '',
       urgenceNom: b.urgenceNom.trim(), urgenceTel: String(b.urgenceTel).replace(/\D/g, ''),
       experience: Math.min(30, Math.max(0, parseInt(b.experience) || 0)),
+      niveau: String(b.niveau || '').trim().slice(0, 60),
       ref1Nom: b.ref1Nom.trim(), ref1Tel: String(b.ref1Tel).replace(/\D/g, ''),
       ref2Nom: String(b.ref2Nom || '').trim(), ref2Tel: String(b.ref2Tel || '').replace(/\D/g, ''),
       photo: typeof b.photo === 'string' ? b.photo.slice(0, 600000) : '',
       services: Array.isArray(b.services) ? b.services.slice(0, 10) : [],
       online: false
     };
+    ag.history = [{ at: nowISO(), by: 'agent', action: 'dossier envoye' }];
+    if (reApply) {
+      ag.history = (reApply.history || []).concat([{ at: nowISO(), by: 'agent', action: 'dossier renvoye apres infos demandees' }]);
+      db.agents = db.agents.filter(a => a.id !== reApply.id);
+      auditLog('agent_recandidature', { agent: ag.nom, tel: tel1 });
+    }
     db.agents.push(ag); saveDb();
     emitAdmin('cand', `📋 Nouvelle candidature agent : ${ag.nom} (${ag.quartier}) — dossier à vérifier`);
     console.log(`📋 Candidature agent : ${ag.nom} — ${ag.pieceType} ${ag.pieceNum}`);
@@ -493,9 +539,9 @@ const server = http.createServer(async (req, res) => {
       missionsToday: today.length, missionsActive: active,
       missionsTotal: MS.length, missionsDone: done.length,
       caToday: caSum(doneToday), caTotal: caSum(done),
-      commToday: Math.round(caSum(doneToday) * PLATFORM_FEE),
-      commTotal: Math.round(caSum(done) * PLATFORM_FEE),
-      gainAgentsTotal: caSum(done) - Math.round(caSum(done) * PLATFORM_FEE),
+      commToday: Math.round(caSum(doneToday) * feePct()),
+      commTotal: Math.round(caSum(done) * feePct()),
+      gainAgentsTotal: caSum(done) - Math.round(caSum(done) * feePct()),
       noteMoyenne: notes.length ? Math.round(notes.reduce((s, n) => s + n, 0) / notes.length * 10) / 10 : 5,
       ca7
     });
@@ -504,7 +550,7 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/admin/missions') {
     return sendJson(res, 200, db.missions.slice(-60).reverse().map(m => ({
       id: m.id, service: m.service, quartier: m.quartier, time: m.time, date: m.date,
-      pieces: m.pieces, prixTotal: m.prixTotal, comm: Math.round((m.prixTotal || 0) * PLATFORM_FEE),
+      pieces: m.pieces, prixTotal: m.prixTotal, comm: Math.round((m.prixTotal || 0) * feePct()),
       status: m.status, client: m.client && m.client.nom,
       agent: m.agentId ? ((db.agents.find(a => a.id === m.agentId) || {}).nom || '—') : null,
       paiement: m.paiement, gps: !!(m.lat && m.lng),
@@ -516,7 +562,32 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, db.agents.map(a => ({ id: a.id, nom: a.nom, quartier: a.quartier, online: !!a.online, status: a.status || 'approved', ...agentStats(a) })));
   }
 
+  if (p === '/api/admin/inscrits') {
+    const clients = db.clients.map(c => {
+      const ms = db.missions.filter(m => m.clientId === c.id);
+      const depense = ms.filter(m => m.status === 'terminee').reduce((s, m) => s + (m.prixTotal || 0), 0);
+      return { id: c.id, nom: c.nom, tel: c.tel, quartier: c.quartier || '', createdAt: c.createdAt, photo: !!c.photo, missions: ms.length, depense };
+    });
+    const agents = db.agents.map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', quartier: a.quartier || '', status: a.status || 'approved', online: !!a.online, niveau: a.niveau || '', services: a.services || [], createdAt: a.createdAt, photo: !!a.photo, ...agentStats(a) }));
+    return sendJson(res, 200, { clients: clients.slice().reverse(), agents: agents.slice().reverse() });
+  }
+
   /* --- Admin : dossiers de candidature --- */
+  if (p === '/api/config') return sendJson(res, 200, { commission: (db.config && db.config.commission) || 25 });
+
+  if (p === '/api/admin/config' && req.method === 'POST') {
+    const b2 = await readBody(req);
+    const cc = parseFloat(b2.commission);
+    if (isNaN(cc) || cc < 0 || cc > 50) return sendJson(res, 400, { error: 'Taux de commission entre 0 et 50 %' });
+    db.config = db.config || {}; db.config.commission = Math.round(cc * 10) / 10; db.config.updatedAt = nowISO();
+    auditLog('commission_modifiee', { nouveau: db.config.commission, par: 'PDG' });
+    saveDb();
+    emitAdmin('admin', `⚙️ Commission plateforme réglée à ${db.config.commission} %`);
+    return sendJson(res, 200, { ok: true, commission: db.config.commission });
+  }
+
+  if (p === '/api/admin/audit') return sendJson(res, 200, (db.audit || []).slice(-200).reverse());
+
   if (p === '/api/admin/candidatures') {
     return sendJson(res, 200, db.agents
       .filter(a => a.status)
@@ -539,6 +610,8 @@ const server = http.createServer(async (req, res) => {
     const ag = db.agents.find(a => a.id === aApprove[1]);
     if (!ag) return sendJson(res, 404, {});
     ag.status = 'approved'; ag.approvedAt = nowISO(); saveDb();
+    (ag.history = ag.history || []).push({ at: nowISO(), by: 'PDG', action: 'valide', from: 'pending', to: 'approved' });
+    auditLog('agent_valide', { agent: ag.nom, id: ag.id, par: 'PDG' });
     emitAdmin('cand', `✅ ${ag.nom} validé — peut maintenant recevoir des missions`);
     const s = [...sockets].find(x => x.meta && x.meta.agentId === ag.id);
     if (s) wsSend(s, { type: 'agent_approved', nom: ag.nom });
@@ -552,9 +625,25 @@ const server = http.createServer(async (req, res) => {
     const ag = db.agents.find(a => a.id === aReject[1]);
     if (!ag) return sendJson(res, 404, {});
     ag.status = 'rejected'; ag.rejectReason = reason || 'Dossier incomplet'; ag.online = false; saveDb();
+    (ag.history = ag.history || []).push({ at: nowISO(), by: 'PDG', action: 'rejete', motif: ag.rejectReason });
+    auditLog('agent_rejete', { agent: ag.nom, id: ag.id, motif: ag.rejectReason });
     emitAdmin('cand', `❌ Candidature de ${ag.nom} rejetée (${ag.rejectReason})`);
     const s = [...sockets].find(x => x.meta && x.meta.agentId === ag.id);
     if (s) wsSend(s, { type: 'agent_rejected', reason: ag.rejectReason });
+    return sendJson(res, 200, { ok: true });
+  }
+
+  const aMore = p.match(/^\/api\/admin\/agents\/(.+)\/moreinfo$/);
+  if (aMore && req.method === 'POST') {
+    const { motif } = await readBody(req);
+    const ag = db.agents.find(a => a.id === aMore[1]);
+    if (!ag) return sendJson(res, 404, {});
+    ag.status = 'moreinfo'; ag.moreInfoReason = String(motif || 'Merci de compléter votre dossier').slice(0, 220); ag.online = false; saveDb();
+    (ag.history = ag.history || []).push({ at: nowISO(), by: 'PDG', action: 'infos_demandees', motif: ag.moreInfoReason });
+    auditLog('agent_infos_demandees', { agent: ag.nom, id: ag.id, motif: ag.moreInfoReason });
+    emitAdmin('cand', `📝 ${ag.nom} : informations supplémentaires demandées (${ag.moreInfoReason})`);
+    const s = [...sockets].find(x => x.meta && x.meta.agentId === ag.id);
+    if (s) wsSend(s, { type: 'agent_moreinfo', reason: ag.moreInfoReason });
     return sendJson(res, 200, { ok: true });
   }
 
@@ -616,7 +705,7 @@ initStorage().then(() => {
     console.log('  🎛️  Tableau HQ : http://localhost:' + PORT + '/admin');
     console.log('  🔑 Mot de passe: ' + (db.admin ? 'déjà configuré ✓' : 'à créer à la 1re ouverture de /admin'));
     console.log('  📡 WebSocket   : ws://localhost:' + PORT + '/ws');
-    console.log('  💰 Commission  : ' + (PLATFORM_FEE * 100) + '% par mission');
+    console.log('  💰 Commission  : ' + (feePct() * 100) + '% par mission');
     console.log('  ────────────────────────────────────');
     console.log('');
   });

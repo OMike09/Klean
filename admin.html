@@ -135,6 +135,34 @@
     <div class="body" id="cands"><div class="empty">Aucun dossier en attente. Les candidatures d'agents apparaîtront ici pour vérification.</div></div>
   </div>
 
+  <!-- Réglages PDG : commission pilotable -->
+  <div class="panel" style="margin-bottom:14px">
+    <h3>⚙️ Réglages plateforme (PDG)</h3>
+    <div style="padding:14px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12.5px;color:var(--muted);font-weight:700">💰 Commission par mission :</label>
+      <input id="cfg-comm" type="number" min="0" max="50" step="1" style="width:76px;background:var(--card2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:9px 11px;font-size:14px;font-family:inherit;text-align:center;font-weight:800">
+      <span style="font-weight:900">%</span>
+      <button onclick="saveComm()" style="background:var(--p);border:none;color:#04130c;font-weight:900;padding:9px 16px;border-radius:10px;cursor:pointer;font-family:inherit">Enregistrer</button>
+      <small style="color:var(--muted);font-size:11.5px">applied aux nouvelles missions</small>
+    </div>
+  </div>
+
+  <!-- Journal d'audit -->
+  <div class="panel" style="margin-bottom:14px">
+    <h3>📜 Journal d'audit <span class="cnt" id="audit-cnt">—</span></h3>
+    <div class="body" id="audit"><div class="empty">—</div></div>
+  </div>
+
+  <!-- Toutes les personnes inscrites (agents + clients) avec recherche -->
+  <div class="panel" style="margin-bottom:14px">
+    <h3>👥 Personnes inscrites <span class="cnt" id="people-cnt">—</span></h3>
+    <div style="padding:12px 16px 4px">
+      <input id="people-search" placeholder="🔍 Rechercher par nom, téléphone, quartier, service…"
+        oninput="renderPeople()" style="width:100%;background:var(--card2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:11px 13px;font-size:13.5px;font-family:inherit">
+    </div>
+    <div class="body" id="people"><div class="empty">Chargement des inscrits…</div></div>
+  </div>
+
   <div class="grid">
     <!-- Missions live -->
     <div class="panel">
@@ -161,7 +189,7 @@
 
 <script>
 const SVC = {maison:'🏠',bureaux:'🏢',canapes:'🛋️',vitres:'🪟',demenagement:'🧼',sdb:'🚿',grand:'🧹'};
-const SVC_N = {maison:'Maison',bureaux:'Bureaux',canapes:'Canapés',vitres:'Vitres',demenagement:'Après dém.',sdb:'SDB',grand:'Grand ménage'};
+const SVC_N = {maison:'Maison',bureaux:'Bureaux',canapes:'Canapés',vitres:'Vitres',demenagement:'Après dém.',sdb:'SDB',grand:'Grand ménage',plomberie:'Plomberie',electricite:'Électricité',clim:'Climatisation',serrurerie:'Serrurerie',electro:'Électroménager',jardinage:'Jardinage',lavageauto:'Lavage auto',bricolage:'Bricolage',demen:'Déménagement',cuisine:'Cuisinier',cours:'📚 Cours particuliers',canal:'📡 Canal+ domicile',evenement:'🎉 Après événement',entretien:'🗓️ Entretien régulier',placement:'👥 Placement',custom:'🛠️ Demande sur mesure'};
 const fmt = n => Math.round(n||0).toLocaleString('fr-FR')+' F';
 const hhmm = iso => iso ? new Date(iso).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
 const STATUS = {
@@ -220,13 +248,18 @@ async function fetchJ(url){
 }
 async function loadAll(){
   try{
-    const [ov, ms, ags, cands] = await Promise.all([
+    const [ov, ms, ags, cands, ppl, cfg, aud] = await Promise.all([
       fetchJ('/api/admin/overview'),
       fetchJ('/api/admin/missions'),
       fetchJ('/api/admin/agents'),
-      fetchJ('/api/admin/candidatures')
+      fetchJ('/api/admin/candidatures'),
+      fetchJ('/api/admin/inscrits'),
+      fetch('/api/config').then(r=>r.json()).catch(()=>({commission:25})),
+      fetchJ('/api/admin/audit')
     ]);
     renderOverview(ov); renderMissions(ms); renderAgents(ags); renderCands(cands);
+    PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
+    renderConfig(cfg); renderAudit(aud);
   }catch(e){
     // Aperçu sans serveur : exiger la connexion locale avant la démo
     if(localStorage.getItem('k2_hq_ok') !== '1'){ location.href = 'admin-login.html'; return; }
@@ -284,8 +317,52 @@ function renderOverview(o){
   renderChart(o.ca7||[]);
 }
 
+
+/* ─── Personnes inscrites : agents + clients, avec recherche ─── */
+let PEOPLE = {agents:[], clients:[]};
+function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+function renderPeople(){
+  const el = document.querySelector('#people'); if(!el) return;
+  const q = pNorm((document.querySelector('#people-search')||{}).value || '');
+  document.querySelector('#people-cnt').textContent = PEOPLE.agents.length + ' agent(s) · ' + PEOPLE.clients.length + ' client(s)';
+  const Ag = PEOPLE.agents.filter(a => !q || pNorm(a.nom+' '+a.tel+' '+a.quartier+' '+(a.services||[]).map(x=>SVC_N[x]||x).join(' ')).includes(q));
+  const Cl = PEOPLE.clients.filter(c => !q || pNorm(c.nom+' '+c.tel+' '+c.quartier).includes(q));
+  const agentRow = a => {
+    const [cls, txt] = CST[a.status] || ['b-pending', a.status||'?'];
+    return `<div class="agrow">
+      <div class="avatar">${(a.nom||'?')[0].toUpperCase()}<span class="${a.online?'doton':'dotof'}"></span></div>
+      <div style="flex:1;min-width:0">
+        <b>${a.nom}</b> <span class="badge b-blue" style="background:rgba(74,163,255,.14);color:var(--blue);border-color:rgba(74,163,255,.3)">AGENT</span> <span class="badge ${cls}">${txt}</span> ${a.online?'<span class="badge b-active">en ligne</span>':''}<br>
+        <small>📞 ${a.tel||'—'} · 📍 ${a.quartier||'—'}${a.niveau?' · 🎓 '+a.niveau:''}</small><br>
+        <small>🧰 ${(a.services||[]).map(x=>(SVC_N[x]||x)).join(', ')||'—'} · ✅ ${a.done||0} mission(s) · 💰 ${fmt(a.gain||0)} gagnés</small>
+        <div id="pdet-${a.id}" style="display:none;background:var(--card2);border-radius:10px;padding:9px 11px;font-size:11.5px;margin-top:6px">
+          Inscrit le ${(a.createdAt||'').slice(0,10)} · ID ${a.id}
+          ${a.status==='pending' ? `<div style="margin-top:7px;display:flex;gap:6px">
+            <button style="background:rgba(21,201,138,.15);border:1px solid rgba(21,201,138,.4);color:var(--p);font-size:10.5px;font-weight:900;padding:7px 10px;border-radius:9px;cursor:pointer" onclick="decideCand('${a.id}','approve','${(a.nom||'').replace(/'/g,'')}')">✅ Valider</button>
+            <button style="background:var(--card2);border:1px solid rgba(255,176,32,.4);color:var(--amber);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="askMoreInfo('${a.id}')">➕ Infos</button>
+            <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer" onclick="decideCand('${a.id}','reject','${(a.nom||'').replace(/'/g,'')}')">✕ Rejeter</button></div>` : ''}
+        </div>
+      </div>
+      <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;flex-shrink:0" onclick="togglePeopleDet('${a.id}')">🔍 Profil</button>
+    </div>`;
+  };
+  const clientRow = c => `<div class="agrow">
+      <div class="avatar" style="background:linear-gradient(135deg,var(--blue),#2f6fd0)">${(c.nom||'?')[0].toUpperCase()}</div>
+      <div style="flex:1;min-width:0">
+        <b>${c.nom}</b> <span class="badge" style="background:rgba(74,163,255,.14);color:var(--blue);border-color:rgba(74,163,255,.3)">CLIENT</span>${c.photo?' 📷':''}<br>
+        <small>📞 ${c.tel||'—'} · 📍 ${c.quartier||'quartier non précisé'}</small><br>
+        <small>🧾 ${c.missions||0} mission(s) · 💸 ${fmt(c.depense||0)} dépensés · inscrit le ${(c.createdAt||'').slice(0,10)}</small>
+      </div>
+    </div>`;
+  el.innerHTML = (Ag.map(agentRow).join('') + Cl.map(clientRow).join('')) || '<div class="empty">Aucune personne ne correspond à cette recherche.</div>';
+}
+function togglePeopleDet(id){
+  const d = document.getElementById('pdet-'+id); if(!d) return;
+  d.style.display = d.style.display==='none' ? 'block' : 'none';
+}
+
 /* ─── Vérification des dossiers agents ─── */
-const CST = {pending:['b-active','⏳ En attente'], approved:['b-done','✓ Validé'], rejected:['b-cancel','Rejeté']};
+const CST = {pending:['b-active','⏳ En attente'], approved:['b-done','✓ Validé'], rejected:['b-cancel','Rejeté'], moreinfo:['b-pending','📝 Infos demandées']};
 function renderCands(list){
   const pend = list.filter(a=>a.status==='pending').length;
   document.querySelector('#cand-cnt').textContent = pend + ' en attente / ' + list.length + ' dossier(s)';
@@ -300,8 +377,9 @@ function renderCands(list){
       ['🪪', (a.pieceType||'') + ' N° ' + (a.pieceNum||'') + (a.hasPhoto ? ' · 📷 photo jointe' : ' · ⚠️ pas de photo')],
       ['🚨', 'Urgence : ' + (a.urgenceNom||'') + ' · ' + (a.urgenceTel||'')],
       ['🗣️', 'Réf. 1 : ' + (a.ref1Nom||'') + ' ' + (a.ref1Tel||'') + (a.ref2Nom ? ' · Réf. 2 : '+a.ref2Nom+' '+(a.ref2Tel||'') : '')],
+      ['🎓', a.niveau ? 'Niveau d\'étude : ' + a.niveau : ((a.services||[]).includes('cours') ? '⚠️ Niveau d\'étude NON précisé (cours)' : '🎓 Cours : non concerné')],
       ['💼', (a.experience||0) + ' an(s) d\'expérience · ' + ((a.services||[]).map(s=>(SVC_N[s]||s)).join(', ') || 'services ?')],
-    ];
+    ].concat(a.history && a.history.length ? [['📜', a.history.map(h => (h.at||'').slice(0,10)+' · '+h.action+(h.motif?' ('+h.motif+')':'')).join(' → ')]] : []);
     return `<div class="agrow" style="align-items:flex-start">
       ${a.photo
         ? `<div style="position:relative;width:44px;height:44px;flex-shrink:0"><img src="${a.photo}" style="width:44px;height:44px;border-radius:50%;object-fit:cover"><span class="${a.online?'doton':'dotof'}" style="position:absolute;right:0;bottom:0"></span></div>`
@@ -335,6 +413,38 @@ async function toggleCandDet(id, hasPhoto){
       if(r.piecePhoto) document.getElementById('photo-'+id).innerHTML = '<img src="'+r.piecePhoto+'" style="max-width:220px;border-radius:10px;margin-top:8px;border:1px solid var(--line)">';
     }catch(e){}
   }
+}
+/* Réglages commission + journal d'audit */
+function renderConfig(cfg){
+  const c = (cfg && cfg.commission)!=null ? cfg.commission : 25;
+  const el = document.getElementById('cfg-comm'); if(el) el.value = c;
+}
+async function saveComm(){
+  const v = parseFloat(document.getElementById('cfg-comm').value);
+  if(isNaN(v) || v<0 || v>50) return alert('Entre 0 et 50 %');
+  const r = await fetch('/api/admin/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({commission:v})});
+  const d = await r.json().catch(()=>({}));
+  if(r.ok){ alert('✅ Commission réglée à '+d.commission+' % — appliquée sur les nouvelles missions.'); loadAll(); }
+  else alert('❌ '+(d.error||'Erreur'));
+}
+function renderAudit(list){
+  const el = document.getElementById('audit'); if(!el) return;
+  document.getElementById('audit-cnt').textContent = (list||[]).length + ' événement(s)';
+  const ICONS = {agent_valide:'✅', agent_rejete:'❌', agent_infos_demandees:'📝', agent_recandidature:'🔁', commission_modifiee:'⚙️', hq_connexion:'🔑', hq_login_echec:'🚫', hq_login_bloque:'⛔', mdp_reinitialise:'🆕'};
+  if(!list || !list.length){ el.innerHTML = '<div class="empty">Aucun événement pour le moment.</div>'; return; }
+  el.innerHTML = list.slice(0, 40).map(e=>{
+    const extra = Object.keys(e).filter(k=>!['at','kind'].includes(k)).map(k=>k+': '+(typeof e[k]==='object'?'':e[k])).join(' · ');
+    return `<div class="agrow" style="align-items:flex-start">
+      <div style="font-size:18px">${ICONS[e.kind]||'•'}</div>
+      <div style="flex:1;min-width:0"><b>${(e.kind||'').replace(/_/g,' ')}</b><br><small>${(e.at||'').slice(0,16).replace('T',' · ')}${extra?' — '+extra:''}</small></div>
+    </div>`;
+  }).join('');
+}
+async function askMoreInfo(id){
+  const motif = prompt('📝 Que manque-t-il au dossier ? (ex : photo de la pièce illisible, référence injoignable) :', 'Photo de la pièce illisible');
+  if(motif===null) return;
+  await fetch('/api/admin/agents/'+id+'/moreinfo', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motif})});
+  setTimeout(loadAll, 300);
 }
 async function decideCand(id, action, nom){
   if(action === 'approve'){
@@ -431,5 +541,6 @@ loadAll();
 connectWS();
 setInterval(loadAll, 12000); // secours
 </script>
-</body>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3eae5c1cbd7e183',t:'MTc5MDAxMjg3MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

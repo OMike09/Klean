@@ -35,6 +35,7 @@ function netStartPosWatch(){
   if (location.protocol === 'file:') return;              // ouverture directe → démo
   fetch('/api/health', {cache:'no-store'})
     .then(r => { if(!r.ok) throw 0; return r.json(); })
+    .then(() => fetch('/api/config', {cache:'no-store'}).then(r=>r.json()).then(d=>{ NET.commission = (d.commission||25)/100; }).catch(()=>{}))
     .then(() => {
       NET.deviceId = localStorage.getItem('k2_device');
       if(!NET.deviceId){
@@ -91,6 +92,9 @@ function applyNetOverrides(){
 async function netLaunchSearch(){
   c.nom = document.querySelector('#inp-nom').value.trim();
   c.tel = document.querySelector('#inp-tel').value.trim();
+  const _bd = document.querySelector('#bk-desc');
+  c.desc = (_bd ? _bd.value : '').trim().slice(0,280);
+  if(c.service==='cours' && !c.desc) return toast('📖 Précisez la matière ou le domaine du coach');
   if(!c.nom) return toast('Indiquez votre nom 👤');
   if(c.tel.replace(/\D/g,'').length < 8) return toast('Numéro invalide 📞');
 
@@ -357,15 +361,24 @@ function netShowRequest(m){
     client:m.clientNom, quartier:m.quartier, adresse:'', time:m.time, dist:distShown, clientLat:m.lat, clientLng:m.lng, server:true
   };
   const p = incomingReq.prix;
-  const gain = p.total*(1-PLATFORM_FEE);
+  const gain = p.total*(1-(NET.commission||0.25));
   const gpsTag = (NET.pos && typeof m.lat === 'number') ? ' (GPS réel 📡)' : '';
   document.querySelector('#req-sub').textContent = m.clientNom+' · 📍 '+m.quartier+' · '+distShown.toFixed(1)+' km de vous';
   document.querySelector('#req-lines').innerHTML = `
     <div class="rline"><span>${p.svc.ic} ${p.svc.nom}</span><span>${fmt(p.svc.base)}</span></div>
     <div class="rline"><span>🛏️ ${m.pieces} pièce(s) · ${m.depth}</span><span></span></div>
     <div class="rline"><span>🕐 ${formatDate(m.date||'')} à ${m.time}</span><span></span></div>
+    ${m.desc ? `<div class=\"rline\" style=\"background:var(--pl);border-radius:8px;padding:6px 8px\"><span>📝 ${m.desc}</span><span></span></div>` : ''}
+    ${m.budget ? `<div class=\"rline\"><span>💰 Budget client indicatif</span><span>${fmt(m.budget)}</span></div>` : ''}
     <div class="rline"><span>📍 Distance${gpsTag}</span><span>${distShown.toFixed(1)} km</span></div>
     <div class="rline total"><span>Montant mission</span><span>${fmt(p.total)}</span></div>`;
+  if(m.photos && m.photos.length){
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:6px;margin-top:8px';
+    row.innerHTML = m.photos.map((ph,i)=>`<button style="flex:1;padding:0;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card2);cursor:pointer" onclick="viewMissionPhoto(${i})"><img src="${ph}" style="width:100%;height:70px;object-fit:cover;display:block"></button>`).join('');
+    document.querySelector('#req-lines').appendChild(row);
+    window._missionPhotos = m.photos;
+  }
   document.querySelector('#req-gain').textContent = fmt(gain);
   document.querySelector('#req-modal-bg').classList.add('show');
   let left = 20; const CIRC = 144.5;
@@ -453,4 +466,13 @@ async function netRenderAgentHist(){
   }).join('');
   // synchronise le tableau de bord
   agent.missionsDone = st.missionsDone; agent.rating = st.rating; saveAll();
+}
+
+/* Afficher une photo de mission en grand */
+function viewMissionPhoto(i){
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px';
+  ov.innerHTML = `<img src="${window._missionPhotos[i]}" style="max-width:100%;max-height:88vh;border-radius:12px"><button style="position:absolute;top:14px;right:16px;background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:20px;width:38px;height:38px;border-radius:50%;cursor:pointer">✕</button>`;
+  ov.onclick = () => ov.remove();
+  document.body.appendChild(ov);
 }

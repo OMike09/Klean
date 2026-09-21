@@ -348,9 +348,22 @@
 
   .toast{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-80px);background:var(--ink);color:#fff;padding:12px 20px;border-radius:12px;font-size:13.5px;font-weight:700;z-index:99;transition:.3s;box-shadow:0 10px 30px rgba(0,0,0,.25);max-width:88%;text-align:center}
   .toast.show{transform:translateX(-50%) translateY(0)}
+
+/* ── SPLASH 3 s (ouverture app client & agent) ── */
+#splash{position:fixed;inset:0;z-index:9999;background:linear-gradient(160deg,#08130e,#0c2217);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;transition:opacity .5s ease}
+#splash.off{opacity:0;pointer-events:none}
+#splash img{width:86px;height:86px;border-radius:24px;box-shadow:0 18px 46px rgba(21,201,138,.4);animation:spPop .7s cubic-bezier(.2,1.4,.4,1)}
+@keyframes spPop{from{transform:scale(.5);opacity:0}to{transform:scale(1);opacity:1}}
+#splash b{font-size:32px;letter-spacing:4px;color:#eafaf2;font-weight:900}
+#splash span{color:#8aa39a;font-size:13.5px}
+.sp-bar{width:140px;height:5px;border-radius:99px;background:rgba(21,201,138,.16);margin-top:10px;overflow:hidden}
+.sp-bar i{display:block;height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#15c98a,#0da678);animation:spLoad 2.9s linear forwards}
+@keyframes spLoad{to{width:100%}}
 </style>
 </head>
 <body>
+<div id="splash"><img src="/klean-icon-512.png" alt="KLEAN"><b>KLEAN</b><span>Services à domicile · Côte d'Ivoire 🇨🇮</span><div class="sp-bar"><i></i></div></div>
+<script>setTimeout(function(){var s=document.getElementById('splash');if(!s)return;s.classList.add('off');setTimeout(function(){s.remove()},550)},3000);</script>
 
 <!-- ═══════ TOP ═══════ -->
 <div class="topbar">
@@ -401,7 +414,6 @@
     <div class="mini-grid">
       <div class="mini-card"><span class="ic">👶</span><b>Garde d'enfants</b></div>
       <div class="mini-card"><span class="ic">🩺</span><b>Soins seniors</b></div>
-      <div class="mini-card"><span class="ic">📚</span><b>Cours à domicile</b></div>
       <div class="mini-card"><span class="ic">🛵</span><b>Livraison</b></div>
       <div class="mini-card"><span class="ic">🐕</span><b>Garde animaux</b></div>
     </div>
@@ -420,7 +432,13 @@
   <div class="steps-bar"><div class="dot done" id="dot1"></div><div class="dot" id="dot2"></div><div class="dot" id="dot3"></div><div class="dot" id="dot4"></div></div>
   <div class="step-label" id="step-title">Étape 1/4<b>Choisissez votre service</b></div>
 
-  <div class="bstep on" id="step1"><div class="svc-grid" id="book-svc"></div></div>
+  <div class="bstep on" id="step1"><div class="svc-grid" id="book-svc"></div>
+    <div style="margin-top:16px;padding:15px 14px;border:2px dashed rgba(21,201,138,.4);border-radius:16px;background:rgba(21,201,138,.05);text-align:center">
+      <b style="font-size:14.5px;color:var(--pd)">🛠️ Vous ne trouvez pas votre service ?</b>
+      <p style="font-size:12.5px;color:var(--muted);margin:6px 0 10px">Décrivez votre besoin avec <b>des photos</b> et un budget indicatif — les agents vous répondent avec un prix.</p>
+      <button class="btn-main" style="flex:none;padding:12px 22px" onclick="pickCustom()">📷 Faire une demande sur mesure</button>
+    </div>
+  </div>
 
   <div class="bstep" id="step2">
     <div id="bk-svc-banner" style="margin-bottom:2px"></div>
@@ -438,6 +456,16 @@
     </div>
     <span class="field-label" id="bk-extras-label">Options supplémentaires</span>
     <div class="extras" id="extras-list"></div>
+    <div id="bk-photos-wrap" style="display:none">
+      <span class="field-label">📷 Photos du besoin (max 3 — très conseillées)</span>
+      <input type="file" accept="image/*" multiple id="inp-photos" style="display:none" onchange="onCustomPhotos(this)">
+      <div id="photos-row" style="display:flex;gap:7px;flex-wrap:wrap;margin:6px 0 10px"></div>
+      <button class="btn-ghost" style="flex:none;padding:10px 14px" onclick="document.getElementById('inp-photos').click()">📷 Ajouter des photos</button>
+      <div class="inp-row" style="margin-top:10px">
+        <label>💰 Votre budget indicatif <span style="color:var(--muted)">(optionnel)</span></label>
+        <input class="inp" id="inp-budget" inputmode="numeric" placeholder="Ex : 10 000 F">
+      </div>
+    </div>
   </div>
 
   <div class="bstep" id="step3">
@@ -728,6 +756,24 @@ const SERVICES = [
     {id:'cartons', nom:'Cartons & emballage', prix:5000},{id:'porteur', nom:'Porteur supplémentaire', prix:8000},{id:'demont', nom:'Montage / démontage meubles', prix:6000}]},
   {id:'cuisine',     ic:'🍳', nom:'Cuisinier à domicile',   desc:'Repas ivoirien ou international', base:10000, cat:'home', opts:[
     {id:'courses', nom:'Courses incluses', prix:4000},{id:'groupe', nom:'Repas 5+ personnes', prix:4000},{id:'patiss', nom:'Pâtisserie / dessert', prix:3500}]},
+  {id:'evenement',   ic:'🎉', nom:'Après événement',        desc:'Fêtes, mariages, réceptions',   base:12000, cat:'clean'},
+  {id:'entretien',   ic:'🗓️', nom:'Entretien régulier',     desc:'Ménage programmé chaque semaine', base:6000,  cat:'clean'},
+  {id:'placement',   ic:'👥', nom:'Placement de personnel', desc:'Nounou, gardien, aide-ménagère, profil vérifié', base:15000, cat:'home', descLabel:"👤 Décrivez le profil recherché (horaires, durée, budget…) *", opts:[
+    {id:'nounou', nom:'Nounou / garde d’enfant', prix:0},{id:'perso', nom:'Personnel de maison', prix:0},
+    {id:'gardien', nom:'Gardien / vigile', prix:0},{id:'aide', nom:'Aide-ménagère', prix:0},
+    {id:'jardinier2', nom:'Jardinier', prix:0}]},
+  {id:'cours',       ic:'📚', nom:'Cours particuliers',    desc:'Soutien scolaire & formations (primaire → lycée)', base:15000, cat:'home', descLabel:"📖 Matière(s) souhaitée(s) ou domaine du coach *", opts:[
+    {id:'college', nom:'Niveau collège', prix:5000},{id:'lycee', nom:'Niveau lycée', prix:8000},
+    {id:'eleves2', nom:'2 élèves', prix:10000},{id:'eleves3', nom:'3 élèves ou plus', prix:15000},
+    {id:'prof', nom:'Professeur diplômé (au lieu d’un étudiant)', prix:10000},
+    {id:'coach', nom:'Coach / formateur dans un domaine précis', prix:20000},
+    {id:'toutes', nom:'Toutes les matières (soutien général)', prix:8000}]},
+  {id:'canal',       ic:'📡', nom:'Canal+ domicile',       desc:'Installation & dépannage satellite, chez vous', base:5000, cat:'home', opts:[
+    {id:'depannage', nom:'Dépannage décodeur / parabole', prix:5000},
+    {id:'placement', nom:'Placement & installation complète', prix:10000},
+    {id:'point2', nom:'Point TV supplémentaire', prix:5000},
+    {id:'renouvel', nom:'Aide au renouvellement d’abonnement', prix:2000},
+    {id:'assistance', nom:'Assistance & réglages (parabole, chaînes)', prix:3000}]},
 ];
 /* Services prévus ensuite :
 const UPCOMING = ['🧸 Garde d\'enfants','💊 Soins à domicile','📚 Cours particuliers','🛵 Livraison & courses','🐕 Garde d\'animaux']; */
@@ -774,11 +820,11 @@ function setCity(id, silent){
   $('#city-chip').innerHTML = '📍 '+city.nom+' ▾';
   $('#hero-phase').innerHTML = '🇨🇮 Actif à '+city.nom;
   $('#hero-agents-sub').textContent = 'Agents actifs à '+city.nom;
-  $('#hero-agents-n').textContent = city.agents;
+  $('#hero-agents-n').textContent = (window._stats && window._stats.agentsTotal) || '—';
   $('#lbl-quart-city').textContent = '('+city.nom+')';
   $('#home-banner-p').textContent = 'Vous êtes à '+city.nom+' ? Recevez des missions près de chez vous, quand vous voulez.';
   renderQuartiers(); if($('#city-list')) renderCityModal(); renderHomeRoad();
-  if(!silent) toast('📍 '+city.nom+' — '+city.agents+' agents disponibles');
+  if(!silent) toast('📍 '+city.nom+((window._stats&&window._stats.agentsEnLigne!=null)?' — '+window._stats.agentsEnLigne+' agent(s) en ligne maintenant':''));
 }
 function cityInfo(){ renderCityModal(); $('#city-modal-bg').classList.add('show'); }
 function closeCityModal(){ $('#city-modal-bg').classList.remove('show'); }
@@ -790,7 +836,7 @@ function renderCityModal(filter){
   const list = CITIES.filter(x => !f || norm(x.nom).includes(f));
   el.innerHTML =
     (list.length
-      ? list.map(x=>`<button class="city-row ${c.city===x.id?'on':''}" onclick="pickCity('${x.id}')"><span style="font-size:20px">🏙️</span><span style="text-align:left"><b style="display:block;font-size:14.5px">${x.nom}</b><small style="color:var(--muted);font-size:11.5px">${x.quartiers.length} quartiers · ${x.agents} agents</small></span><span class="st">${c.city===x.id?'Votre ville':'✅ Actif'}</span></button>`).join('')
+      ? list.map(x=>`<button class="city-row ${c.city===x.id?'on':''}" onclick="pickCity('${x.id}')"><span style="font-size:20px">🏙️</span><span style="text-align:left"><b style="display:block;font-size:14.5px">${x.nom}</b><small style="color:var(--muted);font-size:11.5px">${x.quartiers.length} quartiers</small></span><span class="st">${c.city===x.id?'Votre ville':'✅ Actif'}</span></button>`).join('')
       : `<p class="note">Aucune ville ne correspond à « ${filter} »</p>`) +
     (f ? '' : CITIES_SOON.map(n=>`<div class="city-row soon"><span style="font-size:20px">🏗️</span><span><b style="display:block;font-size:14.5px">${n}</b><small style="font-size:11.5px">Arrive bientôt</small></span><span class="st">🔜 Bientôt</span></div>`).join(''));
 }
@@ -895,7 +941,7 @@ function nextStep(){
 }
 function updatePriceBar(){
   const p = calcPrice(c);
-  $('#bb-price').textContent = fmt(p.total);
+  $('#bb-price').textContent = (c.service==='custom') ? '💬 À convenir' : fmt(p.total);
   if(step===4) renderRecap();
 }
 function renderSvcGrids(){
@@ -910,6 +956,14 @@ function renderSvcGrids(){
   ).join('');
   $('#book-svc').innerHTML = build('pickSvc');
   $('#home-svc').innerHTML = build('quickSvc');
+}
+/* 🛠️ Demande sur mesure (service hors catalogue, avec photos) */
+const CSVC = {id:'custom', ic:'🛠️', nom:'Demande sur mesure', desc:'Vous décrivez, l’agent évalue et propose un prix', base:0, cat:'custom', opts:[], descLabel:'📝 Décrivez précisément votre besoin *'};
+function pickCustom(){
+  if(!SERVICES.find(s=>s.id==='custom')) SERVICES.push(CSVC);
+  c.service='custom'; c.extras={};
+  renderSvcGrids(); renderStep2Meta(); renderExtras(); updatePriceBar(); startBooking(); goStep(2);
+  toast('📷 Décrivez + ajoutez des photos — les agents vous enverront un prix');
 }
 function pickSvc(id){
   if(c.service!==id){ c.service=id; c.extras={}; }
@@ -934,8 +988,15 @@ function renderStep2Meta(){
     document.querySelectorAll('#seg-depth button').forEach(x=>x.classList.remove('sel'));
     b.classList.add('sel'); c.depth=b.dataset.v; updatePriceBar();
   }));
-  $('#bk-desc-wrap').style.display = svc.cat==='clean' ? 'none' : '';
+  const _dw = $('#bk-desc-wrap');
+  _dw.style.display = svc.cat==='clean' ? 'none' : '';
+  const _dlb = _dw.querySelector('.field-label'), _ta = _dw.querySelector('#bk-desc');
+  if(_dlb) _dlb.textContent = svc.descLabel || '📝 Décrivez le problème au technicien (optionnel)';
+  if(_ta) _ta.placeholder = svc.id==='cours' ? 'Ex : Maths niveau 5e, Physique Tle D, Anglais, Word/Excel, guitare…' : (svc.id==='canal' ? 'Ex : la parabole a bougé, signal perdu, nouveau décodeur à installer…' : 'Ex : le robinet de la cuisine fuit depuis hier…');
   $('#bk-extras-label').textContent = svc.cat==='clean' ? 'Options supplémentaires' : 'Options & équipements';
+  $('#seg-depth').style.display = svc.cat==='custom' ? 'none' : '';
+  const _pw = $('#bk-photos-wrap'); if(_pw) _pw.style.display = svc.cat==='custom' ? '' : 'none';
+  if(svc.cat==='custom'){ $('#bk-extras-label').style.display='none'; $('#extras-list').innerHTML=''; } else { $('#bk-extras-label').style.display=''; }
 }
 function renderExtras(){
   const svc = SERVICES.find(s=>s.id===c.service);
@@ -943,9 +1004,35 @@ function renderExtras(){
   const wrap = $('#extras-list');
   if(!wrap) return;
   if(!list.length){ wrap.innerHTML = '<p class="note" style="text-align:left">Aucune option — le prix affiché est tout compris ✓</p>'; return; }
-  wrap.innerHTML = list.map(e=>`<button class="extra ${c.extras[e.id]?'sel':''}" onclick="toggleExtra('${e.id}')"><span class="ck">${c.extras[e.id]?'✓':''}</span><span class="ic">${e.ic||'🔹'}</span><span><b>${e.nom}</b><span>${e.desc||''}</span></span><span class="delta">+${fmt(e.prix)}</span></button>`).join('');
+  wrap.innerHTML = list.map(e=>`<button class="extra ${c.extras[e.id]?'sel':''}" onclick="toggleExtra('${e.id}')"><span class="ck">${c.extras[e.id]?'✓':''}</span><span class="ic">${e.ic||'🔹'}</span><span><b>${e.nom}</b><span>${e.desc||''}</span></span><span class="delta">${e.prix ? '+'+fmt(e.prix) : '(choix)'}</span></button>`).join('');
 }
 function toggleExtra(id){ c.extras[id]=!c.extras[id]; renderExtras(); updatePriceBar(); }
+/* Photos de la demande sur mesure (max 3, compression locale) */
+window._customPhotos = window._customPhotos || [];
+function onCustomPhotos(input){
+  const files = [...(input.files||[])].slice(0, 3 - window._customPhotos.length);
+  files.forEach(f => {
+    const rd = new FileReader();
+    rd.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 1100/Math.max(img.width, img.height));
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(img.width*k); cv.height = Math.round(img.height*k);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        window._customPhotos.push(cv.toDataURL('image/jpeg', .72).slice(0, 580000));
+        renderCustomPhotos();
+      };
+      img.src = e.target.result;
+    };
+    rd.readAsDataURL(f);
+  });
+  input.value = '';
+}
+function renderCustomPhotos(){
+  const row = $('#photos-row'); if(!row) return;
+  row.innerHTML = window._customPhotos.map((p,i)=>`<div style="position:relative;width:78px;height:78px"><img src="${p}" style="width:78px;height:78px;object-fit:cover;border-radius:10px;border:1px solid var(--line)"><button onclick="window._customPhotos.splice(${i},1);renderCustomPhotos()" style="position:absolute;top:-5px;right:-5px;width:22px;height:22px;border-radius:50%;background:var(--red,#ff6b6b);color:#fff;border:none;font-size:12px;cursor:pointer">✕</button></div>`).join('');
+}
 function renderTimes(){ $('#times-grid').innerHTML = TIMES.map(t=>`<button class="time ${c.time===t?'sel':''}" onclick="c.time='${t}';renderTimes()">${t}</button>`).join(''); }
 function renderQuartiers(){
   const qs = currentQuartiers();
@@ -1009,6 +1096,12 @@ function detectPos(){
 function launchSearch(){
   c.nom = $('#inp-nom').value.trim();
   c.tel = $('#inp-tel').value.trim();
+  c.desc = $('#bk-desc') ? $('#bk-desc').value.trim().slice(0,280) : '';
+  if(c.service==='cours' && !c.desc) return toast('📖 Précisez la matière ou le domaine du coach');
+  if($('#inp-budget')) c.budget = parseInt(($('#inp-budget').value||'').replace(/\D/g,'')) || 0;
+  c.photos = window._customPhotos.slice(0, 3);
+  if(c.service==='custom' && (!c.desc || c.desc.length < 8)) return toast('📝 Décrivez votre besoin en quelques mots');
+  if(c.service==='custom' && !c.photos.length) return toast('📷 Ajoutez au moins une photo pour un devis juste');
   if(!c.nom) return toast('Indiquez votre nom 👤');
   if(c.tel.replace(/\D/g,'').length < 8) return toast('Numéro invalide 📞');
 
@@ -1328,6 +1421,18 @@ function renderAgentGate(){
 
     <h4 style="margin-top:14px"><span class="step-n">4</span> Services maîtrisés *</h4>
     <div class="svc-check" id="ap-services">${SERVICES.map(s=>`<button data-s="${s.id}" onclick="toggleApplySvc('${s.id}',this)">${s.ic} ${s.nom.split(' ')[1]||s.nom}</button>`).join('')}</div>
+    <div class="inp-row" id="ap-niveau-wrap" style="display:none">
+      <label>🎓 Niveau d'étude * <span style="color:var(--muted);font-weight:600">(obligatoire pour Cours particuliers)</span></label>
+      <select class="inp" id="ap-niveau">
+        <option value="">— Choisissez votre niveau —</option>
+        <option>Baccalauréat</option>
+        <option>Bac+2 (BTS / DUT)</option>
+        <option>Bac+3 (Licence)</option>
+        <option>Bac+5 (Master)</option>
+        <option>Enseignant(e) diplômé(e)</option>
+        <option>Formateur / coach professionnel</option>
+      </select>
+    </div>
 
     <p class="note" style="text-align:left">🛡️ En soumettant, je certifie l'exactitude de ces informations. Elles seront vérifiées par le propriétaire KLEAN avant validation.</p>
     <button class="btn-main" style="width:100%;flex:none" onclick="submitApplication()">📤 Envoyer mon dossier de candidature</button>
@@ -1337,7 +1442,8 @@ function renderAgentGate(){
   window._agentAvatar = null;
   renderQuartiers();
 }
-function toggleApplySvc(id, btn){ applySvc[id] = !applySvc[id]; btn.classList.toggle('sel', !!applySvc[id]); }
+function toggleApplySvc(id, btn){ applySvc[id] = !applySvc[id]; btn.classList.toggle('sel', !!applySvc[id]);
+  const _w = $('#ap-niveau-wrap'); if(_w) _w.style.display = applySvc['cours'] ? '' : 'none'; }
 function onPiecePhoto(input){
   const f = input.files && input.files[0]; if(!f) return;
   const rd = new FileReader();
@@ -1410,12 +1516,14 @@ async function submitApplication(){
     ref1Nom: V_AP('ap-ref1nom'), ref1Tel: V_AP('ap-ref1tel'),
     ref2Nom: V_AP('ap-ref2nom'), ref2Tel: V_AP('ap-ref2tel'),
     services: Object.keys(applySvc).filter(k=>applySvc[k]),
+    niveau: V_AP('ap-niveau'),
     deviceId: (typeof NET!=='undefined' && NET.deviceId) || 'demo'
   };
   const need = {nom:'Nom', prenom:'Prénom', naissance:'Date de naissance', tel1:'Téléphone', adresse:'Adresse', pieceNum:'N° de pièce', urgenceNom:'Personne à alerter', urgenceTel:'Tél. urgence', ref1Nom:'Référence 1', ref1Tel:'Tél. référence'};
   for(const k in need){ if(!dossier[k]) return toast('❌ Champ requis : '+need[k]); }
   if(dossier.tel1.length < 8) return toast('❌ Téléphone principal invalide');
   if(!dossier.services.length) return toast('❌ Choisissez au moins un service');
+  if(dossier.services.includes('cours') && !dossier.niveau) return toast('❌ Choisissez votre niveau d\u2019étude 🎓 (exigé pour les Cours particuliers)');
 
   agent.nom = dossier.prenom + ' ' + dossier.nom;
   agent.quartier = dossier.quartier; agent.tel = dossier.tel1;
@@ -1623,7 +1731,7 @@ function showRequest(){
     adresse:'près du repère indiqué par le client',
     time:pick(TIMES), dist:rnd(0.4,4)
   };
-  const gain = p.total*(1-PLATFORM_FEE);
+  const gain = p.total*(1-((typeof NET!=='undefined'&&NET.commission!=null)?NET.commission:0.25));
   const ex = '';
   $('#req-sub').textContent = incomingReq.client+' · 📍 '+incomingReq.quartier+' · '+incomingReq.dist.toFixed(1)+' km de vous';
   $('#req-lines').innerHTML = `
@@ -1692,7 +1800,7 @@ function advanceMission(){
 }
 function completeMission(){
   const gain = Math.round(activeMission.prix.total*(1-PLATFORM_FEE));
-  const comm = Math.round(activeMission.prix.total*PLATFORM_FEE);
+  const comm = Math.round(activeMission.prix.total*((typeof NET!=='undefined'&&NET.commission!=null)?NET.commission:0.25));
   agent.gains.today += gain; agent.gains.total += gain; agent.gains.comm += comm;
   agent.missionsDone++;
   const note = 4 + Math.ceil(Math.random()*2);
@@ -1814,5 +1922,7 @@ function showInstallFab(){
 })();
 </script>
 <script src="net.js"></script>
+<script>fetch('/api/stats').then(r=>r.json()).then(s=>{window._stats=s;}).catch(()=>{});</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3eae6382834e183',t:'MTc5MDAxMjg5MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
 </body>
 </html>
