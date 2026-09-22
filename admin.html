@@ -859,5 +859,64 @@ loadAll();
 connectWS();
 setInterval(loadAll, 12000); // secours
 </script>
+<style>
+/* 🗂️ HQ : volets pliables — le quotidien ouvert, le long refermé */
+.panel > h3{cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.panel > h3 .fold-ic{color:var(--muted);font-size:13px;flex:none;transition:transform .15s}
+.panel.folded > *:not(h3){display:none !important}
+.panel{transition:box-shadow .15s}
+.panel > h3:hover{background:rgba(255,255,255,.02)}
+</style>
+<script>
+/* 🗂️ Système de volets du tableau de bord (PDG comme gestionnaire)
+   — chaque panneau se replie/déplie au clic sur son titre
+   — la préférence est mémorisée sur cet appareil (lien : klean_hq_fold_v2) */
+(function(){
+  const STORE = 'klean_hq_fold_v2';
+  function load(){ try{ return JSON.parse(localStorage.getItem(STORE) || '{}'); }catch(e){ return {}; } }
+  function save(m){ try{ localStorage.setItem(STORE, JSON.stringify(m)); }catch(e){} }
+  /* ouvert par défaut : le quotidien — fermé par défaut : tout ce qui est long/archivé */
+  const FOLD_BY_DEFAULT = ['équipe dirigeante', 'affiche', "chiffre d'affaires", 'réglages', "journal d'audit", 'journal temps réel', 'professionnels', 'personnes inscrites'];
+  const OPEN_BY_DEFAULT = ['vérification', 'support', 'missions'];
+  function isFoldByDefault(titre){
+    const t = (titre || '').toLowerCase();
+    if (OPEN_BY_DEFAULT.some(k => t.includes(k))) return false;
+    return FOLD_BY_DEFAULT.some(k => t.includes(k));
+  }
+  function keyOf(panel, i, titre){
+    if (panel.id) return panel.id;
+    return 'panel-' + i + '-' + (titre || '').toLowerCase().replace(/[^a-zàâéèêëâôûùç]+/gi, '-').slice(0, 30);
+  }
+  function refresh(){
+    const mem = load();
+    document.querySelectorAll('.panel').forEach((p, i) => {
+      const h3 = p.querySelector('h3');
+      if (!h3) return;
+      const k = keyOf(p, i, h3.textContent || '');
+      let ic = h3.querySelector('.fold-ic');
+      if (!ic) {
+        ic = document.createElement('span');
+        ic.className = 'fold-ic';
+        h3.appendChild(ic);
+        h3.addEventListener('click', () => {
+          const f = !p.classList.contains('folded');
+          p.classList.toggle('folded', f);
+          const m = load(); m[k] = f; save(m);
+          ic.textContent = f ? '▸' : '▾';
+          ic.style.transform = f ? 'rotate(-90deg)' : '';
+        });
+      }
+      const folded = (k in mem) ? mem[k] : isFoldByDefault(h3.textContent || '');
+      p.classList.toggle('folded', folded);
+      ic.textContent = folded ? '▸' : '▾';
+      ic.style.transform = folded ? 'rotate(-90deg)' : '';
+    });
+  }
+  window.addEventListener('load', refresh);
+  /* re-annoter après chaque rechargement complet (les contenus arrivent en websock) */
+  setInterval(() => { if (document.querySelector('.panel .fold-ic') === null) refresh(); }, 4000);
+  document.addEventListener && document.addEventListener('DOMContentLoaded', refresh);
+})();
+</script>
 </body>
 </html>

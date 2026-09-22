@@ -242,6 +242,7 @@
   .bkg-bottom{display:flex;justify-content:space-between;align-items:center;border-top:1px dashed var(--line);padding-top:10px}
   .bkg-bottom b{font-size:16px;color:var(--pd)}
   .bkg-bottom .stars-mini{color:var(--amber);font-size:13px}
+  .bkg-act{font-weight:800;font-size:12.5px;padding:8px 6px;border:none;background:none;font-family:inherit;cursor:pointer}
   .empty{text-align:center;padding:56px 30px;color:var(--muted)}
   .empty .ic{font-size:52px;margin-bottom:14px}
   .empty b{color:var(--ink);display:block;font-size:16px;margin-bottom:6px}
@@ -694,7 +695,7 @@
 <div class="navbar show" id="nav-client">
   <button class="nav-btn on" data-v="view-home" onclick="showView('view-home',this,'client')"><span class="ic">🏠</span><span>Accueil</span></button>
   <button class="nav-btn" onclick="startBooking()"><span class="ic">🧹</span><span>Réserver</span></button>
-  <button class="nav-btn" data-v="view-track" onclick="openTrack(this)"><span class="ic">👁️</span><span>Voir / Annuler</span></button>
+  <button class="nav-btn" data-v="view-track" onclick="openTrack(this)"><span class="ic">📍</span><span>Suivi</span></button>
   <button class="nav-btn" data-v="view-bookings" onclick="showView('view-bookings',this,'client')"><span class="ic">📋</span><span>Missions</span></button>
   <button class="nav-btn" data-v="view-account" onclick="showView('view-account',this,'client')"><span class="ic">👤</span><span>Compte</span></button>
 </div>
@@ -1420,9 +1421,20 @@ function renderBookings(){
       <div class="meta">📅 ${formatDate(b.date)} à ${b.time}<br>📍 ${b.quartier}, ${cityName(b.city)} — ${b.adresse}</div>
       <div class="bkg-bottom"><b>${fmt(b.prix?b.prix.total:calcPrice(b).total)}</b>
         ${b.rated?`<span class="stars-mini">${'★'.repeat(b.rated)}${'☆'.repeat(5-b.rated)}</span>`:''}
-        ${active?`<button style="color:var(--blue);font-weight:800;font-size:12.5px" onclick="resumeTrack('${b.id}')">📍 Suivre</button>`:''}
+        ${['recherche','enroute','arrive','encours'].includes(b.status)?`<button class="bkg-act" style="color:var(--blue)" onclick="resumeTrack('${b.id}')">👁️ Voir</button>`:''}
+        ${['recherche','enroute'].includes(b.status)?`<button class="bkg-act" style="color:var(--danger)" onclick="cancelBooking('${b.id}')">✕ Annuler</button>`:''}
       </div></div>`;
   }).join('');
+}
+function cancelBooking(id){
+  const b = bookings.find(x=>x.id===id);
+  if(!b) return;
+  if(!['recherche','enroute'].includes(b.status)) return toast('Annulation impossible à ce stade — le pro est déjà arrivé ou au travail.');
+  if(!confirm('Annuler la mission ? (gratuit tant que l\'agent n\'est pas arrivé)')) return;
+  if(mission && mission.id===id){ searchTimers.forEach(clearTimeout); clearInterval(sim); mission=null; }
+  b.status='annulee';
+  saveAll(); renderBookings();
+  toast('Mission annulée');
 }
 function resumeTrack(id){
   const b = bookings.find(x=>x.id===id);
