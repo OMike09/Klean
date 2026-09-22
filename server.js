@@ -251,7 +251,7 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
 
   /* --- API --- */
-  if (p === '/api/health') return sendJson(res, 200, { ok: true, agentsEnLigne: onlineAgents().length, missions: db.missions.length });
+  if (p === '/api/health') return sendJson(res, 200, { ok: true, storage: pgClient ? 'postgres' : 'fichier', agentsEnLigne: onlineAgents().length, agentsTotal: db.agents.length, clientsTotal: db.clients.length, missions: db.missions.length });
 
   if (p === '/api/missions' && req.method === 'POST') {
     const b = await readBody(req);
@@ -270,8 +270,11 @@ const server = http.createServer(async (req, res) => {
       dist: Math.round((0.5 + Math.random() * 3.5) * 10) / 10,
       status: 'pending', agentId: null, createdAt: nowISO(), finishedAt: null, note: 0
     };
-    const cli = findClientByToken(req);   // 👤 mission rattachée au compte client si connecté
-    if (cli) m.clientId = cli.id;
+    const cli = findClientByToken(req);   // 👤 mission rattachée au compte client
+    if (!cli) return sendJson(res, 401, { error: 'Inscription requise : créez votre compte client gratuit pour réserver' });
+    m.clientId = cli.id;
+    const actives = db.missions.filter(x => x.clientId === cli.id && !['terminee', 'annulee'].includes(x.status)).length;
+    if (actives >= 3) return sendJson(res, 409, { error: 'Maximum 3 missions actives en même temps' });
     db.missions.push(m); saveDb();
     broadcastNewMission(m);
     return sendJson(res, 201, { id: m.id, dist: m.dist });
@@ -697,7 +700,10 @@ server.on('upgrade', (req, sock) => {
 process.on('SIGTERM', () => { try { saveDbNow(); } catch (e) {} setTimeout(() => process.exit(0), 300); });
 
 initStorage().then(() => {
-  server.listen(PORT, '0.0.0.0', () => {
+  /* Sauvegarde avant l'arrêt du conteneur (redeploy Render envoie SIGTERM) */
+process.on('SIGTERM', () => { try { saveDbNow(); } catch (e) { } setTimeout(() => process.exit(0), 400); });
+
+server.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log("  ✨ SERVEUR CENTRAL KLEAN — Côte d'Ivoire 🇨🇮");
     console.log('  ────────────────────────────────────');

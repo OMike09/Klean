@@ -98,6 +98,19 @@ async function netLaunchSearch(){
   if(!c.nom) return toast('Indiquez votre nom 👤');
   if(c.tel.replace(/\D/g,'').length < 8) return toast('Numéro invalide 📞');
 
+  /* 👤 Un client doit être INSCRIT pour trouver un agent */
+  if(typeof client === 'undefined' || !client || !client.token || !client.id){
+    toast('👤 Créez votre compte gratuit (30 secondes) pour réserver — sécurité des agents 🛡️');
+    setTimeout(() => {
+      showView('view-account', document.querySelector('#nav-client .nav-btn[data-v=view-account]') || document.querySelector('#nav-client .nav-btn:last-child'), 'client');
+    }, 700);
+    return;
+  }
+
+  /* ⏸️ Maximum 3 missions actives simultanées */
+  const _act = bookings.filter(b => !['terminee','annulee'].includes(b.status)).length;
+  if(_act >= 3) return toast('⏸️ Vous avez déjà 3 missions en cours — attendez qu\'une se termine');
+
   const p = calcPrice(c);
   let created;
   try{

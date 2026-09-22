@@ -101,15 +101,19 @@ function applyMode(){
   card.classList.toggle('setup', SETUP);
   document.getElementById('title').textContent = SETUP ? 'Créez votre mot de passe' : 'KLEAN HQ';
   document.getElementById('subtitle').textContent = SETUP
-    ? 'Première visite : choisissez un mot de passe robuste pour votre HQ'
-    : 'Espace propriétaire · Bouaké 🇨🇮';
+    ? 'Une seule fois : créez votre clé propriétaire (suite à la vérification de sécurité du 21 sept.) — ensuite vous vous connecterez directement'
+    : 'Espace propriétaire · Côte d\'Ivoire 🇨🇮';
   document.getElementById('lbl-pw').textContent = SETUP ? 'Choisissez votre mot de passe' : 'Mot de passe';
   document.getElementById('btn').innerHTML = SETUP ? '🔐 Créer mon mot de passe' : '🔓 Accéder au tableau de bord';
   const w = document.getElementById('where');
   if(!SERVER) w.innerHTML = '🧪 Mode aperçu (sans serveur) — votre mot de passe est gardé dans cette fenêtre.<br>En production, il sera stocké de façon sécurisée sur le serveur.';
-  else w.innerHTML = '🔒 Serveur connecté : <b>'+location.host+'</b><br>Votre mot de passe est stocké hashé — personne ne peut le lire.';
+  else w.innerHTML = '🔒 Serveur connecté : <b>'+location.host+'</b><br>Votre mot de passe est stocké hashé — personne ne peut le lire.'
+    + (SETUP ? '' : '<br><a href="#" onclick="forgotHelp();return false" style="color:var(--p);font-weight:700">🔑 Mot de passe oublié ?</a>');
 }
 
+function forgotHelp(){
+  alert("🔑 Récupération du mot de passe propriétaire\n\nPar sécurité, personne ne peut lire votre mot de passe (il est chiffré).\nLa récupération passe par le code à usage unique enregistré sur Render :\n\n1. Render → service klean → Environment → ADMIN_RESET_CODE\n2. Ouvrez : /api/admin/reset?code=VOTRE-CODE\n3. Revenez ici créer un nouveau mot de passe.\n\nSi vous n'avez pas défini ce code, contactez le support technique KLEAN.");
+}
 (async function init(){
   try{
     const r = await fetch('/api/admin/status', {cache:'no-store'});
@@ -174,5 +178,5 @@ async function submit(){
 }
 </script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3eb13543fe241b7',t:'MTc5MDAxNDczOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3ed1e8bce3dcdcc',t:'MTc5MDAzNjE2OQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
