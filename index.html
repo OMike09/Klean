@@ -30,9 +30,9 @@
   .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:20px;letter-spacing:.5px}
   .logo .bubble{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,var(--p),var(--pd));display:flex;align-items:center;justify-content:center;font-size:17px}
   .city-chip{font-size:12px;color:var(--pd);background:var(--pl);padding:6px 12px;border-radius:99px;font-weight:800}
-  .modebar{display:flex;background:var(--bg);border-radius:12px;padding:4px;gap:4px;margin-top:10px}
-  .modebar button{flex:1;padding:9px;border-radius:9px;font-weight:800;font-size:13px;color:var(--muted)}
-  .modebar button.on{background:#fff;color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+  .modebar{display:grid;grid-template-columns:1fr 1fr;background:var(--bg);border-radius:14px;padding:5px;gap:6px;margin-top:10px}
+  .modebar button{padding:11px 6px;border-radius:10px;font-weight:800;font-size:13.5px;color:var(--pd);background:#fff;border:1.5px solid rgba(7,110,79,.4);box-shadow:0 1px 4px rgba(0,0,0,.05)}
+  .modebar button.on{background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-color:var(--pd);box-shadow:0 4px 12px rgba(7,110,79,.35)}
 
   .view{display:none;min-height:100vh;padding-bottom:96px}
   .view.active{display:block}
@@ -105,6 +105,8 @@
   .svc-check{display:flex;flex-wrap:wrap;gap:7px}
   .svc-check button{padding:8px 12px;border-radius:99px;border:2px solid var(--line);background:#fff;font-size:12px;font-weight:800;color:var(--muted)}
   .svc-check button.sel{border-color:var(--p);background:var(--pl);color:var(--pd)}
+  .ap-sub-grp{margin-top:12px;background:var(--pl);border:1.5px solid rgba(7,110,79,.25);border-radius:12px;padding:11px 12px}
+  .ap-sub-t{font-size:12.5px;font-weight:700;color:var(--pd);margin-bottom:8px}
   .photo-btn{width:100%;border:2px dashed var(--p);background:var(--pl);border-radius:12px;padding:14px;font-weight:800;color:var(--pd);font-size:13px}
   .status-card{text-align:center;padding:30px 20px}
   .status-card .big{font-size:44px;margin-bottom:12px}
@@ -375,10 +377,7 @@
   </div>
   <div class="modebar">
     <button id="mode-client" class="on" onclick="setMode('client')">🙋 Je cherche un service</button>
-    <button id="mode-agent" onclick="setMode('agent')">🧹 Je suis agent</button>
-    <div onclick="document.getElementById('home-svc-search').focus()" style="margin:12px auto 0;max-width:340px;background:rgba(255,255,255,.14);border:1.5px dashed rgba(255,255,255,.45);border-radius:12px;padding:9px 13px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;text-align:center">
-      🔍 Tapez le <b>service voulu</b> dans la barre du haut — il apparaît instantanément 👆
-    </div>
+    <button id="mode-agent" onclick="setMode('agent')">🛠️ Je suis un professionnel</button>
   </div>
 </div>
 
@@ -1460,6 +1459,7 @@ function renderAgentGate(){
 
     <h4 style="margin-top:14px"><span class="step-n">4</span> Services maîtrisés *</h4>
     <div class="svc-check" id="ap-services">${SERVICES.map(s=>`<button data-s="${s.id}" onclick="toggleApplySvc('${s.id}',this)">${s.ic} ${s.nom.split(' ')[1]||s.nom}</button>`).join('')}</div>
+    <div id="ap-subs"></div>
     <div class="inp-row" id="ap-niveau-wrap" style="display:none">
       <label>🎓 Niveau d'étude * <span style="color:var(--muted);font-weight:600">(obligatoire pour Cours particuliers)</span></label>
       <select class="inp" id="ap-niveau">
@@ -1476,13 +1476,34 @@ function renderAgentGate(){
     <p class="note" style="text-align:left">🛡️ En soumettant, je certifie l'exactitude de ces informations. Elles seront vérifiées par le propriétaire KLEAN avant validation.</p>
     <button class="btn-main" style="width:100%;flex:none" onclick="submitApplication()">📤 Envoyer mon dossier de candidature</button>
   </div>`;
-  applySvc = {};
+  applySvc = {}; applySvcSubs = {};
   window._piecePhoto = null;
   window._agentAvatar = null;
   renderQuartiers();
 }
+let applySvcSubs = {};
 function toggleApplySvc(id, btn){ applySvc[id] = !applySvc[id]; btn.classList.toggle('sel', !!applySvc[id]);
-  const _w = $('#ap-niveau-wrap'); if(_w) _w.style.display = applySvc['cours'] ? '' : 'none'; }
+  const _w = $('#ap-niveau-wrap'); if(_w) _w.style.display = applySvc['cours'] ? '' : 'none';
+  renderApplySubs(); }
+/* 🧩 Sous-choix affichés dès qu'un service est cliqué (ex : Cours → collège / lycée…) */
+function renderApplySubs(){
+  const c = document.getElementById('ap-subs'); if(!c) return;
+  let h = '';
+  SERVICES.forEach(s => {
+    if(!applySvc[s.id] || !s.opts || !s.opts.length) return;
+    if(!applySvcSubs[s.id]) applySvcSubs[s.id] = {};
+    h += `<div class="ap-sub-grp">
+      <div class="ap-sub-t">${s.ic} ${s.nom} — <u>précisez exactement ce que vous faites *</u></div>
+      <div class="svc-check">${s.opts.map(o=>`<button class="${applySvcSubs[s.id][o.id]?'sel':''}" onclick="toggleApplySub('${s.id}','${o.id}',this)">${o.nom}</button>`).join('')}</div>
+    </div>`;
+  });
+  c.innerHTML = h;
+}
+function toggleApplySub(sid, oid, btn){
+  if(!applySvcSubs[sid]) applySvcSubs[sid] = {};
+  applySvcSubs[sid][oid] = !applySvcSubs[sid][oid];
+  btn.classList.toggle('sel', !!applySvcSubs[sid][oid]);
+}
 function onPiecePhoto(input){
   const f = input.files && input.files[0]; if(!f) return;
   const rd = new FileReader();
@@ -1562,6 +1583,14 @@ async function submitApplication(){
   for(const k in need){ if(!dossier[k]) return toast('❌ Champ requis : '+need[k]); }
   if(dossier.tel1.length < 8) return toast('❌ Téléphone principal invalide');
   if(!dossier.services.length) return toast('❌ Choisissez au moins un service');
+  dossier.subs = {}; dossier.subsNoms = {};
+  for(const _s of SERVICES){
+    if(!dossier.services.includes(_s.id) || !_s.opts || !_s.opts.length) continue;
+    const _ch = Object.keys(applySvcSubs[_s.id]||{}).filter(k=>applySvcSubs[_s.id][k]);
+    if(!_ch.length) return toast('❌ Précisez ce que vous faites pour : '+_s.ic+' '+_s.nom+' (sous-choix)');
+    dossier.subs[_s.id] = _ch;
+    dossier.subsNoms[_s.id] = _s.opts.filter(o=>_ch.includes(o.id)).map(o=>o.nom);
+  }
   if(dossier.services.includes('cours') && !dossier.niveau) return toast('❌ Choisissez votre niveau d\u2019étude 🎓 (exigé pour les Cours particuliers)');
 
   agent.nom = dossier.prenom + ' ' + dossier.nom;
@@ -1962,6 +1991,6 @@ function showInstallFab(){
 </script>
 <script src="net.js"></script>
 <script>fetch('/api/stats').then(r=>r.json()).then(s=>{window._stats=s;}).catch(()=>{});</script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3edb68f19898036',t:'MTc5MDA0MjM5Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3ee3863cf509dee',t:'MTc5MDA0NzcxMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
 </body>
 </html>

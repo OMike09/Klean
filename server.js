@@ -498,6 +498,8 @@ const server = http.createServer(async (req, res) => {
       ref2Nom: String(b.ref2Nom || '').trim(), ref2Tel: String(b.ref2Tel || '').replace(/\D/g, ''),
       photo: typeof b.photo === 'string' ? b.photo.slice(0, 600000) : '',
       services: Array.isArray(b.services) ? b.services.slice(0, 10) : [],
+      subs: (b.subs && typeof b.subs === 'object' && !Array.isArray(b.subs)) ? Object.fromEntries(Object.entries(b.subs).slice(0, 10).map(([k, ar]) => [String(k).slice(0, 20), (Array.isArray(ar) ? ar : []).slice(0, 12).map(x => String(x).slice(0, 24))])) : {},
+      subsNoms: (b.subsNoms && typeof b.subsNoms === 'object' && !Array.isArray(b.subsNoms)) ? Object.fromEntries(Object.entries(b.subsNoms).slice(0, 10).map(([k, ar]) => [String(k).slice(0, 20), (Array.isArray(ar) ? ar : []).slice(0, 12).map(x => String(x).slice(0, 80))])) : {},
       online: false
     };
     ag.history = [{ at: nowISO(), by: 'agent', action: 'dossier envoye' }];
