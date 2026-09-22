@@ -615,6 +615,7 @@
       <div class="switch" id="online-switch"><i></i></div>
       <div><b id="online-title">Vous êtes hors ligne</b><small id="online-sub">Activez pour recevoir des missions autour de vous</small></div>
     </div>
+    <div id="push-slot" style="margin-top:10px"></div>
 
     <div class="gain-grid">
       <div class="gain-card"><span>💰 Gains aujourd'hui</span><b id="gain-today">0 F</b><small>votre part : 75%</small></div>
@@ -872,6 +873,80 @@ let agent = JSON.parse(localStorage.getItem('k2_agent')||'null') || {nom:'',quar
 let mission = null;          // mission client en cours
 let sim = null, searchTimers = [];
 let incomingReq = null, reqTimer = null, reqCountdown = null, activeMission = null;
+
+/* 🔔 Alerte d'arrivee de demande : 5 notes + triple vibration (avertit meme au fond de la poche) */
+let _alertCtx = null;
+function playAgentAlert(){
+  try{
+    if(!_alertCtx) _alertCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(_alertCtx.state === 'suspended') _alertCtx.resume();
+    [880,1175,880,1175,1320].forEach((f,i)=>{
+      const o=_alertCtx.createOscillator(), g=_alertCtx.createGain();
+      o.type='sine'; o.frequency.value=f;
+      const t=_alertCtx.currentTime+i*0.17;
+      g.gain.setValueAtTime(0.001,t);
+      g.gain.exponentialRampToValueAtTime(0.25,t+0.02);
+      g.gain.exponentialRampToValueAtTime(0.001,t+0.15);
+      o.connect(g); g.connect(_alertCtx.destination);
+      o.start(t); o.stop(t+0.17);
+    });
+  }catch(e){}
+  try{ if(navigator.vibrate) navigator.vibrate([260,120,260,120,420]); }catch(e){}
+}
+/* 🔔📲 WEB PUSH — la sonnerie arrive dans la poche MÊME application fermée (Android).
+   Sur iPhone : KLEAN doit être installé via « Sur l'écran d'accueil » (limite d'Apple). */
+function urlB64ToUint8(b64){
+  const p = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + p).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+function agentPushEnsure(){
+  if(!('Notification' in window) || !('serviceWorker' in navigator) || !window.PushManager) return;
+  if(Notification.permission !== 'granted' || !NET || !NET.agentId) return;
+  agentPushPushSub(true);
+}
+async function agentPushActivate(){
+  try{
+    if(!('Notification' in window) || !('serviceWorker' in navigator) || !window.PushManager) return toast('📵 Ce navigateur ne gère pas les sonneries — utilisez Chrome');
+    const perm = await Notification.requestPermission();
+    if(perm !== 'granted'){ toast('❌ Sonneries refusées — autorisez-les dans les réglages du site pour être alerté'); renderPushBtn(); return; }
+    await agentPushPushSub(false);
+  }catch(e){ toast('⚠️ Activation impossible pour le moment — réessayez'); }
+}
+async function agentPushPushSub(silent){
+  try{
+    const kr = await fetch('/api/push/key'); if(!kr.ok) return;
+    const key = await kr.json(); if(!key.publicKey) return;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlB64ToUint8(key.publicKey)});
+    await fetch('/api/push/subscribe', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({agentId: NET.agentId, sub})});
+    if(!silent) toast('🔔 Sonneries activées ! Les demandes vibreront même dans votre poche 📳');
+  }catch(e){ if(!silent) toast('⚠️ Sonneries non activées (réseau) — réessayez en ligne'); }
+  renderPushBtn();
+}
+function iphonePushHint(){ alert("Sur iPhone :\n\n1. Touchez Partager dans Safari\n2. « Sur l\u2019écran d\u2019accueil »\n3. Rouvrez KLEAN depuis la nouvelle icône\n\nLes sonneries arriveront alors aussi écran fermé.\n\nSur Android : touchez simplement le bouton vert."); }
+function renderPushBtn(){
+  const slot = document.getElementById('push-slot'); if(!slot) return;
+  if(!('Notification' in window) || !('serviceWorker' in navigator) || !window.PushManager){
+    slot.innerHTML = '<p class="note" style="text-align:left">📵 Ce navigateur ne gère pas les sonneries à distance — utilisez Chrome sur Android.</p>'; return;
+  }
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent||'');
+  const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  if(Notification.permission === 'granted'){
+    slot.innerHTML = '<div style="background:var(--pl);border:1.5px solid var(--p);border-radius:12px;padding:10px 13px;font-size:12.5px;font-weight:800;color:var(--pd)">🔔 Sonneries activées — vous serez alerté même application fermée 📳</div>';
+    return;
+  }
+    if(isIOS && !standalone){
+    slot.innerHTML = '<button class="btn-line" onclick="iphonePushHint()">🔔 Sonneries : installez d&#39;abord l&#39;app (iPhone ⤴️)</button>';
+    return;
+  }
+
+  slot.innerHTML = '<button class="btn-main" style="width:100%;flex:none;margin-top:6px" onclick="agentPushActivate()">🔔 Activer les sonneries de mission <span style="display:block;font-weight:600;font-size:11px">vibre & sonne même app fermée 📳</span></button>';
+}
+
+/* iOS exige un geste de l'utilisateur pour debloquer le son : on "reveille" le contexte quand l'agent passe en ligne */
+function agentAlertUnlock(){ try{ if(!_alertCtx) _alertCtx = new (window.AudioContext||window.webkitAudioContext)(); _alertCtx.resume(); }catch(e){} }
 
 const $ = s => document.querySelector(s);
 const fmt = n => Math.round(n).toLocaleString('fr-FR') + ' F';
@@ -1365,6 +1440,7 @@ function freshGains(){
   if(agent.gains.day !== today){ agent.gains = {day:today, today:0, total:agent.gains.total, comm:agent.gains.comm}; saveAll(); }
 }
 function renderAgentDash(){
+  try{ renderPushBtn(); }catch(e){}
   freshGains();
   renderAgentGate();
   const online = agent.online;
@@ -1769,7 +1845,8 @@ async function clientChangePw(){
 }
 function toggleOnline(){
   if(!agent.nom) return toast('Créez d\'abord votre profil agent 👤');
-  agent.online = !agent.online; saveAll(); renderAgentDash();
+  agent.online = !agent.online;
+  if(agent.online) agentAlertUnlock&&agentAlertUnlock(); saveAll(); renderAgentDash();
   if(agent.online){ toast('🟢 En ligne — en attente de demandes…'); scheduleRequest(); }
   else { toast('⚪ Hors ligne'); clearTimeout(reqTimer); hideRequest(); }
 }
@@ -1788,6 +1865,7 @@ function forceRequest(){
 }
 function showRequest(){
   if(incomingReq || activeMission) return;
+  playAgentAlert();
   clearTimeout(reqTimer);
   const o = {service:pick(SERVICES).id, pieces:1+Math.floor(Math.random()*4), depth:pick(['normal','complet','profondeur']), extras:{}, promo:''};
   const p = calcPrice(o);
@@ -1991,6 +2069,6 @@ function showInstallFab(){
 </script>
 <script src="net.js"></script>
 <script>fetch('/api/stats').then(r=>r.json()).then(s=>{window._stats=s;}).catch(()=>{});</script>
-<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3ee63763b30e165',t:'MTc5MDA0OTQ3OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3ee790bdc4394d1',t:'MTc5MDA1MDM2Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+</body>
 </html>

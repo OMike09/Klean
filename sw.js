@@ -1,7 +1,7 @@
 /* ═══════════ KLEAN — Service Worker (PWA) ═══════════
    L'app s'installe et reste ouvrable même réseau lent.
    API & temps réel : toujours en direct (jamais de cache). */
-const CACHE = 'klean-v1';
+const CACHE = 'klean-v2';
 const SHELL = [
   '/', '/index.html', '/net.js', '/manifest.json',
   '/klean-icon-192.png', '/klean-icon-512.png'
@@ -40,4 +40,30 @@ self.addEventListener('fetch', e => {
       return r;
     }))
   );
+});
+
+/* ═══ 🔔 Web Push : sonnerie même app fermée / dans la poche ═══ */
+self.addEventListener('push', e => {
+  let d = { title: '🔔 KLEAN', body: 'Nouvelle demande disponible — touchez pour voir', url: '/?mode=agent', missionId: '' };
+  try { if (e.data) d = Object.assign(d, e.data.json()); } catch (_) {}
+  e.waitUntil(self.registration.showNotification(d.title, {
+    body: d.body,
+    icon: '/klean-icon-192.png',
+    badge: '/klean-icon-192.png',
+    tag: 'klean-' + (d.missionId || 'info'),
+    renotify: true,
+    requireInteraction: true,
+    vibrate: [260, 120, 260, 120, 420],
+    data: { url: d.url },
+    actions: [{ action: 'open', title: '📲 Voir la mission' }]
+  }));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) { if ('focus' in c) { try { c.navigate(url).catch(()=>{}); } catch(_){} return c.focus(); } }
+    return clients.openWindow(url);
+  }));
 });

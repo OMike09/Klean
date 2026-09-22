@@ -353,6 +353,8 @@ function netToggleOnline(){
   if(!agent.nom) return toast('Complétez d\'abord votre dossier 👤');
   agent.online = !agent.online; saveAll(); renderAgentDash();
   if(agent.online){
+    agentAlertUnlock && agentAlertUnlock();
+    try{ agentPushEnsure && agentPushEnsure(); }catch(e){}
     netAnnounceOnline();
     toast('🟢 En ligne — les vraies demandes arrivent');
   } else {
@@ -363,6 +365,7 @@ function netToggleOnline(){
 function netForceInfo(){ toast('🛰️ Temps réel actif : les demandes arrivent toutes seules'); }
 
 function netShowRequest(m){
+  try{ if(typeof playAgentAlert === 'function') playAgentAlert(); }catch(e){}
   // 📍 Distance réelle GPS si on connaît notre position ET celle du client
   let distShown = m.dist || 0;
   if(NET.pos && typeof m.lat === 'number'){

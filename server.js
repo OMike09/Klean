@@ -16,6 +16,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+let webpush = null; try { webpush = require('web-push'); } catch (e) { console.log('ℹ️  web-push non installé — alertes poche désactivées (npm install web-push)'); }
 
 const PORT = process.env.PORT || 8000;
 const PLATFORM_FEE = 0.25;            // taux par défaut si le PDG n'a rien réglé
@@ -144,6 +145,39 @@ function handleWsData(sock) {
 
 /* ───────── Annuaires temps réel ───────── */
 // sock.meta = {role:'agent'|'client', agentId?, deviceId?, missions:Set}
+/* 🔔 VAPID : identité du serveur pour les notifications web (auto-générée 1×, gardée en base) */
+function vapidKeys() {
+  if (!webpush) return null;
+  db.settings = db.settings || {};
+  if (!db.settings.vapid) {
+    const ecdh = crypto.createECDH('prime256v1'); ecdh.generateKeys();
+    db.settings.vapid = {
+      publicKey: ecdh.getPublicKey(null, 'uncompressed').toString('base64url'),
+      privateKey: ecdh.getPrivateKey().toString('base64url')
+    };
+    saveDb(); console.log('🔑 Clés VAPID générées (persistance base)');
+  }
+  try { webpush.setVapidDetails('mailto:contact@klean.ci', db.settings.vapid.publicKey, db.settings.vapid.privateKey); }
+  catch (e) { console.log('⚠️ VAPID invalide :', e.message); return null; }
+  return db.settings.vapid;
+}
+/* Envoie la notification « poche » à tous les agents validés ayant activé les alertes.
+   Le web push arrive MÊME application fermée / écran éteint (Android) — c'est là sa force. */
+async function pushNewMissionToAgents(m, svcNom) {
+  if (!webpush || !vapidKeys()) return;
+  const payload = JSON.stringify({ title: '🔔 Nouvelle demande KLEAN', body: svcNom + ' · ' + (m.quartier || '') + ' · ' + (m.prixTotal || 0).toLocaleString('fr-FR') + ' F — touchez pour accepter', url: '/?mode=agent', missionId: m.id });
+  const targets = db.agents.filter(ag => (ag.status || 'approved') === 'approved' && Array.isArray(ag.pushSubs) && ag.pushSubs.length);
+  let dirty = false;
+  for (const ag of targets) {
+    for (const sub of [...ag.pushSubs]) {
+      try { await webpush.sendNotification(sub, payload, { TTL: 120, urgency: 'high' }); }
+      catch (e) { const c = e && (e.statusCode || e.status); if (c === 404 || c === 410) { ag.pushSubs = ag.pushSubs.filter(s => s.endpoint !== sub.endpoint); dirty = true; } }
+    }
+  }
+  if (targets.length) console.log('📲 Notification poche envoyée à ' + targets.length + ' agent(s) abonné(s)');
+  if (dirty) saveDb();
+}
+
 function onlineAgents() { return [...sockets].filter(s => s.meta && s.meta.role === 'agent' && s.meta.online); }
 function subsOf(missionId) { return [...sockets].filter(s => s.meta && s.meta.missions && s.meta.missions.has(missionId)); }
 function adminSockets() { return [...sockets].filter(s => s.meta && s.meta.role === 'admin'); }
@@ -213,11 +247,13 @@ function emitToMission(m, obj) {
   if (m.agentId) { const a = [...sockets].find(s => s.meta && s.meta.agentId === m.agentId); if (a && !list.includes(a)) list.push(a); }
   broadcast(list, obj);
 }
+const SVC_NAMES = { maison:'Ménage maison', bureaux:'Bureaux', canapes:'Canapés & tapis', vitres:'Vitres', grand:'Grand ménage', plomberie:'Plomberie', electricite:'Électricité', clim:'Climatisation', serrurerie:'Serrurerie', electro:'Électroménager', jardinage:'Jardinage', lavageauto:'Lavage auto', bricolage:'Bricolage', demen:'Déménagement', cuisine:'Cuisinier à domicile', cours:'Cours ou formation à domicile', canal:'Canal+ à domicile', evenement:'Après événement', entretien:'Entretien régulier', placement:'Placement de personnel', custom:'Demande sur mesure' };
 function broadcastNewMission(m) {
   const targets = onlineAgents();
   broadcast(targets, { type: 'mission_request', mission: publicMissionForAgent(m) });
   console.log(`📢 Mission ${m.id} (${m.service} · ${m.prixTotal} F) diffusée à ${targets.length} agent(s)`);
   emitAdmin('mission', `📥 Nouvelle demande ${m.id} — ${m.service} · ${m.quartier} · ${m.prixTotal.toLocaleString('fr-FR')} F (${m.client.nom})`);
+  pushNewMissionToAgents(m, (SVC_NAMES[m.service] || m.service) || '').catch(()=>{});
 }
 
 /* ───────── API REST ───────── */
@@ -477,7 +513,7 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const need = ['nom', 'prenom', 'naissance', 'tel1', 'quartier', 'adresse', 'pieceType', 'pieceNum', 'urgenceNom', 'urgenceTel', 'ref1Nom', 'ref1Tel'];
     for (const k of need) if (!b[k] || String(b[k]).trim() === '') return sendJson(res, 400, { error: 'Champ manquant : ' + k });
-    if (Array.isArray(b.services) && b.services.includes('cours') && !(b.niveau && String(b.niveau).trim())) return sendJson(res, 400, { error: 'Niveau d\'étude requis pour les Cours particuliers' });
+    if (Array.isArray(b.services) && b.services.includes('cours') && !(b.niveau && String(b.niveau).trim())) return sendJson(res, 400, { error: 'Niveau d\'étude requis pour les Cours ou formation à domicile' });
     const tel1 = String(b.tel1).replace(/\D/g, '');
     if (tel1.length < 8) return sendJson(res, 400, { error: 'Téléphone principal invalide' });
     let ag = db.agents.find(a => a.tel === tel1 && a.status !== 'rejected' && a.status !== 'moreinfo');
@@ -519,6 +555,34 @@ const server = http.createServer(async (req, res) => {
     const ag = db.agents.find(a => a.id === aStatus[1]);
     if (!ag) return sendJson(res, 404, {});
     return sendJson(res, 200, { id: ag.id, nom: ag.nom, status: ag.status || 'approved', rejectReason: ag.rejectReason || '' });
+  }
+
+  /* --- 🔔 Web Push : sonnerie agents même app fermée --- */
+  if (p === '/api/push/key' && req.method === 'GET') {
+    const k = vapidKeys();
+    if (!k) return sendJson(res, 503, { error: 'push indisponible' });
+    return sendJson(res, 200, { publicKey: k.publicKey });
+  }
+  if (p === '/api/push/subscribe' && req.method === 'POST') {
+    const b = await readBody(req);
+    const ag = db.agents.find(a => a.id === b.agentId);
+    if (!ag) return sendJson(res, 404, { error: 'agent introuvable' });
+    const sub = b.sub;
+    if (!sub || typeof sub.endpoint !== 'string' || !sub.endpoint.startsWith('https://') || !sub.keys || typeof sub.keys.p256dh !== 'string' || typeof sub.keys.auth !== 'string') return sendJson(res, 400, { error: 'abonnement invalide' });
+    ag.pushSubs = (ag.pushSubs || []).filter(s => s.endpoint !== sub.endpoint);
+    ag.pushSubs.push({ endpoint: sub.endpoint.slice(0, 500), keys: { p256dh: String(sub.keys.p256dh).slice(0, 200), auth: String(sub.keys.auth).slice(0, 60) } });
+    ag.pushSubs = ag.pushSubs.slice(-3);
+    saveDb();
+    console.log('🔔 ' + ag.nom + ' a activé la sonnerie poche');
+    return sendJson(res, 201, { ok: true });
+  }
+  if (p === '/api/push/unsubscribe' && req.method === 'POST') {
+    const b = await readBody(req);
+    const ag = db.agents.find(a => a.id === b.agentId);
+    if (!ag) return sendJson(res, 404, {});
+    ag.pushSubs = (ag.pushSubs || []).filter(s => s.endpoint !== (b.endpoint || ''));
+    saveDb();
+    return sendJson(res, 200, { ok: true });
   }
 
   /* --- API ADMIN (HQ) --- */
