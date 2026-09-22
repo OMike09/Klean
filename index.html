@@ -377,7 +377,7 @@
   </div>
   <div class="modebar">
     <button id="mode-client" class="on" onclick="setMode('client')">🙋 Je cherche un service</button>
-    <button id="mode-agent" onclick="setMode('agent')">🛠️ Je suis un professionnel</button>
+    <button id="mode-agent" onclick="setMode('agent')">🧑‍💼 Je suis un professionnel</button>
   </div>
 </div>
 
@@ -767,7 +767,7 @@ const SERVICES = [
     {id:'nounou', nom:'Nounou / garde d’enfant', prix:0},{id:'perso', nom:'Personnel de maison', prix:0},
     {id:'gardien', nom:'Gardien / vigile', prix:0},{id:'aide', nom:'Aide-ménagère', prix:0},
     {id:'jardinier2', nom:'Jardinier', prix:0}]},
-  {id:'cours',       ic:'📚', nom:'Cours particuliers',    desc:'Soutien scolaire & formations (primaire → lycée)', base:15000, cat:'home', descLabel:"📖 Matière(s) souhaitée(s) ou domaine du coach *", opts:[
+  {id:'cours',       ic:'📚', nom:'Cours ou formation à domicile',    desc:'Soutien scolaire & formations (primaire → lycée)', base:15000, cat:'home', descLabel:"📖 Matière(s) souhaitée(s) ou domaine du coach *", opts:[
     {id:'college', nom:'Niveau collège', prix:5000},{id:'lycee', nom:'Niveau lycée', prix:8000},
     {id:'eleves2', nom:'2 élèves', prix:10000},{id:'eleves3', nom:'3 élèves ou plus', prix:15000},
     {id:'prof', nom:'Professeur diplômé (au lieu d’un étudiant)', prix:10000},
@@ -781,7 +781,7 @@ const SERVICES = [
     {id:'assistance', nom:'Assistance & réglages (parabole, chaînes)', prix:3000}]},
 ];
 /* Services prévus ensuite :
-const UPCOMING = ['🧸 Garde d\'enfants','💊 Soins à domicile','📚 Cours particuliers','🛵 Livraison & courses','🐕 Garde d\'animaux']; */
+const UPCOMING = ['🧸 Garde d\'enfants','💊 Soins à domicile','📚 Cours ou formation à domicile','🛵 Livraison & courses','🐕 Garde d\'animaux']; */
 const PIECE_MULT = {1:1, 2:1.3, 3:1.6, 4:1.9, 5:2.2};
 const DEPTH = {normal:1, complet:1.3, profondeur:1.6};
 const EXTRAS = [
@@ -1458,10 +1458,10 @@ function renderAgentGate(){
     </div>
 
     <h4 style="margin-top:14px"><span class="step-n">4</span> Services maîtrisés *</h4>
-    <div class="svc-check" id="ap-services">${SERVICES.map(s=>`<button data-s="${s.id}" onclick="toggleApplySvc('${s.id}',this)">${s.ic} ${s.nom.split(' ')[1]||s.nom}</button>`).join('')}</div>
+    <div class="svc-check" id="ap-services">${SERVICES.map(s=>`<button data-s="${s.id}" onclick="toggleApplySvc('${s.id}',this)">${s.ic} ${s.nom}</button>`).join('')}</div>
     <div id="ap-subs"></div>
     <div class="inp-row" id="ap-niveau-wrap" style="display:none">
-      <label>🎓 Niveau d'étude * <span style="color:var(--muted);font-weight:600">(obligatoire pour Cours particuliers)</span></label>
+      <label>🎓 Niveau d'étude * <span style="color:var(--muted);font-weight:600">(obligatoire pour Cours ou formation à domicile)</span></label>
       <select class="inp" id="ap-niveau">
         <option value="">— Choisissez votre niveau —</option>
         <option>Baccalauréat</option>
@@ -1591,7 +1591,7 @@ async function submitApplication(){
     dossier.subs[_s.id] = _ch;
     dossier.subsNoms[_s.id] = _s.opts.filter(o=>_ch.includes(o.id)).map(o=>o.nom);
   }
-  if(dossier.services.includes('cours') && !dossier.niveau) return toast('❌ Choisissez votre niveau d\u2019étude 🎓 (exigé pour les Cours particuliers)');
+  if(dossier.services.includes('cours') && !dossier.niveau) return toast('❌ Choisissez votre niveau d\u2019étude 🎓 (exigé pour les Cours ou formation à domicile)');
 
   agent.nom = dossier.prenom + ' ' + dossier.nom;
   agent.quartier = dossier.quartier; agent.tel = dossier.tel1;
@@ -1991,6 +1991,6 @@ function showInstallFab(){
 </script>
 <script src="net.js"></script>
 <script>fetch('/api/stats').then(r=>r.json()).then(s=>{window._stats=s;}).catch(()=>{});</script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3ee3863cf509dee',t:'MTc5MDA0NzcxMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
-</body>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3ee63763b30e165',t:'MTc5MDA0OTQ3OA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
