@@ -100,7 +100,7 @@ async function netLaunchSearch(){
 
   /* 👤 Un client doit être INSCRIT pour trouver un agent */
   if(typeof client === 'undefined' || !client || !client.token || !client.id){
-    toast('👤 Créez votre compte gratuit (30 secondes) pour réserver — sécurité des agents 🛡️');
+    toast('👤 Créez votre compte gratuit (30 secondes) pour réserver — sécurité des professionnels 🛡️');
     setTimeout(() => {
       showView('view-account', document.querySelector('#nav-client .nav-btn[data-v=view-account]') || document.querySelector('#nav-client .nav-btn:last-child'), 'client');
     }, 700);
@@ -253,7 +253,12 @@ function routeNet(msg){
       break;
 
     case 'agent_denied':
-      if(msg.reason === 'apply'){ toast('🛡️ Envoyez d\'abord votre dossier de candidature'); if(agent.nom){ agent.nom=''; saveAll(); } renderAgentGate && renderAgentGate(); }
+      if(msg.reason === 'blocked'){
+        agent.online = false; if(agent.apply) agent.apply = {status:'blocked'};
+        saveAll(); try{ renderAgentGate && renderAgentGate(); }catch(e){}
+        toast('⛔ Compte suspendu par le gestionnaire — contactez le support');
+      }
+      else if(msg.reason === 'apply'){ toast('🛡️ Envoyez d\'abord votre dossier de candidature'); if(agent.nom){ agent.nom=''; saveAll(); } renderAgentGate && renderAgentGate(); }
       else toast('🛡️ Accès agent refusé');
       break;
 
@@ -492,3 +497,60 @@ function viewMissionPhoto(i){
   ov.onclick = () => ov.remove();
   document.body.appendChild(ov);
 }
+
+
+/* ═══════════════════════ 📣 AFFICHE (mise à jour / annonce du PDG) ═══════════════════════
+   → bandeau discret en haut de l'app + mémoire pour ne pas repousser deux fois la même annonce
+   → bandeau « MISE À JOUR » affiché automatiquement quand le serveur change de version       */
+function renderAnnonceBanner(a) {
+  let el = document.getElementById('ann-bar');
+  if (!a) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ann-bar';
+    el.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9400;max-width:520px;width:calc(100% - 20px);';
+    document.body.appendChild(el);
+  }
+  const C = { maj: '#ffb020', info: '#15c98a', alerte: '#ff6b6b' }[a.type] || '#ffb020';
+  const I = { maj: '\u2728', info: '\u2139\uFE0F', alerte: '\u26A0\uFE0F' }[a.type] || '\uD83D\uDCE3';
+  const T = { maj: 'MISE À JOUR KLEAN', info: 'INFO KLEAN', alerte: 'IMPORTANT — KLEAN' }[a.type] || 'KLEAN';
+  el.innerHTML =
+    '<div style="background:var(--card);border:1.5px solid ' + C + ';border-radius:14px;padding:11px 13px;display:flex;align-items:flex-start;gap:9px;box-shadow:0 12px 34px rgba(0,0,0,.4)">' +
+    '<span style="font-size:16px;flex:none">' + I + '</span>' +
+    '<div style="flex:1;min-width:0">' +
+    '<b style="font-size:10.5px;letter-spacing:.5px;color:' + C + '">' + T + '</b>' +
+    '<div style="font-size:13px;line-height:1.45;margin-top:2px">' + a.message + '</div>' +
+    (a.force ? '<button onclick="location.reload(true)" style="margin-top:7px;background:' + C + ';color:#10130f;border:none;font-weight:900;font-size:11.5px;padding:7px 13px;border-radius:9px;cursor:pointer;font-family:inherit">\uD83D\uDD04 Actualiser l\u2019application</button>' : '') +
+    '</div>' +
+    '<button onclick="fermerAnnonce()" style="flex:none;background:none;border:none;color:var(--muted);font-size:15px;cursor:pointer;padding:0 2px;line-height:1">\u2715</button>' +
+    '</div>';
+}
+window._annId = null;
+function fermerAnnonce() {
+  if (window._annId) try { localStorage.setItem('klean_ann_cachee', window._annId); } catch (e) { }
+  const el = document.getElementById('ann-bar');
+  if (el) el.remove();
+}
+async function checkAnnonce() {
+  try {
+    const r = await fetch('/api/annonce', { cache: 'no-store' });
+    const d = await r.json();
+    if (!d || !d.ok) return;
+    if (d.version) {
+      const lastV = localStorage.getItem('klean_version');
+      localStorage.setItem('klean_version', d.version);
+      if (lastV && lastV !== d.version && localStorage.getItem('klean_ann_cachee') !== 'v' + d.version) {
+        window._annId = 'v' + d.version;
+        renderAnnonceBanner({ id: window._annId, type: 'maj', force: true, message: 'KLEAN vient d\u2019être modernisé (' + d.version + '). Rechargez pour profiter des dernières nouveautés.' });
+        return;
+      }
+    }
+    if (d.annonce && localStorage.getItem('klean_ann_cachee') !== d.annonce.id) {
+      window._annId = d.annonce.id;
+      renderAnnonceBanner(d.annonce);
+      return;
+    }
+    if (!d.annonce) renderAnnonceBanner(null);
+  } catch (e) { /* silencieux : hivernage ou démo locale */ }
+}
+window.addEventListener('load', function () { checkAnnonce(); setInterval(checkAnnonce, 60000); });

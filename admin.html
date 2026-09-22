@@ -108,7 +108,7 @@
 <div class="wrap">
   <!-- KPI -->
   <div class="kpis">
-    <div class="kpi green"><span>🟢 Agents en ligne</span><b id="k-agents">0</b><small id="k-agents-sub">sur 0 agent(s)</small></div>
+    <div class="kpi green"><span>🟢 Professionnels en ligne</span><b id="k-agents">0</b><small id="k-agents-sub">sur 0 professionnel(s)</small></div>
     <div class="kpi blue"><span>📋 Missions aujourd'hui</span><b id="k-missions">0</b><small id="k-missions-sub">0 en cours</small></div>
     <div class="kpi"><span>💵 CA aujourd'hui</span><b id="k-ca">0 F</b><small>prestations livrées</small></div>
     <div class="kpi gold"><span>🏦 Commissions (25%)</span><b id="k-comm">0 F</b><small>encaissées aujourd'hui</small></div>
@@ -118,7 +118,7 @@
     <div class="chip">🛡️ Dossiers en attente : <b id="c-pend" style="color:var(--amber)">—</b></div>
     <div class="chip">📊 CA total : <b id="c-ca">0 F</b></div>
     <div class="chip">🏦 Commissions totales : <b id="c-comm">0 F</b></div>
-    <div class="chip">🧹 Reversé aux agents : <b id="c-gains">0 F</b></div>
+    <div class="chip">🧧 Reversé aux professionnels : <b id="c-gains">0 F</b></div>
     <div class="chip">⭐ Note moyenne : <b id="c-note">5,0</b></div>
     <div class="chip">✅ Missions terminées : <b id="c-done">0</b></div>
     <div class="chip">👤 Clients inscrits : <b id="c-clients">0</b></div>
@@ -131,10 +131,45 @@
     <div class="chart" id="chart"></div>
   </div>
 
+  <!-- 👑 Équipe dirigeante — création de gestionnaires (PDG) -->
+  <div class="panel" style="margin-bottom:14px" id="panel-team">
+    <h3>👑 Équipe dirigeante <span class="cnt" id="team-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <div id="team-gate" style="display:none;font-size:12.5px;color:var(--muted);padding:8px 2px">🔒 Vous êtes gestionnaire : la commande de l'équipe est réservée au PDG.</div>
+      <div id="team-form" style="display:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <input id="tm-nom" placeholder="👤 Nom complet (ex : Awa Koné)" style="padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px" maxlength="60">
+          <input id="tm-ident" placeholder="🆔 identifiant (ex : awa.ckn)" style="padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px" maxlength="40">
+        </div>
+        <input id="tm-pw" type="password" placeholder="🔑 Mot de passe (8+ signes · lettre · chiffre · symbole)" style="margin-top:8px;width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px" maxlength="64">
+        <button class="btn-main" style="width:100%;flex:none;margin-top:9px" onclick="createAdmin()">➕ Créer cet administrateur</button>
+      </div>
+      <div id="admins"></div>
+    </div>
+  </div>
+
+  <!-- 📣 Affiche pour tous les utilisateurs (mise à jour, information, annonce) -->
+  <div class="panel" style="margin-bottom:14px" id="panel-ann">
+    <h3>📣 Affiche à tous les utilisateurs</h3>
+    <div class="body" style="padding:12px 14px">
+      <input id="ann-msg" maxlength="240" placeholder="Ex : Mise à jour ce soir à 22 h — 5 minutes d'interruption" style="width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <select id="ann-type" style="flex:1;min-width:130px;padding:10px 11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">
+          <option value="maj">✨ Mise à jour</option>
+          <option value="info">ℹ️ Information</option>
+          <option value="alerte">⚠️ Importante</option>
+        </select>
+        <button class="btn-main" style="flex:none" onclick="publierAnnonce()">📢 Publier</button>
+        <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:11px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="retirerAnnonce()">✕ Retirer</button>
+      </div>
+      <small id="ann-cur" style="display:block;margin-top:9px;color:var(--muted)">Aucune affiche en cours.</small>
+    </div>
+  </div>
+
   <!-- Dossiers agents à vérifier -->
   <div class="panel" style="margin-bottom:14px" id="panel-cands">
-    <h3>🛡️ Vérification des agents <span class="cnt" id="cand-cnt">0 en attente</span></h3>
-    <div class="body" id="cands"><div class="empty">Aucun dossier en attente. Les candidatures d'agents apparaîtront ici pour vérification.</div></div>
+    <h3>🛡️ Vérification des professionnels <span class="cnt" id="cand-cnt">0 en attente</span></h3>
+    <div class="body" id="cands"><div class="empty">Aucun dossier en attente. Les candidatures de professionnels apparaîtront ici pour vérification.</div></div>
   </div>
 
   <!-- Réglages PDG : commission pilotable -->
@@ -178,10 +213,10 @@
         <h3>⚡ Journal temps réel</h3>
         <div class="body" id="feed"><div class="empty">En attente d'événements…<br>Les demandes apparaîtront ici en direct.</div></div>
       </div>
-      <!-- Agents -->
+      <!-- Professionnels -->
       <div class="panel">
-        <h3>🧹 Agents <span class="cnt" id="a-cnt">—</span></h3>
-        <div class="body" id="agents"><div class="empty">Aucun agent inscrit</div></div>
+        <h3>🧑‍💼 Professionnels <span class="cnt" id="a-cnt">—</span></h3>
+        <div class="body" id="agents"><div class="empty">Aucun professionnel inscrit</div></div>
       </div>
     </div>
   </div>
@@ -234,7 +269,7 @@ function enterDemo(){
    '✅ Mariam a accepté la mission KN-DEMO06 (22 400 F)',
    '🧽 KN-DEMO07 : nettoyage en cours',
    '✅ KN-DEMO05 terminée — +1 625 F de commission',
-   '🟢 Mariam en ligne (Koko) — 2 agent(s) en ligne'].forEach(addFeed);
+   '🟢 Mariam en ligne (Koko) — 2 professionnel(s) en ligne'].forEach(addFeed);
   const b = document.createElement('div');
   b.style.cssText = 'background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.45);color:#ffb020;font-size:12px;font-weight:800;padding:10px 14px;border-radius:12px;margin:14px 0 2px;text-align:center';
   b.textContent = '🧪 MODE DÉMO — chiffres d\'exemple. Le vrai HQ affichera les données en direct une fois le serveur en ligne.';
@@ -261,7 +296,7 @@ async function loadAll(){
     ]);
     renderOverview(ov); renderMissions(ms); renderAgents(ags); renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
-    renderConfig(cfg); renderAudit(aud);
+    renderConfig(cfg); renderAudit(aud); loadTeam(); loadAnnonce();
   }catch(e){
     // Aperçu sans serveur : exiger la connexion locale avant la démo
     if(localStorage.getItem('k2_hq_ok') !== '1'){ location.href = 'admin-login.html'; return; }
@@ -325,6 +360,93 @@ function renderOverview(o){
 /* ─── Personnes inscrites : agents + clients, avec recherche ─── */
 let PEOPLE = {agents:[], clients:[]};
 function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+let ME = null, TEAM = [];
+async function loadAnnonce(){
+  try{
+    const d = await fetch('/api/annonce', {cache:'no-store'}).then(r=>r.json());
+    const el = document.getElementById('ann-cur');
+    if(!el) return;
+    el.innerHTML = d && d.annonce
+      ? ('Affiche en cours : <b>'+( {maj:'✨ Mise à jour', info:'ℹ️ Information', alerte:'⚠️ Importante'} [d.annonce.type] || 'Info')+'</b> — « '+d.annonce.message+' » <br><span style="color:#8aa79a">publiée le '+(d.annonce.at||'').slice(0,10)+' par '+(d.annonce.par||'—')+' — version serveur '+(d.version||'')+'</span>')
+      : ('Aucune affiche en cours. <span style="color:#8aa79a">Version serveur : '+(d && d.version || '…')+'</span>');
+  }catch(e){}
+}
+async function publierAnnonce(){
+  const msg = ((document.getElementById('ann-msg')||{}).value||'').trim();
+  const type = (document.getElementById('ann-type')||{}).value || 'info';
+  if(msg.length < 4) return alert('❌ Écrivez le message de l\'affiche d\'abord');
+  const r = await fetch('/api/admin/annonce', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: msg, type})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Publication impossible'));
+  document.getElementById('ann-msg').value='';
+  alert('📣 Publié ! Tous les clients et tous les professionnels verront l\'affiche en moins d\'une minute (ou à leur prochaine ouverture).');
+  loadAnnonce();
+}
+async function retirerAnnonce(){
+  if(!confirm('Retirer l\'affiche actuelle ?')) return;
+  await fetch('/api/admin/annonce', {method:'DELETE'});
+  loadAnnonce();
+}
+async function loadTeam(){
+  try{ ME = await fetchJ('/api/admin/whoami'); }catch(e){ ME = {role:'pdg', nom:'PDG'}; }
+  document.querySelector('#team-gate').style.display = ME && ME.role==='pdg' ? 'none' : 'block';
+  document.querySelector('#team-form').style.display = ME && ME.role==='pdg' ? 'block' : 'none';
+  if(!ME || ME.role !== 'pdg'){ document.querySelector('#team-cnt').textContent = (ME && ME.nom)?('connecté : '+ME.nom):'—'; return; }
+  try{ TEAM = await fetchJ('/api/admin/admins'); }catch(e){ TEAM = []; }
+  renderAdmins();
+}
+function renderAdmins(){
+  document.querySelector('#team-cnt').textContent = 'vous + '+(TEAM||[]).length+' gestionnaire(s)';
+  document.querySelector('#admins').innerHTML = (TEAM||[]).map(a=>`
+    <div class="agrow" style="margin-top:9px">
+      <div class="avatar" style="background:linear-gradient(135deg,#8a63d2,#5b3ba8)">${(a.nom||'?')[0].toUpperCase()}</div>
+      <div style="flex:1;min-width:0">
+        <b>${a.nom}</b> <span class="badge" style="background:rgba(138,99,210,.15);color:#9d78e6;border-color:rgba(138,99,210,.4)">GESTIONNAIRE</span>${a.blocked?' <span class="badge" style="background:rgba(255,107,107,.16);color:var(--red);border-color:rgba(255,107,107,.4)">BLOQUÉ</span>':''}<br>
+        <small>🆔 ${a.ident} · créé le ${(a.createdAt||'').slice(0,10)}${a.lastLogin?(' · dernière connexion '+(a.lastLogin||'').slice(0,10)):''}</small>
+        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          <button style="background:${a.blocked?'rgba(21,201,138,.15)':'var(--card2)'};border:1px solid ${a.blocked?'rgba(21,201,138,.4)':'rgba(255,176,32,.4)'};color:${a.blocked?'var(--p)':'var(--amber)'};font-size:10px;font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit" onclick="actionAdmin('${a.id}','${a.blocked?'unblock':'block'}','${(a.nom||'').replace(/'/g,'')}')">${a.blocked?'✅ Débloquer':'🔒 Bloquer'}</button>
+          <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:10px;font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit" onclick="actionAdmin('${a.id}','password','${(a.nom||'').replace(/'/g,'')}')">🔑 Mot de passe</button>
+          <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10px;font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit" onclick="actionAdmin('${a.id}','delete','${(a.nom||'').replace(/'/g,'')}')">🗑️</button>
+        </div>
+      </div>
+    </div>`).join('') || (ME && ME.role==='pdg' ? '<div class="empty" style="margin-top:9px">Aucun gestionnaire encore.<br>Créez son premier compte juste au-dessus.</div>' : '');
+}
+function pwOk(v){
+  return v.length>=8 && /[A-Za-z]/.test(v) && /[0-9]/.test(v) && /[^A-Za-z0-9\s]/.test(v);
+}
+async function createAdmin(){
+  const nom = ((document.getElementById('tm-nom')||{}).value||'').trim();
+  const ident = ((document.getElementById('tm-ident')||{}).value||'').trim();
+  const pw = (document.getElementById('tm-pw')||{}).value || '';
+  if(nom.length < 3) return alert('❌ Nom trop court');
+  if(!pwOk(pw)) return alert('❌ Mot de passe faible : au moins 8 signes, une lettre, un chiffre, un symbole');
+  const r = await fetch('/api/admin/admins', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({nom, ident, password: pw})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Création impossible'));
+  document.getElementById('tm-nom').value=''; document.getElementById('tm-ident').value=''; document.getElementById('tm-pw').value='';
+  alert('👑 '+nom+' est administrateur.\n\nRemettez-lui ces accès en main propre :\n'+location.origin+'/admin\nIdentifiant : '+(ident || nom.split(' ')[0])+'\nMot de passe : celui choisi à l\'instant.\n\nIl devra le changer ensuite.');
+  loadTeam();
+}
+async function actionAdmin(id, action, nom){
+  if(action==='delete'){
+    if(!confirm('🗑️ SUPPRIMER le gestionnaire '+nom+' ?\n\nSon accès est révoqué immédiatement.')) return;
+    const r = await fetch('/api/admin/admins/'+id, {method:'DELETE'});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); return alert('⚠️ '+(d.error||'Impossible')); }
+  } else if(action==='password'){
+    const pw = prompt('🔑 NOUVEAU mot de passe pour '+nom+' (8+ signes, lettre+chiffre+symbole) :');
+    if(pw===null) return;
+    if(!pwOk(pw)) return alert('❌ Trop faible — réessayez');
+    const r = await fetch('/api/admin/admins/'+id+'/password', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: pw})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+    alert('🔑 Mot de passe renouvelé pour '+nom+'.\nSon ancien accès est révoqué — reconnection nécessaire.');
+  } else {
+    if(!confirm(action==='block' ? '🔒 Éjecter '+nom+' immédiatement ?' : '✅ Rendre son accès à '+nom+' ?')) return;
+    await fetch('/api/admin/admins/'+id+'/'+action, {method:'POST'});
+  }
+  loadTeam();
+}
+
 function renderPeople(){
   const el = document.querySelector('#people'); if(!el) return;
   const q = pNorm((document.querySelector('#people-search')||{}).value || '');
@@ -336,7 +458,7 @@ function renderPeople(){
     return `<div class="agrow">
       <div class="avatar">${(a.nom||'?')[0].toUpperCase()}<span class="${a.online?'doton':'dotof'}"></span></div>
       <div style="flex:1;min-width:0">
-        <b>${a.nom}</b> <span class="badge b-blue" style="background:rgba(74,163,255,.14);color:var(--blue);border-color:rgba(74,163,255,.3)">AGENT</span> <span class="badge ${cls}">${txt}</span> ${a.online?'<span class="badge b-active">en ligne</span>':''}<br>
+        <b>${a.nom}</b> <span class="badge b-blue" style="background:rgba(74,163,255,.14);color:var(--blue);border-color:rgba(74,163,255,.3)">PRO</span> <span class="badge ${cls}">${txt}</span> ${a.online?'<span class="badge b-active">en ligne</span>':''}${a.blocked?' <span class="badge" style="background:rgba(255,107,107,.16);color:var(--red);border-color:rgba(255,107,107,.4)">BLOQUÉ</span>':''}<br>
         <small>📞 ${a.tel||'—'} · 📍 ${a.quartier||'—'}${a.niveau?' · 🎓 '+a.niveau:''}</small><br>
         <small>🧰 ${(a.services||[]).map(x=>(SVC_N[x]||x)).join(', ')||'—'} · ✅ ${a.done||0} mission(s) · 💰 ${fmt(a.gain||0)} gagnés</small>
         <div id="pdet-${a.id}" style="display:none;background:var(--card2);border-radius:10px;padding:9px 11px;font-size:11.5px;margin-top:6px">
@@ -344,7 +466,9 @@ function renderPeople(){
           ${a.status==='pending' ? `<div style="margin-top:7px;display:flex;gap:6px">
             <button style="background:rgba(21,201,138,.15);border:1px solid rgba(21,201,138,.4);color:var(--p);font-size:10.5px;font-weight:900;padding:7px 10px;border-radius:9px;cursor:pointer" onclick="decideCand('${a.id}','approve','${(a.nom||'').replace(/'/g,'')}')">✅ Valider</button>
             <button style="background:var(--card2);border:1px solid rgba(255,176,32,.4);color:var(--amber);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="askMoreInfo('${a.id}')">➕ Infos</button>
-            <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer" onclick="decideCand('${a.id}','reject','${(a.nom||'').replace(/'/g,'')}')">✕ Rejeter</button></div>` : ''}
+            <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer" onclick="decideCand('${a.id}','reject','${(a.nom||'').replace(/'/g,'')}')">✕ Rejeter</button></div>` : `<div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap">
+            <button style="background:${a.blocked?'rgba(21,201,138,.15)':'var(--card2)'};border:1px solid ${a.blocked?'rgba(21,201,138,.4)':'rgba(255,176,32,.4)'};color:${a.blocked?'var(--p)':'var(--amber)'};font-size:10.5px;font-weight:900;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="actionPro('${a.id}','${a.blocked?'unblock':'block'}','${(a.nom||'').replace(/'/g,'')}')">${a.blocked?'✅ Débloquer':'🔒 Bloquer'}</button>
+            <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="actionPro('${a.id}','delete','${(a.nom||'').replace(/'/g,'')}')">🗑️ Supprimer</button></div>`}
         </div>
       </div>
       <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;flex-shrink:0" onclick="togglePeopleDet('${a.id}')">🔍 Profil</button>
@@ -353,9 +477,13 @@ function renderPeople(){
   const clientRow = c => `<div class="agrow">
       <div class="avatar" style="background:linear-gradient(135deg,var(--blue),#2f6fd0)">${(c.nom||'?')[0].toUpperCase()}</div>
       <div style="flex:1;min-width:0">
-        <b>${c.nom}</b> <span class="badge" style="background:rgba(74,163,255,.14);color:var(--blue);border-color:rgba(74,163,255,.3)">CLIENT</span>${c.photo?' 📷':''}<br>
+        <b>${c.nom}</b> <span class="badge" style="background:rgba(74,163,255,.14);color:var(--blue);border-color:rgba(74,163,255,.3)">CLIENT</span>${c.photo?' 📷':''}${c.blocked?' <span class="badge" style="background:rgba(255,107,107,.16);color:var(--red);border-color:rgba(255,107,107,.4)">BLOQUÉ</span>':''}<br>
         <small>📞 ${c.tel||'—'} · 📍 ${c.quartier||'quartier non précisé'}</small><br>
         <small>🧾 ${c.missions||0} mission(s) · 💸 ${fmt(c.depense||0)} dépensés · inscrit le ${(c.createdAt||'').slice(0,10)}</small>
+        <div style="margin-top:7px;display:flex;gap:6px">
+          <button style="background:${c.blocked?'rgba(21,201,138,.15)':'var(--card2)'};border:1px solid ${c.blocked?'rgba(21,201,138,.4)':'rgba(255,176,32,.4)'};color:${c.blocked?'var(--p)':'var(--amber)'};font-size:10px;font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit" onclick="actionClient('${c.id}','${c.blocked?'unblock':'block'}','${(c.nom||'').replace(/'/g,'')}')">${c.blocked?'✅ Débloquer':'🔒 Bloquer'}</button>
+          <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10px;font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit" onclick="actionClient('${c.id}','delete','${(c.nom||'').replace(/'/g,'')}')">🗑️ Supprimer</button>
+        </div>
       </div>
     </div>`;
   el.innerHTML = (Ag.map(agentRow).join('') + Cl.map(clientRow).join('')) || '<div class="empty">Aucune personne ne correspond à cette recherche.</div>';
@@ -463,6 +591,32 @@ async function decideCand(id, action, nom){
   await fetch('/api/admin/agents/'+id+'/approve', {method:'POST'});
   setTimeout(loadAll, 300);
 }
+async function actionPro(id, action, nom){
+  if(action==='delete'){
+    if(!confirm('🗑️ SUPPRIMER '+nom+' ?\n\nSon dossier et son compte disparaîtront définitivement.\n(Ses missions passées restent dans l\'historique.)')) return;
+    const r = await fetch('/api/admin/agents/'+id, {method:'DELETE'});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) return alert('⚠️ '+(d.error||'Action impossible'));
+    alert('🗑️ '+nom+' supprimé.'); setTimeout(loadAll, 300); return;
+  }
+  const bloc = action==='block';
+  if(!confirm(bloc ? '🔒 Bloquer '+nom+' ?\n\nIl sera mis hors ligne et ne recevra plus aucune demande.' : '✅ Débloquer '+nom+' ?\nIl pourra de nouveau recevoir des missions.')) return;
+  await fetch('/api/admin/agents/'+id+'/'+(bloc?'block':'unblock'), {method:'POST'});
+  setTimeout(loadAll, 300);
+}
+async function actionClient(id, action, nom){
+  if(action==='delete'){
+    if(!confirm('🗑️ SUPPRIMER le client '+nom+' ?\n\nSon compte disparaîtra définitivement.')) return;
+    const r = await fetch('/api/admin/clients/'+id, {method:'DELETE'});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) return alert('⚠️ '+(d.error||'Action impossible'));
+    alert('🗑️ Client '+nom+' supprimé.'); setTimeout(loadAll, 300); return;
+  }
+  const bloc = action==='block';
+  if(!confirm(bloc ? '🔒 Bloquer le client '+nom+' ?\n\nIl ne pourra plus passer de demandes.' : '✅ Débloquer '+nom+' ?')) return;
+  await fetch('/api/admin/clients/'+id+'/'+(bloc?'block':'unblock'), {method:'POST'});
+  setTimeout(loadAll, 300);
+}
 function renderChart(days){
   const max = Math.max(1, ...days.map(d=>d.ca));
   document.querySelector('#chart').innerHTML = days.map(d=>`
@@ -493,11 +647,11 @@ function renderMissions(list){
 function renderAgents(list){
   document.querySelector('#a-cnt').textContent = list.length ? list.length+' inscrit(s)' : '—';
   const el = document.querySelector('#agents');
-  if(!list.length){ el.innerHTML = '<div class="empty">Aucun agent inscrit.<br>Ouvrez l\'app en mode Agent pour en créer un.</div>'; return; }
+  if(!list.length){ el.innerHTML = '<div class="empty">Aucun professionnel inscrit.<br>Dans l’app : bouton « Je suis un professionnel » pour en créer un.</div>'; return; }
   el.innerHTML = [...list].sort((a,b)=> (b.online-a.online) || (b.gain-a.gain)).map(a=>`
     <div class="agrow">
       <div class="avatar">${(a.nom||'?')[0].toUpperCase()}<span class="${a.online?'doton':'dotof'}"></span></div>
-      <div><b>${a.nom}</b><small>📍 ${a.quartier||'—'} · ${a.missionsDone} mission(s) · ⭐ ${(a.rating||5).toFixed(1)}</small></div>
+      <div><b>${a.nom}</b>${a.blocked?' <span class="badge" style="background:rgba(255,107,107,.16);color:var(--red);border-color:rgba(255,107,107,.4);font-size:8.5px">BLOQUÉ</span>':''}<small>📍 ${a.quartier||'—'} · ${a.missionsDone} mission(s) · ⭐ ${(a.rating||5).toFixed(1)}</small><div style="margin-top:5px;display:flex;gap:5px"><button style="background:${a.blocked?'rgba(21,201,138,.15)':'var(--card2)'};border:1px solid ${a.blocked?'rgba(21,201,138,.4)':'rgba(255,176,32,.4)'};color:${a.blocked?'var(--p)':'var(--amber)'};font-size:9.5px;font-weight:800;padding:4px 7px;border-radius:7px;cursor:pointer;font-family:inherit" onclick="actionPro('${a.id}','${a.blocked?'unblock':'block'}','${(a.nom||'').replace(/'/g,'')}')">${a.blocked?'✅':'🔒'}</button><button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:9.5px;font-weight:800;padding:4px 7px;border-radius:7px;cursor:pointer;font-family:inherit" onclick="actionPro('${a.id}','delete','${(a.nom||'').replace(/'/g,'')}')">🗑️</button></div></div>
       <div class="right"><b>${fmt(a.gain)}</b><small>gagnés · ${a.online?'en ligne':'hors ligne'}</small></div>
     </div>`).join('');
 }
@@ -546,6 +700,5 @@ loadAll();
 connectWS();
 setInterval(loadAll, 12000); // secours
 </script>
-<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3ee78d2990094d1',t:'MTc5MDA1MDM1Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>

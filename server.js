@@ -16,6 +16,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+let APP_VERSION = 'v7.10';
+try { APP_VERSION = 'v' + require('./package.json').version; } catch (e) { }
 let webpush = null; try { webpush = require('web-push'); } catch (e) { console.log('ℹ️  web-push non installé — alertes poche désactivées (npm install web-push)'); }
 
 const PORT = process.env.PORT || 8000;
@@ -50,8 +52,28 @@ function findClientByToken(req) {
 /* Accès HQ : cookie = jeton dérivé du hash du mot de passe */
 function isAdminReq(req) {
   const c = req.headers.cookie || '';
-  return c.split(';').some(x => x.trim() === 'klean_hq=' + adminToken());
+  return !!hqIdentity(req);
 }
+
+/* 👑 Hiérarchie : PDG (jeton inchangé) + gestionnaires (comptes créés depuis le HQ) */
+function normIdent(s) { return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
+function gestTokenOf(ad) { return sha256(ad.passHash + '::klean-hq:' + ad.id); }
+function hqIdentity(req) {
+  const c = req.headers.cookie || '';
+  for (const part of c.split(';')) {
+    const t = part.trim();
+    if (!t.startsWith('klean_hq=')) continue;
+    const tok = t.slice(9);
+    try {
+      if (tok === adminToken()) return { role: 'pdg', nom: 'PDG' };
+      const ad = (db.admins || []).find(a => !a.blocked && gestTokenOf(a) === tok);
+      if (ad) return { role: 'gest', nom: ad.nom, id: ad.id };
+    } catch (e) { }
+  }
+  return null;
+}
+function pdgOnly(req, res) { const id = hqIdentity(req); if (!id || id.role !== 'pdg') { sendJson(res, 403, { error: 'Réservé au PDG' }); return false; } return true; }
+function act(req) { const id = hqIdentity(req); return (id && id.nom) || 'PDG'; }
 
 /* ───────── Stockage : fichier local  OU  Postgres (Neon gratuit) si DATABASE_URL ─────────
    Sur Render (hébergement gratuit), le disque est effacé à chaque redémarrage :
@@ -166,7 +188,7 @@ function vapidKeys() {
 async function pushNewMissionToAgents(m, svcNom) {
   if (!webpush || !vapidKeys()) return;
   const payload = JSON.stringify({ title: '🔔 Nouvelle demande KLEAN', body: svcNom + ' · ' + (m.quartier || '') + ' · ' + (m.prixTotal || 0).toLocaleString('fr-FR') + ' F — touchez pour accepter', url: '/?mode=agent', missionId: m.id });
-  const targets = db.agents.filter(ag => (ag.status || 'approved') === 'approved' && Array.isArray(ag.pushSubs) && ag.pushSubs.length);
+  const targets = db.agents.filter(ag => (ag.status || 'approved') === 'approved' && !ag.blocked && Array.isArray(ag.pushSubs) && ag.pushSubs.length);
   let dirty = false;
   for (const ag of targets) {
     for (const sub of [...ag.pushSubs]) {
@@ -196,6 +218,7 @@ function routeWsMessage(sock, msg) {
       const ag = db.agents.find(a => a.id === (sock.meta.agentId || msg.agentId));
       if (!ag) { wsSend(sock, { type: 'agent_denied', reason: 'apply' }); break; }
       if (ag.status === 'pending') { wsSend(sock, { type: 'agent_pending' }); break; }
+      if (ag.blocked) { wsSend(sock, { type: 'agent_denied', reason: 'blocked' }); break; }
       if (ag.status === 'rejected') { wsSend(sock, { type: 'agent_denied', reason: 'rejected' }); break; }
       ag.nom = msg.nom || ag.nom; ag.quartier = msg.quartier || ag.quartier; ag.tel = msg.tel || ag.tel;
       ag.online = true; ag.lastSeen = nowISO();
@@ -308,6 +331,7 @@ const server = http.createServer(async (req, res) => {
     };
     const cli = findClientByToken(req);   // 👤 mission rattachée au compte client
     if (!cli) return sendJson(res, 401, { error: 'Inscription requise : créez votre compte client gratuit pour réserver' });
+    if (cli.blocked) return sendJson(res, 403, { error: 'Compte bloqué par le gestionnaire — contactez le support' });
     m.clientId = cli.id;
     const actives = db.missions.filter(x => x.clientId === cli.id && !['terminee', 'annulee'].includes(x.status)).length;
     if (actives >= 3) return sendJson(res, 409, { error: 'Maximum 3 missions actives en même temps' });
@@ -422,10 +446,22 @@ const server = http.createServer(async (req, res) => {
     if (rec.n >= 6 && Date.now() - rec.t < 600000) { auditLog('hq_login_bloque', { ip }); return sendJson(res, 429, { error: 'Trop de tentatives — réessayez dans 10 min' }); }
     const b = await readBody(req);
     const pw = b.password || b.pin || '';
-    if (db.admin && hashPassword(db.admin.salt, pw) === db.admin.passHash) {
-      loginTries.delete(ip); auditLog('hq_connexion', { ip });
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + adminToken() + '; Path=/; HttpOnly; SameSite=Lax; Secure' });
-      return res.end('{"ok":true}');
+    const ident = normIdent(b.ident || '');
+    let who = null;
+    if (db.admin && !ident && hashPassword(db.admin.salt, pw) === db.admin.passHash) {
+      who = { t: adminToken(), qui: 'PDG', role: 'pdg', kind: 'hq_connexion' };
+    } else if (ident) {
+      const ad = (db.admins || []).find(a => normIdent(a.ident) === ident || normIdent(a.nom) === ident);
+      if (ad && !ad.blocked && hashPassword(ad.salt, pw) === ad.passHash) {
+        who = { t: gestTokenOf(ad), qui: ad.nom, role: 'gest', kind: 'gest_connexion', ad };
+      }
+    }
+    if (who) {
+      loginTries.delete(ip);
+      if (who.ad) { who.ad.lastLogin = nowISO(); saveDb(); }
+      auditLog(who.kind, { ip, qui: who.qui });
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + who.t + '; Path=/; HttpOnly; SameSite=Lax; Secure' });
+      return res.end('{"ok":true,"role":"' + who.role + '"}');
     }
     loginTries.set(ip, { n: rec.n + 1, t: rec.t || Date.now() });
     auditLog('hq_login_echec', { ip });
@@ -473,6 +509,7 @@ const server = http.createServer(async (req, res) => {
     const cl = db.clients.find(x => x.tel === tel);
     if (!cl || hashPassword(cl.salt, b.password || '') !== cl.passHash)
       return sendJson(res, 401, { error: 'Téléphone ou mot de passe incorrect' });
+    if (cl.blocked) return sendJson(res, 403, { error: 'Compte bloqué par le gestionnaire — contactez le support' });
     return sendJson(res, 200, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom, quartier: cl.quartier, photo: cl.photo || '' });
   }
 
@@ -545,7 +582,7 @@ const server = http.createServer(async (req, res) => {
       auditLog('agent_recandidature', { agent: ag.nom, tel: tel1 });
     }
     db.agents.push(ag); saveDb();
-    emitAdmin('cand', `📋 Nouvelle candidature agent : ${ag.nom} (${ag.quartier}) — dossier à vérifier`);
+    emitAdmin('cand', `📋 Nouvelle candidature professionnel : ${ag.nom} (${ag.quartier}) — dossier à vérifier`);
     console.log(`📋 Candidature agent : ${ag.nom} — ${ag.pieceType} ${ag.pieceNum}`);
     return sendJson(res, 201, { ok: true, agentId: ag.id, status: 'pending' });
   }
@@ -554,7 +591,7 @@ const server = http.createServer(async (req, res) => {
   if (aStatus && req.method === 'GET') {
     const ag = db.agents.find(a => a.id === aStatus[1]);
     if (!ag) return sendJson(res, 404, {});
-    return sendJson(res, 200, { id: ag.id, nom: ag.nom, status: ag.status || 'approved', rejectReason: ag.rejectReason || '' });
+    return sendJson(res, 200, { id: ag.id, nom: ag.nom, status: ag.status || 'approved', rejectReason: ag.rejectReason || '', blocked: !!ag.blocked });
   }
 
   /* --- 🔔 Web Push : sonnerie agents même app fermée --- */
@@ -628,31 +665,178 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/admin/agents') {
-    return sendJson(res, 200, db.agents.map(a => ({ id: a.id, nom: a.nom, quartier: a.quartier, online: !!a.online, status: a.status || 'approved', ...agentStats(a) })));
+    return sendJson(res, 200, db.agents.map(a => ({ id: a.id, nom: a.nom, quartier: a.quartier, online: !!a.online, status: a.status || 'approved', blocked: !!a.blocked, ...agentStats(a) })));
   }
 
   if (p === '/api/admin/inscrits') {
     const clients = db.clients.map(c => {
       const ms = db.missions.filter(m => m.clientId === c.id);
       const depense = ms.filter(m => m.status === 'terminee').reduce((s, m) => s + (m.prixTotal || 0), 0);
-      return { id: c.id, nom: c.nom, tel: c.tel, quartier: c.quartier || '', createdAt: c.createdAt, photo: !!c.photo, missions: ms.length, depense };
+      return { id: c.id, nom: c.nom, tel: c.tel, quartier: c.quartier || '', createdAt: c.createdAt, photo: !!c.photo, missions: ms.length, depense, blocked: !!c.blocked };
     });
-    const agents = db.agents.map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', quartier: a.quartier || '', status: a.status || 'approved', online: !!a.online, niveau: a.niveau || '', services: a.services || [], createdAt: a.createdAt, photo: !!a.photo, ...agentStats(a) }));
+    const agents = db.agents.map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', quartier: a.quartier || '', status: a.status || 'approved', online: !!a.online, niveau: a.niveau || '', services: a.services || [], createdAt: a.createdAt, photo: !!a.photo, blocked: !!a.blocked, ...agentStats(a) }));
     return sendJson(res, 200, { clients: clients.slice().reverse(), agents: agents.slice().reverse() });
   }
 
   /* --- Admin : dossiers de candidature --- */
   if (p === '/api/config') return sendJson(res, 200, { commission: (db.config && db.config.commission) || 25 });
+  if (p === '/api/annonce') return sendJson(res, 200, { ok: true, version: APP_VERSION, annonce: db.annonce || null });
 
   if (p === '/api/admin/config' && req.method === 'POST') {
     const b2 = await readBody(req);
     const cc = parseFloat(b2.commission);
     if (isNaN(cc) || cc < 0 || cc > 50) return sendJson(res, 400, { error: 'Taux de commission entre 0 et 50 %' });
     db.config = db.config || {}; db.config.commission = Math.round(cc * 10) / 10; db.config.updatedAt = nowISO();
-    auditLog('commission_modifiee', { nouveau: db.config.commission, par: 'PDG' });
+    auditLog('commission_modifiee', { nouveau: db.config.commission, par: act(req) });
     saveDb();
     emitAdmin('admin', `⚙️ Commission plateforme réglée à ${db.config.commission} %`);
     return sendJson(res, 200, { ok: true, commission: db.config.commission });
+  }
+
+  /* --- 🔒 Pouvoirs du PDG : bloquer / débloquer / supprimer un professionnel --- */
+  const kickOut = id => { for (const s of [...sockets].filter(x => x.meta && x.meta.agentId === id)) { try { wsSend(s, { type: 'agent_denied', reason: 'blocked' }); } catch (e) {} try { s.end(); } catch (e) {} } };
+  const aBlock = p.match(/^\/api\/admin\/agents\/(.+)\/block$/);
+  if (aBlock && req.method === 'POST') {
+    const ag = db.agents.find(a => a.id === aBlock[1]); if (!ag) return sendJson(res, 404, {});
+    ag.blocked = true; ag.blockedAt = nowISO(); ag.online = false; saveDb(); kickOut(ag.id);
+    (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'bloque' });
+    auditLog('pro_bloque', { pro: ag.nom, id: ag.id });
+    emitAdmin('admin', `🔒 ${ag.nom} bloqué — hors ligne, ne reçoit plus aucune demande`);
+    console.log(`🔒 Professionnel bloqué : ${ag.nom}`);
+    return sendJson(res, 200, { ok: true });
+  }
+  const aUnblock = p.match(/^\/api\/admin\/agents\/(.+)\/unblock$/);
+  if (aUnblock && req.method === 'POST') {
+    const ag = db.agents.find(a => a.id === aUnblock[1]); if (!ag) return sendJson(res, 404, {});
+    ag.blocked = false; delete ag.blockedAt; saveDb();
+    (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'debloque' });
+    auditLog('pro_debloque', { pro: ag.nom, id: ag.id });
+    emitAdmin('admin', `✅ ${ag.nom} débloqué — à nouveau éligible`);
+    return sendJson(res, 200, { ok: true });
+  }
+  const aDel = p.match(/^\/api\/admin\/agents\/(.+)$/);
+  if (aDel && req.method === 'DELETE') {
+    const ag = db.agents.find(a => a.id === aDel[1]); if (!ag) return sendJson(res, 404, {});
+    const busy = db.missions.some(m => m.agentId === ag.id && ['accepted', 'enroute', 'arrive', 'encours'].includes(m.status));
+    if (busy) return sendJson(res, 409, { error: 'Mission en cours : bloquez ce professionnel puis supprimez-le une fois la mission terminée' });
+    kickOut(ag.id);
+    db.agents = db.agents.filter(a => a.id !== ag.id); saveDb();
+    auditLog('pro_supprime', { pro: ag.nom, id: aDel[1] });
+    emitAdmin('admin', `🗑️ ${ag.nom} supprimé définitivement`);
+    console.log(`🗑️ Professionnel supprimé : ${ag.nom}`);
+    return sendJson(res, 200, { ok: true });
+  }
+  /* --- 🔒 Mêmes pouvoirs sur un client --- */
+  const cBlock = p.match(/^\/api\/admin\/clients\/(.+)\/block$/);
+  if (cBlock && req.method === 'POST') {
+    const cl = db.clients.find(c => c.id === cBlock[1]); if (!cl) return sendJson(res, 404, {});
+    cl.blocked = true; cl.blockedAt = nowISO(); saveDb();
+    auditLog('client_bloque', { client: cl.nom, id: cl.id });
+    emitAdmin('admin', `🔒 Client ${cl.nom} bloqué — ne peut plus passer de demandes`);
+    return sendJson(res, 200, { ok: true });
+  }
+  const cUnblock = p.match(/^\/api\/admin\/clients\/(.+)\/unblock$/);
+  if (cUnblock && req.method === 'POST') {
+    const cl = db.clients.find(c => c.id === cUnblock[1]); if (!cl) return sendJson(res, 404, {});
+    cl.blocked = false; delete cl.blockedAt; saveDb();
+    auditLog('client_debloque', { client: cl.nom, id: cl.id });
+    emitAdmin('admin', `✅ Client ${cl.nom} débloqué`);
+    return sendJson(res, 200, { ok: true });
+  }
+  const cDel = p.match(/^\/api\/admin\/clients\/(.+)$/);
+  if (cDel && req.method === 'DELETE') {
+    const cl = db.clients.find(c => c.id === cDel[1]); if (!cl) return sendJson(res, 404, {});
+    const busy = db.missions.some(m => m.clientId === cl.id && ['accepted', 'enroute', 'arrive', 'encours'].includes(m.status));
+    if (busy) return sendJson(res, 409, { error: 'Mission en cours pour ce client : bloquez-le d’abord, supprimez-le après la fin' });
+    db.missions.forEach(m => { if (m.clientId === cl.id && m.status === 'pending') { m.status = 'annulee'; m.cancelReason = 'compte supprime'; } });
+    db.clients = db.clients.filter(c => c.id !== cl.id); saveDb();
+    auditLog('client_supprime', { client: cl.nom, id: cDel[1] });
+    emitAdmin('admin', `🗑️ Client ${cl.nom} supprimé définitivement`);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (p === '/api/admin/annonce' && req.method === 'POST') {
+    const b = await readBody(req);
+    const msg = String(b.message || '').trim().slice(0, 240);
+    if (msg.length < 4) return sendJson(res, 400, { error: 'Message trop court' });
+    const type = ['maj', 'info', 'alerte'].includes(b.type) ? b.type : 'info';
+    db.annonce = { id: uid('AN'), message: msg, type, at: nowISO(), par: act(req) };
+    saveDb();
+    auditLog('annonce_publiee', { type, par: act(req) });
+    emitAdmin('annonce', '📣 Affiche publiée pour tous les utilisateurs');
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/admin/annonce' && req.method === 'DELETE') {
+    db.annonce = null; saveDb();
+    auditLog('annonce_retiree', { par: act(req) });
+    emitAdmin('annonce', '📣 Affiche retirée');
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (p === '/api/admin/whoami' && req.method === 'GET') {
+    const id = hqIdentity(req);
+    return sendJson(res, 200, { role: id.role, nom: id.nom });
+  }
+
+  /* --- 👑 Gestionnaires : créés par le PDG depuis son tableau de bord --- */
+  if (p === '/api/admin/admins' && req.method === 'GET') {
+    if (!pdgOnly(req, res)) return;
+    return sendJson(res, 200, (db.admins || []).map(a => ({ id: a.id, nom: a.nom, ident: a.ident, blocked: !!a.blocked, createdAt: a.createdAt, lastLogin: a.lastLogin || null })));
+  }
+  if (p === '/api/admin/admins' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const nom = String(b.nom || '').trim();
+    if (nom.length < 3) return sendJson(res, 400, { error: 'Nom du gestionnaire trop court' });
+    const ident = normIdent(b.ident || nom.split(' ')[0]);
+    if (ident.length < 3) return sendJson(res, 400, { error: 'Identifiant trop court (ex : awa.ckn)' });
+    if (ident === 'pdg') return sendJson(res, 400, { error: 'Cet identifiant est réservé au PDG' });
+    db.admins = db.admins || [];
+    if (db.admins.some(a => normIdent(a.ident) === ident || normIdent(a.nom) === nom)) return sendJson(res, 409, { error: 'Nom ou identifiant déjà utilisé' });
+    const bad = validPassword(b.password || '');
+    if (bad) return sendJson(res, 400, { error: bad });
+    const salt = crypto.randomBytes(16).toString('hex');
+    const na = { id: uid('AD'), nom, ident, salt, passHash: hashPassword(salt, b.password), blocked: false, createdAt: nowISO(), lastLogin: null, by: act(req) };
+    db.admins.push(na); saveDb();
+    auditLog('admin_cree', { gestionnaire: nom, ident, par: act(req) });
+    emitAdmin('admin', `👑 Gestionnaire créé : ${nom} (${ident})`);
+    return sendJson(res, 201, { ok: true, id: na.id });
+  }
+  const adAct = p.match(/^\/api\/admin\/admins\/(.+)\/(block|unblock|password)$/);
+  if (adAct && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const ad = (db.admins || []).find(a => a.id === adAct[1]);
+    if (!ad) return sendJson(res, 404, {});
+    if (adAct[2] === 'block') {
+      ad.blocked = true; ad.blockedAt = nowISO();
+      auditLog('admin_bloque', { gestionnaire: ad.nom, par: act(req) });
+      emitAdmin('admin', `🔒 Gestionnaire ${ad.nom} bloqué — éjecté immédiatement`);
+    } else if (adAct[2] === 'unblock') {
+      ad.blocked = false; delete ad.blockedAt;
+      auditLog('admin_debloque', { gestionnaire: ad.nom, par: act(req) });
+      emitAdmin('admin', `✅ Gestionnaire ${ad.nom} débloqué`);
+    } else {
+      const b = await readBody(req);
+      const bad = validPassword(b.password || '');
+      if (bad) return sendJson(res, 400, { error: bad });
+      ad.salt = crypto.randomBytes(16).toString('hex');
+      ad.passHash = hashPassword(ad.salt, b.password);
+      auditLog('admin_mdp_regenere', { gestionnaire: ad.nom, par: act(req) });
+      emitAdmin('admin', `🔑 Nouveau mot de passe fixé pour ${ad.nom} (ancien jeton révoqué)`);
+    }
+    saveDb();
+    return sendJson(res, 200, { ok: true });
+  }
+  const adDel = p.match(/^\/api\/admin\/admins\/(.+)$/);
+  if (adDel && req.method === 'DELETE') {
+    if (!pdgOnly(req, res)) return;
+    const ad = (db.admins || []).find(a => a.id === adDel[1]);
+    if (!ad) return sendJson(res, 404, {});
+    db.admins = db.admins.filter(a => a.id !== ad.id);
+    auditLog('admin_supprime', { gestionnaire: ad.nom, par: act(req) });
+    emitAdmin('admin', `🗑️ Gestionnaire ${ad.nom} supprimé — accès révoqué`);
+    saveDb();
+    return sendJson(res, 200, { ok: true });
   }
 
   if (p === '/api/admin/audit') return sendJson(res, 200, (db.audit || []).slice(-200).reverse());
@@ -679,8 +863,8 @@ const server = http.createServer(async (req, res) => {
     const ag = db.agents.find(a => a.id === aApprove[1]);
     if (!ag) return sendJson(res, 404, {});
     ag.status = 'approved'; ag.approvedAt = nowISO(); saveDb();
-    (ag.history = ag.history || []).push({ at: nowISO(), by: 'PDG', action: 'valide', from: 'pending', to: 'approved' });
-    auditLog('agent_valide', { agent: ag.nom, id: ag.id, par: 'PDG' });
+    (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'valide', from: 'pending', to: 'approved' });
+    auditLog('agent_valide', { agent: ag.nom, id: ag.id, par: act(req) });
     emitAdmin('cand', `✅ ${ag.nom} validé — peut maintenant recevoir des missions`);
     const s = [...sockets].find(x => x.meta && x.meta.agentId === ag.id);
     if (s) wsSend(s, { type: 'agent_approved', nom: ag.nom });
@@ -694,7 +878,7 @@ const server = http.createServer(async (req, res) => {
     const ag = db.agents.find(a => a.id === aReject[1]);
     if (!ag) return sendJson(res, 404, {});
     ag.status = 'rejected'; ag.rejectReason = reason || 'Dossier incomplet'; ag.online = false; saveDb();
-    (ag.history = ag.history || []).push({ at: nowISO(), by: 'PDG', action: 'rejete', motif: ag.rejectReason });
+    (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'rejete', motif: ag.rejectReason });
     auditLog('agent_rejete', { agent: ag.nom, id: ag.id, motif: ag.rejectReason });
     emitAdmin('cand', `❌ Candidature de ${ag.nom} rejetée (${ag.rejectReason})`);
     const s = [...sockets].find(x => x.meta && x.meta.agentId === ag.id);
@@ -708,7 +892,7 @@ const server = http.createServer(async (req, res) => {
     const ag = db.agents.find(a => a.id === aMore[1]);
     if (!ag) return sendJson(res, 404, {});
     ag.status = 'moreinfo'; ag.moreInfoReason = String(motif || 'Merci de compléter votre dossier').slice(0, 220); ag.online = false; saveDb();
-    (ag.history = ag.history || []).push({ at: nowISO(), by: 'PDG', action: 'infos_demandees', motif: ag.moreInfoReason });
+    (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'infos_demandees', motif: ag.moreInfoReason });
     auditLog('agent_infos_demandees', { agent: ag.nom, id: ag.id, motif: ag.moreInfoReason });
     emitAdmin('cand', `📝 ${ag.nom} : informations supplémentaires demandées (${ag.moreInfoReason})`);
     const s = [...sockets].find(x => x.meta && x.meta.agentId === ag.id);

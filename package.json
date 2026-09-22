@@ -1,7 +1,7 @@
 {
   "name": "klean",
-  "version": "1.0.0",
-  "description": "KLEAN — Les services à domicile à la demande en Côte d'Ivoire",
+  "version": "7.10.0",
+  "description": "KLEAN — Le Yango du ménage : plateforme de services à domicile à la demande (Bouaké, Côte d'Ivoire)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,7 +10,8 @@
     "node": ">=18"
   },
   "dependencies": {
-    "pg": "^8.12.0"
+    "pg": "^8.12.0",
+    "web-push": "^3.6.7"
   },
   "license": "UNLICENSED"
 }

@@ -392,7 +392,7 @@
       <button class="go" onclick="goSearchServices(document.getElementById('home-svc-search').value)" style="border:none;cursor:pointer;font:inherit">Réserver</button>
     </div>
     <div class="stats">
-      <div class="stat"><b id="hero-agents-n">48</b><span id="hero-agents-sub">Agents actifs à Bouaké</span></div>
+      <div class="stat"><b id="hero-agents-n">48</b><span id="hero-agents-sub">Professionnels actifs à Bouaké</span></div>
       <div class="stat"><b>17</b><span>Services à domicile</span></div>
       <div class="stat"><b>~10 min</b><span>Temps d'attente</span></div>
     </div>
@@ -405,8 +405,8 @@
     <h3 class="sect-title">Comment ça marche ?</h3>
     <div class="how">
       <div class="how-step"><div class="n">1</div><div><b>Décrivez votre besoin</b><span>Service, nombre de pièces, quartier, date et heure. Le prix s'affiche tout de suite.</span></div></div>
-      <div class="how-step"><div class="n">2</div><div><b>Un agent proche accepte</b><span>Les agents disponibles autour de vous reçoivent la demande. Le premier disponible prend la mission.</span></div></div>
-      <div class="how-step"><div class="n">3</div><div><b>Suivez son arrivée en direct</b><span>Nom de l'agent, sa note, sa distance et son heure d'arrivée — comme sur Yango.</span></div></div>
+      <div class="how-step"><div class="n">2</div><div><b>Un professionnel proche accepte</b><span>Les professionnels disponibles autour de vous reçoivent la demande. Le premier disponible prend la mission.</span></div></div>
+      <div class="how-step"><div class="n">3</div><div><b>Suivez son arrivée en direct</b><span>Nom du professionnel, sa note, sa distance et son heure d'arrivée — comme sur Yango.</span></div></div>
       <div class="how-step"><div class="n">4</div><div><b>Payez puis notez</b><span>Wave, Moov Money ou Orange Money (numéros affichés à la fin) ou espèces — puis notez la prestation sur 5 étoiles.</span></div></div>
     </div>
 
@@ -422,7 +422,7 @@
     </div>
 
     <div class="banner">
-      <b>🧹 Devenez agent KLEAN</b>
+      <b>🧑‍💼 Devenez professionnel KLEAN</b>
       <p><span id="home-banner-p">Vous êtes à Bouaké ? Recevez des missions près de chez vous, quand vous voulez.</span><br><b style="font-size:14px">75% du montant de chaque mission vous revient.</b></p>
       <button onclick="setMode('agent')">Rejoindre la flotte →</button>
     </div>
@@ -440,7 +440,7 @@
     <div class="svc-grid" id="book-svc"></div>
     <div style="margin-top:16px;padding:15px 14px;border:2px dashed rgba(21,201,138,.4);border-radius:16px;background:rgba(21,201,138,.05);text-align:center">
       <b style="font-size:14.5px;color:var(--pd)">🛠️ Vous ne trouvez pas votre service ?</b>
-      <p style="font-size:12.5px;color:var(--muted);margin:6px 0 10px">Décrivez votre besoin avec <b>des photos</b> et un budget indicatif — les agents vous répondent avec un prix.</p>
+      <p style="font-size:12.5px;color:var(--muted);margin:6px 0 10px">Décrivez votre besoin avec <b>des photos</b> et un budget indicatif — les professionnels vous répondent avec un prix.</p>
       <button class="btn-main" style="flex:none;padding:12px 22px" onclick="pickCustom()">📷 Faire une demande sur mesure</button>
     </div>
   </div>
@@ -529,8 +529,8 @@
       <div class="ring"></div><div class="ring"></div><div class="ring"></div>
       <div class="center">🧹</div>
     </div>
-    <h2>Recherche d'un agent…</h2>
-    <p id="search-msg">📡 Agents disponibles autour de vous…</p>
+    <h2>Recherche d'un professionnel…</h2>
+    <p id="search-msg">📡 Professionnels disponibles autour de vous…</p>
   </div>
   <div class="found-card" id="found-card">
     <div class="agent-row" id="found-agent"></div>
@@ -566,7 +566,7 @@
     </svg>
   </div>
   <div class="track-card">
-    <div class="status-banner sb-run" id="trk-banner">🛵 Votre agent est en route</div>
+    <div class="status-banner sb-run" id="trk-banner">🛵 Votre professionnel est en route</div>
     <div class="agent-row">
       <div class="avatar" id="trk-avatar">K</div>
       <div><b id="trk-name">—</b><small id="trk-sub">—</small></div>
@@ -644,18 +644,18 @@
 <!-- ══════════════════ AGENT : PROFIL ══════════════════ -->
 <div class="view" id="view-agent-profil">
   <div class="wrap">
-    <h3 class="sect-title" style="margin-top:6px">Mon profil agent</h3>
+    <h3 class="sect-title" style="margin-top:6px">Mon profil professionnel</h3>
     <div class="bkg">
       <div class="agent-row" style="margin-bottom:14px">
         <div class="avatar" id="prof-avatar">A</div>
-        <div><b id="prof-name">—</b><small id="prof-sub">Agent KLEAN 🇨🇮</small></div>
+        <div><b id="prof-name">—</b><small id="prof-sub">Professionnel KLEAN 🇨🇮</small></div>
       </div>
       <div class="inp-row"><label>👤 Nom complet</label><input class="inp" id="prof-nom" placeholder="Votre nom"></div>
       <div class="inp-row"><label>📍 Quartier principal</label><select class="inp" id="prof-quartier"></select></div>
       <div class="inp-row"><label>📞 Téléphone</label><div class="phone-wrap"><span class="prefix">+225</span><input type="tel" id="prof-tel" placeholder="07 00 00 00 00"></div></div>
       <button class="btn-main" style="width:100%;flex:none" onclick="saveProfile()">💾 Enregistrer</button>
     </div>
-    <p class="note">🛡️ Chaque agent KLEAN est vérifié (pièce d'identité + références) par le propriétaire avant activation, puis noté après chaque mission.</p>
+    <p class="note">🛡️ Chaque professionnel KLEAN est vérifié (pièce d'identité + références) par le gestionnaire avant activation, puis noté après chaque mission.</p>
   </div>
 </div>
 
@@ -679,7 +679,7 @@
         <svg width="54" height="54"><circle cx="27" cy="27" r="23" fill="none" stroke="#e4eae7" stroke-width="4"/><circle id="req-ring" cx="27" cy="27" r="23" fill="none" stroke="#0da678" stroke-width="4" stroke-linecap="round" stroke-dasharray="144.5" stroke-dashoffset="0"/></svg>
         <div class="ring-txt" id="req-count">20</div>
       </div>
-      <div><b>🔔 Nouvelle demande !</b><small id="req-sub">Un client cherche un agent près de vous</small></div>
+      <div><b>🔔 Nouvelle demande !</b><small id="req-sub">Un client cherche un professionnel près de vous</small></div>
     </div>
     <div class="req-lines" id="req-lines"></div>
     <div class="req-gain"><span>Votre gain (75%)<small>25% reversés à KLEAN</small></span><b id="req-gain">—</b></div>
@@ -825,12 +825,12 @@ function setCity(id, silent){
   localStorage.setItem('k2_city', city.id);
   $('#city-chip').innerHTML = '📍 '+city.nom+' ▾';
   $('#hero-phase').innerHTML = '🇨🇮 Actif à '+city.nom;
-  $('#hero-agents-sub').textContent = 'Agents actifs à '+city.nom;
+  $('#hero-agents-sub').textContent = 'Professionnels actifs à '+city.nom;
   $('#hero-agents-n').textContent = (window._stats && window._stats.agentsTotal) || '—';
   $('#lbl-quart-city').textContent = '('+city.nom+')';
   $('#home-banner-p').textContent = 'Vous êtes à '+city.nom+' ? Recevez des missions près de chez vous, quand vous voulez.';
   renderQuartiers(); if($('#city-list')) renderCityModal(); renderHomeRoad();
-  if(!silent) toast('📍 '+city.nom+((window._stats&&window._stats.agentsEnLigne!=null)?' — '+window._stats.agentsEnLigne+' agent(s) en ligne maintenant':''));
+  if(!silent) toast('📍 '+city.nom+((window._stats&&window._stats.agentsEnLigne!=null)?' — '+window._stats.agentsEnLigne+' professionnel(s) en ligne maintenant':''));
 }
 function cityInfo(){ renderCityModal(); $('#city-modal-bg').classList.add('show'); }
 function closeCityModal(){ $('#city-modal-bg').classList.remove('show'); }
@@ -1018,7 +1018,7 @@ function goStep(n){
   step = n;
   for(let i=1;i<=4;i++){ $('#step'+i).classList.toggle('on',i===n); $('#dot'+i).classList.toggle('done',i<=n); }
   $('#step-title').innerHTML = `Étape ${n}/4<b>${STEP_TITLES[n-1]}</b>`;
-  $('#btn-next').textContent = n===4 ? '🛵 Trouver un agent' : 'Continuer →';
+  $('#btn-next').textContent = n===4 ? '🛵 Trouver un professionnel' : 'Continuer →';
   $('#bb-label').textContent = n===4 ? 'Total (payé après la mission)' : 'Total estimé';
   if(n===4 && client){ $('#inp-nom').value = client.nom; $('#inp-tel').value = client.tel; }
   updatePriceBar();
@@ -1058,7 +1058,7 @@ function renderSvcGrids(){
   $('#home-svc').innerHTML = build('quickSvc');
 }
 /* 🛠️ Demande sur mesure (service hors catalogue, avec photos) */
-const CSVC = {id:'custom', ic:'🛠️', nom:'Demande sur mesure', desc:'Vous décrivez, l’agent évalue et propose un prix', base:0, cat:'custom', opts:[], descLabel:'📝 Décrivez précisément votre besoin *'};
+const CSVC = {id:'custom', ic:'🛠️', nom:'Demande sur mesure', desc:'Vous décrivez, le professionnel évalue et propose un prix', base:0, cat:'custom', opts:[], descLabel:'📝 Décrivez précisément votre besoin *'};
 /* 🔍 Recherche de service depuis l'accueil (barre visible) */
 function goSearchServices(v){
   const s = document.querySelector('#svc-search');
@@ -1071,7 +1071,7 @@ function pickCustom(){
   if(!SERVICES.find(s=>s.id==='custom')) SERVICES.push(CSVC);
   c.service='custom'; c.extras={};
   renderSvcGrids(); renderStep2Meta(); renderExtras(); updatePriceBar(); startBooking(); goStep(2);
-  toast('📷 Décrivez + ajoutez des photos — les agents vous enverront un prix');
+  toast('📷 Décrivez + ajoutez des photos — les professionnels vous enverront un prix');
 }
 function normT(x){ return (x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 function pickSvc(id){
@@ -1228,7 +1228,7 @@ function launchSearch(){
   bookings.unshift({...mission}); saveAll();
   showView('view-search', $('#nav-client .nav-btn:nth-child(3)'), 'client');
 
-  const msgs = ['📡 Agents disponibles autour de vous…','🔎 Envoi de la demande aux agents proches…','⏳ En attente d\'acceptation…'];
+  const msgs = ['📡 Professionnels disponibles autour de vous…','🔎 Envoi de la demande aux professionnels proches…','⏳ En attente d\'acceptation…'];
   msgs.forEach((m,i)=> searchTimers.push(setTimeout(()=> $('#search-msg').textContent = m, i*1300)));
   searchTimers.push(setTimeout(assignAgent, 4200));
 }
@@ -1249,7 +1249,7 @@ function assignAgent(){
 }
 function agentRowHTML(a, dist){
   return `${avatarHTML(a.photo, a.nom[0], 44)}
-    <div><b>🧹 Agent : ${a.nom}</b><small>⭐ ${a.note.toFixed(1)}/5 · ${a.missions} missions</small></div>
+    <div><b>🧑‍💼 Professionnel : ${a.nom}</b><small>⭐ ${a.note.toFixed(1)}/5 · ${a.missions} missions</small></div>
     <div class="dist">📍 ${dist.toFixed(1)} km<br><span style="color:var(--muted);font-weight:600">🛵 ~${Math.max(2,Math.round(dist*4))} min</span></div>`;
 }
 function cancelSearch(){
@@ -1316,7 +1316,7 @@ function startWork(){
     if(wp>=100){
       clearInterval(sim);
       mission.status='terminee'; syncBooking(); renderTrack();
-      toast('✅ Mission terminée ! Notez votre agent ⭐');
+      toast('✅ Mission terminée ! Notez votre professionnel ⭐');
     }
   },1000);
 }
@@ -1374,7 +1374,7 @@ function renderPayRate(){
     <div style="border-top:1px dashed var(--line);margin:10px 0;padding-top:12px">
       <p style="margin-bottom:8px;font-weight:800;font-size:13px;color:var(--ink)">Comment s'est passée la prestation ?</p>
       <div class="stars-big" id="rate-stars">${[1,2,3,4,5].map(n=>`<button data-r="${n}" onclick="setRate(${n})">★</button>`).join('')}</div>
-      <textarea class="inp" id="rate-comment" placeholder="Un mot sur votre agent (optionnel)…" style="margin-bottom:10px"></textarea>
+      <textarea class="inp" id="rate-comment" placeholder="Un mot sur votre professionnel (optionnel)…" style="margin-bottom:10px"></textarea>
       <button class="btn-main" style="width:100%;flex:none" onclick="submitRate()">Envoyer ma note ⭐</button>
     </div>
   </div>`;
@@ -1466,6 +1466,15 @@ function renderAgentGate(){
 
   if(st === 'approved'){ el.innerHTML=''; return; }
 
+  if(st === 'blocked'){
+    el.innerHTML = `<div class="gate-card status-card" style="border-color:var(--danger)">
+      <div class="big">⛔</div>
+      <h4>Compte suspendu</h4>
+      <p class="sub">Votre compte professionnel a été suspendu par le gestionnaire KLEAN.<br>Contactez le support pour connaître le motif.</p>
+      <button class="btn-ghost" style="flex:none;padding:12px 22px" onclick="refreshApplyStatus()">↻ Actualiser le statut</button>
+    </div>`;
+    return;
+  }
   if(st === 'pending'){
     el.innerHTML = `<div class="gate-card status-card">
       <div class="big">⏳</div>
@@ -1488,8 +1497,8 @@ function renderAgentGate(){
   // Formulaire de candidature complet
   el.innerHTML = `
   <div class="gate-card" style="border:2px solid var(--p)">
-    <h4>🛡️ Devenez agent KLEAN</h4>
-    <p class="sub">Pour la sécurité de nos clients, chaque agent est <b>vérifié par le propriétaire</b> avant sa première mission. Remplissez soigneusement ce dossier.</p>
+    <h4>🧑‍💼 Devenez professionnel KLEAN</h4>
+    <p class="sub">Pour la sécurité de nos clients, chaque professionnel est <b>vérifié par le gestionnaire</b> avant sa première mission. Remplissez soigneusement ce dossier.</p>
 
     <h4 style="margin-top:14px"><span class="step-n">1</span> Identité</h4>
     <div class="two">
@@ -1683,8 +1692,9 @@ async function submitApplication(){
       saveAll(); renderAgentGate();
       toast('📤 Dossier envoyé ! En vérification 🛡️');
       return;
-    }catch(e){ toast('📡 Serveur injoignable — dossier gardé en démo'); }
+    }catch(e){ if(location.protocol.startsWith('http')) return toast('⏳ Serveur momentanément indisponible — votre dossier n’a PAS été envoyé. Réessayez dans ~1 minute'); }
   }
+  if(location.protocol.startsWith('http')) return toast('⏳ Serveur en cours de démarrage — renvoyez votre dossier dans ~1 minute');
   // Mode démo (sans serveur) : validation automatique
   agent.apply = {status:'approved', agentId:'demo'};
   saveAll(); renderAgentGate(); renderAgentDash();
@@ -1693,7 +1703,8 @@ async function submitApplication(){
 function refreshApplyStatus(){
   if(typeof NET!=='undefined' && NET.on && agent.apply.agentId){
     fetch('/api/agents/'+agent.apply.agentId+'/status').then(r=>r.json()).then(d=>{
-      if(d.status === 'approved'){ agentApplyApproved(); }
+      if(d.blocked){ agent.apply = {status:'blocked'}; agent.online = false; saveAll(); renderAgentGate(); }
+      else if(d.status === 'approved'){ agentApplyApproved(); }
       else if(d.status === 'rejected'){ agent.apply = {status:'rejected', reason: d.rejectReason}; saveAll(); renderAgentGate(); }
       else toast('⏳ Toujours en vérification…');
     }).catch(()=> toast('📡 Serveur injoignable'));
@@ -1702,7 +1713,7 @@ function refreshApplyStatus(){
 function agentApplyApproved(){
   agent.apply.status = 'approved';
   saveAll(); renderAgentGate(); renderAgentDash();
-  toast('🎉 Félicitations '+agent.nom+' ! Vous êtes agent KLEAN ✓ — passez en ligne !');
+  toast('🎉 Félicitations '+agent.nom+' ! Vous êtes professionnel KLEAN ✓ — passez en ligne !');
 }
 
 /* ═════════ COMPTE CLIENT ═════════ */
@@ -1794,8 +1805,9 @@ async function clientRegister(){
       localStorage.setItem('k2_client', JSON.stringify(client));
       renderAccount(); toast('🎉 Bienvenue '+d.nom.split(' ')[0]+' ! Compte créé ✓');
       return;
-    }catch(e){ toast('📡 Serveur injoignable — compte créé en mode démo'); }
+    }catch(e){ if(location.protocol.startsWith('http')) return toast('⏳ Serveur momentanément indisponible — AUCUN compte créé. Réessayez dans ~1 minute'); }
   }
+  if(location.protocol.startsWith('http')) return toast('⏳ Serveur en cours de démarrage — réessayez votre inscription dans ~1 minute');
   client = {id:'demo-'+Date.now(), local:true, passRef: hpLocal(tel+'::'+pw), nom, tel, quartier};
   localStorage.setItem('k2_client', JSON.stringify(client));
   renderAccount(); toast('🎉 Compte créé (démo locale) ✓');
@@ -1813,8 +1825,9 @@ async function clientLogin(){
       localStorage.setItem('k2_client', JSON.stringify(client));
       renderAccount(); toast('👋 Bon retour '+d.nom.split(' ')[0]+' !');
       return;
-    }catch(e){ /* démo */ }
+    }catch(e){ if(location.protocol.startsWith('http')) return toast('⏳ Serveur momentanément indisponible — réessayez dans ~1 minute'); }
   }
+  if(location.protocol.startsWith('http')) return toast('⏳ Serveur en cours de démarrage — réessayez votre connexion dans ~1 minute');
   const saved = JSON.parse(localStorage.getItem('k2_client')||'null');
   if(saved && saved.tel === tel && saved.passRef === hpLocal(tel+'::'+pw)){
     client = saved; renderAccount(); toast('👋 Bon retour !');
@@ -1844,7 +1857,7 @@ async function clientChangePw(){
   }catch(e){ alert('📡 Serveur injoignable'); }
 }
 function toggleOnline(){
-  if(!agent.nom) return toast('Créez d\'abord votre profil agent 👤');
+  if(!agent.nom) return toast('Créez d\'abord votre profil professionnel 👤');
   agent.online = !agent.online;
   if(agent.online) agentAlertUnlock&&agentAlertUnlock(); saveAll(); renderAgentDash();
   if(agent.online){ toast('🟢 En ligne — en attente de demandes…'); scheduleRequest(); }
@@ -1980,7 +1993,7 @@ function fillProfile(){
   $('#prof-nom').value = agent.nom; $('#prof-quartier').value = agent.quartier; $('#prof-tel').value = agent.tel;
   $('#prof-avatar').textContent = (agent.nom||'A')[0].toUpperCase();
   $('#prof-name').textContent = agent.nom || 'Nouvel agent';
-  $('#prof-sub').textContent = 'Agent KLEAN · '+agent.quartier+' · '+(agent.missionsDone)+' mission(s)';
+  $('#prof-sub').textContent = 'Professionnel KLEAN · '+agent.quartier+' · '+(agent.missionsDone)+' mission(s)';
 }
 function saveProfile(){
   agent.nom = $('#prof-nom').value.trim() || agent.nom;
@@ -2069,6 +2082,5 @@ function showInstallFab(){
 </script>
 <script src="net.js"></script>
 <script>fetch('/api/stats').then(r=>r.json()).then(s=>{window._stats=s;}).catch(()=>{});</script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3ee790bdc4394d1',t:'MTc5MDA1MDM2Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
 </body>
 </html>
