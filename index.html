@@ -376,6 +376,9 @@
   <div class="modebar">
     <button id="mode-client" class="on" onclick="setMode('client')">🙋 Je cherche un service</button>
     <button id="mode-agent" onclick="setMode('agent')">🧹 Je suis agent</button>
+    <div onclick="document.getElementById('home-svc-search').focus()" style="margin:12px auto 0;max-width:340px;background:rgba(255,255,255,.14);border:1.5px dashed rgba(255,255,255,.45);border-radius:12px;padding:9px 13px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;text-align:center">
+      🔍 Tapez le <b>service voulu</b> dans la barre du haut — il apparaît instantanément 👆
+    </div>
   </div>
 </div>
 
@@ -385,8 +388,9 @@
     <span class="phase-tag" id="hero-phase">🇨🇮 Actif à Bouaké</span>
     <h1>Tous vos services à domicile, un pro arrive chez vous 🛵</h1>
     <p>Ménage, plomberie, électricité, jardinage… Comme Yango, mais pour la maison. Réservez, un pro disponible à proximité accepte et arrive chez vous.</p>
-    <div class="fake-search" onclick="startBooking()">
-      📍 De quoi avez-vous besoin ? <span class="go">Réserver →</span>
+    <div class="fake-search" style="padding:6px 8px 6px 16px">
+      <span style="flex:none">🔍</span><input id="home-svc-search" placeholder="Je cherche : ménage, maths, canal, nounou…" oninput="goSearchServices(this.value)" style="flex:1;border:none;outline:none;font:inherit;color:#333;background:transparent;min-width:0" autocomplete="off">
+      <button class="go" onclick="goSearchServices(document.getElementById('home-svc-search').value)" style="border:none;cursor:pointer;font:inherit">Réserver</button>
     </div>
     <div class="stats">
       <div class="stat"><b id="hero-agents-n">48</b><span id="hero-agents-sub">Agents actifs à Bouaké</span></div>
@@ -433,7 +437,7 @@
   <div class="step-label" id="step-title">Étape 1/4<b>Choisissez votre service</b></div>
 
   <div class="bstep on" id="step1">
-    <input class="inp" id="svc-search" placeholder="🔍 Cherchez un service au clavier… (ex : clim, maths, nounou, canal)" oninput="renderSvcGrids()" style="margin-bottom:12px" autocomplete="off">
+    <input class="inp" id="svc-search" placeholder="🔍 Cherchez : ménage, maths, canal, nounou, frigo…" oninput="renderSvcGrids()" style="margin-bottom:12px" autocomplete="off">
     <div class="svc-grid" id="book-svc"></div>
     <div style="margin-top:16px;padding:15px 14px;border:2px dashed rgba(21,201,138,.4);border-radius:16px;background:rgba(21,201,138,.05);text-align:center">
       <b style="font-size:14.5px;color:var(--pd)">🛠️ Vous ne trouvez pas votre service ?</b>
@@ -981,6 +985,14 @@ function renderSvcGrids(){
 }
 /* 🛠️ Demande sur mesure (service hors catalogue, avec photos) */
 const CSVC = {id:'custom', ic:'🛠️', nom:'Demande sur mesure', desc:'Vous décrivez, l’agent évalue et propose un prix', base:0, cat:'custom', opts:[], descLabel:'📝 Décrivez précisément votre besoin *'};
+/* 🔍 Recherche de service depuis l'accueil (barre visible) */
+function goSearchServices(v){
+  const s = document.querySelector('#svc-search');
+  if(s) s.value = v || '';
+  startBooking(); goStep(1);
+  renderSvcGrids();
+  if(v && s) s.scrollIntoView({behavior:'smooth', block:'center'});
+}
 function pickCustom(){
   if(!SERVICES.find(s=>s.id==='custom')) SERVICES.push(CSVC);
   c.service='custom'; c.extras={};
@@ -1950,6 +1962,6 @@ function showInstallFab(){
 </script>
 <script src="net.js"></script>
 <script>fetch('/api/stats').then(r=>r.json()).then(s=>{window._stats=s;}).catch(()=>{});</script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3ed1fa30e99cdcc',t:'MTc5MDAzNjIxNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a3edb68f19898036',t:'MTc5MDA0MjM5Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
 </body>
 </html>

@@ -376,7 +376,7 @@ const server = http.createServer(async (req, res) => {
     db.admin = { salt, passHash: hashPassword(salt, password) };
     saveDb();
     console.log('🔑 Mot de passe HQ créé');
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + adminToken() + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800' });
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + adminToken() + '; Path=/; HttpOnly; SameSite=Lax; Secure' });
     return res.end('{"ok":true}');
   }
 
@@ -388,7 +388,7 @@ const server = http.createServer(async (req, res) => {
     const pw = b.password || b.pin || '';
     if (db.admin && hashPassword(db.admin.salt, pw) === db.admin.passHash) {
       loginTries.delete(ip); auditLog('hq_connexion', { ip });
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + adminToken() + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800' });
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + adminToken() + '; Path=/; HttpOnly; SameSite=Lax; Secure' });
       return res.end('{"ok":true}');
     }
     loginTries.set(ip, { n: rec.n + 1, t: rec.t || Date.now() });
@@ -406,7 +406,7 @@ const server = http.createServer(async (req, res) => {
     const salt = crypto.randomBytes(12).toString('hex');
     db.admin = { salt, passHash: hashPassword(salt, next) };   // nouveau hash → nouvelles sessions, anciennes invalidées
     saveDb();
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + adminToken() + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800' });
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + adminToken() + '; Path=/; HttpOnly; SameSite=Lax; Secure' });
     return res.end('{"ok":true}');
   }
   if (p === '/api/admin/logout') {
