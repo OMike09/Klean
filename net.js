@@ -279,6 +279,16 @@ function routeNet(msg){
       }
       break;
 
+    case 'mission_reassigned':        // → AGENT : le gestionnaire lui a retiré cette mission
+      if(incomingReq && incomingReq.id === msg.missionId) hideRequest();
+      toast('⤴ Mission retirée — réattribuée par le gestionnaire');
+      break;
+
+    case 'support_msg':               // → PRO : l'équipe a répondu au support
+      toast('💬 Réponse du support KLEAN' + (msg.par ? ' (' + msg.par + ')' : ''));
+      try { if (window.supRefreshBadge) window.supRefreshBadge(); } catch (e) { }
+      break;
+
     case 'mission_update': {           // → CLIENT (et agent assigné)
       // côté agent : le client a annulé
       if(activeMission && activeMission.id === msg.missionId && msg.status === 'annulee'){
@@ -554,3 +564,111 @@ async function checkAnnonce() {
   } catch (e) { /* silencieux : hivernage ou démo locale */ }
 }
 window.addEventListener('load', function () { checkAnnonce(); setInterval(checkAnnonce, 60000); });
+
+
+/* ═══════════════════ 💬 SUPPORT INTERNE (client & pro ↔ équipe) ═══════════════════
+   Bulle flottante en bas de l'app + fil direct avec l'équipe.
+   Le client s'identifie par son jeton, le professionnel par son agentId.            */
+function supId() {
+  try {
+    if (typeof client !== 'undefined' && client && client.token) return { h: { 'X-Client-Token': client.token }, body: {}, qs: '' };
+  } catch (e) { }
+  const aid = (NET && NET.agentId) || localStorage.getItem('k2_agentId') || '';
+  if (aid) return { h: { 'Content-Type': 'application/json' }, body: { agentId: aid }, qs: '?agentId=' + encodeURIComponent(aid) };
+  return null;
+}
+let _supBuild = false, _supTimer = null, _supUnread = 0;
+function supBuild() {
+  if (_supBuild) return; _supBuild = true;
+  const css = document.createElement('style');
+  css.textContent = `
+#sup-fab{position:fixed;right:14px;bottom:96px;z-index:9600;width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,#15c98a,#0a8f60);border:none;color:#04130c;font-size:22px;box-shadow:0 8px 22px rgba(21,201,138,.35);cursor:pointer;display:flex;align-items:center;justify-content:center}
+#sup-fab .bdg{position:absolute;top:-3px;right:-3px;background:#ff6b6b;color:#fff;font-size:10px;font-weight:900;min-width:18px;height:18px;border-radius:9px;display:none;align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--card)}
+#sup-pane{position:fixed;left:0;right:0;bottom:0;z-index:9700;max-width:520px;margin:0 auto;background:var(--card);border-top-left-radius:20px;border-top-right-radius:20px;box-shadow:0 -14px 44px rgba(0,0,0,.5);padding:14px 14px 0;display:none;flex-direction:column;max-height:72vh}
+#sup-msgs2{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:7px;padding:4px 2px;min-height:170px}
+.sup-b{max-width:82%;border-radius:12px;padding:8px 11px;font-size:13.5px;line-height:1.42;word-break:break-word}
+.sup-b small{display:block;margin-top:3px;font-size:9.5px;color:var(--muted)}`;
+  document.head.appendChild(css);
+  const fab = document.createElement('button');
+  fab.id = 'sup-fab'; fab.innerHTML = '💬<span class="bdg" id="sup-bdg"></span>';
+  fab.onclick = function () { supOpen(); };
+  document.body.appendChild(fab);
+  const pane = document.createElement('div');
+  pane.id = 'sup-pane';
+  pane.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px">' +
+    '<div><b style="font-size:15px">💬 Support KLEAN</b><div style="font-size:11px;color:var(--muted)">Le gestionnaire vous lit — réponse habituelle : <10 min</div></div>' +
+    '<button onclick="supClose()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:15px">✕</button></div>' +
+    '<div id="sup-msgs2"></div>' +
+    '<div style="display:flex;gap:7px;padding:10px 0 12px">' +
+    '<input id="sup-in" maxlength="400" placeholder="Écrivez votre message…" style="flex:1;padding:12px;border-radius:12px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:13.5px">' +
+    '<button onclick="supSend()" style="background:var(--p);border:none;color:#04130c;font-weight:900;padding:0 16px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:14px">➤</button></div>';
+  document.body.appendChild(pane);
+  supRefreshBadge();
+  setInterval(supRefreshBadge, 30000);
+}
+async function supRefreshBadge() {
+  const id = supId(); if (!id) return;
+  try {
+    const r = await fetch('/api/support/mine' + (id.qs ? id.qs + '&' : '?') + 'peek=1', { headers: id.h });
+    const d = await r.json().catch(() => ({}));
+    _supUnread = (d && d.unread) || 0;
+    const b = document.getElementById('sup-bdg');
+    if (b) { b.textContent = _supUnread > 9 ? '9+' : _supUnread; b.style.display = _supUnread ? 'flex' : 'none'; }
+  } catch (e) { }
+}
+window.supRefreshBadge = supRefreshBadge;
+function supRender(list) {
+  const box = document.getElementById('sup-msgs2'); if (!box) return;
+  if (list === null) {
+    box.innerHTML = '<div class="sup-b" style="background:var(--card2);border:1px solid var(--line);align-self:center;color:var(--muted)">Créez un compte pour écrire au support.<small>Accueil → inscription en 1 min</small></div>';
+    return;
+  }
+  box.innerHTML = (list || []).map(s => {
+    const me = s.from === 'user';
+    return '<div class="sup-b" style="align-self:' + (me ? 'flex-end;background:rgba(21,201,138,.16);border:1px solid rgba(21,201,138,.4)' : 'flex-start;background:var(--card2);border:1px solid var(--line)') + '">' +
+      s.text + '<small>' + (me ? 'vous' : ('Support' + (s.par ? ' · ' + s.par : ''))) + ' · ' + (s.at || '').slice(11, 16) + '</small></div>';
+  }).join('') || '<div class="sup-b" style="background:var(--card2);border:1px solid var(--line);align-self:flex-start">Bonjour ! 👋 Écrivez-nous ici — un souci de mission, une question, une idée ?<small>Support KLEAN</small></div>';
+  box.scrollTop = box.scrollHeight;
+}
+function supOpen() {
+  supBuild();
+  document.getElementById('sup-pane').style.display = 'flex';
+  supLoad();
+  if (_supTimer) clearInterval(_supTimer);
+  _supTimer = setInterval(supLoad, 8000);
+}
+function supClose() {
+  document.getElementById('sup-pane').style.display = 'none';
+  if (_supTimer) { clearInterval(_supTimer); _supTimer = null; }
+}
+window.supClose = supClose;
+async function supLoad() {
+  const id = supId();
+  if (!id) { supRender(null); return; }
+  try {
+    const r = await fetch('/api/support/mine' + id.qs, { headers: id.h });
+    const d = await r.json().catch(() => ({}));
+    if (!d.ok) { supRender(null); return; }
+    supRender(d.messages || []);
+    if (d.unread) supRefreshBadge();
+  } catch (e) { }
+}
+async function supSend() {
+  const id = supId();
+  const inp = document.getElementById('sup-in');
+  const text = (inp && inp.value || '').trim();
+  if (!id) { toast('🗣️ Créez d\u2019abord un compte pour écrire au support'); return; }
+  if (text.length < 2) return;
+  const r = await fetch('/api/support/send', {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, id.h),
+    body: JSON.stringify(Object.assign({ text }, id.body))
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { toast('⚠️ ' + (d.error || 'Envoi impossible')); return; }
+  inp.value = '';
+  supLoad();
+}
+window.supSend = supSend;
+window.addEventListener('load', supBuild);

@@ -91,7 +91,14 @@ async function initStorage() {
       await pgClient.query('CREATE TABLE IF NOT EXISTS klean_state (id smallint PRIMARY KEY, data jsonb NOT NULL, updated timestamptz NOT NULL DEFAULT now())');
       const r = await pgClient.query('SELECT data FROM klean_state WHERE id=1');
       if (r.rows.length) db = r.rows[0].data;
-      else await pgClient.query('INSERT INTO klean_state (id, data) VALUES (1, $1)', [JSON.stringify(db)]);
+      else {
+        /* 📦 Première connexion Neon : on TRANSPLANTE les comptes actuels (db.json) — rien n'est perdu */
+        try {
+          db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+          console.log('  📦 Migration automatique db.json → Postgres : vos comptes existants suivent ✓');
+        } catch (e) { /* départ neuf */ }
+        await pgClient.query('INSERT INTO klean_state (id, data) VALUES (1, $1)', [JSON.stringify(db)]);
+      }
       console.log('  💾 Stockage : Postgres (Neon) — données persistantes ✓');
     } catch (e) {
       pgClient = null;
@@ -105,6 +112,7 @@ async function initStorage() {
   db.agents = db.agents || []; db.missions = db.missions || []; db.clients = db.clients || [];
   if (!db.config || typeof db.config.commission !== 'number') db.config = { commission: 25, updatedAt: null };
   if (!db.audit) db.audit = [];
+  db.supportMsgs = db.supportMsgs || [];
   /* Pré-initialisation optionnelle du mot de passe via ADMIN_PIN (1er démarrage seulement) */
   if (!db.admin && process.env.ADMIN_PIN) {
     const salt = crypto.randomBytes(12).toString('hex');
@@ -131,6 +139,7 @@ const nowISO = () => new Date().toISOString();
 /* ───────── WebSocket minimal (RFC 6455) ───────── */
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const sockets = new Set();           // tous les sockets connectés
+const supRateMap = new Map();      // 🛡️ digestif anti-spam du support
 function wsSend(sock, obj) {
   if (sock.destroyed) return;
   const data = Buffer.from(JSON.stringify(obj));
@@ -348,6 +357,7 @@ const server = http.createServer(async (req, res) => {
     if (!m) return sendJson(res, 404, { error: 'mission introuvable' });
     if (!ag) return sendJson(res, 404, { error: 'agent inconnu' });
     if (m.status !== 'pending') return sendJson(res, 409, { error: 'déjà prise', status: m.status });
+    if ((m.exclAg || []).includes(ag.id)) return sendJson(res, 409, { error: 'Cette mission vous a été retirée — le gestionnaire l’a réattribuée' });
     m.status = 'accepted'; m.agentId = ag.id; saveDb();
     // informer les autres agents que la mission est prise
     broadcast(onlineAgents().filter(s => s.meta.agentId !== ag.id), { type: 'mission_taken', missionId: m.id });
@@ -469,6 +479,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/admin/password' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
     if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
     const { current, next } = await readBody(req);
     if (!db.admin || hashPassword(db.admin.salt, current || '') !== db.admin.passHash)
@@ -638,7 +649,7 @@ const server = http.createServer(async (req, res) => {
       ca7.push({ day: d.toLocaleDateString('fr-FR', { weekday: 'short' }), ca: caSum(dd), n: dd.length });
     }
     const notes = done.filter(m => m.note).map(m => m.note);
-    return sendJson(res, 200, {
+    const OV = {
       agentsEnLigne: onlineAgents().length, agentsTotal: db.agents.length,
       clientsTotal: db.clients.length,
       candsPending: db.agents.filter(a => a.status === 'pending').length,
@@ -650,7 +661,13 @@ const server = http.createServer(async (req, res) => {
       gainAgentsTotal: caSum(done) - Math.round(caSum(done) * feePct()),
       noteMoyenne: notes.length ? Math.round(notes.reduce((s, n) => s + n, 0) / notes.length * 10) / 10 : 5,
       ca7
-    });
+    };
+    /* 🛡️ Matrice des rôles : le gestionnaire ne reçoit JAMAIS les chiffres financiers (cahier §A.1) */
+    if ((hqIdentity(req) || {}).role !== 'pdg') {
+      OV.caToday = null; OV.caTotal = null; OV.commToday = null; OV.commTotal = null;
+      OV.gainAgentsTotal = null; OV.ca7 = [];
+    }
+    return sendJson(res, 200, OV);
   }
 
   if (p === '/api/admin/missions') {
@@ -682,7 +699,45 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/config') return sendJson(res, 200, { commission: (db.config && db.config.commission) || 25 });
   if (p === '/api/annonce') return sendJson(res, 200, { ok: true, version: APP_VERSION, annonce: db.annonce || null });
 
+  /* --- 💬 Support interne : utilisateur (client OU pro) ↔ équipe KLEAN --- */
+  function supportIdent(req, b) {
+    const tk = req.headers['x-client-token'] || '';
+    if (tk) { const cl = db.clients.find(c => !c.blocked && clientToken(c.passHash) === tk); if (cl) return { role: 'client', id: cl.id, nom: cl.nom }; }
+    const aid = (b && b.agentId) || url.searchParams.get('agentId') || '';
+    if (aid) { const ag = db.agents.find(a => a.id === aid && (a.status || 'approved') === 'approved'); if (ag) return { role: 'pro', id: ag.id, nom: ag.nom }; }
+    return null;
+  }
+  if (p === '/api/support/send' && req.method === 'POST') {
+    const b = await readBody(req);
+    const who = supportIdent(req, b);
+    if (!who) return sendJson(res, 401, { error: 'Identifiez-vous d’abord (inscription ou connexion)' });
+    const text = String(b.text || '').trim().slice(0, 400);
+    if (text.length < 2) return sendJson(res, 400, { error: 'Message vide' });
+    const rk = who.role + ':' + who.id, t = Date.now();
+    // limite douce : ~6 messages / minute / utilisateur
+    const rec = supRateMap.get(rk);
+    if (rec && t - rec.at < 60000 && rec.n >= 6) return sendJson(res, 429, { error: 'Trop de messages — patientez une minute' });
+    supRateMap.set(rk, rec && t - rec.at < 60000 ? { n: rec.n + 1, at: rec.at } : { n: 1, at: t });
+    db.supportMsgs.push({ id: uid('SR'), role: who.role, uid: who.id, nom: who.nom, from: 'user', text, at: nowISO(), readHQ: false, readUser: true });
+    if (db.supportMsgs.length > 4000) db.supportMsgs = db.supportMsgs.slice(-2000);
+    saveDb();
+    broadcast(adminSockets(), { type: 'support_new', role: who.role, uid: who.id });
+    emitAdmin('support', '💬 Message support (' + who.nom + ') : « ' + text.slice(0, 60) + (text.length > 60 ? '…' : '') + ' »');
+    auditLog('support_message', { role: who.role, de: who.nom });
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/support/mine' && req.method === 'GET') {
+    const who = supportIdent(req, null);
+    if (!who) return sendJson(res, 401, { error: 'Identifiez-vous d’abord' });
+    const peek = url.searchParams.get('peek') === '1';
+    const convo = db.supportMsgs.filter(s => s.role === who.role && s.uid === who.id);
+    const unread = convo.filter(s => s.from === 'hq' && !s.readUser).length;
+    if (!peek && unread) { convo.forEach(s => { if (s.from === 'hq') s.readUser = true; }); saveDb(); }
+    return sendJson(res, 200, { ok: true, unread, messages: convo.slice(-60) });
+  }
+
   if (p === '/api/admin/config' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
     const b2 = await readBody(req);
     const cc = parseFloat(b2.commission);
     if (isNaN(cc) || cc < 0 || cc > 50) return sendJson(res, 400, { error: 'Taux de commission entre 0 et 50 %' });
@@ -756,6 +811,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/admin/annonce' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
     const b = await readBody(req);
     const msg = String(b.message || '').trim().slice(0, 240);
     if (msg.length < 4) return sendJson(res, 400, { error: 'Message trop court' });
@@ -767,6 +823,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true });
   }
   if (p === '/api/admin/annonce' && req.method === 'DELETE') {
+    if (!pdgOnly(req, res)) return;
     db.annonce = null; saveDb();
     auditLog('annonce_retiree', { par: act(req) });
     emitAdmin('annonce', '📣 Affiche retirée');
@@ -776,6 +833,69 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/admin/whoami' && req.method === 'GET') {
     const id = hqIdentity(req);
     return sendJson(res, 200, { role: id.role, nom: id.nom });
+  }
+
+  /* --- 🔁 Réattribution manuelle d'urgence d'une mission (gestionnaire autorisé) --- */
+  const mRea = p.match(/^\/api\/admin\/missions\/(.+)\/reassign$/);
+  if (mRea && req.method === 'POST') {
+    const b = await readBody(req);
+    const m = db.missions.find(x => x.id === mRea[1]);
+    if (!m) return sendJson(res, 404, { error: 'mission introuvable' });
+    if (!['accepted', 'enroute'].includes(m.status)) return sendJson(res, 409, { error: 'Seules les missions « acceptée » ou « en route » peuvent être réattribuées d’urgence' });
+    const oldAg = db.agents.find(a => a.id === m.agentId);
+    const oldId = m.agentId;
+    m.exclAg = [...new Set([...(m.exclAg || []), oldId].filter(Boolean))];
+    m.hist = m.hist || [];
+    m.hist.push({ at: Date.now(), by: act(req), ev: '⤴ Réattribution d’urgence (ancien : ' + (oldAg ? oldAg.nom : oldId) + ') — ' + String(b.reason || 'motif non précisé').slice(0, 120) });
+    m.agentId = null; m.status = 'pending'; delete m.acceptedAt;
+    saveDb();
+    // nouvelle diffusion (sauf à l'ancien)
+    const targets = onlineAgents().filter(s => !(m.exclAg || []).includes(s.meta && s.meta.agentId));
+    broadcast(targets, { type: 'mission_request', mission: publicMissionForAgent(m) });
+    pushNewMissionToAgents(m, (SVC_NAMES[m.service] || m.service) || '').catch(() => {});
+    // informer l'ancien + les écrans abonnés
+    const oldSock = [...sockets].find(s => s.meta && s.meta.agentId === oldId);
+    if (oldSock) wsSend(oldSock, { type: 'mission_reassigned', missionId: m.id, reason: (b.reason || '').slice(0, 120) });
+    emitToMission(m, { type: 'mission_update', status: 'pending', missionId: m.id, agent: null });
+    auditLog('mission_reattribuee', { mission: m.id, ancien: oldAg ? oldAg.nom : '?', par: act(req) });
+    emitAdmin('mission', '⤴ Mission ' + m.id + ' retirée à ' + (oldAg ? oldAg.nom : '?') + ' par ' + act(req) + ' — réattribuée');
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (p === '/api/admin/support' && req.method === 'GET') {
+    const open = url.searchParams.get('open') || '';
+    let messages = null;
+    if (open) {
+      const [r0, u0] = open.split('|');
+      messages = db.supportMsgs.filter(s => s.role === r0 && s.uid === u0).slice(-80);
+      if (messages.some(s => s.from === 'user' && !s.readHQ)) { messages.forEach(s => { if (s.from === 'user') s.readHQ = true; }); saveDb(); }
+    }
+    const convs = {};
+    for (const s of db.supportMsgs) {
+      const k = s.role + ':' + s.uid;
+      if (!convs[k]) convs[k] = { role: s.role, uid: s.uid, nom: s.nom, last: null, unreadHQ: 0 };
+      convs[k].last = { text: s.text, at: s.at, from: s.from };
+      if (s.from === 'user' && !s.readHQ) convs[k].unreadHQ++;
+    }
+    const list = Object.values(convs).sort((a, b) => String((b.last || {}).at).localeCompare(String((a.last || {}).at)));
+    return sendJson(res, 200, { ok: true, conversations: list, messages });
+  }
+  if (p === '/api/admin/support' && req.method === 'POST') {
+    const b = await readBody(req);
+    const text = String(b.text || '').trim().slice(0, 400);
+    if (text.length < 2) return sendJson(res, 400, { error: 'Message vide' });
+    if (!['client', 'pro'].includes(b.role) || !b.uid) return sendJson(res, 400, { error: 'destinataire inconnu' });
+    const cible = b.role === 'client' ? db.clients.find(c => c.id === b.uid) : db.agents.find(a => a.id === b.uid);
+    if (!cible) return sendJson(res, 404, { error: 'introuvable' });
+    const sender = act(req);
+    db.supportMsgs.push({ id: uid('SR'), role: b.role, uid: b.uid, nom: cible.nom, from: 'hq', par: sender, text, at: nowISO(), readHQ: true, readUser: false });
+    saveDb();
+    if (b.role === 'pro') {
+      const sock = [...sockets].find(s => s.meta && s.meta.agentId === b.uid);
+      if (sock) wsSend(sock, { type: 'support_msg', text, par: sender });
+    }
+    auditLog('support_reponse', { par: sender, a: cible.nom, role: b.role });
+    return sendJson(res, 200, { ok: true });
   }
 
   /* --- 👑 Gestionnaires : créés par le PDG depuis son tableau de bord --- */
@@ -839,7 +959,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true });
   }
 
-  if (p === '/api/admin/audit') return sendJson(res, 200, (db.audit || []).slice(-200).reverse());
+  if (p === '/api/admin/audit') { if (!pdgOnly(req, res)) return; return sendJson(res, 200, (db.audit || []).slice(-200).reverse()); }
 
   if (p === '/api/admin/candidatures') {
     return sendJson(res, 200, db.agents

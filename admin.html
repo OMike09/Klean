@@ -126,7 +126,7 @@
   </div>
 
   <!-- Chart 7 jours -->
-  <div class="panel" style="margin-bottom:14px">
+  <div class="panel" id="panel-ca7" style="margin-bottom:14px">
     <h3>📈 Chiffre d'affaires — 7 derniers jours <span class="cnt" id="chart-total"></span></h3>
     <div class="chart" id="chart"></div>
   </div>
@@ -166,6 +166,21 @@
     </div>
   </div>
 
+  <!-- 💬 Support interne — conversations clients & pros (gestionnaire inclus) -->
+  <div class="panel" style="margin-bottom:14px" id="panel-support">
+    <h3>💬 Support & messages <span class="cnt" id="sup-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <div id="sup-convs"></div>
+      <div id="sup-chat" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">
+        <div id="sup-msgs" style="max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:9px"></div>
+        <div style="display:flex;gap:6px">
+          <input id="sup-input" placeholder="Répondre (signé à votre nom)…" maxlength="400" style="flex:1;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+          <button class="btn-main" style="flex:none" onclick="supReply()">Envoyer</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Dossiers agents à vérifier -->
   <div class="panel" style="margin-bottom:14px" id="panel-cands">
     <h3>🛡️ Vérification des professionnels <span class="cnt" id="cand-cnt">0 en attente</span></h3>
@@ -173,7 +188,7 @@
   </div>
 
   <!-- Réglages PDG : commission pilotable -->
-  <div class="panel" style="margin-bottom:14px">
+  <div class="panel" style="margin-bottom:14px" id="panel-cfg">
     <h3>⚙️ Réglages plateforme (PDG)</h3>
     <div style="padding:14px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <label style="font-size:12.5px;color:var(--muted);font-weight:700">💰 Commission par mission :</label>
@@ -185,7 +200,7 @@
   </div>
 
   <!-- Journal d'audit -->
-  <div class="panel" style="margin-bottom:14px">
+  <div class="panel" style="margin-bottom:14px" id="panel-audit">
     <h3>📜 Journal d'audit <span class="cnt" id="audit-cnt">—</span></h3>
     <div class="body" id="audit"><div class="empty">—</div></div>
   </div>
@@ -285,6 +300,7 @@ async function fetchJ(url){
 }
 async function loadAll(){
   try{
+    ME = await fetchJ('/api/admin/whoami').catch(()=>ME);
     const [ov, ms, ags, cands, ppl, cfg, aud] = await Promise.all([
       fetchJ('/api/admin/overview'),
       fetchJ('/api/admin/missions'),
@@ -292,11 +308,13 @@ async function loadAll(){
       fetchJ('/api/admin/candidatures'),
       fetchJ('/api/admin/inscrits'),
       fetch('/api/config').then(r=>r.json()).catch(()=>({commission:25})),
-      fetchJ('/api/admin/audit')
+      fetchJ('/api/admin/audit').catch(()=>null)
     ]);
+    applyRole(); loadSupport();
     renderOverview(ov); renderMissions(ms); renderAgents(ags); renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
-    renderConfig(cfg); renderAudit(aud); loadTeam(); loadAnnonce();
+    if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); }
+    loadTeam(); loadAnnonce();
   }catch(e){
     // Aperçu sans serveur : exiger la connexion locale avant la démo
     if(localStorage.getItem('k2_hq_ok') !== '1'){ location.href = 'admin-login.html'; return; }
@@ -361,7 +379,17 @@ function renderOverview(o){
 let PEOPLE = {agents:[], clients:[]};
 function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 let ME = null, TEAM = [];
+async function reassignMission(id, clientNom){
+  const reason = prompt('🔁 RÉATTRIBUER D\'URGENCE la mission '+id+' ('+(clientNom||'client')+') ?\n\nLe professionnel actuel la perd et ne peut plus la reprendre.\nLes autres professionnels en ligne sont avertis immédiatement.\n\nMotif (tracé dans l\'historique) :');
+  if(reason === null) return;
+  const r = await fetch('/api/admin/missions/'+id+'/reassign', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({reason})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  alert('✅ Mission remise en circulation !\nLes autres professionnels viennent d\'être avertis.');
+  loadAll();
+}
 async function loadAnnonce(){
+  if(ME && ME.role !== 'pdg'){ const p=document.getElementById('panel-ann'); if(p) p.style.display='none'; return; }
   try{
     const d = await fetch('/api/annonce', {cache:'no-store'}).then(r=>r.json());
     const el = document.getElementById('ann-cur');
@@ -387,6 +415,18 @@ async function retirerAnnonce(){
   await fetch('/api/admin/annonce', {method:'DELETE'});
   loadAnnonce();
 }
+/* 🛡️ Matrice des rôles à l'écran : si connecté GESTIONNAIRE, tout ce qui est PDG disparaît */
+function applyRole(){
+  if(ME && ME.role !== 'pdg'){
+    document.body.classList.add('role-gest');
+    ['panel-cfg','panel-audit','panel-ann','panel-ca7'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display='none'; });
+    ['k-ca','k-comm','c-ca','c-comm','c-gains'].forEach(id=>{
+      const el=document.getElementById(id); if(!el) return;
+      const card=el.closest('.kpi') || el.closest('.chip') || el.parentElement;
+      if(card) card.style.display='none';
+    });
+  }
+}
 async function loadTeam(){
   try{ ME = await fetchJ('/api/admin/whoami'); }catch(e){ ME = {role:'pdg', nom:'PDG'}; }
   document.querySelector('#team-gate').style.display = ME && ME.role==='pdg' ? 'none' : 'block';
@@ -411,6 +451,56 @@ function renderAdmins(){
       </div>
     </div>`).join('') || (ME && ME.role==='pdg' ? '<div class="empty" style="margin-top:9px">Aucun gestionnaire encore.<br>Créez son premier compte juste au-dessus.</div>' : '');
 }
+let SUPV = null, SUP_OPEN = null;
+async function loadSupport(){
+  try{ SUPV = await fetchJ('/api/admin/support' + (SUP_OPEN ? '?open='+encodeURIComponent(SUP_OPEN.role+'|'+SUP_OPEN.uid) : '')); }catch(e){ return; }
+  renderSupport();
+}
+function renderSupport(){
+  const box = document.getElementById('sup-convs'); if(!box) return;
+  const list = (SUPV && SUPV.conversations) || [];
+  document.querySelector('#sup-cnt').textContent = list.length ? list.length+' conversation(s)' : '—';
+  box.innerHTML = list.map(c=>{
+    const open = SUP_OPEN && SUP_OPEN.role===c.role && SUP_OPEN.uid===c.uid;
+    return `<div class="agrow" style="margin-bottom:6px;cursor:pointer" onclick="supToggle('${c.role}','${c.uid}','${(c.nom||'').replace(/'/g,'')}')">
+      <div class="avatar" style="background:${c.role==='pro'?'linear-gradient(135deg,#15c98a,#0a8f60)':'linear-gradient(135deg,#5b8ab8,#2c567c)'}">${(c.nom||'?')[0].toUpperCase()}</div>
+      <div style="flex:1;min-width:0">
+        <b>${c.nom}</b> <span class="badge">${c.role==='pro'?'PRO':'CLIENT'}</span>${c.unreadHQ?(' <span class="badge" style="background:rgba(255,107,107,.16);color:var(--red);border-color:rgba(255,107,107,.4)">'+c.unreadHQ+' NON LU'+(c.unreadHQ>1?'S':'')+'</span>'):''}<br>
+        <small style="color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;max-width:190px">${((c.last&&c.last.text)||'').slice(0,60)}</small>
+      </div>
+      <span style="color:var(--muted);font-size:13px">${open?'▾':'▸'}</span>
+    </div>`;
+  }).join('') || '<div class="empty">Aucun message encore.<br>Le support apparaîtra ici dès qu\u2019un client ou un professionnel écrira.</div>';
+  if(SUP_OPEN){
+    document.getElementById('sup-chat').style.display='block';
+    const mm = (SUPV && SUPV.messages) || [];
+    const sc = document.getElementById('sup-msgs');
+    sc.innerHTML = mm.map(s=>{
+      const me = s.from==='hq';
+      return `<div style="align-self:${me?'flex-end':'flex-start'};max-width:84%;background:${me?'rgba(21,201,138,.14)':'var(--card2)'};border:1px solid ${me?'rgba(21,201,138,.35)':'var(--line)'};border-radius:11px;padding:7px 10px;font-size:12.5px;line-height:1.42">${s.text}<small style="display:block;color:var(--muted);font-size:9.5px;margin-top:2px">${me?('vous ('+(s.par||'')+')'):(s.nom||'')} · ${(s.at||'').slice(11,16)}</small></div>`;
+    }).join('') || '<div class="empty">—</div>';
+    sc.scrollTop = sc.scrollHeight;
+  }
+}
+async function supToggle(role, uid, nom){
+  if(SUP_OPEN && SUP_OPEN.role===role && SUP_OPEN.uid===uid){
+    SUP_OPEN = null;
+    const chat = document.getElementById('sup-chat'); if(chat) chat.style.display='none';
+    renderSupport(); return;
+  }
+  SUP_OPEN = {role, uid, nom}; await loadSupport();
+}
+async function supReply(){
+  const inp = document.getElementById('sup-input');
+  const v = ((inp && inp.value) || '').trim();
+  if(v.length < 2 || !SUP_OPEN) return;
+  const r = await fetch('/api/admin/support', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({role:SUP_OPEN.role, uid:SUP_OPEN.uid, text:v})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Envoi impossible'));
+  inp.value = ''; loadSupport();
+}
+setInterval(()=>{ if(document.getElementById('sup-cnt')) loadSupport(); }, 15000);
+
 function pwOk(v){
   return v.length>=8 && /[A-Za-z]/.test(v) && /[0-9]/.test(v) && /[^A-Za-z0-9\s]/.test(v);
 }
@@ -640,7 +730,7 @@ function renderMissions(list){
         <small>#${m.id} · ${m.client||'—'}${m.agent?' → '+m.agent:''} · ${hhmm(m.at)}${m.paiement?' · '+(PAYTAG[m.paiement]||m.paiement):''}${m.gps?' · 📡GPS':''}</small>
         <span class="badge ${cls}">${txt}</span>
       </div>
-      <div class="right"><b>${fmt(m.prixTotal)}</b><small>+${fmt(m.comm)} KLEAN</small></div>
+      <div class="right"><b>${fmt(m.prixTotal)}</b><small>+${fmt(m.comm)} KLEAN</small>${['accepted','enroute'].includes(m.status)?`<br><button title="Réattribuer d'urgence à un autre professionnel" style="margin-top:5px;background:var(--card2);border:1px solid rgba(255,176,32,.45);color:var(--amber);font-size:9.5px;font-weight:800;padding:4px 8px;border-radius:7px;cursor:pointer;font-family:inherit" onclick="reassignMission('${m.id}','${(m.client||'').replace(/'/g,'')}')">🔁 Réaff.</button>`:''}</div>
     </div>`;
   }).join('');
 }
