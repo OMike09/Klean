@@ -495,7 +495,7 @@
   <div class="bstep" id="step4">
     <div class="inp-row">
       <label>👤 Votre nom</label>
-      <input type="text" class="inp" id="inp-nom" placeholder="Ex : Awa Koné">
+      <input type="text" class="inp" id="inp-nom" placeholder="Ex : John Sery Michael">
     </div>
     <div class="inp-row">
       <label>📞 Téléphone (WhatsApp)</label>
@@ -694,7 +694,7 @@
 <div class="navbar show" id="nav-client">
   <button class="nav-btn on" data-v="view-home" onclick="showView('view-home',this,'client')"><span class="ic">🏠</span><span>Accueil</span></button>
   <button class="nav-btn" onclick="startBooking()"><span class="ic">🧹</span><span>Réserver</span></button>
-  <button class="nav-btn" data-v="view-track" onclick="openTrack(this)"><span class="ic">📍</span><span>Suivi</span></button>
+  <button class="nav-btn" data-v="view-track" onclick="openTrack(this)"><span class="ic">👁️</span><span>Voir / Annuler</span></button>
   <button class="nav-btn" data-v="view-bookings" onclick="showView('view-bookings',this,'client')"><span class="ic">📋</span><span>Missions</span></button>
   <button class="nav-btn" data-v="view-account" onclick="showView('view-account',this,'client')"><span class="ic">👤</span><span>Compte</span></button>
 </div>
@@ -812,8 +812,8 @@ const PAYS = [
   {id:'cash', nom:'Espèces',      sub:'Remise à l\'agent',             bg:'#27ae60', txt:'💵'},
 ];
 const PROMOS = {'BIENVENUE':0.15, 'KLEAN10':0.10};
-const AGENT_NAMES = ['Koffi','Bakary','Adama','Siaka','Mariam','Fatoumata','Aminata','Yao','Karim','Awa','N\'Guessan','Issouf','Rokia','Sékou'];
-const CLIENT_NAMES = ['Awa','Moussa','Aïcha','Konan','Salimata','Yaya','Nadia','Serge','Tiemoko','Rokia'];
+const AGENT_NAMES = ['Koffi','Bakary','Adama','Siaka','Mariam','Fatoumata','Aminata','Yao','Karim','Jean','N\'Guessan','Issouf','Rokia','Sékou'];
+const CLIENT_NAMES = ['Jean','Moussa','Aïcha','Konan','Salimata','Yaya','Nadia','Serge','Tiemoko','Rokia'];
 
 /* ══════════ ÉTAT ══════════ */
 let mode = 'client';
@@ -1477,7 +1477,28 @@ function renderAgentGate(){
   const st = agent.apply.status;
   $('#agent-blocks').style.display = st === 'approved' ? 'block' : 'none';
 
-  if(st === 'approved'){ el.innerHTML=''; return; }
+  if(st === 'approved'){
+    if(typeof NET!=='undefined' && NET.on && agent.apply.agentId && !window._agstatus && !window._agloading){
+      window._agloading = true;
+      fetch('/api/agents/'+agent.apply.agentId+'/status').then(r=>r.json()).then(d=>{ window._agstatus=d; renderAgentGate(); }).catch(()=>{ window._agloading=false; });
+    }
+    const gd = window._agstatus || {};
+    const comp = typeof gd.completion === 'number' ? gd.completion : null;
+    el.innerHTML = `
+    <div class="gate-card" style="border:1.5px solid var(--line);padding:13px 15px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <b style="font-size:13px">👋 ${agent.apply.nom || gd.nom || 'Professionnel'} — compte actif</b>
+        <button class="btn-ghost" style="flex:none;padding:7px 12px;font-size:11px;color:var(--danger)" onclick="agentLogout()">🚪 Déconnexion</button>
+      </div>
+      ${comp !== null ? `
+      <div style="margin-top:10px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:var(--muted)">Votre profil est complété</span><b style="color:${comp>=80?'var(--p)':'var(--amber)'}">${comp} %</b></div>
+        <div style="height:8px;border-radius:5px;background:var(--card2);overflow:hidden"><div style="height:100%;width:${comp}%;background:linear-gradient(90deg,var(--amber),var(--p))"></div></div>
+        ${comp < 100 ? `<button class="btn-main" style="width:100%;margin-top:9px;padding:10px" onclick="openProEditor()">✏️ Compléter mon profil (${comp} %)</button>` : `<small style="display:block;margin-top:7px;color:var(--p);font-weight:700">✅ Profil complet — les clients vous font confiance.</small>`}
+      </div>` : ''}
+    </div>`;
+    return;
+  }
 
   if(st === 'blocked'){
     el.innerHTML = `<div class="gate-card status-card" style="border-color:var(--danger)">
@@ -1722,9 +1743,78 @@ async function submitApplication(){
   saveAll(); renderAgentGate(); renderAgentDash();
   toast('✅ (Démo) Dossier validé — en production le propriétaire vérifie d\'abord 🛡️');
 }
+function agentLogout(){
+  if(!confirm('🚪 Se déconnecter de ce compte professionnel ?\n\nVotre compte reste chez KLEAN — pour revenir, utilisez votre liaison ou le gestionnaire.')) return;
+  localStorage.removeItem('k2_agentId'); localStorage.removeItem('k2_agent');
+  if(typeof NET !== 'undefined') NET.agentId = null;
+  location.reload();
+}
+let _proPhotoNew = '';
+function openProEditor(){
+  const gd = window._agstatus || {};
+  const ov = document.createElement('div');
+  ov.id = 'proed';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9800;display:flex;align-items:flex-end;justify-content:center';
+  ov.innerHTML = `
+  <div style="background:var(--card);width:100%;max-width:520px;border-top-left-radius:20px;border-top-right-radius:20px;padding:16px;max-height:86vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <b>✏️ Compléter mon profil professionnel</b>
+      <button onclick="document.getElementById('proed').remove()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:15px">✕</button>
+    </div>
+    <button class="photo-btn" onclick="document.getElementById('pe-photo').click()" style="margin-bottom:4px">🙂 Photo de profil — inspirant confiance</button>
+    <input type="file" id="pe-photo" accept="image/*" capture="user" style="display:none">
+    <small id="pe-photo-ok" style="display:none;color:var(--p);font-weight:700">✓ photo retenue</small>
+    <div class="two" style="margin-top:8px">
+      <div class="inp-row"><label>🏠 Quartier</label><input class="inp" id="pe-quartier" value="${gd.quartier||''}" placeholder="ex : Koko"></div>
+      <div class="inp-row"><label>🎂 Date de naissance</label><input class="inp" id="pe-naissance" type="date"></div>
+    </div>
+    <div class="inp-row"><label>Adresse précise</label><textarea class="inp" id="pe-adresse" placeholder="Rue, repère…"></textarea></div>
+    <div class="two">
+      <div class="inp-row"><label>Type de pièce</label><select class="inp" id="pe-piecetype"><option>CNI</option><option>Passeport</option><option>Attestation d'identité</option><option>Permis de conduire</option></select></div>
+      <div class="inp-row"><label>Numéro de la pièce</label><input class="inp" id="pe-piecenum" placeholder="C00XXXXXXXX"></div>
+    </div>
+    <div class="two">
+      <div class="inp-row"><label>🆘 Urgence — nom</label><input class="inp" id="pe-urgnom" placeholder="Contact en cas d'urgence"></div>
+      <div class="inp-row"><label>🆘 Urgence — tél.</label><input class="inp" id="pe-urgtel" type="tel" placeholder="01 02 03 04 05"></div>
+    </div>
+    <div class="two">
+      <div class="inp-row"><label>👤 Référence — nom</label><input class="inp" id="pe-refnom" placeholder="Qui peut garantir vous"></div>
+      <div class="inp-row"><label>👤 Référence — tél.</label><input class="inp" id="pe-reftel" type="tel" placeholder="01 02 03 04 05"></div>
+    </div>
+    <div class="two">
+      <div class="inp-row"><label>📖 Niveau de formation</label><select class="inp" id="pe-niveau"><option value="">—</option><option>Primaire</option><option>Collège</option><option>Lycée</option><option>Université</option><option>Formation pro</option></select></div>
+      <div class="inp-row"><label>⏳ Expérience (années)</label><input class="inp" id="pe-exp" type="number" min="0" max="30" placeholder="0"></div>
+    </div>
+    <button class="btn-main" style="width:100%;margin-top:10px;padding:12px" onclick="saveProEditor()">💾 Enregistrer mon profil</button>
+  </div>`;
+  document.body.appendChild(ov);
+  _proPhotoNew = '';
+  document.getElementById('pe-photo').onchange = function(){
+    const f = this.files[0]; if(!f) return;
+    const rd = new FileReader();
+    rd.onload = ()=>{ _proPhotoNew = rd.result; const ok=document.getElementById('pe-photo-ok'); if(ok) ok.style.display='inline'; };
+    rd.readAsDataURL(f);
+  };
+}
+async function saveProEditor(){
+  const body = {};
+  [['pe-quartier','quartier'],['pe-adresse','adresse'],['pe-naissance','naissance'],['pe-piecetype','pieceType'],['pe-piecenum','pieceNum'],['pe-urgnom','urgenceNom'],['pe-urgtel','urgenceTel'],['pe-refnom','ref1Nom'],['pe-reftel','ref1Tel'],['pe-niveau','niveau'],['pe-exp','experience']].forEach(([id,f])=>{ const v=((document.getElementById(id)||{}).value||'').trim(); if(v) body[f]=v; });
+  if(_proPhotoNew) body.photo = _proPhotoNew;
+  if(!Object.keys(body).length){ document.getElementById('proed').remove(); return; }
+  try{
+    const r = await fetch('/api/agents/'+agent.apply.agentId+'/profile', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ toast('⚠️ '+(d.error||'Enregistrement impossible')); return; }
+    if(window._agstatus) window._agstatus.completion = d.completion;
+    document.getElementById('proed').remove();
+    toast('✅ Profil enregistré — niveau ' + d.completion + ' %');
+    refreshApplyStatus();
+  }catch(e){ toast('📵 Réseau fragile — réessayez'); }
+}
 function refreshApplyStatus(){
   if(typeof NET!=='undefined' && NET.on && agent.apply.agentId){
     fetch('/api/agents/'+agent.apply.agentId+'/status').then(r=>r.json()).then(d=>{
+      window._agstatus = d; window._agloading = false;
       if(d.blocked){ agent.apply = {status:'blocked'}; agent.online = false; saveAll(); renderAgentGate(); }
       else if(d.status === 'approved'){ agentApplyApproved(); }
       else if(d.status === 'rejected'){ agent.apply = {status:'rejected', reason: d.rejectReason}; saveAll(); renderAgentGate(); }
@@ -1743,6 +1833,18 @@ let client = JSON.parse(localStorage.getItem('k2_client') || 'null');
 const hpLocal = s => { try{ return btoa(unescape(encodeURIComponent('klean::'+s))); }catch(e){ return btoa('klean::'+s); } };
 
 let accTab = 'register';
+async function saveAccountCompletion(){
+  const nom=($('#acp-nom2')||{}).value||'', quartier=($('#acp-quartier2')||{}).value||'';
+  try{
+    const r=await fetch('/api/clients/me',{method:'PUT',headers:{'Content-Type':'application/json','X-Client-Token':client.token},body:JSON.stringify({nom,quartier})});
+    if(r.ok){
+      client.nom=nom||client.nom; client.quartier=quartier||client.quartier;
+      localStorage.setItem('k2_client',JSON.stringify(client));
+      toast('✅ Compte complété — les pros proches vous trouveront 👌');
+      renderAccount();
+    } else toast('⚠️ Enregistrement impossible');
+  }catch(e){ toast('📵 Réseau fragile — réessayez'); }
+}
 function renderAccount(){
   const box = $('#acc-box');
   if(client){
@@ -1756,6 +1858,15 @@ function renderAccount(){
       <small style="color:var(--muted)">📞 +225 ${client.tel || ''}${client.quartier ? ' · 📍 '+client.quartier : ''}</small>
       <div style="margin-top:10px"><span class="status st-ok">🔒 Compte sécurisé ✓</span></div>
     </div>
+    ${(()=>{ const filled=[client.nom,client.tel,client.quartier,client.photo].filter(Boolean).length; const comp=Math.round(filled/4*100); return `
+    <div class="gate-card" style="border:1.5px solid var(--line);margin-bottom:10px;text-align:left">
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:var(--muted)">Votre compte est complété</span><b style="color:${comp>=75?'var(--p)':'var(--amber)'}">${comp} %</b></div>
+      <div style="height:8px;border-radius:5px;background:var(--card2);overflow:hidden"><div style="height:100%;width:${comp}%;background:linear-gradient(90deg,var(--amber),var(--p))"></div></div>
+      ${comp<100?`
+      <div class="inp-row" style="margin-top:9px"><label>👤 Nom complet</label><input class="inp" id="acp-nom2" value="${client.nom||''}"></div>
+      <div class="inp-row"><label>📍 Quartier — essentiel pour trouver les pros proches</label><input class="inp" id="acp-quartier2" value="${client.quartier||''}" placeholder="ex : Koko, Nimbo…"></div>
+      <button class="btn-main" style="width:100%;padding:10px" onclick="saveAccountCompletion()">💾 Compléter mon compte</button>`:''}
+    </div>`;})()}
     <button class="btn-line" onclick="goBookings()">📋 <span>Mes réservations</span></button>
     <button class="btn-line" onclick="startBooking()">🧹 <span>Nouvelle réservation</span></button>
     <button class="btn-line" onclick="clientChangePw()">🔑 <span>Changer mon mot de passe</span></button>
@@ -1771,7 +1882,7 @@ function renderAccount(){
   <div class="gate-card">
     <h4>✨ Créez votre compte KLEAN</h4>
     <p class="sub">Gratuit · vos réservations sont retrouvées sur tous vos appareils, et vos infos sont pré-remplies à chaque ménage.</p>
-    <div class="inp-row"><label>👤 Nom complet *</label><input class="inp" id="ac-nom" placeholder="Ex : Awa Koné"></div>
+    <div class="inp-row"><label>👤 Nom complet *</label><input class="inp" id="ac-nom" placeholder="Ex : John Sery Michael"></div>
     <div class="inp-row"><label>📞 Téléphone * (identifiant du compte)</label><div class="phone-wrap"><span class="prefix">+225</span><input type="tel" id="ac-tel" placeholder="01 02 03 04 05" maxlength="14"></div></div>
     <div class="inp-row"><label>📍 Quartier</label><select class="inp" id="ac-quartier">${QUARTIERS.map(q=>`<option>${q}</option>`).join('')}</select></div>
     <div class="inp-row"><label>🔑 Mot de passe robuste *</label><input class="inp" id="ac-pw" type="password" placeholder="lettres + chiffres + symbole" oninput="accStrength()"></div>
@@ -2104,5 +2215,12 @@ function showInstallFab(){
 </script>
 <script src="net.js"></script>
 <script>fetch('/api/stats').then(r=>r.json()).then(s=>{window._stats=s;}).catch(()=>{});</script>
+<style>
+#city-list{max-height:52vh;overflow-y:auto;padding-right:4px;-webkit-overflow-scrolling:touch}
+#city-list::-webkit-scrollbar{width:6px}
+#city-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+.city-row.soon{opacity:1!important}
+.city.soon{opacity:.9}
+</style>
 </body>
 </html>

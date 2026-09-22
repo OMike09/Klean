@@ -280,12 +280,50 @@ function emitToMission(m, obj) {
   broadcast(list, obj);
 }
 const SVC_NAMES = { maison:'Ménage maison', bureaux:'Bureaux', canapes:'Canapés & tapis', vitres:'Vitres', grand:'Grand ménage', plomberie:'Plomberie', electricite:'Électricité', clim:'Climatisation', serrurerie:'Serrurerie', electro:'Électroménager', jardinage:'Jardinage', lavageauto:'Lavage auto', bricolage:'Bricolage', demen:'Déménagement', cuisine:'Cuisinier à domicile', cours:'Cours ou formation à domicile', canal:'Canal+ à domicile', evenement:'Après événement', entretien:'Entretien régulier', placement:'Placement de personnel', custom:'Demande sur mesure' };
+function haversineKm(aLat, aLng, bLat, bLng) {
+  const R = 6371, dLa = (bLat - aLat) * Math.PI / 180, dLo = (bLng - aLng) * Math.PI / 180;
+  const s = Math.sin(dLa / 2) ** 2 + Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.sin(dLo / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+function missionTargets(m) {
+  /* 📡 PROS LES PLUS PROCHES (GPS) : la demande s'offre d'abord dans le rayon réglable (PDG, /api/config) */
+  const all = onlineAgents();
+  if (typeof m.lat !== 'number' || typeof m.lng !== 'number') return all;
+  const reach = (db.config && typeof db.config.reachKm === 'number') ? db.config.reachKm : 15;
+  const near = [];
+  for (const s of all) {
+    const ag = db.agents.find(a => a.id === (s.meta && s.meta.agentId));
+    const p = ag && ag.pos;
+    if (p && typeof p.lat === 'number') {
+      const d = haversineKm(m.lat, m.lng, p.lat, p.lng);
+      s._dist = Math.round(d * 10) / 10;
+      if (d <= reach) near.push(s);
+    } else { near.push(s); } /* sans GPS connu : on le garde */
+  }
+  const list = near.length ? near : all;
+  console.log('\u{1F4E1} GPS : ' + list.length + '/' + all.length + ' pro(s) en ligne dans le rayon ' + reach + ' km');
+  return list;
+}
 function broadcastNewMission(m) {
-  const targets = onlineAgents();
-  broadcast(targets, { type: 'mission_request', mission: publicMissionForAgent(m) });
-  console.log(`📢 Mission ${m.id} (${m.service} · ${m.prixTotal} F) diffusée à ${targets.length} agent(s)`);
-  emitAdmin('mission', `📥 Nouvelle demande ${m.id} — ${m.service} · ${m.quartier} · ${m.prixTotal.toLocaleString('fr-FR')} F (${m.client.nom})`);
+  const exc = m.exclAg || [];
+  const base = publicMissionForAgent(m);
+  const targets = missionTargets(m);
+  let sent = 0;
+  for (const s of targets) {
+    if (exc.includes(s.meta && s.meta.agentId)) continue;
+    wsSend(s, { type: 'mission_request', mission: Object.assign({}, base, { dist: (typeof s._dist === 'number' ? s._dist : base.dist) }) });
+    sent++;
+  }
+  console.log('📢 Mission ' + m.id + ' (' + m.service + ' · ' + m.prixTotal + ' F) diffusée à ' + sent + ' agent(s)');
+  emitAdmin('mission', '📥 Nouvelle demande ' + m.id + ' — ' + m.service + ' · ' + m.quartier + ' · ' + m.prixTotal.toLocaleString('fr-FR') + ' F (' + m.client.nom + ')');
   pushNewMissionToAgents(m, (SVC_NAMES[m.service] || m.service) || '').catch(()=>{});
+}
+
+function agentCompletion(ag) {
+  const F = ['photo', 'quartier', 'adresse', 'naissance', 'pieceType', 'pieceNum', 'urgenceNom', 'urgenceTel', 'ref1Nom', 'ref1Tel', 'niveau'];
+  let done = F.filter(f => ag[f] && String(ag[f]).trim()).length;
+  if (Array.isArray(ag.services) && ag.services.length) done++;
+  return Math.round(done / (F.length + 1) * 100);
 }
 
 /* ───────── API REST ───────── */
@@ -524,6 +562,17 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom, quartier: cl.quartier, photo: cl.photo || '' });
   }
 
+  /* ✏️ Compléter sa fiche (quartier, nom) — PUT /api/clients/me (jeton) */
+  if (p === '/api/clients/me' && req.method === 'PUT') {
+    const b = await readBody(req);
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, {});
+    if (b.nom !== undefined && String(b.nom).trim().length >= 2) cli.nom = String(b.nom).trim().slice(0, 80);
+    if (b.quartier !== undefined) cli.quartier = String(b.quartier).slice(0, 60);
+    saveDb();
+    return sendJson(res, 200, { ok: true });
+  }
+
   /* 📷 Photo de profil client — PUT /api/clients/me/photo */
   if (p === '/api/clients/me/photo' && req.method === 'PUT') {
     const b = await readBody(req);
@@ -598,11 +647,29 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 201, { ok: true, agentId: ag.id, status: 'pending' });
   }
 
+  /* 📊 Niveau de remplissage du profil pro : 100 % = il inspire confiance */
   const aStatus = p.match(/^\/api\/agents\/(.+)\/status$/);
   if (aStatus && req.method === 'GET') {
     const ag = db.agents.find(a => a.id === aStatus[1]);
     if (!ag) return sendJson(res, 404, {});
-    return sendJson(res, 200, { id: ag.id, nom: ag.nom, status: ag.status || 'approved', rejectReason: ag.rejectReason || '', blocked: !!ag.blocked });
+    return sendJson(res, 200, { id: ag.id, nom: ag.nom, status: ag.status || 'approved', rejectReason: ag.rejectReason || '', blocked: !!ag.blocked,
+      completion: agentCompletion(ag), quartier: ag.quartier || '', tel: ag.tel1 || '', photo: ag.photo || '' });
+  }
+
+  if (p.match(/^\/api\/agents\/(.+)\/profile$/) && req.method === 'PUT') {
+    const b = await readBody(req);
+    const id = p.match(/^\/api\/agents\/(.+)\/profile$/)[1];
+    const ag = db.agents.find(a => a.id === id);
+    if (!ag || (ag.status || 'approved') !== 'approved') return sendJson(res, 404, { error: 'compte introuvable' });
+    const W = ['quartier', 'adresse', 'naissance', 'pieceType', 'pieceNum', 'urgenceNom', 'urgenceTel', 'ref1Nom', 'ref1Tel', 'niveau', 'tel2', 'experience'];
+    let touched = 0;
+    for (const f of W) {
+      if (b[f] !== undefined && String(b[f]).trim() !== String(ag[f] || '')) { ag[f] = String(b[f]).slice(0, 160); touched++; }
+    }
+    if (typeof b.photo === 'string' && b.photo.length > 100 && b.photo.length < 600000) { ag.photo = b.photo; touched++; }
+    const comp = agentCompletion(ag); saveDb();
+    auditLog('pro_profil_maj', { pro: ag.nom, champs: touched, completion: comp });
+    return sendJson(res, 200, { ok: true, completion: comp });
   }
 
   /* --- 🔔 Web Push : sonnerie agents même app fermée --- */
@@ -696,7 +763,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   /* --- Admin : dossiers de candidature --- */
-  if (p === '/api/config') return sendJson(res, 200, { commission: (db.config && db.config.commission) || 25 });
+  if (p === '/api/config') return sendJson(res, 200, { commission: (db.config && db.config.commission) || 25, reachKm: (db.config && typeof db.config.reachKm === 'number') ? db.config.reachKm : 15 });
   if (p === '/api/annonce') return sendJson(res, 200, { ok: true, version: APP_VERSION, annonce: db.annonce || null });
 
   /* --- 🤝 Liaison d'un compte pro créé à la main par l'équipe (code à usage unique) --- */
@@ -764,6 +831,10 @@ const server = http.createServer(async (req, res) => {
     const cc = parseFloat(b2.commission);
     if (isNaN(cc) || cc < 0 || cc > 50) return sendJson(res, 400, { error: 'Taux de commission entre 0 et 50 %' });
     db.config = db.config || {}; db.config.commission = Math.round(cc * 10) / 10; db.config.updatedAt = nowISO();
+    if (b2.reachKm !== undefined && !isNaN(parseFloat(b2.reachKm))) {
+      db.config.reachKm = Math.max(1, Math.min(80, Math.round(parseFloat(b2.reachKm))));
+      auditLog('rayon_regle', { nouveau: db.config.reachKm, par: act(req) });
+    }
     auditLog('commission_modifiee', { nouveau: db.config.commission, par: act(req) });
     saveDb();
     emitAdmin('admin', `⚙️ Commission plateforme réglée à ${db.config.commission} %`);
@@ -910,8 +981,8 @@ const server = http.createServer(async (req, res) => {
     m.agentId = null; m.status = 'pending'; delete m.acceptedAt;
     saveDb();
     // nouvelle diffusion (sauf à l'ancien)
-    const targets = onlineAgents().filter(s => !(m.exclAg || []).includes(s.meta && s.meta.agentId));
-    broadcast(targets, { type: 'mission_request', mission: publicMissionForAgent(m) });
+    const t2 = missionTargets(m).filter(s => !(m.exclAg || []).includes(s.meta && s.meta.agentId));
+    broadcast(t2, { type: 'mission_request', mission: publicMissionForAgent(m) });
     pushNewMissionToAgents(m, (SVC_NAMES[m.service] || m.service) || '').catch(() => {});
     // informer l'ancien + les écrans abonnés
     const oldSock = [...sockets].find(s => s.meta && s.meta.agentId === oldId);

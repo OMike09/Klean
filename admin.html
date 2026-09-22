@@ -197,6 +197,12 @@
       <button onclick="saveComm()" style="background:var(--p);border:none;color:#04130c;font-weight:900;padding:9px 16px;border-radius:10px;cursor:pointer;font-family:inherit">Enregistrer</button>
       <small style="color:var(--muted);font-size:11.5px">applied aux nouvelles missions</small>
     </div>
+    <div style="padding:0 16px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12.5px;color:var(--muted);font-weight:700">📡 Rayon de recherche des pros :</label>
+      <input id="cfg-reach" type="number" min="1" max="80" step="1" style="width:76px;background:var(--card2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:9px 11px;font-size:14px;font-family:inherit;text-align:center;font-weight:800">
+      <span style="font-weight:900">km</span>
+      <small style="color:var(--muted);font-size:11.5px">GPS : seuls les pros dans ce rayon voient la demande en priorité</small>
+    </div>
   </div>
 
   <!-- Journal d'audit -->
@@ -702,11 +708,13 @@ async function toggleCandDet(id, hasPhoto){
 function renderConfig(cfg){
   const c = (cfg && cfg.commission)!=null ? cfg.commission : 25;
   const el = document.getElementById('cfg-comm'); if(el) el.value = c;
+  const er = document.getElementById('cfg-reach'); if(er) er.value = (cfg && cfg.reachKm) || 15;
 }
 async function saveComm(){
   const v = parseFloat(document.getElementById('cfg-comm').value);
   if(isNaN(v) || v<0 || v>50) return alert('Entre 0 et 50 %');
-  const r = await fetch('/api/admin/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({commission:v})});
+  const reach = parseFloat(document.getElementById('cfg-reach') && document.getElementById('cfg-reach').value) || undefined;
+  const r = await fetch('/api/admin/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({commission:v, reachKm:reach})});
   const d = await r.json().catch(()=>({}));
   if(r.ok){ alert('✅ Commission réglée à '+d.commission+' % — appliquée sur les nouvelles missions.'); loadAll(); }
   else alert('❌ '+(d.error||'Erreur'));
