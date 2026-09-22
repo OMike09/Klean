@@ -1,6 +1,6 @@
 {
   "name": "klean",
-  "version": "7.16.2",
+  "version": "7.17.0",
   "description": "KLEAN — Le Yango du ménage : plateforme de services à domicile à la demande (Bouaké, Côte d'Ivoire)",
   "main": "server.js",
   "scripts": {

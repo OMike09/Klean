@@ -546,7 +546,7 @@ const server = http.createServer(async (req, res) => {
     if (perr) return sendJson(res, 400, { error: perr });
     if (db.clients.find(cl => cl.tel === tel)) return sendJson(res, 409, { error: 'Ce numéro a déjà un compte — connectez-vous' });
     const salt = crypto.randomBytes(12).toString('hex');
-    const cl = { id: uid('CL'), nom: b.nom.trim(), tel, quartier: b.quartier || '', salt, passHash: hashPassword(salt, b.password), createdAt: nowISO() };
+    const cl = { id: uid('CL'), nom: b.nom.trim(), tel, quartier: String(b.quartier || '').slice(0, 60), ville: String(b.ville || '').slice(0, 60), mail: String(b.mail || '').slice(0, 80), salt, passHash: hashPassword(salt, b.password), createdAt: nowISO() };
     db.clients.push(cl); saveDb();
     console.log(`👤 Nouveau compte client : ${cl.nom} (${tel})`);
     return sendJson(res, 201, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom });
@@ -559,7 +559,7 @@ const server = http.createServer(async (req, res) => {
     if (!cl || hashPassword(cl.salt, b.password || '') !== cl.passHash)
       return sendJson(res, 401, { error: 'Téléphone ou mot de passe incorrect' });
     if (cl.blocked) return sendJson(res, 403, { error: 'Compte bloqué par le gestionnaire — contactez le support' });
-    return sendJson(res, 200, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom, quartier: cl.quartier, photo: cl.photo || '' });
+    return sendJson(res, 200, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom, quartier: cl.quartier, ville: cl.ville || '', mail: cl.mail || '', photo: cl.photo || '' });
   }
 
   /* ✏️ Compléter sa fiche (quartier, nom) — PUT /api/clients/me (jeton) */
@@ -569,6 +569,8 @@ const server = http.createServer(async (req, res) => {
     if (!cli) return sendJson(res, 401, {});
     if (b.nom !== undefined && String(b.nom).trim().length >= 2) cli.nom = String(b.nom).trim().slice(0, 80);
     if (b.quartier !== undefined) cli.quartier = String(b.quartier).slice(0, 60);
+    if (b.ville !== undefined) cli.ville = String(b.ville).slice(0, 60);
+    if (b.mail !== undefined) cli.mail = String(b.mail).slice(0, 80);
     saveDb();
     return sendJson(res, 200, { ok: true });
   }
@@ -622,6 +624,7 @@ const server = http.createServer(async (req, res) => {
       nom: (b.prenom.trim() + ' ' + b.nom.trim()).trim(), nomFamille: b.nom.trim(), prenom: b.prenom.trim(),
       naissance: b.naissance, tel: tel1, tel1, tel2: String(b.tel2 || '').replace(/\D/g, ''),
       quartier: b.quartier, adresse: b.adresse,
+      ville: String(b.ville || '').slice(0, 60), mail: String(b.mail || '').slice(0, 80),
       pieceType: b.pieceType, pieceNum: b.pieceNum,
       piecePhoto: typeof b.piecePhoto === 'string' && b.piecePhoto.length < 900000 ? b.piecePhoto : '',
       urgenceNom: b.urgenceNom.trim(), urgenceTel: String(b.urgenceTel).replace(/\D/g, ''),
@@ -749,7 +752,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/admin/agents') {
-    return sendJson(res, 200, db.agents.map(a => ({ id: a.id, nom: a.nom, quartier: a.quartier, online: !!a.online, status: a.status || 'approved', blocked: !!a.blocked, ...agentStats(a) })));
+    return sendJson(res, 200, db.agents.map(a => ({ id: a.id, nom: a.nom, quartier: a.quartier, ville: a.ville || '', mail: a.mail || '', online: !!a, status: a.status || 'approved', blocked: !!a.blocked, ...agentStats(a) })));
   }
 
   if (p === '/api/admin/inscrits') {
@@ -758,7 +761,7 @@ const server = http.createServer(async (req, res) => {
       const depense = ms.filter(m => m.status === 'terminee').reduce((s, m) => s + (m.prixTotal || 0), 0);
       return { id: c.id, nom: c.nom, tel: c.tel, quartier: c.quartier || '', createdAt: c.createdAt, photo: !!c.photo, missions: ms.length, depense, blocked: !!c.blocked };
     });
-    const agents = db.agents.map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', quartier: a.quartier || '', status: a.status || 'approved', online: !!a.online, niveau: a.niveau || '', services: a.services || [], createdAt: a.createdAt, photo: !!a.photo, blocked: !!a.blocked, ...agentStats(a) }));
+    const agents = db.agents.map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', quartier: a.quartier || '', ville: a.ville || '', mail: a.mail || '', status: a.status || 'approved', online: !!a.online, niveau: a.niveau || '', services: a.services || [], createdAt: a.createdAt, photo: !!a.photo, blocked: !!a.blocked, ...agentStats(a) }));
     return sendJson(res, 200, { clients: clients.slice().reverse(), agents: agents.slice().reverse() });
   }
 
@@ -942,7 +945,7 @@ const server = http.createServer(async (req, res) => {
     const perr = validPassword(pw);
     if (perr) return sendJson(res, 400, { error: 'Mot de passe faible : ' + perr });
     const salt = crypto.randomBytes(12).toString('hex');
-    const cl = { id: uid('CL'), nom, tel, quartier: String(b.quartier || '').trim(), salt, passHash: hashPassword(salt, pw), createdAt: nowISO(), createdBy: act(req) };
+    const cl = { id: uid('CL'), nom, tel, quartier: String(b.quartier || '').trim(), ville: String(b.ville || '').trim().slice(0, 60), mail: String(b.mail || '').trim().slice(0, 80), salt, passHash: hashPassword(salt, pw), createdAt: nowISO(), createdBy: act(req) };
     db.clients.push(cl); saveDb();
     auditLog('client_cree_hq', { nom, tel, par: act(req) });
     emitAdmin('client', '👤 Compte client créé par ' + act(req) + ' : ' + nom + ' (' + tel + ')');
@@ -957,7 +960,7 @@ const server = http.createServer(async (req, res) => {
     if (db.agents.find(a => String(a.tel1 || '').replace(/\D/g, '') === tel1)) return sendJson(res, 409, { error: 'Ce numéro est déjà inscrit chez les professionnels' });
     const pin = String(Math.floor(100000 + Math.random() * 900000));
     const services = Array.isArray(b.services) && b.services.length ? b.services : [b.service || 'maison'];
-    const na = { id: uid('AG'), nom: (prenom + ' ' + nom).trim(), prenom, tel1, quartier: String(b.quartier || '').trim(), adresse: String(b.adresse || '').trim(),
+    const na = { id: uid('AG'), nom: (prenom + ' ' + nom).trim(), prenom, tel1, quartier: String(b.quartier || '').trim(), ville: String(b.ville || '').trim().slice(0, 60), mail: String(b.mail || '').trim().slice(0, 80), adresse: String(b.adresse || '').trim(),
       naissance: '', experience: b.experience || 0, pieceType: '', pieceNum: '', tel2: '', urgenceNom: '', urgenceTel: '', ref1Nom: '', ref1Tel: '',
       services, niveau: '', photo: '', pushSubs: [], hist: [{ at: Date.now(), by: act(req), ev: '🏗️ Compte créé à la main par l’équipe — vérification immédiate' }],
       status: 'approved', approvedAt: nowISO(), createdAt: nowISO(), createdBy: act(req), claimPin: pin, online: false, pos: null };
