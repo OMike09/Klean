@@ -1459,6 +1459,19 @@ function renderAgentDash(){
 agent.apply = agent.apply || {status: agent.nom ? 'approved' : 'none', agentId: localStorage.getItem('k2_agentId')||null, reason:''};
 let applySvc = {};
 
+async function claimAgentAccount(){
+  const tel = ($('#cl-tel')||{}).value || '', pin = ($('#cl-pin')||{}).value || '';
+  if(tel.replace(/\D/g,'').length < 8 || pin.length < 6){ toast('📞 Numéro + code de liaison à 6 chiffres'); return; }
+  try{
+    const r = await fetch('/api/agents/claim', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({tel, pin})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ toast('⚠️ ' + (d.error || 'Liaison impossible')); return; }
+    localStorage.setItem('k2_agentId', d.agentId);
+    if(typeof NET !== 'undefined') NET.agentId = d.agentId;
+    toast('🎉 Compte professionnel lié — bienvenue ' + (d.nom || '') + ' !');
+    saveAll(); setTimeout(()=>location.reload(), 900);
+  }catch(e){ toast('📵 Réseau fragile — réessayez'); }
+}
 function renderAgentGate(){
   const el = $('#agent-gate');
   const st = agent.apply.status;
@@ -1496,6 +1509,15 @@ function renderAgentGate(){
 
   // Formulaire de candidature complet
   el.innerHTML = `
+  <div class="gate-card" style="border:1.5px dashed var(--line)">
+    <h4>🤝 Vous avez été enregistré par le gestionnaire ?</h4>
+    <p class="sub">Si l'équipe KLEAN a déjà ouvert votre compte professionnel, liez ce téléphone grâce au code qu'on vous a remis. Sinon, remplissez le dossier juste en dessous.</p>
+    <div class="two">
+      <div class="inp-row"><label>📞 Votre numéro principal</label><input class="inp" id="cl-tel" type="tel" placeholder="01 02 03 04 05"></div>
+      <div class="inp-row"><label>🔑 Code de liaison (6 chiffres)</label><input class="inp" id="cl-pin" inputmode="numeric" maxlength="6" placeholder="••••••"></div>
+    </div>
+    <button class="btn-main" style="flex:none;padding:11px 18px;margin-top:4px" onclick="claimAgentAccount()">🔗 Lier mon compte à ce téléphone</button>
+  </div>
   <div class="gate-card" style="border:2px solid var(--p)">
     <h4>🧑‍💼 Devenez professionnel KLEAN</h4>
     <p class="sub">Pour la sécurité de nos clients, chaque professionnel est <b>vérifié par le gestionnaire</b> avant sa première mission. Remplissez soigneusement ce dossier.</p>

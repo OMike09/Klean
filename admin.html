@@ -138,8 +138,8 @@
       <div id="team-gate" style="display:none;font-size:12.5px;color:var(--muted);padding:8px 2px">🔒 Vous êtes gestionnaire : la commande de l'équipe est réservée au PDG.</div>
       <div id="team-form" style="display:none">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <input id="tm-nom" placeholder="👤 Nom complet (ex : Awa Koné)" style="padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px" maxlength="60">
-          <input id="tm-ident" placeholder="🆔 identifiant (ex : awa.ckn)" style="padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px" maxlength="40">
+          <input id="tm-nom" placeholder="👤 Nom complet (ex : John Sery Michael)" style="padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px" maxlength="60">
+          <input id="tm-ident" placeholder="🆔 identifiant (ex : john.sm)" style="padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px" maxlength="40">
         </div>
         <input id="tm-pw" type="password" placeholder="🔑 Mot de passe (8+ signes · lettre · chiffre · symbole)" style="margin-top:8px;width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px" maxlength="64">
         <button class="btn-main" style="width:100%;flex:none;margin-top:9px" onclick="createAdmin()">➕ Créer cet administrateur</button>
@@ -208,6 +208,37 @@
   <!-- Toutes les personnes inscrites (agents + clients) avec recherche -->
   <div class="panel" style="margin-bottom:14px">
     <h3>👥 Personnes inscrites <span class="cnt" id="people-cnt">—</span></h3>
+    <div style="padding:10px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
+      <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="toggleAcctForm('client')">➕ Créer un compte client</button>
+      <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="toggleAcctForm('pro')">➕ Créer un compte pro</button>
+    </div>
+    <div id="acct-client" style="display:none;padding:10px 16px 0">
+      <div style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px 12px">
+        <b style="font-size:12px">🏗️ Compte client guidé</b><br>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <input id="acc-nom" placeholder="👤 Nom complet *" maxlength="60" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="acc-tel" placeholder="📞 Téléphone *" maxlength="16" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        </div>
+        <input id="acc-quartier" placeholder="📍 Quartier (facultatif)" maxlength="40" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <input id="acc-pw" placeholder="🔑 Mot de passe (vide = généré automatiquement)" maxlength="64" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <button class="btn-main" style="width:100%;margin-top:9px" onclick="createClientHQ()">🏗️ Ouvrir le compte client</button>
+      </div>
+    </div>
+    <div id="acct-pro" style="display:none;padding:10px 16px 0">
+      <div style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px 12px">
+        <b style="font-size:12px">🧑‍💼 Compte professionnel guidé <span style="color:var(--muted);font-weight:600">(validé d'office par vous)</span></b><br>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <input id="acp-prenom" placeholder="Prénom *" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="acp-nom" placeholder="Nom *" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="acp-tel" placeholder="📞 Tél. principal *" maxlength="16" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="acp-quartier" placeholder="📍 Quartier" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        </div>
+        <select id="acp-service" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <option value="maison">🧹 Ménage maison</option><option value="bureaux">🏢 Bureaux</option><option value="canapes">🛋️ Canapés & tapis</option><option value="vitres">🪟 Vitres</option><option value="grand">🏰 Grand ménage</option><option value="plomberie">🔧 Plomberie</option><option value="electricite">💡 Électricité</option><option value="clim">❄️ Climatisation</option><option value="serrurerie">🔐 Serrurerie</option><option value="jardinage">🌿 Jardinage</option><option value="lavageauto">🚗 Lavage auto</option><option value="bricolage">🛠️ Bricolage</option><option value="demen">📦 Déménagement</option><option value="cuisine">🍽️ Cuisinier</option><option value="cours">📚 Cours à domicile</option><option value="custom">✨ Demande sur mesure</option>
+        </select>
+        <button class="btn-main" style="width:100%;margin-top:9px" onclick="createProHQ()">🏗️ Ouvrir le compte pro (validation immédiate)</button>
+      </div>
+    </div>
     <div style="padding:12px 16px 4px">
       <input id="people-search" placeholder="🔍 Rechercher par nom, téléphone, quartier, service…"
         oninput="renderPeople()" style="width:100%;background:var(--card2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:11px 13px;font-size:13.5px;font-family:inherit">
@@ -379,6 +410,36 @@ function renderOverview(o){
 let PEOPLE = {agents:[], clients:[]};
 function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 let ME = null, TEAM = [];
+function toggleAcctForm(which){
+  const c = document.getElementById('acct-client'), p = document.getElementById('acct-pro');
+  const showC = which==='client' && c.style.display==='none';
+  const showP = which==='pro' && p.style.display==='none';
+  c.style.display = showC ? 'block' : 'none';
+  p.style.display = showP ? 'block' : 'none';
+}
+async function createClientHQ(){
+  const nom=((document.getElementById('acc-nom')||{}).value||'').trim(), tel=((document.getElementById('acc-tel')||{}).value||'').trim();
+  const quartier=((document.getElementById('acc-quartier')||{}).value||'').trim(), password=(document.getElementById('acc-pw')||{}).value||'';
+  if(nom.length<2||tel.replace(/\D/g,'').length<8) return alert('❌ Nom + numéro valide requis');
+  const r=await fetch('/api/admin/clients/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel,quartier,password})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Création impossible'));
+  alert('👤 COMPTE CLIENT CRÉÉ\n\nRemettez-lui ses accès :\nTéléphone : '+d.tel+'\nMot de passe : '+d.password+(d.passwordGenere?' (généré automatiquement)':'')+'\n\nIl se connecte dans l\'app : « Se connecter ».');
+  document.getElementById('acc-nom').value='';document.getElementById('acc-tel').value='';document.getElementById('acc-pw').value='';
+  loadAll();
+}
+async function createProHQ(){
+  const prenom=((document.getElementById('acp-prenom')||{}).value||'').trim(), nom=((document.getElementById('acp-nom')||{}).value||'').trim();
+  const tel=((document.getElementById('acp-tel')||{}).value||'').trim(), quartier=((document.getElementById('acp-quartier')||{}).value||'').trim();
+  const service=(document.getElementById('acp-service')||{}).value||'maison';
+  if(prenom.length<2||nom.length<2||tel.replace(/\D/g,'').length<8) return alert('❌ Prénom + nom + téléphone requis');
+  const r=await fetch('/api/admin/agents/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,prenom,tel,quartier,service})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Création impossible'));
+  alert('🧑‍💼 COMPTE PROFESSIONNEL CRÉÉ — VALIDÉ IMMÉDIATEMENT\n\nRemettez-lui ce CODE DE LIAISON (ne notez que pour la remise en main propre) :\n\n    📞 '+d.tel+'\n    🔑 '+d.pin+'\n\nDans l\'app, il touche « Je suis un professionnel » → carte 🤝 « enregistré par le gestionnaire » → numéro + code.\n⚠️ Le code fonctionne UNE SEULE FOIS, puis s\'efface.');
+  document.getElementById('acp-prenom').value='';document.getElementById('acp-nom').value='';document.getElementById('acp-tel').value='';
+  loadAll();
+}
 async function reassignMission(id, clientNom){
   const reason = prompt('🔁 RÉATTRIBUER D\'URGENCE la mission '+id+' ('+(clientNom||'client')+') ?\n\nLe professionnel actuel la perd et ne peut plus la reprendre.\nLes autres professionnels en ligne sont avertis immédiatement.\n\nMotif (tracé dans l\'historique) :');
   if(reason === null) return;

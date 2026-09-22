@@ -699,6 +699,28 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/config') return sendJson(res, 200, { commission: (db.config && db.config.commission) || 25 });
   if (p === '/api/annonce') return sendJson(res, 200, { ok: true, version: APP_VERSION, annonce: db.annonce || null });
 
+  /* --- 🤝 Liaison d'un compte pro créé à la main par l'équipe (code à usage unique) --- */
+  if (p === '/api/agents/claim' && req.method === 'POST') {
+    const ip = req.socket.remoteAddress || '?';
+    const rc = loginTries.get(ip + '|claim') || { n: 0, t: 0 };
+    if (rc.n >= 6 && Date.now() - rc.t < 600000) return sendJson(res, 429, { error: 'Trop d’essais — patientez 10 minutes' });
+    const b = await readBody(req);
+    const tel = String(b.tel || '').replace(/\D/g, '');
+    const pin = String(b.pin || '').trim();
+    const ag = db.agents.find(a => String(a.tel1 || '').replace(/\D/g, '') === tel && a.claimPin && a.claimPin === pin && (a.status || 'approved') === 'approved');
+    if (!ag) {
+      loginTries.set(ip + '|claim', { n: rc.n + 1, t: rc.t || Date.now() });
+      return sendJson(res, 401, { error: 'Numéro ou code incorrect — vérifiez avec le gestionnaire' });
+    }
+    loginTries.delete(ip + '|claim');
+    delete ag.claimPin; // 🔒 usage unique
+    ag.claimedAt = nowISO();
+    (ag.hist = ag.hist || []).push({ at: Date.now(), by: ag.nom, ev: '📱 Compte lié au téléphone du professionnel' });
+    saveDb();
+    auditLog('pro_lie', { pro: ag.nom, tel });
+    return sendJson(res, 200, { ok: true, agentId: ag.id, nom: ag.nom });
+  }
+
   /* --- 💬 Support interne : utilisateur (client OU pro) ↔ équipe KLEAN --- */
   function supportIdent(req, b) {
     const tk = req.headers['x-client-token'] || '';
@@ -836,6 +858,44 @@ const server = http.createServer(async (req, res) => {
   }
 
   /* --- 🔁 Réattribution manuelle d'urgence d'une mission (gestionnaire autorisé) --- */
+  /* --- 🏗️ Création guidée de comptes par l'équipe (client ou professionnel) --- */
+  if (p === '/api/admin/clients/create' && req.method === 'POST') {
+    const b = await readBody(req);
+    const nom = String(b.nom || '').trim();
+    if (nom.length < 2) return sendJson(res, 400, { error: 'Nom du client trop court' });
+    const tel = String(b.tel || '').replace(/\D/g, '');
+    if (tel.length < 8) return sendJson(res, 400, { error: 'Numéro de téléphone invalide' });
+    if (db.clients.find(cl => cl.tel === tel)) return sendJson(res, 409, { error: 'Ce numéro a déjà un compte client' });
+    let pw = String(b.password || ''), gen = false;
+    if (!pw) { pw = 'Klean-' + Math.floor(1000 + Math.random() * 9000) + '!'; gen = true; }
+    const perr = validPassword(pw);
+    if (perr) return sendJson(res, 400, { error: 'Mot de passe faible : ' + perr });
+    const salt = crypto.randomBytes(12).toString('hex');
+    const cl = { id: uid('CL'), nom, tel, quartier: String(b.quartier || '').trim(), salt, passHash: hashPassword(salt, pw), createdAt: nowISO(), createdBy: act(req) };
+    db.clients.push(cl); saveDb();
+    auditLog('client_cree_hq', { nom, tel, par: act(req) });
+    emitAdmin('client', '👤 Compte client créé par ' + act(req) + ' : ' + nom + ' (' + tel + ')');
+    return sendJson(res, 201, { ok: true, id: cl.id, nom, tel, password: pw, passwordGenere: gen });
+  }
+  if (p === '/api/admin/agents/create' && req.method === 'POST') {
+    const b = await readBody(req);
+    const nom = String(b.nom || '').trim(), prenom = String(b.prenom || '').trim();
+    if (nom.length < 2 || prenom.length < 2) return sendJson(res, 400, { error: 'Nom et prénom requis' });
+    const tel1 = String(b.tel || '').replace(/\D/g, '');
+    if (tel1.length < 8) return sendJson(res, 400, { error: 'Numéro de téléphone invalide' });
+    if (db.agents.find(a => String(a.tel1 || '').replace(/\D/g, '') === tel1)) return sendJson(res, 409, { error: 'Ce numéro est déjà inscrit chez les professionnels' });
+    const pin = String(Math.floor(100000 + Math.random() * 900000));
+    const services = Array.isArray(b.services) && b.services.length ? b.services : [b.service || 'maison'];
+    const na = { id: uid('AG'), nom: (prenom + ' ' + nom).trim(), prenom, tel1, quartier: String(b.quartier || '').trim(), adresse: String(b.adresse || '').trim(),
+      naissance: '', experience: b.experience || 0, pieceType: '', pieceNum: '', tel2: '', urgenceNom: '', urgenceTel: '', ref1Nom: '', ref1Tel: '',
+      services, niveau: '', photo: '', pushSubs: [], hist: [{ at: Date.now(), by: act(req), ev: '🏗️ Compte créé à la main par l’équipe — vérification immédiate' }],
+      status: 'approved', approvedAt: nowISO(), createdAt: nowISO(), createdBy: act(req), claimPin: pin, online: false, pos: null };
+    db.agents.push(na); saveDb();
+    auditLog('pro_cree_hq', { pro: na.nom, tel: tel1, par: act(req) });
+    emitAdmin('agent', '🏗️ ' + act(req) + ' a créé le professionnel ' + na.nom + ' — code de liaison remis en main');
+    return sendJson(res, 201, { ok: true, id: na.id, nom: na.nom, tel: tel1, pin });
+  }
+
   const mRea = p.match(/^\/api\/admin\/missions\/(.+)\/reassign$/);
   if (mRea && req.method === 'POST') {
     const b = await readBody(req);
