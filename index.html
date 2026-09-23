@@ -387,6 +387,14 @@
 
 <!-- ══════════════════ CLIENT : ACCUEIL ══════════════════ -->
 <div class="view active" id="view-home">
+  <button id="svc-city-big" onclick="cityInfo()" style="width:100%;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-radius:16px;padding:13px 15px;margin:0 0 12px;box-shadow:0 4px 14px rgba(7,110,79,.28);text-align:left">
+    <span style="font-size:27px">🛠️</span>
+    <span style="flex:1;min-width:0">
+      <b style="display:block;font-size:15.5px;line-height:1.3;letter-spacing:.3px">🏙️ VILLE OÙ FAIRE LE SERVICE</b>
+      <small style="display:block;font-size:11px;opacity:.93;font-weight:600">Touchez ici pour changer de ville — le 📡 GPS est dans la fenêtre</small>
+    </span>
+    <b id="svc-city-name" style="font-size:15.5px;background:rgba(255,255,255,.2);padding:7px 13px;border-radius:99px;flex:none">Bouaké ▾</b>
+  </button>
   <div class="hero">
     <span class="phase-tag" id="hero-phase">🇨🇮 Actif à Bouaké</span>
     <h1>Tous vos services à domicile, un pro arrive chez vous 🛵</h1>
@@ -478,6 +486,16 @@
   </div>
 
   <div class="bstep" id="step3">
+    <span class="field-label">👥 Cette demande est pour qui ?</span>
+    <div class="seg" id="seg-pour" style="margin-bottom:12px">
+      <button data-pour="moi" class="sel" onclick="setBookFor('moi')">🙋 Pour moi</button>
+      <button data-pour="autre" onclick="setBookFor('autre')">🎁 Pour quelqu'un d'autre</button>
+    </div>
+    <div id="pour-autre-wrap" style="display:none;background:var(--pl);border:1.5px solid rgba(21,201,138,.3);border-radius:14px;padding:12px 13px;margin-bottom:12px">
+      <b style="font-size:13px;color:var(--pd);display:block;margin-bottom:8px">🎁 Vous offrez le service — il faut joindre la personne sur place :</b>
+      <div class="inp-row"><label>👤 Nom de la personne *</label><input class="inp" id="inp-benefnom" maxlength="60" placeholder="Ex : Aminata Touré"></div>
+      <div class="inp-row" style="margin-bottom:0"><label>📞 Son téléphone *</label><div class="phone-wrap"><span class="prefix">+225</span><input type="tel" id="inp-beneftel" placeholder="07 00 00 00 00" maxlength="14"></div></div>
+    </div>
     <div class="inp-row">
       <label>📅 Date de la prestation</label>
       <input type="date" class="inp" id="inp-date">
@@ -830,6 +848,7 @@ function setCity(id, silent){
   c.quartier = city.quartiers[0];
   localStorage.setItem('k2_city', city.id);
   $('#city-chip').innerHTML = '📍 '+city.nom+' ▾';
+  const svcN = $('#svc-city-name'); if(svcN) svcN.textContent = city.nom+' ▾';
   $('#hero-phase').innerHTML = '🇨🇮 Actif à '+city.nom;
   $('#hero-agents-sub').textContent = 'Professionnels actifs à '+city.nom;
   $('#hero-agents-n').textContent = (window._stats && window._stats.agentsTotal) || '—';
@@ -1222,6 +1241,12 @@ function detectPos(){
 }
 
 /* ══════════ RECHERCHE + SUIVI ══════════ */
+let bookFor = 'moi';
+function setBookFor(v){
+  bookFor = v;
+  document.querySelectorAll('#seg-pour button').forEach(b=> b.classList.toggle('sel', b.dataset.pour===v));
+  $('#pour-autre-wrap').style.display = v==='autre' ? 'block' : 'none';
+}
 function launchSearch(){
   c.nom = $('#inp-nom').value.trim();
   c.tel = $('#inp-tel').value.trim();
@@ -1237,6 +1262,14 @@ function launchSearch(){
   const _ACT = ['recherche','enroute','arrive','encours','recherche'];
   const _activeB = bookings.filter(b => !['terminee','annulee'].includes(b.status)).length;
   if(_activeB >= 3) return toast('⏸️ Maximum 3 missions actives à la fois — attendez qu\'une termine');
+
+  c.pour = bookFor;
+  if(bookFor==='autre'){
+    c.benefNom = ($('#inp-benefnom')||{}).value.trim();
+    c.benefTel = ($('#inp-beneftel')||{}).value.trim();
+    if(c.benefNom.length < 2) return toast('👤 Écrivez le nom de la personne qui reçoit le service');
+    if(c.benefTel.replace(/\D/g,'').length < 8) return toast('📞 Numéro de la personne invalide — le pro devra la joindre');
+  } else { c.benefNom=''; c.benefTel=''; }
 
   const p = calcPrice(c);
   mission = {
@@ -1437,7 +1470,7 @@ function renderBookings(){
     const active = ['enroute','arrive','encours','recherche'].includes(b.status);
     return `<div class="bkg">
       <div class="bkg-top"><div><b>${svc.ic} ${svc.nom}</b><small>#${b.id}${b.agent?' · '+b.agent.nom+' ⭐'+b.agent.note.toFixed(1):''}</small></div><span class="status ${cls}">${txt}</span></div>
-      <div class="meta">📅 ${formatDate(b.date)} à ${b.time}<br>📍 ${b.quartier}, ${cityName(b.city)} — ${b.adresse}</div>
+      <div class="meta">📅 ${formatDate(b.date)} à ${b.time}<br>📍 ${b.quartier}, ${cityName(b.city)} — ${b.adresse}${b.pour==='autre'&&b.benefNom?`<br>🎁 Pour <b>${b.benefNom}</b>${b.benefTel?' · '+b.benefTel:''}`:''}</div>
       <div class="bkg-bottom"><b>${fmt(b.prix?b.prix.total:calcPrice(b).total)}</b>
         ${b.rated?`<span class="stars-mini">${'★'.repeat(b.rated)}${'☆'.repeat(5-b.rated)}</span>`:''}
         ${['recherche','enroute','arrive','encours'].includes(b.status)?`<button class="bkg-act" style="color:var(--blue)" onclick="resumeTrack('${b.id}')">👁️ Voir</button>`:''}
@@ -1583,7 +1616,7 @@ function renderAgentGate(){
       <div class="inp-row"><label>Date de naissance *</label><input class="inp" id="ap-naissance" type="date"></div>
       <div class="inp-row"><label>Années d'expérience</label><input class="inp" id="ap-experience" type="number" min="0" max="30" placeholder="0"></div>
     </div>
-    <div class="inp-row"><label>🏙️ Ville de résidence * <small style="font-weight:400;color:var(--muted)">— vous déménagez ? La 📍 en haut choisit la ville où vous travaillez.</small></label><select class="inp" id="ap-ville" onchange="document.getElementById('ap-ville2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— choisir votre ville —</option>${CITIES.map(ci=>`<option value="${ci.nom}">${ci.nom}</option>`).join('')}${CITIES_SOON.map(ci=>`<option value="${ci}">${ci}</option>`).join('')}<option value="__autre">✏️ Ma ville n'est pas dans la liste — je l'écris</option></select></div>
+    <div class="inp-row"><label>🏙️ Ville de résidence * — où vous vivez ?</label><select class="inp" id="ap-ville" onchange="document.getElementById('ap-ville2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— choisir votre ville —</option>${CITIES.map(ci=>`<option value="${ci.nom}">${ci.nom}</option>`).join('')}${CITIES_SOON.map(ci=>`<option value="${ci}">${ci}</option>`).join('')}<option value="__autre">✏️ Ma ville n'est pas dans la liste — je l'écris</option></select></div>
     <div class="inp-row" id="ap-ville2-row" style="display:none"><label>✏️ Écrivez le nom de votre ville</label><input class="inp" id="ap-ville2" maxlength="40" placeholder="Ex : Séguéla…"></div>
     <div class="inp-row"><label>✉️ E-mail <small style="font-weight:400;color:var(--muted)">(optionnel)</small></label><input class="inp" id="ap-mail" type="email" maxlength="60" placeholder="ex : nom@gmail.com"></div>
     <div class="two">
@@ -1919,7 +1952,7 @@ function renderAccount(){
     <p class="sub">Gratuit · vos réservations sont retrouvées sur tous vos appareils, et vos infos sont pré-remplies à chaque ménage.</p>
     <div class="inp-row"><label>👤 Nom complet *</label><input class="inp" id="ac-nom" placeholder="Ex : John Sery Michael"></div>
     <div class="inp-row"><label>📞 Téléphone * (identifiant du compte)</label><div class="phone-wrap"><span class="prefix">+225</span><input type="tel" id="ac-tel" placeholder="01 02 03 04 05" maxlength="14"></div></div>
-    <div class="inp-row"><label>🏙️ Ville de résidence * <small style="font-weight:400;color:var(--muted)">— où vous vivez. Voyagez-vous ? Pas grave : la 📍 en haut de l'accueil choisit la ville du service (avec GPS 📡).</small></label><select class="inp" id="ac-ville" onchange="document.getElementById('ac-ville2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— choisir votre ville —</option>${CITIES.map(ci=>`<option value="${ci.nom}">${ci.nom}</option>`).join('')}${CITIES_SOON.map(ci=>`<option value="${ci}">${ci}</option>`).join('')}<option value="__autre">✏️ Ma ville n'est pas dans la liste — je l'écris</option></select></div>
+    <div class="inp-row"><label>🏙️ Ville de résidence * — où vous vivez ?</label><select class="inp" id="ac-ville" onchange="document.getElementById('ac-ville2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— choisir votre ville —</option>${CITIES.map(ci=>`<option value="${ci.nom}">${ci.nom}</option>`).join('')}${CITIES_SOON.map(ci=>`<option value="${ci}">${ci}</option>`).join('')}<option value="__autre">✏️ Ma ville n'est pas dans la liste — je l'écris</option></select></div>
     <div class="inp-row" id="ac-ville2-row" style="display:none"><label>✏️ Écrivez le nom de votre ville</label><input class="inp" id="ac-ville2" maxlength="40" placeholder="Ex : Séguéla, Bouaflé…"></div>
     <div class="inp-row"><label>📍 Votre quartier * — à écrire vous-même</label><input class="inp" id="ac-quartier" list="dl-ac-quartier" placeholder="Ex : Koko, Nimbo, Angré…" autocomplete="off"><datalist id="dl-ac-quartier">${[...new Set(CITIES.flatMap(ci=>ci.quartiers))].map(q=>`<option value="${q}">`).join('')}</datalist></div>
     <div class="inp-row"><label>✉️ E-mail <small style="font-weight:400;color:var(--muted)">(optionnel — factures & confirmations)</small></label><input class="inp" id="ac-mail" type="email" maxlength="60" placeholder="ex : nom@gmail.com"></div>
