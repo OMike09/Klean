@@ -372,17 +372,9 @@
 <div class="topbar">
   <div class="topbar-in">
     <div class="logo"><img src="/klean-icon-192.png" alt="KLEAN" style="width:34px;height:34px;border-radius:10px;vertical-align:-10px;margin-right:4px;box-shadow:0 3px 10px rgba(7,110,79,.35)">KLEAN</div>
-    <div style="display:flex;align-items:center;gap:8px">
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px" onclick="cityInfo()">
-        <div class="city-chip" id="city-chip">📍 Bouaké ▾</div>
-        <small style="font-size:9.5px;color:var(--muted);font-weight:800;letter-spacing:.2px">🛠️ ville où faire le service</small>
-      </div>
-    </div>
+
   </div>
-  <div class="modebar">
-    <button id="mode-client" class="on" onclick="setMode('client')">🙋 Je cherche un service</button>
-    <button id="mode-agent" onclick="setMode('agent')">🧑‍💼 Je suis un professionnel</button>
-  </div>
+
 </div>
 
 <!-- ══════════════════ CLIENT : ACCUEIL ══════════════════ -->
@@ -726,6 +718,7 @@
   <button class="nav-btn on" data-v="view-agent" onclick="showView('view-agent',this,'agent')"><span class="ic">📊</span><span>Tableau</span></button>
   <button class="nav-btn" data-v="view-agent-hist" onclick="showView('view-agent-hist',this,'agent')"><span class="ic">🧾</span><span>Missions</span></button>
   <button class="nav-btn" data-v="view-agent-profil" onclick="showView('view-agent-profil',this,'agent');fillProfile()"><span class="ic">👤</span><span>Profil</span></button>
+  <button class="nav-btn" onclick="goClientAccount()"><span class="ic">📱</span><span>Compte</span></button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -847,7 +840,7 @@ function setCity(id, silent){
   c.city = city.id;
   c.quartier = city.quartiers[0];
   localStorage.setItem('k2_city', city.id);
-  $('#city-chip').innerHTML = '📍 '+city.nom+' ▾';
+  const _cc = $('#city-chip'); if(_cc) _cc.innerHTML = '📍 '+city.nom+' ▾';
   const svcN = $('#svc-city-name'); if(svcN) svcN.textContent = city.nom+' ▾';
   $('#hero-phase').innerHTML = '🇨🇮 Actif à '+city.nom;
   $('#hero-agents-sub').textContent = 'Professionnels actifs à '+city.nom;
@@ -994,14 +987,29 @@ const pick = arr => arr[Math.floor(Math.random()*arr.length)];
 function saveAll(){ localStorage.setItem('k2_bookings',JSON.stringify(bookings)); localStorage.setItem('k2_agent',JSON.stringify(agent)); }
 
 /* ══════════ NAVIGATION ══════════ */
+let _wantProClaim = false;
 function setMode(m){
   mode = m;
-  $('#mode-client').classList.toggle('on', m==='client');
-  $('#mode-agent').classList.toggle('on', m==='agent');
+  const mc = $('#mode-client'), ma = $('#mode-agent');
+  if(mc) mc.classList.toggle('on', m==='client');
+  if(ma) ma.classList.toggle('on', m==='agent');
   $('#nav-client').classList.toggle('show', m==='client');
   $('#nav-agent').classList.toggle('show', m==='agent');
   if(m==='client') showView('view-home', $('#nav-client .nav-btn'), 'client');
-  else { showView('view-agent', $('#nav-agent .nav-btn'), 'agent'); renderAgentDash(); scheduleRequest(); }
+  else {
+    showView('view-agent', $('#nav-agent .nav-btn'), 'agent'); renderAgentDash(); scheduleRequest();
+    if(_wantProClaim){
+      _wantProClaim = false;
+      setTimeout(()=>{ const el = document.getElementById('claim-slot'); if(el) el.scrollIntoView({behavior:'smooth', block:'center'}); }, 450);
+    }
+  }
+}
+function goProConnect(){ _wantProClaim = true; setMode('agent'); }
+function goClientAccount(){
+  mode = 'client';
+  $('#nav-client').classList.add('show'); $('#nav-agent').classList.remove('show');
+  const btn = document.querySelector('#nav-client .nav-btn[data-v="view-account"]');
+  showView('view-account', btn, 'client'); renderAccount();
 }
 function showView(id, btn, navGroup){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
@@ -1595,7 +1603,7 @@ function renderAgentGate(){
   // Formulaire de candidature complet
   el.innerHTML = `
   <div class="gate-card" style="border:1.5px dashed var(--line)">
-    <h4>🤝 Vous avez été enregistré par le gestionnaire ?</h4>
+    <h4 id="claim-slot">🤝 Vous avez été enregistré par le gestionnaire ?</h4>
     <p class="sub">Si l'équipe KLEAN a déjà ouvert votre compte professionnel, liez ce téléphone grâce au code qu'on vous a remis. Sinon, remplissez le dossier juste en dessous.</p>
     <div class="two">
       <div class="inp-row"><label>📞 Votre numéro principal</label><input class="inp" id="cl-tel" type="tel" placeholder="01 02 03 04 05"></div>
@@ -1913,11 +1921,39 @@ async function saveAccountCompletion(){
     } else toast('⚠️ Enregistrement impossible');
   }catch(e){ toast('📵 Réseau fragile — réessayez'); }
 }
+function _accHeroHTML(){
+  const proLinked = agent.apply && agent.apply.status === 'approved';
+  const proName = ((agent.apply && agent.apply.nom) || agent.nom || 'Pro').split(' ')[0];
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+    <div style="background:var(--card2);border:1.5px solid var(--line);border-radius:15px;padding:13px 12px;text-align:center">
+      <div style="font-size:24px;margin-bottom:4px">👤</div>
+      <b style="display:block;font-size:12.5px;line-height:1.3">Créer mon<br>compte client</b>
+      ${client ? `
+      <div style="margin-top:9px"><span class="status st-ok" style="font-size:10.5px">✓ connecté : ${(client.nom||'&#39;').split(' ')[0]}</span><br>
+      <button class="btn-ghost" style="padding:8px 10px;margin-top:7px;font-size:12px;color:var(--danger)" onclick="clientLogout()">⏻ Se déconnecter</button></div>` : `
+      <div style="margin-top:9px;display:flex;flex-direction:column;gap:6px">
+        <button class="btn-main" style="padding:9px 8px;font-size:12.5px" onclick="accTab='register';renderAccount();setTimeout(()=>{const t=document.getElementById('acc-tabs-el');if(t)t.scrollIntoView({behavior:'smooth'})},80)">✨ Créer</button>
+        <button class="btn-line" style="padding:8px;font-size:12.5px" onclick="accTab='login';renderAccount();setTimeout(()=>{const t=document.getElementById('acc-tabs-el');if(t)t.scrollIntoView({behavior:'smooth'})},80)">🔑 Se connecter</button>
+      </div>`}
+    </div>
+    <div style="background:var(--card2);border:1.5px solid var(--line);border-radius:15px;padding:13px 12px;text-align:center">
+      <div style="font-size:24px;margin-bottom:4px">🧑‍💼</div>
+      <b style="display:block;font-size:12.5px;line-height:1.3">Créer compte<br>professionnel</b>
+      ${proLinked ? `
+      <div style="margin-top:9px"><span class="status st-ok" style="font-size:10.5px">✓ connecté : ${proName}</span><br>
+      <button class="btn-ghost" style="padding:8px 10px;margin-top:7px;font-size:12px;color:var(--danger)" onclick="agentLogout()">⏻ Se déconnecter</button></div>` : `
+      <div style="margin-top:9px;display:flex;flex-direction:column;gap:6px">
+        <button class="btn-main" style="padding:9px 8px;font-size:12.5px" onclick="setMode('agent')">📝 Créer</button>
+        <button class="btn-line" style="padding:8px;font-size:12.5px" onclick="goProConnect()">🔑 Se connecter</button>
+      </div>`}
+    </div>
+  </div>`;
+}
 function renderAccount(){
   const box = $('#acc-box');
   if(client){
     const ini = (client.nom||'?')[0].toUpperCase();
-    box.innerHTML = `
+    box.innerHTML = _accHeroHTML() + `
     <div class="acc-profile" style="text-align:center;margin-bottom:14px">
       <div style="margin:0 auto 10px;width:72px;height:72px;display:flex;align-items:center;justify-content:center">${avatarHTML(client.photo, ini, 72)}</div>
       <b style="font-size:19px;display:block">${client.nom}</b>
@@ -1941,8 +1977,8 @@ function renderAccount(){
     <button class="btn-line" style="color:var(--danger)" onclick="clientLogout()">⏻ <span>Se déconnecter</span></button>`;
     return;
   }
-  box.innerHTML = `
-  <div class="acc-tabs">
+  box.innerHTML = _accHeroHTML() + `
+  <div class="acc-tabs" id="acc-tabs-el">
     <button class="${accTab==='register'?'sel':''}" onclick="accTab='register';renderAccount()">Créer un compte</button>
     <button class="${accTab==='login'?'sel':''}" onclick="accTab='login';renderAccount()">Connexion</button>
   </div>
