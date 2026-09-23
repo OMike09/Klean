@@ -1154,12 +1154,29 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true });
   }
 
-  if (p === '/api/stats') return sendJson(res, 200, {
-    agentsEnLigne: onlineAgents().length,
-    agentsTotal: db.agents.length,
-    missionsTotal: db.missions.length,
-    missionsTerminees: db.missions.filter(m => m.status === 'terminee').length
-  });
+  if (p === '/api/stats') {
+    const villeN = String(url.searchParams.get('ville') || '').trim().toLowerCase();
+    if (!villeN) return sendJson(res, 200, {
+      agentsEnLigne: onlineAgents().length,
+      agentsTotal: db.agents.length,
+      missionsTotal: db.missions.length,
+      missionsTerminees: db.missions.filter(m => m.status === 'terminee').length
+    });
+    /* vérité terrain : comptage sur les vraies inscriptions de la ville — jamais de chiffre inventé
+       (un pro compte si sa ville d'inscription correspond, ou, sans ville, si son quartier appartient à la ville choisie) */
+    const qList = String(url.searchParams.get('quartiers') || '').split(',').map(q => q.trim().toLowerCase()).filter(Boolean);
+    const actifs = db.agents.filter(a =>
+      (a.status || 'approved') === 'approved' &&
+      (String(a.ville || '').trim().toLowerCase() === villeN ||
+       (!String(a.ville || '').trim() && a.quartier && qList.includes(String(a.quartier).trim().toLowerCase())))
+    );
+    return sendJson(res, 200, {
+      agentsEnLigne: actifs.filter(a => a.online).length,
+      agentsTotal: actifs.length,
+      missionsTotal: db.missions.length,
+      missionsTerminees: db.missions.filter(m => m.status === 'terminee').length
+    });
+  }
 
   /* --- Fichiers statiques --- */
   if (p === '/admin' || p === '/admin.html') {

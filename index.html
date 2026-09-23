@@ -371,7 +371,10 @@
 <!-- ═══════ TOP ═══════ -->
 <div class="topbar">
   <div class="topbar-in">
-    <div class="logo"><img src="/klean-icon-192.png" alt="KLEAN" style="width:34px;height:34px;border-radius:10px;vertical-align:-10px;margin-right:4px;box-shadow:0 3px 10px rgba(7,110,79,.35)">KLEAN</div>
+    <div class="logo" style="display:flex;flex-direction:column;line-height:1.05">
+      <span style="display:flex;align-items:center"><img src="/klean-icon-192.png" alt="KLEAN" style="width:30px;height:30px;border-radius:9px;margin-right:5px;box-shadow:0 3px 10px rgba(7,110,79,.35)">KLEAN</span>
+      <small style="font-size:8.5px;font-weight:900;color:var(--pd);letter-spacing:1.2px;margin-top:3px;padding-left:2px">SERVICES À DOMICILE — CI 🇨🇮</small>
+    </div>
 
   </div>
 
@@ -811,11 +814,11 @@ const EXTRAS = [
 ];
 /* 🏙️ VILLES ACTIVES — Bouaké · Abidjan · Yamoussoukro · Touba · Kounahiri */
 const CITIES = [
-  {id:'bouake',     nom:'Bouaké',       actif:true, agents:48,  quartiers:['Air France','Commerce','Koko','Nimbo','Dar-Es-Salam','Ahougnanssou','Belleville','Kennedy','Houphouët-Boigny','Esso','Bro Fodio','N\'Gattakro','Sokoura','Municipalité']},
-  {id:'abidjan',    nom:'Abidjan',      actif:true, agents:120, quartiers:['Plateau','Cocody','Angré','Riviera','Marcory','Zone 4','Treichville','Koumassi','Port-Bouët','Vridi','Adjamé','Williamsville','Attecoubé','Yopougon','Abobo','Bingerville','Anyama','Brofodoumé','Songon']},
-  {id:'yamoussoukro',nom:'Yamoussoukro',actif:true, agents:22,  quartiers:['Habitat','Morofé','Dioulakro','Millionnaire','Tokpokro','Attiégouakro','Centre','Énergie']},
-  {id:'touba',      nom:'Touba',        actif:true, agents:8,   quartiers:['Touba-Centre','Dioulassoba','Centre-Commercial','Sokoura','Camp-Militaire','Gare Routière','Marché']},
-  {id:'kounahiri',  nom:'Kounahiri',    actif:true, agents:6,   quartiers:['Kounahiri-Centre','Dioulabougou','Sokoura','Camp-Militaire','Marché','Gare']},
+  {id:'bouake',     nom:'Bouaké',       actif:true, quartiers:['Air France','Commerce','Koko','Nimbo','Dar-Es-Salam','Ahougnanssou','Belleville','Kennedy','Houphouët-Boigny','Esso','Bro Fodio','N\'Gattakro','Sokoura','Municipalité']},
+  {id:'abidjan',    nom:'Abidjan',      actif:true, quartiers:['Plateau','Cocody','Angré','Riviera','Marcory','Zone 4','Treichville','Koumassi','Port-Bouët','Vridi','Adjamé','Williamsville','Attecoubé','Yopougon','Abobo','Bingerville','Anyama','Brofodoumé','Songon']},
+  {id:'yamoussoukro',nom:'Yamoussoukro',actif:true, quartiers:['Habitat','Morofé','Dioulakro','Millionnaire','Tokpokro','Attiégouakro','Centre','Énergie']},
+  {id:'touba',      nom:'Touba',        actif:true, quartiers:['Touba-Centre','Dioulassoba','Centre-Commercial','Sokoura','Camp-Militaire','Gare Routière','Marché']},
+  {id:'kounahiri',  nom:'Kounahiri',    actif:true, quartiers:['Kounahiri-Centre','Dioulabougou','Sokoura','Camp-Militaire','Marché','Gare']},
 ];
 const CITIES_SOON = ['San-Pédro','Daloa','Korhogo','Man','Gagnoa','Abengourou','Bondoukou','Dimbokro','Agboville','Divo','Grand-Bassam','Bingerville','Anyama','Odienné','Sassandra','Soubré','Adzopé','Tiassalé','Dabou','Grand-Lahou','Jacqueville','Alépé','Ayamé','Maféré','Tiapoum','Noé','Duekoué','Danané','Guiglo','Bangolo','Blolequin','Buyo','Issia','Oumé','Guitry','Toumodi','Didiévi','Tiébissou','Bocanda','Dabakala','Katiola','Ferkessédougou','Kong','Tengréla','Boundiali','Kouto',"M'Bengué",'Bouna','Séguéla','Zuenoula','Vavoua','Sinématiali','Bouaflé','Sinfra','Agnibilékrou','Mankono','Toulepleu','Taï','Facobly','Sipilou','Kuédougou','Tanda','Arrah','Bégoué','Dalao','Bounkani','Botro','Aklakro','Prikro','Touba','Ouangolodougou','Worodougou','Nassian','Doropo','Sandégué','Transua','Assuéfry'];
 function currentCity(){ return CITIES.find(x=>x.id===(c.city||'bouake')) || CITIES[0]; }
@@ -843,7 +846,8 @@ function setCity(id, silent){
   const _cc = $('#city-chip'); if(_cc) _cc.innerHTML = '📍 '+city.nom+' ▾';
   const svcN = $('#svc-city-name'); if(svcN) svcN.textContent = city.nom+' ▾';
   $('#hero-phase').innerHTML = '🇨🇮 Actif à '+city.nom;
-  $('#hero-agents-sub').textContent = 'Professionnels actifs à '+city.nom;
+  $('#hero-agents-sub').textContent = 'Professionnels inscrits à '+city.nom;
+  if(typeof refreshStats==='function') refreshStats();
   $('#hero-agents-n').textContent = (window._stats && window._stats.agentsTotal) || '—';
   $('#lbl-quart-city').textContent = '('+city.nom+')';
   $('#home-banner-p').textContent = 'Vous êtes à '+city.nom+' ? Recevez des missions près de chez vous, quand vous voulez.';
@@ -1924,29 +1928,39 @@ async function saveAccountCompletion(){
 function _accHeroHTML(){
   const proLinked = agent.apply && agent.apply.status === 'approved';
   const proName = ((agent.apply && agent.apply.nom) || agent.nom || 'Pro').split(' ')[0];
-  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-    <div style="background:var(--card2);border:1.5px solid var(--line);border-radius:15px;padding:13px 12px;text-align:center">
-      <div style="font-size:24px;margin-bottom:4px">👤</div>
-      <b style="display:block;font-size:12.5px;line-height:1.3">Créer mon<br>compte client</b>
-      ${client ? `
-      <div style="margin-top:9px"><span class="status st-ok" style="font-size:10.5px">✓ connecté : ${(client.nom||'&#39;').split(' ')[0]}</span><br>
-      <button class="btn-ghost" style="padding:8px 10px;margin-top:7px;font-size:12px;color:var(--danger)" onclick="clientLogout()">⏻ Se déconnecter</button></div>` : `
-      <div style="margin-top:9px;display:flex;flex-direction:column;gap:6px">
-        <button class="btn-main" style="padding:9px 8px;font-size:12.5px" onclick="accTab='register';renderAccount();setTimeout(()=>{const t=document.getElementById('acc-tabs-el');if(t)t.scrollIntoView({behavior:'smooth'})},80)">✨ Créer</button>
-        <button class="btn-line" style="padding:8px;font-size:12.5px" onclick="accTab='login';renderAccount();setTimeout(()=>{const t=document.getElementById('acc-tabs-el');if(t)t.scrollIntoView({behavior:'smooth'})},80)">🔑 Se connecter</button>
-      </div>`}
-    </div>
-    <div style="background:var(--card2);border:1.5px solid var(--line);border-radius:15px;padding:13px 12px;text-align:center">
-      <div style="font-size:24px;margin-bottom:4px">🧑‍💼</div>
-      <b style="display:block;font-size:12.5px;line-height:1.3">Créer compte<br>professionnel</b>
-      ${proLinked ? `
-      <div style="margin-top:9px"><span class="status st-ok" style="font-size:10.5px">✓ connecté : ${proName}</span><br>
-      <button class="btn-ghost" style="padding:8px 10px;margin-top:7px;font-size:12px;color:var(--danger)" onclick="agentLogout()">⏻ Se déconnecter</button></div>` : `
-      <div style="margin-top:9px;display:flex;flex-direction:column;gap:6px">
-        <button class="btn-main" style="padding:9px 8px;font-size:12.5px" onclick="setMode('agent')">📝 Créer</button>
-        <button class="btn-line" style="padding:8px;font-size:12.5px" onclick="goProConnect()">🔑 Se connecter</button>
-      </div>`}
-    </div>
+  const scrollForm = "setTimeout(function(){var t=document.getElementById('acc-forms-slot');if(t)t.scrollIntoView({behavior:'smooth'})},80)";
+  return `
+  <div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px;display:flex;align-items:center;gap:12px;margin-bottom:12px;box-shadow:var(--shadow)">
+    <span style="font-size:27px;flex:none">👤</span>
+    <span style="flex:1;min-width:0">
+      <b style="display:block;font-size:14px">Créer mon compte client</b>
+      <small style="color:var(--muted);font-size:11px;line-height:1.35;display:block">Réservez un pro, suivez-le, payez simplement</small>
+    </span>
+    ${client ? `
+    <span style="flex:none;text-align:center">
+      <span class="status st-ok" style="font-size:10.5px">✓ ${(client.nom||'').split(' ')[0]}</span><br>
+      <button class="btn-ghost" style="padding:8px 11px;margin-top:6px;font-size:12px;color:var(--danger)" onclick="clientLogout()">⏻ Se déconnecter</button>
+    </span>` : `
+    <span style="flex:none;display:flex;flex-direction:column;gap:6px">
+      <button class="btn-main" style="padding:9px 14px;font-size:12.5px" onclick="accTab='register';renderAccount();${scrollForm}">✨ Créer</button>
+      <button class="btn-line" style="padding:8px 11px;font-size:12px" onclick="accTab='login';renderAccount();${scrollForm}">🔑 Se connecter</button>
+    </span>`}
+  </div>
+  <div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px;display:flex;align-items:center;gap:12px;margin-bottom:14px;box-shadow:var(--shadow)">
+    <span style="font-size:27px;flex:none">🧑‍💼</span>
+    <span style="flex:1;min-width:0">
+      <b style="display:block;font-size:14px">Créer mon compte professionnel</b>
+      <small style="color:var(--muted);font-size:11px;line-height:1.35;display:block">Travaillez à votre rythme, missions près de chez vous</small>
+    </span>
+    ${proLinked ? `
+    <span style="flex:none;text-align:center">
+      <span class="status st-ok" style="font-size:10.5px">✓ ${proName}</span><br>
+      <button class="btn-ghost" style="padding:8px 11px;margin-top:6px;font-size:12px;color:var(--danger)" onclick="agentLogout()">⏻ Se déconnecter</button>
+    </span>` : `
+    <span style="flex:none;display:flex;flex-direction:column;gap:6px">
+      <button class="btn-main" style="padding:9px 14px;font-size:12.5px" onclick="setMode('agent')">📝 Créer</button>
+      <button class="btn-line" style="padding:8px 11px;font-size:12px" onclick="goProConnect()">🔑 Se connecter</button>
+    </span>`}
   </div>`;
 }
 function renderAccount(){
@@ -1977,11 +1991,7 @@ function renderAccount(){
     <button class="btn-line" style="color:var(--danger)" onclick="clientLogout()">⏻ <span>Se déconnecter</span></button>`;
     return;
   }
-  box.innerHTML = _accHeroHTML() + `
-  <div class="acc-tabs" id="acc-tabs-el">
-    <button class="${accTab==='register'?'sel':''}" onclick="accTab='register';renderAccount()">Créer un compte</button>
-    <button class="${accTab==='login'?'sel':''}" onclick="accTab='login';renderAccount()">Connexion</button>
-  </div>
+  box.innerHTML = _accHeroHTML() + `<div id="acc-forms-slot"></div>
   ${accTab==='register' ? `
   <div class="gate-card">
     <h4>✨ Créez votre compte KLEAN</h4>
@@ -2327,7 +2337,19 @@ function showInstallFab(){
 })();
 </script>
 <script src="net.js"></script>
-<script>fetch('/api/stats').then(r=>r.json()).then(s=>{window._stats=s;}).catch(()=>{});</script>
+<script>
+/* compteurs par ville : on demande au serveur le vrai nombre d'inscrits de la ville choisie — zéro s'il n'y a personne */
+async function refreshStats(){
+  const ci = (typeof currentCity==='function') ? currentCity() : null;
+  if(!ci){ setTimeout(refreshStats, 400); return; }
+  try{
+    const r = await fetch('/api/stats?ville='+encodeURIComponent(ci.nom)+'&quartiers='+encodeURIComponent((ci.quartiers||[]).join(',')));
+    if(r.ok) window._stats = await r.json();
+  }catch(e){ window._stats = window._stats || {agentsTotal:0, agentsEnLigne:0}; }
+  const n = document.getElementById('hero-agents-n'); if(n && window._stats) n.textContent = window._stats.agentsTotal;
+}
+refreshStats();
+</script>
 <style>
 #city-list{max-height:52vh;overflow-y:auto;padding-right:4px;-webkit-overflow-scrolling:touch}
 #city-list::-webkit-scrollbar{width:6px}
