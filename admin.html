@@ -16,6 +16,14 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
       if(document.body) document.body.insertBefore(bar, document.body.firstChild);
     }
     bar.textContent='📦 En base : '+(h.clientsTotal||0)+' client(s) · '+(h.agentsTotal||0)+' professionnel(s) · '+(h.missions||0)+' mission(s)  —  0 en ligne = personne n’a ouvert l’app';
+    fetch('/api/admin/inscrits',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json();}).then(function(p){
+      var ag=(p.agents||[]).map(function(a){return a.nom;}).filter(Boolean);
+      var cl=(p.clients||[]).map(function(c){return c.nom;}).filter(Boolean);
+      var extra=[];
+      if(ag.length) extra.push('Pros : '+ag.join(', '));
+      if(cl.length) extra.push('Clients : '+cl.join(', '));
+      if(extra.length) bar.innerHTML=bar.textContent+'<div style="font-size:14px;margin-top:6px;font-weight:800">'+extra.join(' · ')+'</div>';
+    }).catch(function(){});
     var sub=document.getElementById('k-agents-sub'); if(sub) sub.textContent='sur '+(h.agentsTotal||0)+' professionnel(s)';
     var c=document.getElementById('c-inscrits'); if(c) c.textContent=h.clientsTotal||0;
     var c2=document.getElementById('c-clients'); if(c2) c2.textContent=h.clientsTotal||0;
@@ -1099,14 +1107,6 @@ async function createPartner(){
   const r=await fetch('/api/admin/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel})});
   if(r.ok){ document.getElementById('pt-nom').value=''; document.getElementById('pt-tel').value=''; loadPdgExtras(); }
 }
-async function restoreTrash(id){ await fetch('/api/admin/trash/restore',{method:'POST',headers:{'CogExtras();
-}
-async function cancelPromo(id){ await fetch('/api/admin/promos/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); loadPdgExtras(); }
-async function createPartner(){
-  const nom=document.getElementById('pt-nom').value, tel=document.getElementById('pt-tel').value;
-  const r=await fetch('/api/admin/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel})});
-  if(r.ok){ document.getElementById('pt-nom').value=''; document.getElementById('pt-tel').value=''; loadPdgExtras(); }
-}
 async function restoreTrash(id){ await fetch('/api/admin/trash/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); loadPdgExtras(); loadAll(); }
 async function savePayDest(){
   const wave=(document.getElementById('pay-wave').value||'').split(',').map(s=>s.trim()).filter(Boolean);
@@ -1131,7 +1131,7 @@ setInterval(loadAll, 12000); // secours
    — chaque panneau se replie/déplie au clic sur son titre
    — la préférence est mémorisée sur cet appareil (lien : klean_hq_fold_v2) */
 (function(){
-  const STORE = 'klean_hq_fold_v3';
+  const STORE = 'klean_hq_fold_v4';
   function load(){ try{ return JSON.parse(localStorage.getItem(STORE) || '{}'); }catch(e){ return {}; } }
   function save(m){ try{ localStorage.setItem(STORE, JSON.stringify(m)); }catch(e){} }
   /* ouvert par défaut : le quotidien — fermé par défaut : tout ce qui est long/archivé */
@@ -1177,7 +1177,5 @@ setInterval(loadAll, 12000); // secours
   document.addEventListener && document.addEventListener('DOMContentLoaded', refresh);
 })();
 </script>
-</body>
-</html>
 </body>
 </html>
