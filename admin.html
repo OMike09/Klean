@@ -222,6 +222,7 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
         <div id="qz-winners" style="font-size:12px;margin-top:6px;color:var(--p)"></div>
       </div>
       <small id="ann-cur" style="display:block;margin-top:9px;color:var(--muted)">Aucune affiche en cours.</small>
+      <button type="button" onclick="openQuizClicks()" style="margin-top:10px;width:100%;background:rgba(255,138,0,.16);border:1.5px solid rgba(255,138,0,.5);color:#b36b00;font-weight:900;padding:11px 12px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:13.5px">👁 Voir qui a répondu (noms + choix)</button>
       <div id="field-chat-hq" style="margin-top:12px;background:var(--card2);border-radius:12px;padding:10px">
         <b style="font-size:12.5px">💬 Fil agents de terrain</b>
         <select id="fc-who" onchange="loadFieldChat()" style="width:100%;margin:6px 0;padding:8px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px"></select>
@@ -635,8 +636,12 @@ async function loadAnnonce(){
     const el = document.getElementById('ann-cur');
     if(!el) return;
     el.innerHTML = d && d.annonce
-      ? ('Affiche en cours : <b>'+( {maj:'✨ Mise à jour', info:'ℹ️ Information', alerte:'⚠️ Importante'} [d.annonce.type] || 'Info')+'</b> — « '+d.annonce.message+' » <br><span style="color:#8aa79a">publiée le '+(d.annonce.at||'').slice(0,10)+' par '+(d.annonce.par||'—')+' — version serveur '+(d.version||'')+'</span>')
+      ? ('Affiche en cours : <b>'+( {maj:'✨ Mise à jour', info:'ℹ️ Information', alerte:'⚠️ Importante', quiz:'🏆 Quiz'} [d.annonce.type] || 'Info')+'</b> — « '+d.annonce.message+' » <br><span style="color:#8aa79a">publiée le '+(d.annonce.at||'').slice(0,10)+' par '+(d.annonce.par||'—')+' — version serveur '+(d.version||'')+'</span>')
       : ('Aucune affiche en cours. <span style="color:#8aa79a">Version serveur : '+(d && d.version || '…')+'</span>');
+    if(d && d.annonce && d.annonce.type==='quiz'){
+      const qz=document.getElementById('ann-quiz'); if(qz) qz.style.display='block';
+      const sel=document.getElementById('ann-type'); if(sel) sel.value='quiz';
+    }
   }catch(e){}
 }
 async function publierAnnonce(){
@@ -674,8 +679,29 @@ async function loadQuizHQ(){
         : '<span style="color:var(--muted)">Aucun clic pour l’instant.</span>';
     }
     tickQuizCd(d.countdownEndsAt, d.countdownRevealed);
+    window._quizHQ = d;
+    const btn=document.querySelector('button[onclick="openQuizClicks()"]');
+    if(btn) btn.textContent = '👁 Voir qui a répondu — '+(d.nTotal||0)+' clic(s)';
   }catch(e){}
 }
+async function openQuizClicks(){
+  await loadQuizHQ();
+  const d=window._quizHQ||{};
+  const m=document.getElementById('qz-modal'); if(m) m.style.display='flex';
+  const st=document.getElementById('qz-modal-stats');
+  const letters=['A','B','C','D'];
+  const list=d.clicks||[];
+  const by={};
+  list.forEach(x=>{ by[x.choice]=(by[x.choice]||0)+1; });
+  if(st) st.textContent = (d.active?(d.question||'Quiz'):'Aucun quiz')+' — '+list.length+' personne(s). '+letters.map(L=> L+': '+(by[L]||0)).join(' · ');
+  const box=document.getElementById('qz-modal-list');
+  if(box){
+    box.innerHTML = list.length
+      ? list.map((x,i)=>'<div style="display:flex;gap:8px;align-items:center;padding:9px 8px;border-bottom:1px solid var(--line)"><span style="width:22px;color:var(--muted);font-size:11px">'+(i+1)+'</span><b style="flex:1">'+(x.nom||'Anonyme')+'</b><span style="background:rgba(255,138,0,.2);color:#b36b00;font-weight:900;padding:4px 10px;border-radius:99px">'+x.choice+'</span></div>').join('')
+      : '<div class="empty">Personne n’a encore cliqué.</div>';
+  }
+}
+function closeQuizClicks(){ const m=document.getElementById('qz-modal'); if(m) m.style.display='none'; }
 function tickQuizCd(ends, revealed){
   const el=document.getElementById('qz-cd'); if(!el) return;
   if(_qzTick){ clearInterval(_qzTick); _qzTick=null; }
@@ -1240,32 +1266,17 @@ setInterval(loadAll, 12000); // secours
   document.addEventListener && document.addEventListener('DOMContentLoaded', refresh);
 })();
 </script>
-</body>
-</html>
-);
-      if (!ic) {
-        ic = document.createElement('span');
-        ic.className = 'fold-ic';
-        h3.appendChild(ic);
-        h3.addEventListener('click', () => {
-          const f = !p.classList.contains('folded');
-          p.classList.toggle('folded', f);
-          const m = load(); m[k] = f; save(m);
-          ic.textContent = f ? '▸' : '▾';
-          ic.style.transform = f ? 'rotate(-90deg)' : '';
-        });
-      }
-      const folded = (k in mem) ? mem[k] : isFoldByDefault(h3.textContent || '');
-      p.classList.toggle('folded', folded);
-      ic.textContent = folded ? '▸' : '▾';
-      ic.style.transform = folded ? 'rotate(-90deg)' : '';
-    });
-  }
-  window.addEventListener('load', refresh);
-  /* re-annoter après chaque rechargement complet (les contenus arrivent en websock) */
-  setInterval(() => { if (document.querySelector('.panel .fold-ic') === null) refresh(); }, 4000);
-  document.addEventListener && document.addEventListener('DOMContentLoaded', refresh);
-})();
-</script>
+
+<div id="qz-modal" style="display:none;position:fixed;inset:0;z-index:80;background:rgba(10,18,14,.55);align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:420px;width:100%;max-height:86vh;overflow:auto;padding:16px 16px 18px;box-shadow:0 18px 50px rgba(0,0,0,.28)">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <b style="flex:1;font-size:16px">🏆 Réponses du quiz</b>
+      <button type="button" onclick="closeQuizClicks()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button>
+    </div>
+    <div id="qz-modal-stats" style="font-size:13px;font-weight:800;color:var(--amber);margin-bottom:8px"></div>
+    <div id="qz-modal-list" style="font-size:13px"></div>
+  </div>
+</div>
+
 </body>
 </html>

@@ -2410,7 +2410,8 @@ function quizWho(){
     const ag=JSON.parse(localStorage.getItem('k2_agent')||'null');
     if(ag && (ag.nom||ag.prenom||ag.tel1)) return {nom:(ag.prenom?ag.prenom+' ':'')+(ag.nom||ag.tel1||'Pro'), accountId:'AG-'+(ag.id||localStorage.getItem('k2_agentId')||ag.tel1||ag.nom)};
   }catch(e){}
-  return {nom:'Invité', accountId:'web'};
+  let gid=''; try{ gid=localStorage.getItem('k2_quiz_gid'); if(!gid){ gid='G-'+Date.now()+'-'+Math.random().toString(36).slice(2,7); localStorage.setItem('k2_quiz_gid', gid);} }catch(e){ gid='G-'+Date.now(); }
+  return {nom:'Invité', accountId:gid};
 }
 function quizMyPick(qid){
   try{ const p=JSON.parse(localStorage.getItem('k2_quiz_pick')||'null'); if(p && p.id===qid) return p.choice; }catch(e){}
@@ -2432,12 +2433,35 @@ function loadAffiche(){
 }
 loadAffiche();
 setInterval(loadAffiche, 1000);
-async function sendQuiz(i){
-  let who=''; try{ who=localStorage.getItem('klean_nom')||localStorage.getItem('klean_tel')||''; }catch(e){}
-  const r=await fetch('/api/quiz/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({choice:i, nom:who, deviceId:who||('web-'+Date.now())})});
-  const d=await r.json().catch(()=>({}));
+function markQuizOrange(i){
+  const qb=document.getElementById('quiz-box'); if(!qb) return;
+  qb.querySelectorAll('button[data-qi]').forEach(btn=>{
+    const on=Number(btn.getAttribute('data-qi'))===i;
+    btn.disabled=true;
+    btn.style.cursor='default';
+    btn.onclick=null;
+    if(on){
+      btn.style.background='#ff8a00';
+      btn.style.border='2px solid #cc6d00';
+      btn.style.color='#1a1204';
+      btn.style.boxShadow='0 0 0 3px rgba(255,138,0,.35)';
+      if(btn.textContent.indexOf('✓')<0) btn.appendChild(document.createTextNode('  ✓'));
+    } else {
+      btn.style.opacity='.55';
+    }
+  });
   const el=document.getElementById('quiz-ok');
-  if(el) el.textContent = d.ok ? ('🎉 '+(d.message||'Bonne réponse !')) : ('❌ '+(d.message||'Ce n’est pas ça'));
+  if(el){ el.textContent='Réponse enregistrée — un seul clic.'; el.style.color='#cc6d00'; el.style.fontWeight='800'; }
+}
+async function sendQuiz(i){
+  const qid=window._annonceId||'cur';
+  if(quizMyPick(qid)!=null) return;
+  try{ localStorage.setItem('k2_quiz_pick', JSON.stringify({id:qid, choice:i})); }catch(e){}
+  markQuizOrange(i);
+  const w=quizWho();
+  try{
+    await fetch('/api/quiz/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({choice:i, nom:w.nom, accountId:w.accountId, deviceId:w.accountId})});
+  }catch(e){}
 }
 </script>
 <script src="net.js"></script>
