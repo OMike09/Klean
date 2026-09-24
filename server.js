@@ -153,6 +153,8 @@ async function initStorage() {
   db.hqChat = db.hqChat || [];
   db.accountRequests = db.accountRequests || [];
   db.mutedChats = db.mutedChats || [];
+  db.fieldAgents = db.fieldAgents || [];
+  db.fieldChat = db.fieldChat || [];
   /* Pré-initialisation optionnelle du mot de passe via ADMIN_PIN (1er démarrage seulement) */
   if (!db.admin && process.env.ADMIN_PIN) {
     const salt = crypto.randomBytes(12).toString('hex');
@@ -543,14 +545,15 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const pw = b.password || b.pin || '';
     const ident = normIdent(b.ident || '');
+    const expect = (b.expect === 'gest' || ident) ? 'gest' : 'pdg';
     let who = null;
-    if (db.admin && !ident && hashPassword(db.admin.salt, pw) === db.admin.passHash) {
-      who = { t: adminToken(), qui: 'PDG', role: 'pdg', kind: 'hq_connexion' };
-    } else if (ident) {
+    if (expect === 'pdg') {
+      if (db.admin && hashPassword(db.admin.salt, pw) === db.admin.passHash)
+        who = { t: adminToken(), qui: 'PDG', role: 'pdg', kind: 'hq_connexion' };
+    } else {
       const ad = (db.admins || []).find(a => normIdent(a.ident) === ident || normIdent(a.nom) === ident);
-      if (ad && !ad.blocked && hashPassword(ad.salt, pw) === ad.passHash) {
+      if (ad && !ad.blocked && hashPassword(ad.salt, pw) === ad.passHash)
         who = { t: gestTokenOf(ad), qui: ad.nom, role: 'gest', kind: 'gest_connexion', ad };
-      }
     }
     if (who) {
       loginTries.delete(ip);
@@ -969,12 +972,16 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/admin/annonce' && req.method === 'POST') {
-    if (!pdgOnly(req, res)) return;
     const b = await readBody(req);
     const msg = String(b.message || '').trim().slice(0, 240);
     if (msg.length < 4) return sendJson(res, 400, { error: 'Message trop court' });
-    const type = ['maj', 'info', 'alerte'].includes(b.type) ? b.type : 'info';
-    db.annonce = { id: uid('AN'), message: msg, type, at: nowISO(), par: act(req) };
+    const type = ['maj', 'info', 'alerte', 'quiz'].includes(b.type) ? b.type : 'info';
+    const choices = Array.isArray(b.choices) ? b.choices.map(x => String(x).trim().slice(0, 80)).filter(Boolean).slice(0, 4) : [];
+    db.annonce = { id: uid('AN'), message: msg, type, at: nowISO(), par: act(req),
+      question: type === 'quiz' ? String(b.question || '').trim().slice(0, 180) : '',
+      choices: type === 'quiz' ? choices : [],
+      good: type === 'quiz' ? Math.max(0, Math.min(3, parseInt(b.good, 10) || 0)) : 0 };
+    db.quizAnswers = [];
     saveDb();
     auditLog('annonce_publiee', { type, par: act(req) });
     emitAdmin('annonce', '📣 Affiche publiée pour tous les utilisateurs');
@@ -1236,7 +1243,12 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === '/api/admin/field' && req.method === 'GET') {
     const list = (db.fieldAgents || []).filter(f => isPdg(req) || ownsRecord(req, f));
-    return sendJson(res, 200, list.map(f => ({ id: f.id, nom: f.nom, tel: f.tel, blocked: !!f.blocked, createdAt: f.createdAt, createdBy: f.createdBy })));
+    return sendJson(res, 200, list.map(f => {
+      const cls = (db.clients || []).filter(c => c.createdById === f.id);
+      const pros = (db.agents || []).filter(a => a.createdById === f.id);
+      const ca = cls.reduce((s, c) => s + (c.paiements || []).reduce((x, p) => x + (p.montant || 0), 0) + (db.missions || []).filter(m => m.client && (m.client.deviceId === c.deviceId || m.client.tel === c.tel) && m.status === 'terminee').reduce((x, m) => x + (m.prixTotal || 0), 0), 0);
+      return { id: f.id, nom: f.nom, tel: f.tel, blocked: !!f.blocked, createdAt: f.createdAt, createdBy: f.createdBy, nClients: cls.length, nPros: pros.length, ca };
+    }));
   }
   if (p === '/api/admin/field' && req.method === 'POST') {
     const b = await readBody(req);
@@ -1261,6 +1273,93 @@ const server = http.createServer(async (req, res) => {
     else f.blocked = false;
     saveDb();
     return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/admin/field-chat' && req.method === 'GET') {
+    const fid = String(url.searchParams.get('id') || '');
+    const f = (db.fieldAgents || []).find(x => x.id === fid);
+    if (!f) return sendJson(res, 404, {});
+    if (!isPdg(req) && !ownsRecord(req, f)) return sendJson(res, 403, {});
+    const messages = (db.fieldChat || []).filter(m => m.fieldId === fid).slice(-200);
+    return sendJson(res, 200, { messages });
+  }
+  if (p === '/api/admin/field-chat' && req.method === 'POST') {
+    const b = await readBody(req);
+    const f = (db.fieldAgents || []).find(x => x.id === b.id);
+    if (!f) return sendJson(res, 404, {});
+    if (!isPdg(req) && !ownsRecord(req, f)) return sendJson(res, 403, {});
+    const text = String(b.text || '').trim().slice(0, 500);
+    if (!text) return sendJson(res, 400, { error: 'Message vide' });
+    db.fieldChat = db.fieldChat || [];
+    db.fieldChat.push({ id: uid('FC'), fieldId: f.id, from: 'hq', par: act(req), text, at: nowISO() });
+    saveDb();
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (p === '/api/quiz/answer' && req.method === 'POST') {
+    const b = await readBody(req);
+    const a = db.annonce;
+    if (!a || a.type !== 'quiz') return sendJson(res, 400, { error: 'Pas de quiz en cours' });
+    const choice = parseInt(b.choice, 10);
+    const ok = choice === a.good;
+    db.quizAnswers = db.quizAnswers || [];
+    db.quizAnswers.push({ at: nowISO(), nom: String(b.nom || '').slice(0, 40), choice, ok });
+    saveDb();
+    return sendJson(res, 200, { ok, message: ok ? 'Bonne réponse !' : 'Mauvaise réponse, retentez.' });
+  }
+
+  if (p === '/api/field/login' && req.method === 'POST') {
+    const b = await readBody(req);
+    const tel = String(b.tel || '').replace(/\D/g, '');
+    const f = (db.fieldAgents || []).find(x => x.tel === tel && !x.blocked);
+    if (!f || hashPassword(f.salt, b.password || '') !== f.passHash) return sendJson(res, 401, { error: 'Téléphone ou mot de passe incorrect' });
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_field=' + fieldTokenOf(f) + '; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=2592000' });
+    return res.end(JSON.stringify({ ok: true, nom: f.nom }));
+  }
+  if (p === '/api/field/clients' && req.method === 'POST') {
+    const fid = fieldIdentity(req); if (!fid) return sendJson(res, 401, { error: 'Connectez-vous' });
+    req._forceField = fid;
+    const b = await readBody(req);
+    const nom = String(b.nom || '').trim();
+    const tel = String(b.tel || '').replace(/\D/g, '');
+    if (nom.length < 2 || tel.length < 8) return sendJson(res, 400, { error: 'Nom + téléphone' });
+    if (db.clients.find(c => c.tel === tel)) return sendJson(res, 409, { error: 'Numéro déjà client' });
+    const pw = 'Klean-' + Math.floor(1000 + Math.random() * 9000) + '!';
+    const salt = crypto.randomBytes(12).toString('hex');
+    const cl = { id: uid('CL'), nom, tel, ville: String(b.ville || '').slice(0, 60), quartier: '', salt, passHash: hashPassword(salt, pw), createdAt: nowISO(), createdBy: fid.nom, createdById: fid.id, createdByGestId: fid.gestId || null };
+    db.clients.push(cl); saveDb();
+    return sendJson(res, 201, { ok: true, tel, password: pw });
+  }
+  if (p === '/api/field/agents' && req.method === 'POST') {
+    const fid = fieldIdentity(req); if (!fid) return sendJson(res, 401, { error: 'Connectez-vous' });
+    const b = await readBody(req);
+    const prenom = String(b.prenom || '').trim(), nom = String(b.nom || '').trim();
+    const tel1 = String(b.tel || b.tel1 || '').replace(/\D/g, '');
+    if (prenom.length < 2 || nom.length < 2 || tel1.length < 8) return sendJson(res, 400, { error: 'Prénom, nom, téléphone' });
+    if (db.agents.find(a => String(a.tel1 || a.tel || '').replace(/\D/g, '') === tel1 && a.status !== 'rejected')) return sendJson(res, 409, { error: 'Numéro déjà pro' });
+    const pin = String(Math.floor(1000 + Math.random() * 9000));
+    const na = { id: uid('AG'), nom: (prenom + ' ' + nom).trim(), prenom, tel: tel1, tel1, quartier: '', ville: String(b.ville || '').slice(0, 60), status: 'approved', approvedAt: nowISO(), createdAt: nowISO(), createdBy: fid.nom, createdById: fid.id, createdByGestId: fid.gestId || null, claimPin: pin, online: false, kind: 'pro', services: [], hist: [{ at: Date.now(), by: fid.nom, ev: 'Créé par agent de terrain' }] };
+    db.agents.push(na); saveDb();
+    return sendJson(res, 201, { ok: true, tel: tel1, pin });
+  }
+  if (p === '/api/field/chat' && req.method === 'GET') {
+    const fid = fieldIdentity(req); if (!fid) return sendJson(res, 401, {});
+    const messages = (db.fieldChat || []).filter(m => m.fieldId === fid.id).slice(-200);
+    return sendJson(res, 200, { messages });
+  }
+  if (p === '/api/field/chat' && req.method === 'POST') {
+    const fid = fieldIdentity(req); if (!fid) return sendJson(res, 401, {});
+    const b = await readBody(req);
+    const text = String(b.text || '').trim().slice(0, 500);
+    if (!text) return sendJson(res, 400, { error: 'Message vide' });
+    db.fieldChat = db.fieldChat || [];
+    db.fieldChat.push({ id: uid('FC'), fieldId: fid.id, from: 'field', gestNom: fid.nom, text, at: nowISO() });
+    saveDb();
+    emitAdmin('admin', '🧭 ' + fid.nom + ' : ' + text.slice(0, 40));
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/logout' && req.method === 'POST') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_field=; Path=/; Max-Age=0' });
+    return res.end('{"ok":true}');
   }
 
   /* ─── Requête gestionnaire → PDG (bloquer/supprimer un compte) ─── */
@@ -1431,14 +1530,23 @@ const server = http.createServer(async (req, res) => {
     });
     return;
   }
-  if (p === '/admin' || p === '/admin.html') {
-    // pas de redirection (certains proxies la cassent) : on sert directement le bon HTML
-    const target = path.join(__dirname, isAdminReq(req) ? 'admin.html' : 'admin-login.html');
-    fs.readFile(target, (err, data) => {
+  const sendPage = (file) => {
+    fs.readFile(path.join(__dirname, file), (err, data) => {
       if (err) { res.writeHead(404); res.end('404'); return; }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(data);
     });
+  };
+  if (p === '/pdg' || p === '/admin' || p === '/admin.html' || p === '/admin-login.html') {
+    const id = hqIdentity(req);
+    if (id && id.role === 'gest') { res.writeHead(302, { Location: '/gest' }); return res.end(); }
+    sendPage((id && id.role === 'pdg') ? 'admin.html' : 'admin-login.html');
+    return;
+  }
+  if (p === '/gest' || p === '/gest-login.html') {
+    const id = hqIdentity(req);
+    if (id && id.role === 'pdg') { res.writeHead(302, { Location: '/pdg' }); return res.end(); }
+    sendPage((id && id.role === 'gest') ? 'admin.html' : 'gest-login.html');
     return;
   }
   let file = p === '/' ? '/index.html' : p;

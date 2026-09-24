@@ -158,19 +158,43 @@
 
   <!-- 📣 Affiche pour tous les utilisateurs (mise à jour, information, annonce) -->
   <div class="panel" style="margin-bottom:14px" id="panel-ann">
-    <h3>📣 Affiche à tous les utilisateurs</h3>
+    <h3>📣 Affiche aux utilisateurs</h3>
     <div class="body" style="padding:12px 14px">
-      <input id="ann-msg" maxlength="240" placeholder="Ex : Mise à jour ce soir à 22 h — 5 minutes d'interruption" style="width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.4">Visible sur l’accueil. Choisissez <b>🏆 Quiz</b> pour une question à choix sous le bandeau défilant.</p>
+      <input id="ann-msg" maxlength="240" placeholder="Texte de l’affiche (défile sur l’accueil) *" style="width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-        <select id="ann-type" style="flex:1;min-width:130px;padding:10px 11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">
+        <select id="ann-type" onchange="document.getElementById('ann-quiz').style.display=this.value==='quiz'?'block':'none'" style="flex:1;min-width:130px;padding:10px 11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">
           <option value="maj">✨ Mise à jour</option>
           <option value="info">ℹ️ Information</option>
           <option value="alerte">⚠️ Importante</option>
+          <option value="quiz">🏆 Quiz</option>
         </select>
         <button class="btn-main" style="flex:none" onclick="publierAnnonce()">📢 Publier</button>
         <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:11px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="retirerAnnonce()">✕ Retirer</button>
       </div>
+      <div id="ann-quiz" style="display:none;margin-top:8px;background:var(--card2);border-radius:12px;padding:10px">
+        <input id="qz-q" maxlength="180" placeholder="Question du quiz *" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px;margin-bottom:6px">
+        <input id="qz-a" placeholder="Choix A *" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px;margin-bottom:5px">
+        <input id="qz-b" placeholder="Choix B *" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px;margin-bottom:5px">
+        <input id="qz-c" placeholder="Choix C" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px;margin-bottom:5px">
+        <input id="qz-d" placeholder="Choix D" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px;margin-bottom:5px">
+        <select id="qz-ok" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px">
+          <option value="0">Bonne réponse : A</option>
+          <option value="1">Bonne réponse : B</option>
+          <option value="2">Bonne réponse : C</option>
+          <option value="3">Bonne réponse : D</option>
+        </select>
+      </div>
       <small id="ann-cur" style="display:block;margin-top:9px;color:var(--muted)">Aucune affiche en cours.</small>
+      <div id="field-chat-hq" style="margin-top:12px;background:var(--card2);border-radius:12px;padding:10px">
+        <b style="font-size:12.5px">💬 Fil agents de terrain</b>
+        <select id="fc-who" onchange="loadFieldChat()" style="width:100%;margin:6px 0;padding:8px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px"></select>
+        <div id="fc-msgs" style="max-height:140px;overflow:auto;font-size:12px;margin-bottom:6px"></div>
+        <div style="display:flex;gap:6px">
+          <input id="fc-txt" placeholder="Répondre…" style="flex:1;padding:9px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px">
+          <button class="btn-main" style="flex:none;padding:9px 12px" onclick="sendFieldChat()">Envoyer</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -388,7 +412,7 @@ function enterDemo(){
 
 async function fetchJ(url){
   const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
-  if(r.status === 401){ location.href = '/admin-login.html'; throw 0; }
+  if(r.status === 401){ location.href = (location.pathname.indexOf('/gest')>=0?'/gest':'/pdg'); throw 0; }
   if(!r.ok) throw 0;
   return r.json();
 }
@@ -443,7 +467,7 @@ async function changePwd(){
 async function logout(){
   localStorage.removeItem('k2_hq_ok');
   await fetch('/api/admin/logout', {method:'POST'}).catch(()=>{});
-  location.href = '/admin-login.html';
+  location.href = (ME && ME.role==='gest') ? '/gest' : '/pdg';
 }
 function renderOverview(o){
   setLive(true);
@@ -518,8 +542,49 @@ async function reassignMission(id, clientNom){
   alert('✅ Mission remise en circulation !\nLes autres professionnels viennent d\'être avertis.');
   loadAll();
 }
+async function createField(){
+  const nom=((document.getElementById('fd-nom')||{}).value||'').trim();
+  const tel=((document.getElementById('fd-tel')||{}).value||'').trim();
+  const r=await fetch('/api/admin/field',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  alert('🧭 Agent créé\\nNom : '+d.nom+'\\nTél : '+d.tel+'\\nMot de passe : '+d.password+'\\nLien : '+location.origin+'/field');
+  if(document.getElementById('fd-nom')) document.getElementById('fd-nom').value='';
+  loadFields();
+}
+async function loadFields(){
+  const r=await fetch('/api/admin/field'); if(!r.ok) return;
+  const list=await r.json();
+  const el=document.getElementById('field-list'); if(!el) return;
+  const sel=document.getElementById('fc-who');
+  if(sel){ const cur=sel.value; sel.innerHTML='<option value=\"\">— choisir un agent —</option>'+(list||[]).map(f=>'<option value=\"'+f.id+'\">'+f.nom+' · '+f.tel+'</option>').join(''); if(cur) sel.value=cur; }
+  el.innerHTML=(list||[]).map(f=>`<div class="agrow" style="align-items:flex-start">
+    <div style="flex:1"><b>${f.nom}</b> ${f.blocked?'<span class="badge" style="background:rgba(255,107,107,.16);color:var(--red)">BLOQUÉ</span>':''}<br>
+    <small>📞 ${f.tel} · 👤 ${f.nClients||0} client(s) · 🧑‍💼 ${f.nPros||0} pro(s) · 💸 ${fmt(f.ca||0)}</small></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:10px;font-weight:800;padding:6px 8px;border-radius:8px;cursor:pointer" onclick="fieldAct('${f.id}','${f.blocked?'unblock':'block'}')">${f.blocked?'✅':'🔒'}</button>
+      <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10px;font-weight:800;padding:6px 8px;border-radius:8px;cursor:pointer" onclick="fieldAct('${f.id}','delete')">🗑️</button>
+    </div></div>`).join('') || '<div class="empty">Aucun agent de terrain.</div>';
+}
+async function fieldAct(id, act){
+  if(act==='delete' && !confirm('Supprimer cet agent de terrain ?')) return;
+  await fetch('/api/admin/field/'+id+'/'+act,{method:'POST'});
+  loadFields();
+}
+async function loadFieldChat(){
+  const id=(document.getElementById('fc-who')||{}).value; if(!id) return;
+  const r=await fetch('/api/admin/field-chat?id='+encodeURIComponent(id)); if(!r.ok) return;
+  const d=await r.json();
+  const box=document.getElementById('fc-msgs'); if(!box) return;
+  box.innerHTML=(d.messages||[]).map(m=>'<div style="margin:4px 0"><b>'+(m.from==='hq'?(m.par||'HQ'):'terrain')+'</b> — '+m.text+'</div>').join('')||'<span style="color:var(--muted)">Aucun message</span>';
+}
+async function sendFieldChat(){
+  const id=(document.getElementById('fc-who')||{}).value, text=((document.getElementById('fc-txt')||{}).value||'').trim();
+  if(!id||!text) return alert('Choisissez un agent et écrivez');
+  await fetch('/api/admin/field-chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,text})});
+  document.getElementById('fc-txt').value=''; loadFieldChat();
+}
 async function loadAnnonce(){
-  if(ME && ME.role !== 'pdg'){ const p=document.getElementById('panel-ann'); if(p) p.style.display='none'; return; }
   try{
     const d = await fetch('/api/annonce', {cache:'no-store'}).then(r=>r.json());
     const el = document.getElementById('ann-cur');
@@ -546,10 +611,19 @@ async function retirerAnnonce(){
   loadAnnonce();
 }
 /* 🛡️ Matrice des rôles à l'écran : si connecté GESTIONNAIRE, tout ce qui est PDG disparaît */
+function openAffichePanel(){
+  const p=document.getElementById('panel-ann'); if(!p) return;
+  p.style.display='block';
+  p.classList.remove('folded');
+  const ic=p.querySelector('.fold-ic'); if(ic){ ic.textContent='▾'; ic.style.transform=''; }
+  p.scrollIntoView({behavior:'smooth', block:'start'});
+  const sel=document.getElementById('ann-type'); if(sel) sel.focus();
+}
 function applyRole(){
+  const pan=document.getElementById('panel-ann'); if(pan) pan.style.display='block';
   if(ME && ME.role !== 'pdg'){
     document.body.classList.add('role-gest');
-    ['panel-cfg','panel-audit','panel-ann','panel-ca7'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display='none'; });
+    ['panel-cfg','panel-audit','panel-ca7'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display='none'; });
     ['k-ca','k-comm','c-ca','c-comm','c-gains'].forEach(id=>{
       const el=document.getElementById(id); if(!el) return;
       const card=el.closest('.kpi') || el.closest('.chip') || el.parentElement;
@@ -984,6 +1058,14 @@ async function createPartner(){
   const r=await fetch('/api/admin/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel})});
   if(r.ok){ document.getElementById('pt-nom').value=''; document.getElementById('pt-tel').value=''; loadPdgExtras(); }
 }
+async function restoreTrash(id){ await fetch('/api/admin/trash/restore',{method:'POST',headers:{'CogExtras();
+}
+async function cancelPromo(id){ await fetch('/api/admin/promos/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); loadPdgExtras(); }
+async function createPartner(){
+  const nom=document.getElementById('pt-nom').value, tel=document.getElementById('pt-tel').value;
+  const r=await fetch('/api/admin/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel})});
+  if(r.ok){ document.getElementById('pt-nom').value=''; document.getElementById('pt-tel').value=''; loadPdgExtras(); }
+}
 async function restoreTrash(id){ await fetch('/api/admin/trash/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); loadPdgExtras(); loadAll(); }
 async function savePayDest(){
   const wave=(document.getElementById('pay-wave').value||'').split(',').map(s=>s.trim()).filter(Boolean);
@@ -1008,12 +1090,12 @@ setInterval(loadAll, 12000); // secours
    — chaque panneau se replie/déplie au clic sur son titre
    — la préférence est mémorisée sur cet appareil (lien : klean_hq_fold_v2) */
 (function(){
-  const STORE = 'klean_hq_fold_v2';
+  const STORE = 'klean_hq_fold_v3';
   function load(){ try{ return JSON.parse(localStorage.getItem(STORE) || '{}'); }catch(e){ return {}; } }
   function save(m){ try{ localStorage.setItem(STORE, JSON.stringify(m)); }catch(e){} }
   /* ouvert par défaut : le quotidien — fermé par défaut : tout ce qui est long/archivé */
-  const FOLD_BY_DEFAULT = ['équipe dirigeante', 'affiche', "chiffre d'affaires", 'réglages', "journal d'audit", 'journal temps réel', 'professionnels', 'personnes inscrites'];
-  const OPEN_BY_DEFAULT = ['vérification', 'support', 'missions'];
+  const FOLD_BY_DEFAULT = ['équipe dirigeante', "chiffre d'affaires", 'réglages', "journal d'audit", 'journal temps réel', 'professionnels', 'personnes inscrites'];
+  const OPEN_BY_DEFAULT = ['vérification', 'support', 'missions', 'affiche'];
   function isFoldByDefault(titre){
     const t = (titre || '').toLowerCase();
     if (OPEN_BY_DEFAULT.some(k => t.includes(k))) return false;
@@ -1056,46 +1138,5 @@ setInterval(loadAll, 12000); // secours
 </script>
 </body>
 </html>
-ssions'];
-  function isFoldByDefault(titre){
-    const t = (titre || '').toLowerCase();
-    if (OPEN_BY_DEFAULT.some(k => t.includes(k))) return false;
-    return FOLD_BY_DEFAULT.some(k => t.includes(k));
-  }
-  function keyOf(panel, i, titre){
-    if (panel.id) return panel.id;
-    return 'panel-' + i + '-' + (titre || '').toLowerCase().replace(/[^a-zàâéèêëâôûùç]+/gi, '-').slice(0, 30);
-  }
-  function refresh(){
-    const mem = load();
-    document.querySelectorAll('.panel').forEach((p, i) => {
-      const h3 = p.querySelector('h3');
-      if (!h3) return;
-      const k = keyOf(p, i, h3.textContent || '');
-      let ic = h3.querySelector('.fold-ic');
-      if (!ic) {
-        ic = document.createElement('span');
-        ic.className = 'fold-ic';
-        h3.appendChild(ic);
-        h3.addEventListener('click', () => {
-          const f = !p.classList.contains('folded');
-          p.classList.toggle('folded', f);
-          const m = load(); m[k] = f; save(m);
-          ic.textContent = f ? '▸' : '▾';
-          ic.style.transform = f ? 'rotate(-90deg)' : '';
-        });
-      }
-      const folded = (k in mem) ? mem[k] : isFoldByDefault(h3.textContent || '');
-      p.classList.toggle('folded', folded);
-      ic.textContent = folded ? '▸' : '▾';
-      ic.style.transform = folded ? 'rotate(-90deg)' : '';
-    });
-  }
-  window.addEventListener('load', refresh);
-  /* re-annoter après chaque rechargement complet (les contenus arrivent en websock) */
-  setInterval(() => { if (document.querySelector('.panel .fold-ic') === null) refresh(); }, 4000);
-  document.addEventListener && document.addEventListener('DOMContentLoaded', refresh);
-})();
-</script>
 </body>
 </html>
