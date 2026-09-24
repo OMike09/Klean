@@ -556,6 +556,7 @@
     <h2>Recherche d'un professionnel…</h2>
     <p id="search-msg">📡 Professionnels disponibles autour de vous…</p>
   </div>
+  <div id="match-board" style="margin:0 16px 12px"></div>
   <div class="found-card" id="found-card">
     <div class="agent-row" id="found-agent"></div>
   </div>
@@ -640,6 +641,7 @@
       <div><b id="online-title">Vous êtes hors ligne</b><small id="online-sub">Activez pour recevoir des missions autour de vous</small></div>
     </div>
     <div id="push-slot" style="margin-top:10px"></div>
+    <div id="pro-roam" style="margin-top:12px"></div>
 
     <div class="gain-grid">
       <div class="gain-card"><span>💰 Gains aujourd'hui</span><b id="gain-today">0 F</b><small>votre part : 75%</small></div>
@@ -865,6 +867,7 @@ function setCity(id, silent){
   $('#lbl-quart-city').textContent = '('+city.nom+')';
   $('#home-banner-p').textContent = 'Vous êtes à '+city.nom+' ? Recevez des missions près de chez vous, quand vous voulez.';
   renderQuartiers(); if($('#city-list')) renderCityModal(); renderHomeRoad();
+  if(typeof loadHomeEngine==='function') loadHomeEngine();
   if(!silent) toast('📍 '+city.nom+((window._stats&&window._stats.agentsEnLigne!=null)?' — '+window._stats.agentsEnLigne+' professionnel(s) en ligne maintenant':''));
 }
 function cityInfo(){ renderCityModal(); $('#city-modal-bg').classList.add('show'); }
@@ -1536,13 +1539,14 @@ function renderAgentDash(){
   $('#online-card').classList.toggle('on', online);
   $('#online-switch').classList.toggle('on', online);
   $('#online-title').textContent = online ? '🟢 Vous êtes en ligne' : 'Vous êtes hors ligne';
-  $('#online-sub').textContent = online ? 'Les demandes près de '+agent.quartier+' arrivent automatiquement' : 'Activez pour recevoir des missions autour de vous';
+  $('#online-sub').textContent = online ? 'Actif partout où vous allez — votre métier est visible dans toute la Côte d’Ivoire' : 'Activez pour être repérable partout (GPS) ou par numéro (sans GPS)';
   $('#gain-today').textContent = fmt(agent.gains.today);
   $('#gain-total').textContent = fmt(agent.gains.total);
   $('#gain-comm').textContent = fmt(agent.gains.comm);
   $('#agent-rating').textContent = agent.missionsDone ? agent.rating.toFixed(1)+' ★' : '—';
   $('#agent-missions-n').textContent = agent.missionsDone+' mission'+(agent.missionsDone>1?'s':'');
   renderMissionPanel();
+  if(typeof loadProRoam==='function') loadProRoam();
 }
 /* ═════════ CANDIDATURE AGENT (vérifiée par le propriétaire) ═════════ */
 agent.apply = agent.apply || {status: agent.nom ? 'approved' : 'none', agentId: localStorage.getItem('k2_agentId')||null, reason:''};

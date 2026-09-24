@@ -118,7 +118,7 @@ async function netLaunchSearch(){
     if(typeof client!=='undefined' && client && client.token) headers['X-Client-Token'] = client.token;
     const r = await fetch('/api/missions', {
       method:'POST', headers,
-      body: JSON.stringify({...c, prixTotal:p.total, deviceId:NET.deviceId})
+      body: JSON.stringify({...c, prixTotal:p.total, deviceId:NET.deviceId, ville: (typeof cityName==='function'? cityName(c.city): (c.city||'')), cityNom: (typeof cityName==='function'? cityName(c.city): (c.city||''))})
     });
     created = await r.json();
   }catch(e){ return toast('Serveur injoignable — réessayez'); }
@@ -130,18 +130,87 @@ async function netLaunchSearch(){
   };
   bookings.unshift({...mission}); saveAll();
   showView('view-search', document.querySelector('#nav-client .nav-btn:nth-child(3)'), 'client');
-  document.querySelector('#search-msg').textContent = '📡 Demande diffusée aux agents en ligne à '+ (typeof cityName==='function'? cityName(c.city) : 'votre ville') +'…';
+  document.querySelector('#search-msg').textContent = '📡 Demande envoyée dans votre ville — GPS d’abord, sinon numéros pour appeler…';
   wsSend({type:'subscribe_mission', missionId: mission.id});
+  startMatchBoard(mission.id, typeof cityName==='function'? cityName(c.city): (c.city||''));
   clearTimeout(NET.searchTimeout);
   NET.searchTimeout = setTimeout(()=>{
     if(mission && mission.status==='recherche'){
-      document.querySelector('#search-msg').textContent = '⏳ Aucun agent n\'a encore accepté — la demande reste diffusée…';
+      document.querySelector('#search-msg').textContent = '🌍 Élargi à toute la Côte d’Ivoire — GPS ou appel…';
+      startMatchBoard(mission.id, typeof cityName==='function'? cityName(c.city): (c.city||''), 'all');
     }
-  }, 45000);
+  }, 25000);
+}
+function startMatchBoard(missionId, ville, scope){
+  clearInterval(NET.matchIv);
+  const paint = async ()=>{
+    const box=document.getElementById('match-board'); if(!box) return;
+    try{
+      const headers={};
+      if(typeof client!=='undefined' && client && client.token) headers['X-Client-Token']=client.token;
+      const q='ville='+encodeURIComponent(ville||'')+'&missionId='+encodeURIComponent(missionId||'')+'&scope='+(scope||'city')+(typeof c!=='undefined'&&c.lat?('&lat='+c.lat+'&lng='+c.lng):'');
+      const d=await fetch('/api/match?'+q,{headers, cache:'no-store'}).then(r=>r.json());
+      const row=(list, title)=>{
+        if(!list||!list.length) return '';
+        return '<b style="display:block;margin:10px 0 6px;font-size:13px">'+title+'</b>'+list.map(p=>{
+          const km = p.hasGps && p.distKm!=null ? ('📡 '+p.distKm+' km') : '📞 Pas de GPS';
+          const tel = p.telAffiche && p.tel ? ('<a href="tel:+225'+p.tel.replace(/^225/,'')+'" style="display:inline-block;margin-top:6px;background:#ff8a00;color:#1a1204;font-weight:900;padding:8px 12px;border-radius:10px;text-decoration:none">📞 Appeler '+p.tel+'</a>') : '<span style="font-size:11px;color:#6b7c73">En attente d’acceptation GPS</span>';
+          return '<div style="background:#fff;border:1.5px solid #e4eae7;border-radius:14px;padding:10px 12px;margin-bottom:8px"><b>'+(p.nom||'Pro')+'</b> '+(p.online?'<span style="color:#0da678;font-size:11px;font-weight:800">● en ligne</span>':'<span style="color:#6b7c73;font-size:11px">hors ligne</span>')+'<br><small>'+(p.ville||'')+(p.quartier?' · '+p.quartier:'')+' · '+km+'</small><div>'+tel+'</div></div>';
+        }).join('');
+      };
+      box.innerHTML = '<div style="background:#fff;border-radius:16px;padding:12px;border:1.5px solid #e4eae7"><b style="font-size:14px">Moteur KLEAN — mise en contact</b><p style="font-size:12px;color:#6b7c73;margin:4px 0 0">'+(d.nOnline||0)+' pro(s) en ligne · '+(d.nSame||0)+' dans votre ville · '+(d.nOther||0)+' ailleurs</p>'+row(d.sameCity,'🏙️ Dans votre ville')+row(d.otherCities,'🌍 Autres villes')+'</div>';
+    }catch(e){}
+  };
+  paint();
+  NET.matchIv = setInterval(paint, 4000);
+}
+function matchCardHTML(p){
+  const km = p.hasGps && p.distKm!=null ? ('📡 '+p.distKm+' km') : '📞 Sans GPS';
+  const tel = (p.tel||'').replace(/\D/g,'');
+  const call = (p.telAffiche && tel)
+    ? ('<a href="tel:+225'+tel.replace(/^225/,'')+'" style="display:inline-block;margin:6px 6px 0 0;background:#ff8a00;color:#1a1204;font-weight:900;padding:8px 12px;border-radius:10px;text-decoration:none">📞 '+tel+'</a>'
+      +'<a href="https://wa.me/225'+tel.replace(/^225/,'')+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;background:#25d366;color:#fff;font-weight:900;padding:8px 12px;border-radius:10px;text-decoration:none">💬 WhatsApp</a>')
+    : '<span style="font-size:11.5px;color:#0a8a62;font-weight:800">📡 GPS actif — réservez, il reçoit la demande</span>';
+  const metier=(p.services&&p.services.length)?p.services.slice(0,3).join(', '):'';
+  return '<div style="background:#fff;border:1.5px solid #e4eae7;border-radius:14px;padding:10px 12px;margin-bottom:8px"><b>'+(p.nom||'Pro')+'</b> '+(p.online?'<span style="color:#0da678;font-size:11px;font-weight:800">● en ligne</span>':'<span style="color:#6b7c73;font-size:11px">hors ligne</span>')+'<br><small>'+(p.ville||'')+(p.quartier?' · '+p.quartier:'')+' · '+km+(metier?' · '+metier:'')+'</small><div>'+call+'</div></div>';
+}
+async function loadHomeEngine(){
+  const box=document.getElementById('engine-home'); if(!box) return;
+  const ville = (typeof cityName==='function' && typeof c!=='undefined') ? cityName(c.city) : '';
+  try{
+    const headers={}; if(typeof client!=='undefined' && client && client.token) headers['X-Client-Token']=client.token;
+    const svc=(typeof c!=='undefined'&&c.service)?c.service:'';
+    const d=await fetch('/api/match?ville='+encodeURIComponent(ville)+'&scope=all&service='+encodeURIComponent(svc)+(typeof c!=='undefined'&&c.lat?('&lat='+c.lat+'&lng='+c.lng):''),{headers,cache:'no-store'}).then(r=>r.json());
+    const empty='<p style="font-size:12.5px;color:#6b7c73;margin:8px 0 0">Aucun professionnel inscrit ici pour l’instant. Changez de ville ou réservez — la demande partira dès qu’un pro est en ligne.</p>';
+    box.innerHTML = '<div style="background:#fff;border-radius:16px;padding:12px;border:1.5px solid #e4eae7"><b style="font-size:14.5px">📍 Moteur KLEAN — vous retrouver</b><p style="font-size:12px;color:#6b7c73;margin:4px 0 8px">Même ville d’abord (GPS ou appel). Puis les autres villes. Sans GPS, le numéro s’affiche.</p>'
+      + (d.sameCity&&d.sameCity.length? '<b style="font-size:13px">🏙️ '+ville+'</b>'+d.sameCity.map(matchCardHTML).join('') : empty)
+      + (d.otherCities&&d.otherCities.length? '<b style="display:block;margin-top:10px;font-size:13px">🌍 Autres villes</b>'+d.otherCities.slice(0,12).map(matchCardHTML).join('') : '')
+      + '</div>';
+  }catch(e){ box.innerHTML=''; }
+}
+async function loadProRoam(){
+  const box=document.getElementById('pro-roam'); if(!box) return;
+  const svcs=(agent&&agent.apply&&agent.apply.services)||(agent&&agent.services)||[];
+  const svc=svcs[0]||'';
+  const ici=(NET.pos?'📡 GPS actif — vous êtes visible là où vous êtes.':'📞 Sans GPS — les clients voient votre numéro.');
+  try{
+    const d=await fetch('/api/pros/peers?service='+encodeURIComponent(svc)+'&self='+encodeURIComponent(NET.agentId||''),{cache:'no-store'}).then(r=>r.json());
+    const peers=(d.peers||[]).slice(0,15);
+    box.innerHTML='<div style="background:#fff;border:1.5px solid #e4eae7;border-radius:14px;padding:12px"><b>🌍 Actif partout</b><p style="font-size:12px;color:#6b7c73;margin:4px 0 8px">'+ici+' Les clients cherchent votre métier partout en Côte d’Ivoire.</p>'
+      +(peers.length?('<small style="font-weight:800">Autres pros du même domaine ('+svc+')</small>'+peers.map(p=>'<div style="padding:7px 0;border-bottom:1px solid #e4eae7;font-size:13px"><b>'+p.nom+'</b> · '+(p.ville||p.villeIci||'')+' '+(p.online?'●':'○')+(p.telAffiche&&p.tel?(' · '+p.tel):'')+'</div>').join('')):'<p style="font-size:12px;color:#6b7c73">Pas encore d’autre pro sur ce métier.</p>')
+      +'</div>';
+  }catch(e){ box.innerHTML='<div style="background:#fff;border-radius:14px;padding:12px;border:1.5px solid #e4eae7"><b>🌍 Actif partout</b><p style="font-size:12px;margin:4px 0 0;color:#6b7c73">'+ici+'</p></div>'; }
+}
+if(typeof window!=='undefined'){
+  window.loadHomeEngine = loadHomeEngine;
+  window.loadProRoam = loadProRoam;
+  setTimeout(loadHomeEngine, 800); setInterval(loadHomeEngine, 20000);
+  setTimeout(loadProRoam, 1200); setInterval(loadProRoam, 25000);
 }
 
+
 function netCancelSearch(){
-  clearTimeout(NET.searchTimeout); clearInterval(NET.animIv);
+  clearTimeout(NET.searchTimeout); clearInterval(NET.animIv); clearInterval(NET.matchIv);
   if(mission){ netCancelOnServer(); mission.status='annulee'; syncBooking(); mission=null; }
   searchTimers.forEach(clearTimeout);
   showView('view-home', document.querySelector('#nav-client .nav-btn'), 'client');
@@ -351,7 +420,7 @@ async function netEnsureAgentRegistered(){
 }
 function netAnnounceOnline(){
   netStartPosWatch();
-  wsSend({type:'agent_online', agentId:NET.agentId, nom:agent.nom, quartier:agent.quartier, tel:agent.tel});
+  wsSend({type:'agent_online', agentId:NET.agentId, nom:agent.nom, quartier:agent.quartier, tel:agent.tel, ville: agent.ville || (typeof cityName==='function'?cityName(typeof c!=='undefined'&&c.city): '') || ''});
 }
 async function netQuickOnboard(){
   const nom = document.querySelector('#ob-nom').value.trim();

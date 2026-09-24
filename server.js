@@ -269,6 +269,7 @@ async function pushNewMissionToAgents(m, svcNom) {
 }
 
 function onlineAgents() { return [...sockets].filter(s => s.meta && s.meta.role === 'agent' && s.meta.online); }
+function onlineAgentIds() { return new Set(onlineAgents().map(s => s.meta && s.meta.agentId).filter(Boolean)); }
 function subsOf(missionId) { return [...sockets].filter(s => s.meta && s.meta.missions && s.meta.missions.has(missionId)); }
 function adminSockets() { return [...sockets].filter(s => s.meta && s.meta.role === 'admin'); }
 /* Envoie un événement au(x) tableau(x) de bord HQ en temps réel */
@@ -293,6 +294,8 @@ function routeWsMessage(sock, msg) {
       if (ag.blocked) { wsSend(sock, { type: 'agent_denied', reason: 'blocked' }); break; }
       if (ag.status === 'rejected') { wsSend(sock, { type: 'agent_denied', reason: 'rejected' }); break; }
       ag.nom = msg.nom || ag.nom; ag.quartier = msg.quartier || ag.quartier; ag.tel = msg.tel || ag.tel;
+      if (msg.ville) ag.ville = String(msg.ville).slice(0, 60);
+      ag.mobile = true;
       ag.online = true; ag.lastSeen = nowISO();
       sock.meta.role = 'agent'; sock.meta.online = true; sock.meta.agentId = ag.id;
       saveDb();
@@ -311,10 +314,12 @@ function routeWsMessage(sock, msg) {
     case 'subscribe_mission':
       sock.meta.missions.add(msg.missionId);
       break;
-    case 'agent_pos': {   // 📡 position GPS envoyée périodiquement par l'agent
+    case 'agent_pos': {   // 📡 position GPS — le pro reste actif partout où il va
       const ag = db.agents.find(a => a.id === (sock.meta.agentId || msg.agentId));
       if (ag && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
         ag.pos = { lat: msg.lat, lng: msg.lng, at: nowISO() };
+        ag.villeIci = nearestVille(msg.lat, msg.lng);
+        ag.lastSeen = nowISO();
       }
       break;
     }
@@ -348,24 +353,86 @@ function haversineKm(aLat, aLng, bLat, bLng) {
   const s = Math.sin(dLa / 2) ** 2 + Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.sin(dLo / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
 }
+function normVille(s) {
+  return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function villeOfAgent(ag) {
+  return normVille(ag.villeIci || ag.villeService || ag.ville || '');
+}
+const CI_GPS = [
+  ['Bouaké', 7.693, -5.030], ['Abidjan', 5.345, -4.024], ['Yamoussoukro', 6.821, -5.277],
+  ['Touba', 8.283, -7.684], ['Kounahiri', 8.400, -5.950], ['Korhogo', 9.458, -5.630],
+  ['Daloa', 6.890, -6.450], ['San-Pédro', 4.749, -6.636], ['Man', 7.412, -7.554],
+  ['Gagnoa', 6.132, -5.951], ['Abengourou', 6.730, -3.496], ['Bondoukou', 8.040, -2.800],
+  ['Divo', 5.837, -5.357], ['Grand-Bassam', 5.211, -3.738], ['Odienné', 9.500, -7.563],
+  ['Séguéla', 7.961, -6.673], ['Katiola', 8.137, -5.101], ['Ferkessédougou', 9.593, -5.194],
+  ['Bouaflé', 6.990, -5.746], ['Agboville', 5.928, -4.213]
+];
+function nearestVille(lat, lng) {
+  let best = 'En déplacement', bd = 1e9;
+  for (const row of CI_GPS) {
+    const nom = row[0], la = row[1], lo = row[2];
+    const d = haversineKm(lat, lng, la, lo);
+    if (d < bd) { bd = d; best = nom; }
+  }
+  return bd < 90 ? best : 'En déplacement';
+}
+function agentHasService(ag, svc) {
+  if (!svc) return true;
+  const list = Array.isArray(ag.services) ? ag.services : [];
+  if (!list.length) return true;
+  return list.includes(svc);
+}
+function reachKm() {
+  return (db.config && typeof db.config.reachKm === 'number') ? db.config.reachKm : 15;
+}
+function agentHasGps(ag) {
+  return !!(ag && ag.pos && typeof ag.pos.lat === 'number' && typeof ag.pos.lng === 'number');
+}
+function rankPro(m, ag) {
+  const same = !!(m.villeN && villeOfAgent(ag) && m.villeN === villeOfAgent(ag));
+  const gps = agentHasGps(ag);
+  let dist = null;
+  if (gps && typeof m.lat === 'number' && typeof m.lng === 'number') {
+    dist = Math.round(haversineKm(m.lat, m.lng, ag.pos.lat, ag.pos.lng) * 10) / 10;
+  }
+  const inReach = gps && dist != null && dist <= reachKm();
+  let ring = 9;
+  if (same && inReach) ring = 1;
+  else if (same && gps) ring = 2;
+  else if (same && !gps) ring = 3;
+  else if (!same && inReach) ring = 4;
+  else if (!same && gps) ring = 5;
+  else ring = 6;
+  return { same, gps, dist, inReach, ring, mode: gps ? 'gps' : 'appel' };
+}
 function missionTargets(m) {
-  /* 📡 PROS LES PLUS PROCHES (GPS) : la demande s'offre d'abord dans le rayon réglable (PDG, /api/config) */
+  /* Partout en CI, métier uniquement. Classement : GPS proche → même ville → ailleurs. */
   const all = onlineAgents();
-  if (typeof m.lat !== 'number' || typeof m.lng !== 'number') return all;
-  const reach = (db.config && typeof db.config.reachKm === 'number') ? db.config.reachKm : 15;
-  const near = [];
+  const scored = [];
   for (const s of all) {
     const ag = db.agents.find(a => a.id === (s.meta && s.meta.agentId));
-    const p = ag && ag.pos;
-    if (p && typeof p.lat === 'number') {
-      const d = haversineKm(m.lat, m.lng, p.lat, p.lng);
-      s._dist = Math.round(d * 10) / 10;
-      if (d <= reach) near.push(s);
-    } else { near.push(s); } /* sans GPS connu : on le garde */
+    if (!ag) continue;
+    if (m.service && !agentHasService(ag, m.service)) continue;
+    const r = rankPro(m, ag);
+    s._dist = r.dist; s._ring = r.ring; s._mode = r.mode;
+    scored.push(s);
   }
-  const list = near.length ? near : all;
-  console.log('\u{1F4E1} GPS : ' + list.length + '/' + all.length + ' pro(s) en ligne dans le rayon ' + reach + ' km');
-  return list;
+  scored.sort((a, b) => (a._ring - b._ring) || ((a._dist || 99) - (b._dist || 99)));
+  console.log('Moteur KLEAN : ' + scored.length + '/' + all.length + ' pro(s) métier=' + (m.service || '*') + ' · ' + (m.villeN || 'CI'));
+  return scored;
+}
+function publicMatchCard(ag, m, online) {
+  const r = rankPro(m, ag);
+  const tel = String(ag.tel || ag.tel1 || '').replace(/\D/g, '');
+  return {
+    id: ag.id, nom: ag.nom, ville: ag.villeIci || ag.villeService || ag.ville || '',
+    villeHome: ag.ville || '', quartier: ag.quartier || '',
+    services: Array.isArray(ag.services) ? ag.services : [],
+    online: !!online, hasGps: r.gps, distKm: r.dist, mode: r.mode, ring: r.ring, sameCity: r.same,
+    tel,
+    telAffiche: !r.gps || !online
+  };
 }
 function broadcastNewMission(m) {
   const exc = m.exclAg || [];
@@ -380,6 +447,16 @@ function broadcastNewMission(m) {
   console.log('📢 Mission ' + m.id + ' (' + m.service + ' · ' + m.prixTotal + ' F) diffusée à ' + sent + ' agent(s)');
   emitAdmin('mission', '📥 Nouvelle demande ' + m.id + ' — ' + m.service + ' · ' + m.quartier + ' · ' + m.prixTotal.toLocaleString('fr-FR') + ' F (' + m.client.nom + ')');
   pushNewMissionToAgents(m, (SVC_NAMES[m.service] || m.service) || '').catch(()=>{});
+  if (m.matchScope !== 'all') {
+    setTimeout(() => {
+      const live = db.missions.find(x => x.id === m.id);
+      if (!live || live.status !== 'pending') return;
+      live.matchScope = 'all';
+      saveDb();
+      broadcastNewMission(live);
+      emitAdmin('mission', '🌍 ' + live.id + ' élargie à toutes les villes (aucun accepté dans la ville)');
+    }, 25000);
+  }
 }
 
 function agentCompletion(ag) {
@@ -422,6 +499,44 @@ const server = http.createServer(async (req, res) => {
   /* --- API --- */
   if (p === '/api/health') return sendJson(res, 200, { ok: true, storage: pgClient ? 'postgres' : 'fichier', agentsEnLigne: onlineAgents().length, agentsTotal: db.agents.length, clientsTotal: db.clients.length, missions: db.missions.length });
 
+  if (p === '/api/match' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    const ville = String(url.searchParams.get('ville') || (cli && cli.ville) || '').slice(0, 60);
+    const mid = String(url.searchParams.get('missionId') || '');
+    const mLive = mid ? db.missions.find(x => x.id === mid) : null;
+    const m = mLive || {
+      ville, villeN: normVille(ville),
+      lat: parseFloat(url.searchParams.get('lat')), lng: parseFloat(url.searchParams.get('lng')),
+      matchScope: url.searchParams.get('scope') || 'all'
+    };
+    if (typeof m.lat !== 'number' || isNaN(m.lat)) m.lat = null;
+    if (typeof m.lng !== 'number' || isNaN(m.lng)) m.lng = null;
+    const onIds = onlineAgentIds();
+    const cards = (db.agents || []).filter(a => !a.blocked && (a.status || 'approved') === 'approved').map(a => publicMatchCard(a, m, onIds.has(a.id)));
+    cards.sort((a, b) => (Number(!b.online) - Number(!a.online)) || (a.ring - b.ring) || ((a.distKm || 99) - (b.distKm || 99)));
+    const same = cards.filter(x => x.sameCity);
+    const other = cards.filter(x => !x.sameCity);
+    return sendJson(res, 200, {
+      ok: true, ville, scope: m.matchScope || 'city',
+      nOnline: onIds.size, nSame: same.length, nOther: other.length,
+      sameCity: same.slice(0, 40), otherCities: other.slice(0, 40), service: svc || ''
+    });
+  }
+
+  if (p === '/api/pros/peers' && req.method === 'GET') {
+    const svc = String(url.searchParams.get('service') || '').trim();
+    const self = String(url.searchParams.get('self') || '');
+    const onIds = onlineAgentIds();
+    const dummy = { villeN: '', lat: null, lng: null };
+    const list = (db.agents || []).filter(a => !a.blocked && (a.status || 'approved') === 'approved' && a.id !== self && agentHasService(a, svc)).map(a => {
+      const card = publicMatchCard(a, dummy, onIds.has(a.id));
+      card.villeIci = a.villeIci || '';
+      return card;
+    });
+    list.sort((a, b) => Number(!b.online) - Number(!a.online));
+    return sendJson(res, 200, { ok: true, service: svc, n: list.length, peers: list.slice(0, 60) });
+  }
+
   if (p === '/api/missions' && req.method === 'POST') {
     const b = await readBody(req);
     if (!b.nom || !b.service) return sendJson(res, 400, { error: 'données manquantes' });
@@ -435,9 +550,11 @@ const server = http.createServer(async (req, res) => {
       budget: Math.max(0, parseInt(b.budget) || 0),
       lat: typeof b.lat === 'number' ? b.lat : null,
       lng: typeof b.lng === 'number' ? b.lng : null,
+      ville: String(b.ville || b.cityNom || b.city || '').slice(0, 60),
       client: { nom: b.nom, tel: b.tel || '', deviceId: b.deviceId || '' },
       dist: Math.round((0.5 + Math.random() * 3.5) * 10) / 10,
-      status: 'pending', agentId: null, createdAt: nowISO(), finishedAt: null, note: 0
+      status: 'pending', agentId: null, createdAt: nowISO(), finishedAt: null, note: 0,
+      matchScope: 'all'
     };
     const cli = findClientByToken(req);   // 👤 mission rattachée au compte client
     if (!cli) return sendJson(res, 401, { error: 'Inscription requise : créez votre compte client gratuit pour réserver' });
@@ -479,9 +596,9 @@ const server = http.createServer(async (req, res) => {
     if (status === 'terminee') { m.finishedAt = nowISO(); if (note) m.note = note; }
     saveDb();
     emitToMission(m, { type: 'mission_update', status, missionId: m.id });
-    console.log(`➡️  ${m.id} : ${status}`);
-    const LBL = { enroute: '🛵 en route', arrive: '📍 arrivé sur place', encours: '🧽 nettoyage en cours', terminee: `✅ terminée — +${Math.round(m.prixTotal * feePct()).toLocaleString('fr-FR')} F de commission` };
-    emitAdmin('status', `${LBL[status] || status} · ${m.id}`);
+    console.log('➡️  ' + m.id + ' : ' + status);
+    const LBL = { enroute: 'en route', arrive: 'arrive', encours: 'en cours', terminee: 'terminee' };
+    emitAdmin('status', (LBL[status] || status) + ' · ' + m.id);
     const ag = db.agents.find(a => a.id === agentId);
     const st = agentStats(ag);
     return sendJson(res, 200, { ok: true, gain: Math.round(m.prixTotal * (1 - feePct())), comm: Math.round(m.prixTotal * feePct()), stats: st });
@@ -539,7 +656,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if ((p === '/api/admin/setup' || p === '/api/admin/login') && req.method === 'POST' && !storageReady) {
-    return sendJson(res, 503, { error: 'Le serveur charge encore les données — réessayez dans 3 secondes' });
+    return sendJson(res, 503, { error: 'Chargement des données — réessayez dans 3 secondes' });
   }
   if (p === '/api/admin/setup' && req.method === 'POST') {
     const { password } = await readBody(req);
