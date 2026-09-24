@@ -188,6 +188,46 @@
   </div>
 
   <!-- Réglages PDG : commission pilotable -->
+  <div class="panel" style="margin-bottom:14px" id="panel-hqchat">
+    <h3>🟠 Fil PDG ↔ gestionnaires <span class="cnt" id="hqchat-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <div id="hqchat-msgs" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+      <div style="display:flex;gap:6px">
+        <input id="hqchat-in" placeholder="Écrire au PDG / au gestionnaire…" maxlength="400" style="flex:1;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+        <button class="btn-main" style="flex:none" onclick="sendHqChat()">Envoyer</button>
+      </div>
+    </div>
+  </div>
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-promo">
+    <h3>🎟️ Codes promo & partenaires</h3>
+    <div class="body" style="padding:12px 14px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <input id="pr-code" placeholder="CODE" maxlength="20" style="padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+        <input id="pr-days" type="number" placeholder="Durée (j)" min="1" value="30" style="padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+        <input id="pr-uses" type="number" placeholder="Nb d'usages" min="1" value="10" style="padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin:8px 0;font-size:12px"><input type="checkbox" id="pr-unique"> Usage unique</label>
+      <button class="btn-main" onclick="createPromo()">Créer le code</button>
+      <div id="promo-list" style="margin-top:10px"></div>
+      <h4 style="margin:14px 0 8px;font-size:13px">🤝 Partenaires pub</h4>
+      <div style="display:flex;gap:8px"><input id="pt-nom" placeholder="Nom partenaire" style="flex:1;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit"><input id="pt-tel" placeholder="Tél" style="width:120px;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit"><button class="btn-main" style="flex:none" onclick="createPartner()">Ouvrir</button></div>
+      <div id="partner-list" style="margin-top:8px"></div>
+    </div>
+  </div>
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-paydest">
+    <h3>💳 Numéros de paiement</h3>
+    <div class="body" style="padding:12px 14px">
+      <input id="pay-wave" placeholder="Wave (séparés par virgule)" style="width:100%;margin-bottom:8px;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <input id="pay-om" placeholder="Orange Money" style="width:100%;margin-bottom:8px;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <input id="pay-moov" placeholder="Moov" style="width:100%;margin-bottom:8px;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <label style="font-size:12px;display:flex;gap:8px;align-items:center;margin-bottom:8px"><input type="checkbox" id="pay-hide"> Masquer les numéros côté clients</label>
+      <button class="btn-main" onclick="savePayDest()">Enregistrer</button>
+    </div>
+  </div>
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-trash">
+    <h3>♻️ Récupération de comptes supprimés</h3>
+    <div class="body" id="trash-list" style="padding:12px 14px"><div class="empty">Vide</div></div>
+  </div>
   <div class="panel" style="margin-bottom:14px" id="panel-cfg">
     <h3>⚙️ Réglages plateforme (PDG)</h3>
     <div style="padding:14px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -356,8 +396,8 @@ async function loadAll(){
     applyRole(); loadSupport();
     renderOverview(ov); renderMissions(ms); renderAgents(ags); renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
-    if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); }
-    loadTeam(); loadAnnonce();
+    if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
+    loadTeam(); loadAnnonce(); loadHqChat();
   }catch(e){
     // Aperçu sans serveur : exiger la connexion locale avant la démo
     if(localStorage.getItem('k2_hq_ok') !== '1'){ location.href = 'admin-login.html'; return; }
@@ -758,7 +798,18 @@ async function decideCand(id, action, nom){
   await fetch('/api/admin/agents/'+id+'/approve', {method:'POST'});
   setTimeout(loadAll, 300);
 }
+async function askPdg(role, id, kind, nom){
+  const motif = prompt('📋 Demande au PDG — '+(kind==='block'?'bloquer':'supprimer')+' « '+nom+' »\n\nMotif :');
+  if(motif===null) return;
+  const r = await fetch('/api/admin/account-request', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({role, id, kind, motif})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  alert('🟠 Demande envoyée au PDG. Il décidera.');
+}
 async function actionPro(id, action, nom){
+  if(ME && ME.role !== 'pdg'){
+    if(action==='delete'||action==='block') return askPdg('pro', id, action==='delete'?'delete':'block', nom);
+  }
   if(action==='delete'){
     if(!confirm('🗑️ SUPPRIMER '+nom+' ?\n\nSon dossier et son compte disparaîtront définitivement.\n(Ses missions passées restent dans l\'historique.)')) return;
     const r = await fetch('/api/admin/agents/'+id, {method:'DELETE'});
@@ -863,8 +914,66 @@ function connectWS(){
 }
 function scheduleRetry(){ clearTimeout(retry); retry = setTimeout(connectWS, 4000); }
 
+async function loadHqChat(){
+  try{
+    const d = await fetchJ('/api/admin/hq-chat');
+    const box = document.getElementById('hqchat-msgs'); if(!box) return;
+    const n = d.unread||0;
+    document.getElementById('hqchat-cnt').textContent = n ? n+' non lu(s)' : (d.messages||[]).length+' msg';
+    if(n && ME && ME.role==='pdg'){
+      let b=document.getElementById('hq-bubble');
+      if(!b){ b=document.createElement('button'); b.id='hq-bubble'; b.textContent='🟠 '+n; b.title='Messages gestionnaires';
+        b.style.cssText='position:fixed;right:16px;bottom:18px;z-index:90;background:#ff8a00;color:#fff;font-weight:900;border:none;border-radius:99px;padding:12px 16px;cursor:pointer;box-shadow:0 6px 18px rgba(255,138,0,.4);font-family:inherit';
+        b.onclick=()=>{ document.getElementById('panel-hqchat').scrollIntoView({behavior:'smooth'}); b.remove(); };
+        document.body.appendChild(b);
+      } else b.textContent='🟠 '+n;
+    }
+    box.innerHTML=(d.messages||[]).map(m=>`<div style="align-self:${m.from==='pdg'?'flex-end':'flex-start'};max-width:86%;background:${m.from==='pdg'?'rgba(21,201,138,.14)':'rgba(255,138,0,.14)'};border:1px solid var(--line);border-radius:11px;padding:7px 10px;font-size:12.5px">${m.text}<small style="display:block;color:var(--muted);font-size:9.5px">${m.gestNom||m.from} · ${(m.at||'').slice(11,16)}</small></div>`).join('')||'<div class="empty">Aucun message</div>';
+    box.scrollTop=box.scrollHeight;
+  }catch(e){}
+}
+async function sendHqChat(){
+  const inp=document.getElementById('hqchat-in'); const v=(inp.value||'').trim(); if(!v) return;
+  const r=await fetch('/api/admin/hq-chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v})});
+  if(r.ok){ inp.value=''; loadHqChat(); }
+}
+async function loadPdgExtras(){
+  ['panel-promo','panel-paydest','panel-trash'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display=''; });
+  try{
+    const pr=await fetchJ('/api/admin/promos');
+    document.getElementById('promo-list').innerHTML=(pr||[]).map(x=>`<div class="agrow"><div><b>${x.code}</b> ${x.active?'<span class="badge b-done">actif</span>':'<span class="badge b-cancel">annulé</span>'}<br><small>${x.unique?'usage unique':x.maxUses+' uses'} · ${x.uses||0} utilisés · jusqu'au ${(x.until||'').slice(0,10)}</small></div>${x.active?`<button style="margin-left:auto;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10px;font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer" onclick="cancelPromo('${x.id}')">Annuler</button>`:''}</div>`).join('')||'<div class="empty">Aucun code</div>';
+  }catch(e){}
+  try{
+    const pt=await fetchJ('/api/admin/partners');
+    document.getElementById('partner-list').innerHTML=(pt||[]).map(x=>`<div class="agrow"><b>${x.nom}</b><small> · ${x.tel||'—'}</small></div>`).join('')||'<div class="empty">Aucun partenaire</div>';
+  }catch(e){}
+  try{
+    const tr=await fetchJ('/api/admin/trash');
+    document.getElementById('trash-list').innerHTML=(tr||[]).length?(tr||[]).map(x=>`<div class="agrow"><div><b>${(x.data&&x.data.nom)||'?'}</b> <span class="badge">${x.kind}</span><br><small>${(x.at||'').slice(0,16)}</small></div><button class="btn-main" style="flex:none;padding:7px 10px" onclick="restoreTrash('${x.id}')">♻️ Restaurer</button></div>`).join(''):'<div class="empty">Aucun compte à récupérer</div>';
+  }catch(e){}
+}
+async function createPromo(){
+  const code=document.getElementById('pr-code').value, days=document.getElementById('pr-days').value, maxUses=document.getElementById('pr-uses').value, unique=document.getElementById('pr-unique').checked;
+  const r=await fetch('/api/admin/promos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,days,maxUses,unique})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  document.getElementById('pr-code').value=''; loadPdgExtras();
+}
+async function cancelPromo(id){ await fetch('/api/admin/promos/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); loadPdgExtras(); }
+async function createPartner(){
+  const nom=document.getElementById('pt-nom').value, tel=document.getElementById('pt-tel').value;
+  const r=await fetch('/api/admin/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel})});
+  if(r.ok){ document.getElementById('pt-nom').value=''; document.getElementById('pt-tel').value=''; loadPdgExtras(); }
+}
+async function restoreTrash(id){ await fetch('/api/admin/trash/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); loadPdgExtras(); loadAll(); }
+async function savePayDest(){
+  const wave=(document.getElementById('pay-wave').value||'').split(',').map(s=>s.trim()).filter(Boolean);
+  await fetch('/api/admin/paydest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wave, om:document.getElementById('pay-om').value, moov:document.getElementById('pay-moov').value, hide:document.getElementById('pay-hide').checked})});
+  alert('✓ Numéros enregistrés');
+}
 loadAll();
 connectWS();
+setInterval(loadHqChat, 12000);
 setInterval(loadAll, 12000); // secours
 </script>
 <style>

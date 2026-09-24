@@ -373,7 +373,7 @@
   <div class="topbar-in">
     <div class="logo" style="display:flex;align-items:center">
       <span style="display:flex;align-items:center"><img src="/klean-icon-192.png" alt="KLEAN" style="width:32px;height:32px;border-radius:9px;margin-right:6px;box-shadow:0 3px 10px rgba(7,110,79,.35)">KLEAN</span>
-      <span style="font-size:12px;font-weight:900;color:var(--pd);letter-spacing:.6px;line-height:1.15;border-left:2px solid var(--line);padding-left:9px;margin-left:2px">SERVICES À<br>DOMICILE — CI 🇨🇮</span>
+      <span style="font-size:12px;font-weight:900;color:var(--pd);letter-spacing:.6px;line-height:1.15;border-left:2px solid var(--line);padding-left:9px;margin-left:2px">SERVICES À<br>DOMICILE</span>
     </div>
 
   </div>
@@ -820,7 +820,13 @@ const CITIES = [
   {id:'touba',      nom:'Touba',        actif:true, quartiers:['Touba-Centre','Dioulassoba','Centre-Commercial','Sokoura','Camp-Militaire','Gare Routière','Marché']},
   {id:'kounahiri',  nom:'Kounahiri',    actif:true, quartiers:['Kounahiri-Centre','Dioulabougou','Sokoura','Camp-Militaire','Marché','Gare']},
 ];
-const CITIES_SOON = ['San-Pédro','Daloa','Korhogo','Man','Gagnoa','Abengourou','Bondoukou','Dimbokro','Agboville','Divo','Grand-Bassam','Bingerville','Anyama','Odienné','Sassandra','Soubré','Adzopé','Tiassalé','Dabou','Grand-Lahou','Jacqueville','Alépé','Ayamé','Maféré','Tiapoum','Noé','Duekoué','Danané','Guiglo','Bangolo','Blolequin','Buyo','Issia','Oumé','Guitry','Toumodi','Didiévi','Tiébissou','Bocanda','Dabakala','Katiola','Ferkessédougou','Kong','Tengréla','Boundiali','Kouto',"M'Bengué",'Bouna','Séguéla','Zuenoula','Vavoua','Sinématiali','Bouaflé','Sinfra','Agnibilékrou','Mankono','Toulepleu','Taï','Facobly','Sipilou','Kuédougou','Tanda','Arrah','Bégoué','Dalao','Bounkani','Botro','Aklakro','Prikro','Touba','Ouangolodougou','Worodougou','Nassian','Doropo','Sandégué','Transua','Assuéfry'];
+const CITIES_SOON = ['San-Pédro','Daloa','Korhogo','Man','Gagnoa','Abengourou','Bondoukou','Dimbokro','Agboville','Divo','Grand-Bassam','Odienné','Sassandra','Soubré','Adzopé','Tiassalé','Dabou','Grand-Lahou','Jacqueville','Alépé','Ayamé','Maféré','Tiapoum','Noé','Duékoué','Danané','Guiglo','Bangolo','Blolequin','Buyo','Issia','Oumé','Guitry','Toumodi','Didiévi','Tiébissou','Bocanda','Dabakala','Katiola','Ferkessédougou','Kong','Tengréla','Boundiali','Kouto',"M'Bengué",'Bouna','Séguéla','Zuénoula','Vavoua','Sinématiali','Bouaflé','Sinfra','Agnibilékrou','Mankono','Toulepleu','Taï','Facobly','Sipilou','Tanda','Arrah','Botro','Prikro','Ouangolodougou','Nassian','Doropo','Sandégué','Transua','Beoumi','Sakassou','Daoukro','Aboisso','Tabou','Biankouma','Touba'];
+(function mergeCities(){
+  const have = new Set(CITIES.map(c=>c.nom.toLowerCase()));
+  CITIES_SOON.forEach(n=>{
+    if(!have.has(n.toLowerCase())){ CITIES.push({id:n.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]+/g,'-'), nom:n, actif:true, quartiers:[n+'-Centre','Marché','Gare']}); have.add(n.toLowerCase()); }
+  });
+})();
 function currentCity(){ return CITIES.find(x=>x.id===(c.city||'bouake')) || CITIES[0]; }
 function currentQuartiers(){ return currentCity().quartiers; }
 const QUARTIERS = CITIES[0].quartiers; // compat (Bouaké par défaut)
@@ -2115,8 +2121,12 @@ async function clientChangePw(){
 function toggleOnline(){
   if(!agent.nom) return toast('Créez d\'abord votre profil professionnel 👤');
   agent.online = !agent.online;
-  if(agent.online) agentAlertUnlock&&agentAlertUnlock(); saveAll(); renderAgentDash();
-  if(agent.online){ toast('🟢 En ligne — en attente de demandes…'); scheduleRequest(); }
+  if(agent.online){
+    agentAlertUnlock&&agentAlertUnlock();
+    if(navigator.wakeLock) navigator.wakeLock.request('screen').then(l=>{ window._kleanLock=l; }).catch(()=>{});
+  } else { try{ window._kleanLock && window._kleanLock.release(); }catch(e){} }
+  saveAll(); renderAgentDash();
+  if(agent.online){ toast('🟢 En ligne même écran en veille — sonnerie + vibration'); scheduleRequest(); }
   else { toast('⚪ Hors ligne'); clearTimeout(reqTimer); hideRequest(); }
 }
 
