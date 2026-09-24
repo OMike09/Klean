@@ -133,14 +133,15 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
 
 <div class="wrap">
   <div class="panel" style="margin-bottom:14px" id="panel-search">
-    <h3>🔎 Recherche générale</h3>
+    <h3>🔎 Raccourcis — tout le tableau de bord</h3>
     <div class="body" style="padding:12px 14px">
-      <input id="hq-q" placeholder="Toutes les fenêtres : nom, tél, ville, mission, métier, message, promo, audit…" oninput="searchHQ()" style="width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:14px;font-weight:700">
-      <div id="hq-q-out" style="margin-top:10px;max-height:240px;overflow:auto;font-size:13px"></div>
+      <input id="hq-q" placeholder="Aller à une fenêtre ou chercher un nom, tél, mission…" oninput="searchHQ()" style="width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:14px;font-weight:700">
+      <div id="hq-q-go" style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px"></div>
+      <div id="hq-q-out" style="margin-top:10px;max-height:220px;overflow:auto;font-size:13px"></div>
     </div>
   </div>
   <!-- KPI -->
-  <div class="kpis">
+  <div class="kpis" id="kpis">
     <div class="kpi green"><span>🟢 Professionnels en ligne</span><b id="k-agents">0</b><small id="k-agents-sub">sur 0 professionnel(s)</small></div>
     <div class="kpi blue"><span>📋 Missions aujourd'hui</span><b id="k-missions">0</b><small id="k-missions-sub">0 en cours</small></div>
     <div class="kpi"><span>💵 CA aujourd'hui</span><b id="k-ca">0 F</b><small>prestations livrées</small></div>
@@ -326,7 +327,7 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
   </div>
 
   <!-- Toutes les personnes inscrites (agents + clients) avec recherche -->
-  <div class="panel" style="margin-bottom:14px">
+  <div class="panel" style="margin-bottom:14px" id="people">
     <h3>👥 Personnes inscrites <span class="cnt" id="people-cnt">—</span></h3>
     <div style="padding:10px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
       <button onclick="PEOPLE_FILTER='all';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">Tous</button>
@@ -596,40 +597,54 @@ async function nudgeOff(role, id, nom){
 function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 let ME = null, TEAM = [];
 let _hqQtm=null;
+const HQ_GO = [
+  ['kpis','🟢 Pros en ligne / KPI'],
+  ['panel-ca7','📈 CA 7 jours'],
+  ['panel-team','👑 Équipe dirigeante'],
+  ['panel-ann','📣 Affiche'],
+  ['panel-support','💬 Support'],
+  ['panel-cands','🛡️ Vérification pros'],
+  ['panel-hqchat','🟠 Fil PDG'],
+  ['panel-promo','🎟️ Promos & partenaires'],
+  ['panel-paydest','💳 Numéros de paiement'],
+  ['panel-trash','♻️ Comptes supprimés'],
+  ['panel-cfg','⚙️ Réglages'],
+  ['panel-audit','📜 Audit'],
+  ['panel-online-cli','🟢 Clients en ligne'],
+  ['people','👥 Personnes inscrites'],
+  ['panel-villes','🏙️ Villes'],
+  ['panel-svc-create','🛠️ Créer un service'],
+  ['panel-svc-browse','📂 Services & pros'],
+  ['panel-freeze','⛔ Coupure écritures']
+];
 function searchHQ(){
+  paintHqGo();
   clearTimeout(_hqQtm);
   _hqQtm=setTimeout(runSearchHQ, 220);
 }
-function filterFenêtresHQ(q){
-  const n=pNorm(q);
-  document.querySelectorAll('.wrap .panel, .kpis, .substrip').forEach(el=>{
-    if(el.id==='panel-search') return;
-    if(!el.dataset.origDisp) el.dataset.origDisp = el.style.display || '';
-    if(!n){
-      el.style.display = el.dataset.origDisp;
-      el.style.outline = '';
-      return;
-    }
-    const ok = pNorm(el.innerText||'').includes(n);
-    el.style.display = ok ? '' : 'none';
-    el.style.outline = ok ? '2px solid rgba(21,201,138,.55)' : '';
-  });
+function paintHqGo(){
+  const box=document.getElementById('hq-q-go'); if(!box) return;
+  const n=pNorm(((document.getElementById('hq-q')||{}).value||'').trim());
+  const list = HQ_GO.filter(x=>!n || pNorm(x[0]+' '+x[1]).includes(n));
+  box.innerHTML = list.map(x=>'<button type="button" onclick="jumpPanel(\''+x[0]+'\')" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font:inherit;font-size:11.5px;font-weight:800;padding:8px 11px;border-radius:99px;cursor:pointer">'+x[1]+'</button>').join('') || '<span style="color:var(--muted);font-size:12px">Aucune fenêtre</span>';
 }
 function jumpPanel(id){
-  const el=document.getElementById(id) || document.querySelector('.'+id);
+  const el=document.getElementById(id);
   if(!el) return;
   el.style.display='';
   el.scrollIntoView({behavior:'smooth', block:'start'});
+  el.style.outline='2px solid var(--p)';
+  setTimeout(()=>{ el.style.outline=''; }, 1600);
 }
 async function runSearchHQ(){
   const q=((document.getElementById('hq-q')||{}).value||'').trim();
   const out=document.getElementById('hq-q-out'); if(!out) return;
-  filterFenêtresHQ(q);
+  paintHqGo();
   if(q.length<1){ out.innerHTML=''; return; }
   try{
     const d=await fetch('/api/admin/search?q='+encodeURIComponent(q),{cache:'no-store'}).then(r=>r.json());
     const secs=d.sections||[];
-    if(!secs.length){ out.innerHTML='<span style="color:var(--muted)">Aucun enregistrement — les fenêtres visibles ci-dessous correspondent au texte.</span>'; return; }
+    if(!secs.length){ out.innerHTML='<span style="color:var(--muted)">Pas de donnée — utilisez les boutons ci-dessus pour ouvrir une fenêtre.</span>'; return; }
     out.innerHTML = secs.map(s=>'<b style="display:block;margin:8px 0 4px;cursor:pointer" onclick="jumpPanel(\''+(s.panel||'')+'\')">'+s.title+' →</b>'+(s.items||[]).map(it=>'<div style="padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer" onclick="jumpPanel(\''+(s.panel||'')+'\')"><b>'+(it.t||'')+'</b>'+(it.s?' <small>'+it.s+'</small>':'')+'</div>').join('')).join('');
   }catch(e){ out.textContent='Recherche impossible'; }
 }
