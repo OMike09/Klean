@@ -228,62 +228,6 @@ function vapidKeys() {
   catch (e) { console.log('⚠️ VAPID invalide :', e.message); return null; }
   return db.settings.vapid;
 }
-function smsSenderName() {
-  const s = String(process.env.SMS_SENDER || 'KLEAN-SV CI').replace(/[^A-Za-z0-9 -]/g, '').slice(0, 11);
-  return s || 'KLEAN-SV CI';
-}
-function toE164CI(tel) {
-  let d = String(tel || '').replace(/\D/g, '');
-  if (d.startsWith('00225')) d = d.slice(2);
-  if (d.startsWith('225')) return '+' + d;
-  if (d.length === 10 || d.length === 8) return '+225' + d;
-  return d.length >= 8 ? '+' + d : null;
-}
-function httpJson(method, url, headers, body) {
-  const https = require('https');
-  const u = new URL(url);
-  return new Promise((resolve, reject) => {
-    const req = https.request({ method, hostname: u.hostname, path: u.pathname + u.search, headers: headers || {} }, res => {
-      let b = '';
-      res.on('data', c => b += c);
-      res.on('end', () => { try { resolve({ status: res.statusCode, json: b ? JSON.parse(b) : {}, raw: b }); } catch (e) { resolve({ status: res.statusCode, json: {}, raw: b }); } });
-    });
-    req.on('error', reject);
-    if (body) req.write(body);
-    req.end();
-  });
-}
-let orangeToken = { val: null, exp: 0 };
-async function sendSms(tel, text) {
-  const dest = toE164CI(tel);
-  if (!dest) return { ok: false, error: 'Numéro invalide' };
-  const msg = ('KLEAN-SERVICES CI — ' + String(text || '').replace(/^KLEAN[- ]SERVICES?\s*CI?\s*[—:-]?\s*/i, '')).slice(0, 320);
-  const sender = smsSenderName();
-  try {
-    if (process.env.TWILIO_SID && process.env.TWILIO_TOKEN) {
-      const from = process.env.TWILIO_FROM || sender;
-      const auth = Buffer.from(process.env.TWILIO_SID + ':' + process.env.TWILIO_TOKEN).toString('base64');
-      const form = new URLSearchParams({ To: dest, From: from, Body: msg }).toString();
-      const r = await httpJson('POST', 'https://api.twilio.com/2010-04-01/Accounts/' + process.env.TWILIO_SID + '/Messages.json', { Authorization: 'Basic ' + auth, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(form) }, form);
-      return { ok: r.status >= 200 && r.status < 300, provider: 'twilio', error: r.json.message || r.json.error_message };
-    }
-    if (process.env.ORANGE_SMS_CLIENT_ID && process.env.ORANGE_SMS_CLIENT_SECRET) {
-      if (!orangeToken.val || Date.now() > orangeToken.exp) {
-        const form = 'grant_type=client_credentials';
-        const auth = Buffer.from(process.env.ORANGE_SMS_CLIENT_ID + ':' + process.env.ORANGE_SMS_CLIENT_SECRET).toString('base64');
-        const t = await httpJson('POST', 'https://api.orange.com/oauth/v3/token', { Authorization: 'Basic ' + auth, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(form) }, form);
-        orangeToken.val = t.json.access_token || null;
-        orangeToken.exp = Date.now() + Math.max(60, (t.json.expires_in || 3600) - 60) * 1000;
-      }
-      if (!orangeToken.val) return { ok: false, error: 'Orange : identifiants refusés' };
-      const senderAddr = process.env.ORANGE_SMS_ADDRESS || 'tel:+2250000';
-      const payload = JSON.stringify({ outboundSMSMessageRequest: { address: ['tel:' + dest], senderAddress: senderAddr, senderName: sender, outboundSMSTextMessage: { message: msg } } });
-      const r = await httpJson('POST', 'https://api.orange.com/smsmessaging/v1/outbound/' + encodeURIComponent(senderAddr) + '/requests', { Authorization: 'Bearer ' + orangeToken.val, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }, payload);
-      return { ok: r.status >= 200 && r.status < 300, provider: 'orange', error: (r.json.requestError && r.json.requestError.serviceException && r.json.requestError.serviceException.text) || r.raw };
-    }
-  } catch (e) { return { ok: false, error: e.message }; }
-  return { ok: false, error: 'SMS non configuré. Sur Render → Environment : ORANGE_SMS_CLIENT_ID et ORANGE_SMS_CLIENT_SECRET. Sender à whitelister : KLEAN-SV CI (le SMS commence par KLEAN-SERVICES CI)' };
-}
 /* Envoie la notification « poche » à tous les agents validés ayant activé les alertes.
    Le web push arrive MÊME application fermée / écran éteint (Android) — c'est là sa force. */
 async function pushNewMissionToAgents(m, svcNom) {
@@ -1279,37 +1223,8 @@ const server = http.createServer(async (req, res) => {
       const payload = JSON.stringify({ title: '🔔 KLEAN-SERVICES CI', body: text, url: '/', vibrate: true });
       for (const sub of rec.pushSubs) { try { await webpush.sendNotification(sub, payload, { TTL: 3600, urgency: 'high' }); } catch (e) {} }
     }
-    const sms = await sendSms(rec.tel || rec.tel1, text);
     saveDb();
-    return sendJson(res, 200, { ok: true, sms: sms.ok, smsError: sms.ok ? null : sms.error });
-  }
-  if (p === '/api/admin/sms' && req.method === 'POST') {
-    const b = await readBody(req);
-    const text = String(b.text || 'Ouvrez KLEAN : une interpellation HQ vous attend.').slice(0, 220);
-    const targets = [];
-    if (b.allOffline) {
-      (db.clients || []).forEach(c => { if (!c.online && !c.blocked) targets.push(c); });
-      (db.agents || []).forEach(a => { if (!a.online && !a.blocked && (a.status || 'approved') === 'approved') targets.push(a); });
-      (db.fieldAgents || []).forEach(f => { if (!f.blocked) targets.push(f); });
-    } else if (b.role === 'field') {
-      const f = (db.fieldAgents || []).find(x => x.id === b.id); if (f) targets.push(f);
-    } else if (b.role === 'client') {
-      const c = db.clients.find(x => x.id === b.id); if (c) targets.push(c);
-    } else if (b.role === 'pro') {
-      const a = db.agents.find(x => x.id === b.id); if (a) targets.push(a);
-    } else if (b.tel) {
-      targets.push({ nom: b.nom || b.tel, tel: b.tel });
-    }
-    if (!targets.length) return sendJson(res, 400, { error: 'Aucun destinataire' });
-    let sent = 0, fail = 0, lastErr = null;
-    for (const rec of targets) {
-      if (rec.id && !ownsRecord(req, rec) && !isPdg(req)) continue;
-      const sms = await sendSms(rec.tel || rec.tel1, text);
-      if (sms.ok) sent++; else { fail++; lastErr = sms.error; }
-    }
-    auditLog('sms_interpellation', { par: act(req), sent, fail, n: targets.length });
-    saveDb();
-    return sendJson(res, 200, { ok: sent > 0, sent, fail, error: lastErr });
+    return sendJson(res, 200, { ok: true });
   }
   if (p === '/api/admin/field' && req.method === 'GET') {
     const list = (db.fieldAgents || []).filter(f => isPdg(req) || ownsRecord(req, f));

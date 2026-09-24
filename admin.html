@@ -265,18 +265,6 @@
       <button onclick="PEOPLE_FILTER='on';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--p);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">🟢 En ligne</button>
       <button onclick="PEOPLE_FILTER='off';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">⚪ Hors ligne</button>
     </div>
-    <div style="padding:10px 16px 0">
-      <div style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px 12px">
-        <b style="font-size:12.5px">📲 SMS hors ligne — KLEAN-SERVICES CI</b>
-        <p style="margin:6px 0 8px;font-size:11.5px;color:var(--muted);line-height:1.4">Le SMS arrive sur le numéro même si l’app est fermée. Le réseau CI n’affiche que 11 caractères : <b>KLEAN-SV CI</b>. Le texte commence par <b>KLEAN-SERVICES CI</b>.</p>
-        <textarea id="sms-txt" maxlength="200" placeholder="Message d’interpellation…" style="width:100%;min-height:64px;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px;resize:vertical"></textarea>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-          <input id="sms-tel" placeholder="📞 Numéro (optionnel)" maxlength="16" style="flex:1;min-width:140px;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <button onclick="smsDirect()" style="background:var(--p);border:0;color:#042;font-size:11.5px;font-weight:900;padding:10px 14px;border-radius:9px;cursor:pointer;font-family:inherit">Envoyer à ce n°</button>
-          <button onclick="smsAllOff()" style="background:rgba(255,176,32,.15);border:1px solid rgba(255,176,32,.45);color:var(--amber);font-size:11.5px;font-weight:900;padding:10px 14px;border-radius:9px;cursor:pointer;font-family:inherit">Tous les hors ligne</button>
-        </div>
-      </div>
-    </div>
     <div style="padding:10px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
       <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="toggleAcctForm('client')">➕ Créer un compte client</button>
       <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="toggleAcctForm('pro')">➕ Créer un compte pro</button>
@@ -485,33 +473,10 @@ function renderOverview(o){
 let PEOPLE = {agents:[], clients:[]};
 let PEOPLE_FILTER = 'all';
 async function nudgeOff(role, id, nom){
-  if(!confirm('📲 Envoyer une alerte poche + SMS KLEAN-SERVICES CI à '+nom+' ?')) return;
+  if(!confirm('📲 Envoyer une alerte poche à '+nom+' : vous n\'êtes pas en ligne ?')) return;
   const r=await fetch('/api/admin/nudge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role,id})});
-  const j=await r.json().catch(()=>({}));
-  if(r.ok) alert('📲 Envoyé à '+nom+(j.sms?' · SMS KLEAN-SERVICES CI OK':(j.smsError?' · SMS : '+j.smsError:'')));
-  else alert('⚠️ Envoi impossible');
-}
-async function smsOne(role,id,nom){
-  const text=prompt('SMS KLEAN-SERVICES CI à '+nom+' :','Vous n’êtes pas en ligne. Ouvrez KLEAN.');
-  if(text===null) return;
-  const r=await fetch('/api/admin/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role,id,text})});
-  const j=await r.json().catch(()=>({}));
-  alert(j.ok?('✅ SMS envoyé ('+(j.sent||1)+')'):('⚠️ '+(j.error||'SMS non configuré')));
-}
-async function smsDirect(){
-  const tel=(document.getElementById('sms-tel')||{}).value||'';
-  const text=(document.getElementById('sms-txt')||{}).value||'Ouvrez KLEAN : interpellation HQ.';
-  if(tel.replace(/\D/g,'').length<8) return alert('❌ Numéro invalide');
-  const r=await fetch('/api/admin/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tel,text})});
-  const j=await r.json().catch(()=>({}));
-  alert(j.ok?'✅ SMS KLEAN-SERVICES CI envoyé':'⚠️ '+(j.error||'SMS non configuré sur Render'));
-}
-async function smsAllOff(){
-  const text=(document.getElementById('sms-txt')||{}).value||'Vous n’êtes pas en ligne. Ouvrez KLEAN.';
-  if(!confirm('Envoyer ce SMS KLEAN-SERVICES CI à TOUS les comptes hors ligne ?')) return;
-  const r=await fetch('/api/admin/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({allOffline:true,text})});
-  const j=await r.json().catch(()=>({}));
-  alert(j.ok?('✅ '+(j.sent||0)+' SMS · '+(j.fail||0)+' échec(s)'):('⚠️ '+(j.error||'SMS non configuré')));
+  if(r.ok) alert('📲 Alerte envoyée à '+nom);
+  else alert('⚠️ Envoi impossible (notifications poche peut-être pas activées)');
 }
 function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 let ME = null, TEAM = [];
@@ -729,8 +694,7 @@ function renderPeople(){
             <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer" onclick="decideCand('${a.id}','reject','${(a.nom||'').replace(/'/g,'')}')">✕ Rejeter</button></div>` : `<div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap">
             <button style="background:${a.blocked?'rgba(21,201,138,.15)':'var(--card2)'};border:1px solid ${a.blocked?'rgba(21,201,138,.4)':'rgba(255,176,32,.4)'};color:${a.blocked?'var(--p)':'var(--amber)'};font-size:10.5px;font-weight:900;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="actionPro('${a.id}','${a.blocked?'unblock':'block'}','${(a.nom||'').replace(/'/g,'')}')">${a.blocked?'✅ Débloquer':'🔒 Bloquer'}</button>
             <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="actionPro('${a.id}','delete','${(a.nom||'').replace(/'/g,'')}')">🗑️ Supprimer</button>
-            ${a.online?'':`<button style="background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.4);color:var(--amber);font-size:10px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="nudgeOff('pro','${a.id}','${(a.nom||'').replace(/'/g,'')}')">📲 Pas en ligne</button>
-            <button style="background:rgba(21,201,138,.12);border:1px solid rgba(21,201,138,.35);color:var(--p);font-size:10px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="smsOne('pro','${a.id}','${(a.nom||'').replace(/'/g,'')}')">💬 SMS</button>`}</div>`}
+            ${a.online?'':`<button style="background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.4);color:var(--amber);font-size:10px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="nudgeOff('pro','${a.id}','${(a.nom||'').replace(/'/g,'')}')">📲 Pas en ligne</button>`}</div>`}
         </div>
       </div>
       <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;flex-shrink:0" onclick="togglePeopleDet('${a.id}')">🔍 Profil</button>
