@@ -1363,24 +1363,30 @@ const server = http.createServer(async (req, res) => {
     const a = db.annonce;
     if (!a || a.type !== 'quiz') return sendJson(res, 400, { error: 'Pas de quiz en cours' });
     if (a.closed || a.countdownEndsAt) return sendJson(res, 409, { error: 'Quiz terminé — le décompte a commencé', winners: a.winners || [] });
-    const who = String(b.nom || b.deviceId || ('anon-' + (req.socket.remoteAddress || ''))).slice(0, 60);
+    const nom = String(b.nom || '').trim().slice(0, 40) || 'Anonyme';
+    const who = String(b.accountId || b.deviceId || nom || ('anon-' + (req.socket.remoteAddress || ''))).slice(0, 80);
     db.quizAnswers = db.quizAnswers || [];
-    if (db.quizAnswers.some(x => x.who === who)) return sendJson(res, 200, { ok: false, message: 'Vous avez déjà répondu.' });
+    const already = db.quizAnswers.find(x => x.who === who);
+    if (already) return sendJson(res, 200, { ok: true, already: true, choice: already.choice, message: 'Réponse déjà enregistrée.' });
     const choice = parseInt(b.choice, 10);
+    if (!(choice >= 0 && choice <= 3)) return sendJson(res, 400, { error: 'Choix invalide' });
     const ok = choice === a.good;
-    db.quizAnswers.push({ at: nowISO(), nom: String(b.nom || 'Anonyme').slice(0, 40), who, choice, ok });
+    db.quizAnswers.push({ at: nowISO(), nom, who, choice, ok });
     saveDb();
-    return sendJson(res, 200, { ok, message: ok ? 'Bonne réponse ! Vous êtes dans le tirage.' : 'Mauvaise réponse.' });
+    return sendJson(res, 200, { ok: true, already: false, choice, message: 'Réponse enregistrée.' });
   }
   if (p === '/api/admin/quiz' && req.method === 'GET') {
     quizRevealIfDue();
     const a = db.annonce;
     const ans = db.quizAnswers || [];
     const goods = ans.filter(x => x.ok);
+    const letters = ['A', 'B', 'C', 'D'];
     return sendJson(res, 200, {
       active: !!(a && a.type === 'quiz'), closed: !!(a && a.closed),
       question: a && a.question, nTotal: ans.length, nOk: goods.length,
-      goods: goods.map(x => x.nom), winners: (a && a.winners) || [],
+      goods: goods.map(x => x.nom),
+      clicks: ans.map(x => ({ nom: x.nom, choice: letters[x.choice] || '?', at: x.at })),
+      winners: (a && a.winners) || [],
       countdownEndsAt: a && a.countdownEndsAt, countdownRevealed: !!(a && a.countdownRevealed),
       pendingN: a && a.pendingN, rounds: (a && a.rounds) || [], stagePool: (a && a.stagePool) || []
     });

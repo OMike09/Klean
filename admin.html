@@ -662,10 +662,17 @@ async function loadQuizHQ(){
   try{
     const d = await fetch('/api/admin/quiz',{cache:'no-store'}).then(r=>r.json());
     const s=document.getElementById('qz-stats');
-    if(s) s.textContent = d.active ? ('Quiz : '+(d.nOk||0)+' bonne(s) / '+(d.nTotal||0)+' · en lice : '+((d.stagePool&&d.stagePool.length)||d.nOk||0)+(d.closed?' · réponses fermées':'')) : 'Quiz : —';
+    if(s) s.textContent = d.active ? ('Clics : '+(d.nTotal||0)+' compte(s) · '+(d.nOk||0)+' bonne(s)'+(d.closed?' · réponses fermées':'')) : 'Quiz : —';
     const w=document.getElementById('qz-winners');
     const rounds=(d.rounds||[]).map((r,i)=>'Tour '+(i+1)+' ('+r.n+') : '+(r.winners||[]).join(', ')).join(' · ');
-    if(w) w.textContent = (d.countdownRevealed && d.winners&&d.winners.length) ? ('🏆 '+(d.winners.length===1?'Gagnant : ':'Encore en lice : ')+d.winners.join(', ')+(rounds?' | '+rounds:'')) : ((d.goods&&d.goods.length)?'Bons : '+d.goods.join(', '):'');
+    if(w) w.textContent = (d.countdownRevealed && d.winners&&d.winners.length) ? ('🏆 '+(d.winners.length===1?'Gagnant : ':'Encore en lice : ')+d.winners.join(', ')+(rounds?' | '+rounds:'')) : '';
+    const cl=document.getElementById('qz-clicks');
+    if(cl){
+      const list=d.clicks||[];
+      cl.innerHTML = list.length
+        ? ('<b style="font-size:11.5px">'+list.length+' clic(s)</b>'+list.map(x=>'<div style="padding:5px 0;border-bottom:1px solid var(--line)"><b>'+(x.nom||'Anonyme')+'</b> · choix <b style="color:var(--amber)">'+x.choice+'</b></div>').join(''))
+        : '<span style="color:var(--muted)">Aucun clic pour l’instant.</span>';
+    }
     tickQuizCd(d.countdownEndsAt, d.countdownRevealed);
   }catch(e){}
 }
