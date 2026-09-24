@@ -387,7 +387,7 @@ function enterDemo(){
 }
 
 async function fetchJ(url){
-  const r = await fetch(url);
+  const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
   if(r.status === 401){ location.href = '/admin-login.html'; throw 0; }
   if(!r.ok) throw 0;
   return r.json();
@@ -410,10 +410,7 @@ async function loadAll(){
     if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
     loadTeam(); loadAnnonce(); loadHqChat(); loadFields();
   }catch(e){
-    // Aperçu sans serveur : exiger la connexion locale avant la démo
-    if(localStorage.getItem('k2_hq_ok') !== '1'){ location.href = 'admin-login.html'; return; }
-    OFFLINE = true;
-    enterDemo(); setLive(false);
+    console.warn('HQ : une partie des données n’a pas chargé', e);
   }
 }
 let OFFLINE = false;

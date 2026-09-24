@@ -146,8 +146,8 @@ async function submit(){
     if(v !== pw2El.value){ pw2El.classList.add('err'); msg.style.color='var(--red)'; msg.textContent='❌ Les deux saisies ne correspondent pas'; return; }
     if(SERVER){
       try{
-        const r = await fetch('/api/admin/setup', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:v})});
-        if(r.ok){ location.href='/admin'; return; }
+        const r = await fetch('/api/admin/setup', {method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({password:v})});
+        if(r.ok){ localStorage.setItem('k2_hq_ok','1'); location.href='/admin'; return; }
         const d = await r.json().catch(()=>({}));
         msg.style.color='var(--red)'; msg.textContent = '❌ '+(d.error||'Erreur serveur');
         if(r.status===409){ SETUP=false; applyMode(); }
@@ -166,7 +166,7 @@ async function submit(){
   if(SERVER){
     try{
       const r = await fetch('/api/admin/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:v, ident:(document.getElementById('ident')||{}).value||''})});
-      if(r.ok){ location.href='/admin'; return; }
+      if(r.ok){ localStorage.setItem('k2_hq_ok','1'); location.href='/admin'; return; }
       throw 0;
     }catch(e){
       pwEl.classList.add('err'); pwEl.value=''; pwEl.focus();

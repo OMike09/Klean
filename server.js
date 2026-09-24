@@ -109,6 +109,10 @@ function trashPush(kind, rec) {
      et les comptes/missions survivront à tous les redémarrages. */
 let db = { agents: [], missions: [], clients: [] };
 let pgClient = null;
+let storageReady = false;
+function hqCookie(token) {
+  return 'klean_hq=' + token + '; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=2592000';
+}
 async function pgQuery(sql, params) { const r = await pgClient.query(sql, params); return r; }
 async function initStorage() {
   if (process.env.DATABASE_URL) {
@@ -155,6 +159,7 @@ async function initStorage() {
     db.admin = { salt, passHash: hashPassword(salt, process.env.ADMIN_PIN) };
     saveDb();
   }
+  storageReady = true;
 }
 function saveDbNow() {
   const snap = JSON.stringify(db, null, 1);
@@ -515,6 +520,9 @@ const server = http.createServer(async (req, res) => {
       + '<p style="max-width:340px;line-height:1.6">Ouvrez <a style="color:#22c55e;font-weight:700" href="/admin">votre page /admin</a> : elle vous proposera maintenant de <b>créer un nouveau mot de passe</b>. Faites-le tout de suite.</p></div></body>');
   }
 
+  if ((p === '/api/admin/setup' || p === '/api/admin/login') && req.method === 'POST' && !storageReady) {
+    return sendJson(res, 503, { error: 'Le serveur charge encore les données — réessayez dans 3 secondes' });
+  }
   if (p === '/api/admin/setup' && req.method === 'POST') {
     const { password } = await readBody(req);
     if (db.admin) return sendJson(res, 409, { error: 'Le mot de passe est déjà créé' });
@@ -524,7 +532,7 @@ const server = http.createServer(async (req, res) => {
     db.admin = { salt, passHash: hashPassword(salt, password) };
     saveDb();
     console.log('🔑 Mot de passe HQ créé');
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + adminToken() + '; Path=/; HttpOnly; SameSite=Lax; Secure' });
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': hqCookie(adminToken()) });
     return res.end('{"ok":true}');
   }
 
@@ -548,7 +556,7 @@ const server = http.createServer(async (req, res) => {
       loginTries.delete(ip);
       if (who.ad) { who.ad.lastLogin = nowISO(); saveDb(); }
       auditLog(who.kind, { ip, qui: who.qui });
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + who.t + '; Path=/; HttpOnly; SameSite=Lax; Secure' });
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': hqCookie(who.t) });
       return res.end('{"ok":true,"role":"' + who.role + '"}');
     }
     loginTries.set(ip, { n: rec.n + 1, t: rec.t || Date.now() });
@@ -567,7 +575,7 @@ const server = http.createServer(async (req, res) => {
     const salt = crypto.randomBytes(12).toString('hex');
     db.admin = { salt, passHash: hashPassword(salt, next) };   // nouveau hash → nouvelles sessions, anciennes invalidées
     saveDb();
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=' + adminToken() + '; Path=/; HttpOnly; SameSite=Lax; Secure' });
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': hqCookie(adminToken()) });
     return res.end('{"ok":true}');
   }
   if (p === '/api/admin/logout') {
