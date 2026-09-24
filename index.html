@@ -36,6 +36,7 @@
 
   .view{display:none;min-height:100vh;padding-bottom:96px}
   .view.active{display:block}
+  .hidden{display:none !important}
   .wrap{padding:16px}
 
   /* HERO */
@@ -380,13 +381,14 @@
 
 </div>
 
+<div id="aff-bar" class="hidden" style="overflow:hidden;white-space:nowrap;background:linear-gradient(90deg,#ffb020,#ff8a00);color:#1a1204;font-weight:900;font-size:22px;padding:16px 0;margin:8px 12px 8px;border-radius:16px;letter-spacing:.4px;line-height:1.25">
+  <div id="aff-track" style="display:inline-block;animation:kleanMarqueeLtr 16s linear infinite"></div>
+</div>
+<div id="quiz-box" class="hidden" style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px 14px 12px;margin:0 12px 12px;position:relative;z-index:30"></div>
+<style>@keyframes kleanMarqueeLtr{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}</style>
+
 <!-- ══════════════════ CLIENT : ACCUEIL ══════════════════ -->
 <div class="view active" id="view-home">
-  <div id="aff-bar" class="hidden" style="overflow:hidden;white-space:nowrap;background:linear-gradient(90deg,#ffb020,#ff8a00);color:#1a1204;font-weight:900;font-size:22px;padding:16px 0;margin:0 0 12px;border-radius:16px;letter-spacing:.4px;line-height:1.25">
-    <div id="aff-track" style="display:inline-block;animation:kleanMarqueeLtr 16s linear infinite"></div>
-  </div>
-  <div id="quiz-box" class="hidden" style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px 14px 12px;margin:0 0 12px"></div>
-  <style>@keyframes kleanMarqueeLtr{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}</style>
   <button id="svc-city-big" onclick="cityInfo()" style="width:100%;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-radius:16px;padding:13px 15px;margin:0 0 12px;box-shadow:0 4px 14px rgba(7,110,79,.28);text-align:left">
     <span style="font-size:27px">🛠️</span>
     <span style="flex:1;min-width:0">
@@ -2357,7 +2359,8 @@ function fmtCd(ends){
   return {left, txt: m+':'+s};
 }
 function paintQuiz(a){
-  const qb=document.getElementById('quiz-box'); if(!qb||!a||a.type!=='quiz'||!a.question) return;
+  const qb=document.getElementById('quiz-box'); if(!qb||!a||a.type!=='quiz') return;
+  a.question = a.question || a.message || 'Quiz KLEAN';
   const counting=a.countdownEndsAt && !a.countdownRevealed;
   const shown=a.countdownRevealed && a.winners && a.winners.length;
   const key=(a.id||'')+'|'+(counting?'cd':'')+'|'+(shown?'w':'')+'|'+(a.closed?'c':'')+'|'+(a.winners||[]).join(',');
@@ -2385,8 +2388,9 @@ function paintQuiz(a){
     qb.classList.remove('hidden'); _quizPaint=key; return;
   }
   if(_quizPaint===key) return;
-  const opts=(a.choices||[]).map((c,i)=>'<button onclick="sendQuiz('+i+')" style="width:100%;text-align:left;margin-top:7px;padding:11px 12px;border-radius:12px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800;cursor:pointer">'+(String.fromCharCode(65+i))+'. '+c+'</button>').join('');
-  qb.innerHTML='<b style="font-size:15px">🏆 Quiz KLEAN</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p>'+opts+'<small id="quiz-ok" style="display:block;margin-top:8px;color:var(--muted)"></small>';
+  const ch=(a.choices||[]).filter(Boolean);
+  const opts=ch.length ? ch.map((c,i)=>'<button type="button" onclick="sendQuiz('+i+')" style="width:100%;text-align:left;margin-top:7px;padding:11px 12px;border-radius:12px;border:1.5px solid var(--line);background:#f3f6f5;color:#14211c;font:inherit;font-weight:800;cursor:pointer">'+(String.fromCharCode(65+i))+'. '+c+'</button>').join('') : '<p style="color:#e5484d;font-weight:800">Les choix n’ont pas été publiés. Le PDG doit republier le quiz avec A, B…</p>';
+  qb.innerHTML='<b style="font-size:15px">🏆 Quiz KLEAN</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p>'+opts+'<small id="quiz-ok" style="display:block;margin-top:8px;color:#6b7c73"></small>';
   qb.classList.remove('hidden'); _quizPaint=key;
 }
 function loadAffiche(){

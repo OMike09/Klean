@@ -643,7 +643,14 @@ async function publierAnnonce(){
   const msg = ((document.getElementById('ann-msg')||{}).value||'').trim();
   const type = (document.getElementById('ann-type')||{}).value || 'info';
   if(msg.length < 4) return alert('❌ Écrivez le message de l\'affiche d\'abord');
-  const r = await fetch('/api/admin/annonce', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message: msg, type})});
+  const payload = {message: msg, type};
+  if(type==='quiz'){
+    payload.question = ((document.getElementById('qz-q')||{}).value||'').trim() || msg;
+    payload.choices = ['qz-a','qz-b','qz-c','qz-d'].map(id=>((document.getElementById(id)||{}).value||'').trim()).filter(Boolean);
+    payload.good = parseInt((document.getElementById('qz-ok')||{}).value,10)||0;
+    if(payload.choices.length<2) return alert('❌ Quiz : remplissez au moins les choix A et B — c\'est ce que voient les comptes');
+  }
+  const r = await fetch('/api/admin/annonce', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
   const d = await r.json().catch(()=>({}));
   if(!r.ok) return alert('⚠️ '+(d.error||'Publication impossible'));
   document.getElementById('ann-msg').value='';

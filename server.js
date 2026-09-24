@@ -1014,8 +1014,9 @@ const server = http.createServer(async (req, res) => {
     if (msg.length < 4) return sendJson(res, 400, { error: 'Message trop court' });
     const type = ['maj', 'info', 'alerte', 'quiz'].includes(b.type) ? b.type : 'info';
     const choices = Array.isArray(b.choices) ? b.choices.map(x => String(x).trim().slice(0, 80)).filter(Boolean).slice(0, 4) : [];
+    if (type === 'quiz' && choices.length < 2) return sendJson(res, 400, { error: 'Quiz : au moins 2 choix' });
     db.annonce = { id: uid('AN'), message: msg, type, at: nowISO(), par: act(req),
-      question: type === 'quiz' ? String(b.question || '').trim().slice(0, 180) : '',
+      question: type === 'quiz' ? (String(b.question || '').trim().slice(0, 180) || msg) : '',
       choices: type === 'quiz' ? choices : [],
       good: type === 'quiz' ? Math.max(0, Math.min(3, parseInt(b.good, 10) || 0)) : 0,
       closed: false, winners: [] };
