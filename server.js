@@ -1242,14 +1242,32 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === '/api/admin/search' && req.method === 'GET') {
     const q = String(url.searchParams.get('q') || '').trim().toLowerCase();
-    if (q.length < 1) return sendJson(res, 200, { clients: [], agents: [], missions: [], gests: [], cities: [] });
-    const hit = (s) => String(s || '').toLowerCase().includes(q);
-    const clients = (db.clients || []).filter(c => hit(c.nom) || hit(c.tel) || hit(c.ville) || hit(c.quartier)).slice(0, 30).map(c => ({ id: c.id, nom: c.nom, tel: c.tel, ville: c.ville, kind: 'client' }));
-    const agents = (db.agents || []).filter(a => hit(a.nom) || hit(a.tel) || hit(a.tel1) || hit(a.ville) || hit(a.quartier) || (a.services || []).some(hit)).slice(0, 30).map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1, ville: a.ville, services: a.services, kind: 'pro', online: !!a.online }));
-    const missions = (db.missions || []).filter(m => hit(m.id) || hit(m.service) || hit(m.quartier) || hit((m.client || {}).nom)).slice(0, 20).map(m => ({ id: m.id, service: m.service, status: m.status, client: (m.client || {}).nom, kind: 'mission' }));
-    const gests = (db.admins || []).filter(a => hit(a.nom) || hit(a.ident)).slice(0, 15).map(a => ({ id: a.id, nom: a.nom, ident: a.ident, blocked: !!a.blocked, kind: 'gest' }));
-    const cities = (db.cities || []).filter(c => hit(c.nom)).map(c => ({ id: c.id, nom: c.nom, kind: 'ville' }));
-    return sendJson(res, 200, { q, clients, agents, missions, gests, cities });
+    const hit = (...xs) => xs.some(s => String(s == null ? '' : (typeof s === 'object' ? JSON.stringify(s) : s)).toLowerCase().includes(q));
+    const take = (arr, n) => (arr || []).slice(0, n);
+    if (q.length < 1) return sendJson(res, 200, { q, sections: [] });
+    const sections = [];
+    const add = (title, panel, items) => { if (items && items.length) sections.push({ title, panel, items }); };
+    add('🧑‍💼 Pros', 'people', take((db.agents || []).filter(a => hit(a.nom, a.tel, a.tel1, a.mail, a.ville, a.quartier, a.id, a.services, a.status)).map(a => ({ t: a.nom, s: [a.tel || a.tel1, a.ville, a.status].filter(Boolean).join(' · ') })), 40));
+    add('👤 Clients', 'people', take((db.clients || []).filter(c => hit(c.nom, c.tel, c.mail, c.ville, c.quartier, c.id)).map(c => ({ t: c.nom, s: [c.tel, c.ville].filter(Boolean).join(' · ') })), 40));
+    add('🟢 Clients en ligne', 'panel-online-cli', take((db.clients || []).filter(c => c.online && hit(c.nom, c.tel)).map(c => ({ t: c.nom, s: 'en ligne' })), 20));
+    add('📋 Missions', 'panel-ca7', take((db.missions || []).filter(m => hit(m.id, m.service, m.quartier, m.adresse, m.status, m.paiement, (m.client || {}).nom, (m.client || {}).tel, m.agentId)).map(m => ({ t: m.id + ' · ' + (m.service || ''), s: [m.status, (m.client || {}).nom, m.quartier].filter(Boolean).join(' · ') })), 30));
+    add('👑 Gestionnaires', 'panel-team', take((db.admins || []).filter(a => hit(a.nom, a.ident, a.id)).map(a => ({ t: a.nom, s: a.ident || '' })), 20));
+    add('🧭 Agents de terrain', 'panel-team', take((db.fieldAgents || []).filter(f => hit(f.nom, f.ident, f.tel, f.id)).map(f => ({ t: f.nom, s: f.ident || f.tel || '' })), 20));
+    add('🛡️ Candidatures', 'panel-cands', take((db.agents || []).filter(a => (a.status || 'approved') !== 'approved' && hit(a.nom, a.tel, a.status, a.ville)).map(a => ({ t: a.nom, s: a.status })), 30));
+    add('💬 Support', 'panel-support', take((db.support || []).filter(m => hit(m.nom, m.tel, m.text, m.body, m.msg, m.from)).map(m => ({ t: m.nom || m.from || 'msg', s: String(m.text || m.body || m.msg || '').slice(0, 80) })), 30));
+    add('🟠 Fil PDG', 'panel-hqchat', take((db.hqChat || []).filter(m => hit(m.nom, m.text, m.body, m.from)).map(m => ({ t: m.nom || m.from || 'fil', s: String(m.text || m.body || '').slice(0, 80) })), 30));
+    add('📜 Audit', 'panel-audit', take((db.audit || []).filter(a => hit(a.kind, a.action, a.qui, JSON.stringify(a))).reverse().map(a => ({ t: a.kind || a.action || 'audit', s: a.qui || '' })), 40));
+    add('🏙️ Villes', 'panel-villes', take((db.cities || []).filter(c => hit(c.nom, c.quartiers)).map(c => ({ t: c.nom, s: Array.isArray(c.quartiers) ? c.quartiers.join(', ') : '' })), 40));
+    add('🛠️ Services', 'panel-svc-browse', take((db.catalog || []).filter(s => hit(s.nom, s.id, s.desc, s.opts)).map(s => ({ t: (s.ic || '') + ' ' + (s.nom || s.id), s: s.desc || '' })), 40));
+    add('🎟️ Promos', 'panel-promo', take((db.promos || []).filter(p => hit(p.code, p.nom, p.note)).map(p => ({ t: p.code || p.nom, s: String(p.note || '') })), 20));
+    add('🤝 Partenaires', 'panel-promo', take((db.partners || []).filter(p => hit(p.nom, p.tel, p.note)).map(p => ({ t: p.nom, s: p.tel || '' })), 20));
+    add('💳 Paiement', 'panel-paydest', hit(db.config && db.config.payDest) ? [{ t: 'Numéros de paiement', s: JSON.stringify((db.config && db.config.payDest) || {}).slice(0, 80) }] : []);
+    add('♻️ Corbeille', 'panel-trash', take((db.trash || []).filter(t => hit(t.kind, t.id, t.data)).map(t => ({ t: t.kind + ' ' + t.id, s: (t.data && t.data.nom) || '' })), 20));
+    add('📣 Affiche', 'panel-ann', (db.annonce && hit(db.annonce, db.annonce.text, db.annonce.title)) ? [{ t: 'Affiche', s: String(db.annonce.text || db.annonce.title || db.annonce.type || '') }] : []);
+    add('⚙️ Réglages', 'panel-cfg', hit(db.config) ? [{ t: 'Config plateforme', s: '' }] : []);
+    add('📝 Demandes de compte', 'panel-team', take((db.accountRequests || []).filter(r => hit(r.nom, r.tel, r.ident)).map(r => ({ t: r.nom, s: r.tel || r.ident || '' })), 20));
+    add('❓ Quiz', 'panel-ann', take((db.quizAnswers || []).filter(a => hit(a.nom, a.answer, a.tel)).map(a => ({ t: a.nom || 'réponse', s: String(a.answer || '').slice(0, 60) })), 20));
+    return sendJson(res, 200, { q, sections });
   }
 
   /* --- 🔁 Réattribution manuelle d'urgence d'une mission (gestionnaire autorisé) --- */

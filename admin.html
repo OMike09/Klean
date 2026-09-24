@@ -135,7 +135,7 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
   <div class="panel" style="margin-bottom:14px" id="panel-search">
     <h3>🔎 Recherche générale</h3>
     <div class="body" style="padding:12px 14px">
-      <input id="hq-q" placeholder="Nom, tél, ville, mission, métier, gestionnaire…" oninput="searchHQ()" style="width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:14px;font-weight:700">
+      <input id="hq-q" placeholder="Toutes les fenêtres : nom, tél, ville, mission, métier, message, promo, audit…" oninput="searchHQ()" style="width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:14px;font-weight:700">
       <div id="hq-q-out" style="margin-top:10px;max-height:240px;overflow:auto;font-size:13px"></div>
     </div>
   </div>
@@ -600,20 +600,37 @@ function searchHQ(){
   clearTimeout(_hqQtm);
   _hqQtm=setTimeout(runSearchHQ, 220);
 }
+function filterFenêtresHQ(q){
+  const n=pNorm(q);
+  document.querySelectorAll('.wrap .panel, .kpis, .substrip').forEach(el=>{
+    if(el.id==='panel-search') return;
+    if(!el.dataset.origDisp) el.dataset.origDisp = el.style.display || '';
+    if(!n){
+      el.style.display = el.dataset.origDisp;
+      el.style.outline = '';
+      return;
+    }
+    const ok = pNorm(el.innerText||'').includes(n);
+    el.style.display = ok ? '' : 'none';
+    el.style.outline = ok ? '2px solid rgba(21,201,138,.55)' : '';
+  });
+}
+function jumpPanel(id){
+  const el=document.getElementById(id) || document.querySelector('.'+id);
+  if(!el) return;
+  el.style.display='';
+  el.scrollIntoView({behavior:'smooth', block:'start'});
+}
 async function runSearchHQ(){
   const q=((document.getElementById('hq-q')||{}).value||'').trim();
   const out=document.getElementById('hq-q-out'); if(!out) return;
+  filterFenêtresHQ(q);
   if(q.length<1){ out.innerHTML=''; return; }
   try{
     const d=await fetch('/api/admin/search?q='+encodeURIComponent(q),{cache:'no-store'}).then(r=>r.json());
-    const row=(k,arr,fn)=> arr&&arr.length ? ('<b style="display:block;margin:8px 0 4px">'+k+'</b>'+arr.map(fn).join('')) : '';
-    out.innerHTML =
-      row('🧑‍💼 Pros', d.agents, a=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>'+a.nom+'</b> '+(a.online?'●':'')+' <small>'+(a.tel||'')+' · '+(a.ville||'')+'</small></div>')+
-      row('👤 Clients', d.clients, c=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>'+c.nom+'</b> <small>'+(c.tel||'')+' · '+(c.ville||'')+'</small></div>')+
-      row('📋 Missions', d.missions, m=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>'+m.id+'</b> · '+(m.service||'')+' · '+(m.status||'')+' <small>'+(m.client||'')+'</small></div>')+
-      row('👑 Gestionnaires', d.gests, g=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>'+g.nom+'</b> <small>'+(g.ident||'')+'</small></div>')+
-      row('🏙️ Villes', d.cities, v=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)">🏙️ <b>'+v.nom+'</b></div>')
-      || '<span style="color:var(--muted)">Aucun résultat</span>';
+    const secs=d.sections||[];
+    if(!secs.length){ out.innerHTML='<span style="color:var(--muted)">Aucun enregistrement — les fenêtres visibles ci-dessous correspondent au texte.</span>'; return; }
+    out.innerHTML = secs.map(s=>'<b style="display:block;margin:8px 0 4px;cursor:pointer" onclick="jumpPanel(\''+(s.panel||'')+'\')">'+s.title+' →</b>'+(s.items||[]).map(it=>'<div style="padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer" onclick="jumpPanel(\''+(s.panel||'')+'\')"><b>'+(it.t||'')+'</b>'+(it.s?' <small>'+it.s+'</small>':'')+'</div>').join('')).join('');
   }catch(e){ out.textContent='Recherche impossible'; }
 }
 async function gelerGest(frozen){
