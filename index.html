@@ -856,6 +856,22 @@ async function loadServerCities(){
 }
 loadServerCities();
 setInterval(loadServerCities, 20000);
+function absorbServerServices(list){
+  if(!Array.isArray(list)) return;
+  list.forEach(s=>{
+    if(!s || !s.id || SERVICES.find(x=>x.id===s.id)) return;
+    SERVICES.push({id:s.id, ic:s.ic||'🛠️', nom:s.nom||s.id, desc:s.desc||'', base:s.base||5000, cat:s.cat||'home', opts:s.opts||[]});
+  });
+  try{ if(typeof renderSvcGrids==='function') renderSvcGrids(); }catch(e){}
+}
+async function loadServerServices(){
+  try{
+    const d=await fetch('/api/services',{cache:'no-store'}).then(r=>r.json());
+    absorbServerServices(d.services||[]);
+  }catch(e){}
+}
+loadServerServices();
+setInterval(loadServerServices, 20000);
 function currentCity(){ return CITIES.find(x=>x.id===(c.city||'bouake')) || CITIES[0]; }
 function currentQuartiers(){ return currentCity().quartiers; }
 const QUARTIERS = CITIES[0].quartiers; // compat (Bouaké par défaut)

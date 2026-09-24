@@ -386,6 +386,28 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
     </div>
   </div>
 
+  <div class="panel" style="margin-bottom:14px" id="panel-svc-create">
+    <h3>🛠️ Créer un service</h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Service + sous-services. « Actualiser » pousse la liste partout (clients / pros).</p>
+      <input id="sv-ic" placeholder="Emoji (ex : 🛠️)" maxlength="4" style="width:80px;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <input id="sv-nom" placeholder="Nom du service *" maxlength="60" style="width:100%;margin-top:7px;padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <input id="sv-desc" placeholder="Description courte" maxlength="80" style="width:100%;margin-top:7px;padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <input id="sv-base" type="number" placeholder="Prix de base (F)" style="width:100%;margin-top:7px;padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <textarea id="sv-opts" placeholder="Sous-services, un par ligne : Nom | prix&#10;ex : Fuite | 5000" rows="4" style="width:100%;margin-top:7px;padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit"></textarea>
+      <button class="btn-main" style="width:100%;margin-top:8px" onclick="creerServiceHQ()">➕ Créer le service</button>
+      <button type="button" onclick="actualiserServicesHQ()" style="width:100%;margin-top:7px;background:rgba(255,138,0,.16);border:1.5px solid rgba(255,138,0,.45);color:#b36b00;font-weight:900;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit">🔄 Actualiser partout</button>
+    </div>
+  </div>
+  <div class="panel" style="margin-bottom:14px" id="panel-svc-browse">
+    <h3>📂 Services & professionnels</h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Scrollez, cliquez un service ou un sous-service pour voir les pros.</p>
+      <div id="sv-tree" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:8px"></div>
+      <div id="sv-pros" style="margin-top:10px;max-height:220px;overflow:auto"></div>
+    </div>
+  </div>
+
 <script>
 const SVC = {maison:'🏠',bureaux:'🏢',canapes:'🛋️',vitres:'🪟',demenagement:'🧼',sdb:'🚿',grand:'🧹'};
 const SVC_N = {maison:'Maison',bureaux:'Bureaux',canapes:'Canapés',vitres:'Vitres',demenagement:'Après dém.',sdb:'SDB',grand:'Grand ménage',plomberie:'Plomberie',electricite:'Électricité',clim:'Climatisation',serrurerie:'Serrurerie',electro:'Électroménager',jardinage:'Jardinage',lavageauto:'Lavage auto',bricolage:'Bricolage',demen:'Déménagement',cuisine:'Cuisinier',cours:'📚 Cours ou formation à domicile',canal:'📡 Canal+ domicile',evenement:'🎉 Après événement',entretien:'🗓️ Entretien régulier',placement:'👥 Placement',custom:'🛠️ Demande sur mesure'};
@@ -484,7 +506,7 @@ async function loadAll(){
     if(cands) renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
     if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
-    loadTeam(); loadAnnonce(); loadQuizHQ(); loadHqChat(); loadFields(); loadVillesHQ();
+    loadTeam(); loadAnnonce(); loadQuizHQ(); loadHqChat(); loadFields(); loadVillesHQ(); loadCatalogHQ();
     if(!window._qzPoll){ window._qzPoll=setInterval(loadQuizHQ, 1000); }
   }catch(e){
     console.warn('HQ : une partie des données n’a pas chargé', e);
@@ -554,6 +576,74 @@ async function nudgeOff(role, id, nom){
 }
 function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 let ME = null, TEAM = [];
+async function creerVilleHQ(){
+  const nom=((document.getElementById('nv-nom')||{}).value||'').trim();
+  const quartiers=((document.getElementById('nv-q')||{}).value||'').trim();
+  if(nom.length<2) return alert('❌ Nom de ville requis');
+  const r=await fetch('/api/admin/cities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,quartiers})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  document.getElementById('nv-nom').value=''; document.getElementById('nv-q').value='';
+  alert('🏙️ Ville « '+d.city.nom+' » créée — elle s’affiche chez clients et pros.');
+  loadVillesHQ();
+}
+async function loadVillesHQ(){
+  try{
+    const d=await fetch('/api/admin/cities',{cache:'no-store'}).then(r=>r.json());
+    const el=document.getElementById('nv-list'); if(!el) return;
+    const list=d.cities||[];
+    el.innerHTML = list.length ? ('<b style="font-size:12px">'+list.length+' ville(s) ajoutée(s)</b>'+list.map(x=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)">🏙️ <b>'+x.nom+'</b> <small style="color:var(--muted)">'+(x.quartiers||[]).join(', ')+'</small></div>').join('')) : '<span style="color:var(--muted)">Aucune ville extra pour l’instant.</span>';
+  }catch(e){}
+}
+function parseOptsHQ(){
+  return String((document.getElementById('sv-opts')||{}).value||'').split(/\n/).map(l=>{
+    const p=l.split('|'); const nom=(p[0]||'').trim(); if(!nom) return null;
+    return {nom, prix: parseInt((p[1]||'0').replace(/\D/g,''),10)||0};
+  }).filter(Boolean);
+}
+async function creerServiceHQ(){
+  const nom=((document.getElementById('sv-nom')||{}).value||'').trim();
+  if(nom.length<2) return alert('❌ Nom du service requis');
+  const r=await fetch('/api/admin/services',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    ic: ((document.getElementById('sv-ic')||{}).value||'🛠️').trim(),
+    nom, desc: ((document.getElementById('sv-desc')||{}).value||'').trim(),
+    base: parseInt((document.getElementById('sv-base')||{}).value,10)||5000,
+    opts: parseOptsHQ()
+  })});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  ['sv-nom','sv-desc','sv-opts','sv-base','sv-ic'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  alert('🛠️ Service « '+d.service.nom+' » créé.');
+  loadCatalogHQ();
+}
+async function actualiserServicesHQ(){
+  await loadCatalogHQ();
+  alert('🔄 Liste actualisée. Clients et pros la rechargent en moins de 20 s.');
+}
+async function loadCatalogHQ(){
+  try{
+    const extra=(await fetch('/api/admin/services',{cache:'no-store'}).then(r=>r.json()).catch(()=>({}))).services||[];
+    const builtin=Object.keys(SVC_N||{}).map(id=>({id, ic:SVC[id]||'🛠️', nom:SVC_N[id], opts:[], builtin:true}));
+    const all=builtin.concat(extra.map(s=>Object.assign({builtin:false},s)));
+    window._catalogHQ=all;
+    const tree=document.getElementById('sv-tree'); if(!tree) return;
+    tree.innerHTML=all.map(s=>{
+      const subs=(s.opts||[]).map(o=>'<button type="button" onclick="voirProsService(\''+s.id+'\')" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:5px 8px 5px 22px;font:inherit;font-size:12px;cursor:pointer;color:var(--muted)">↳ '+(o.nom||o.id)+'</button>').join('');
+      return '<div style="border-bottom:1px solid var(--line);padding:4px 0"><button type="button" onclick="voirProsService(\''+s.id+'\')" style="width:100%;text-align:left;background:transparent;border:none;padding:8px;font:inherit;font-weight:800;cursor:pointer">'+(s.ic||'🛠️')+' '+(s.nom||s.id)+(s.builtin?'':' <small style="color:var(--amber)">nouveau</small>')+'</button>'+subs+'</div>';
+    }).join('');
+  }catch(e){}
+}
+async function voirProsService(id){
+  const box=document.getElementById('sv-pros'); if(!box) return;
+  box.innerHTML='Chargement…';
+  try{
+    const d=await fetch('/api/admin/services/pros?id='+encodeURIComponent(id),{cache:'no-store'}).then(r=>r.json());
+    const cat=(window._catalogHQ||[]).find(s=>s.id===id);
+    box.innerHTML='<b>'+(cat&&cat.nom||id)+' — '+(d.n||0)+' pro(s)</b>'+((d.pros||[]).length
+      ? d.pros.map(p=>'<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>'+p.nom+'</b> '+(p.online?'<span style="color:var(--p)">● en ligne</span>':'○')+'<br><small>'+(p.ville||'')+(p.quartier?' · '+p.quartier:'')+(p.tel?' · '+p.tel:'')+'</small></div>').join('')
+      : '<p style="color:var(--muted);font-size:12.5px">Aucun professionnel sur ce métier pour l’instant.</p>');
+  }catch(e){ box.textContent='Impossible de charger'; }
+}
 function genererCodePro(){
   const pin = String(Math.floor(100000 + Math.random()*900000));
   const pw = 'Klean-' + Math.floor(1000 + Math.random()*9000) + '!';

@@ -165,6 +165,7 @@ async function initStorage() {
   db.fieldAgents = db.fieldAgents || [];
   db.fieldChat = db.fieldChat || [];
   db.cities = db.cities || [];
+  db.catalog = db.catalog || [];
   /* Pré-initialisation optionnelle du mot de passe via ADMIN_PIN (1er démarrage seulement) */
   if (!db.admin && process.env.ADMIN_PIN) {
     const salt = crypto.randomBytes(12).toString('hex');
@@ -957,8 +958,56 @@ const server = http.createServer(async (req, res) => {
     commission: (db.config && db.config.commission) || 25,
     reachKm: (db.config && typeof db.config.reachKm === 'number') ? db.config.reachKm : 15,
     payDest: (db.config && db.config.hide) ? { hide: true } : ((db.config && db.config.payDest) || {}),
-    hidePay: !!(db.config && db.config.payDest && db.config.payDest.hide)
+    hidePay: !!(db.config && db.config.payDest && db.config.payDest.hide),
+    cities: db.cities || [],
+    services: db.catalog || []
   });
+  if (p === '/api/cities' && req.method === 'GET') return sendJson(res, 200, { ok: true, cities: db.cities || [] });
+  if (p === '/api/admin/cities' && req.method === 'POST') {
+    const b = await readBody(req);
+    const nom = String(b.nom || '').trim().slice(0, 40);
+    if (nom.length < 2) return sendJson(res, 400, { error: 'Nom de ville requis' });
+    db.cities = db.cities || [];
+    const id = nom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || ('ville-' + Date.now());
+    if (db.cities.some(x => x.id === id || String(x.nom).toLowerCase() === nom.toLowerCase()))
+      return sendJson(res, 409, { error: 'Cette ville existe déjà' });
+    const quartiers = String(b.quartiers || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean).slice(0, 40);
+    const city = { id, nom, actif: true, quartiers: quartiers.length ? quartiers : [nom + '-Centre', 'Marché', 'Gare'], at: nowISO(), par: act(req) };
+    db.cities.push(city); saveDb();
+    auditLog('ville_ajoutee', { nom, par: act(req) });
+    emitAdmin('admin', '🏙️ Nouvelle ville : ' + nom);
+    return sendJson(res, 201, { ok: true, city });
+  }
+  if (p === '/api/admin/cities' && req.method === 'GET') return sendJson(res, 200, { cities: db.cities || [] });
+  if (p === '/api/services' && req.method === 'GET') return sendJson(res, 200, { ok: true, services: db.catalog || [] });
+  if (p === '/api/admin/services' && req.method === 'POST') {
+    const b = await readBody(req);
+    const nom = String(b.nom || '').trim().slice(0, 60);
+    if (nom.length < 2) return sendJson(res, 400, { error: 'Nom du service requis' });
+    const id = String(b.id || nom).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+    db.catalog = db.catalog || [];
+    if (db.catalog.some(s => s.id === id)) return sendJson(res, 409, { error: 'Ce service existe déjà' });
+    const opts = Array.isArray(b.opts) ? b.opts.map(o => ({
+      id: String(o.id || o.nom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').slice(0, 30),
+      nom: String(o.nom || '').slice(0, 60),
+      prix: Math.max(0, parseInt(o.prix, 10) || 0)
+    })).filter(o => o.nom) : [];
+    const svc = { id, ic: String(b.ic || '🛠️').slice(0, 4), nom, desc: String(b.desc || '').slice(0, 80), base: Math.max(0, parseInt(b.base, 10) || 5000), cat: String(b.cat || 'home').slice(0, 12), opts, at: nowISO(), par: act(req) };
+    db.catalog.push(svc); saveDb();
+    auditLog('service_ajoute', { nom, par: act(req) });
+    emitAdmin('admin', '🛠️ Service créé : ' + nom);
+    return sendJson(res, 201, { ok: true, service: svc });
+  }
+  if (p === '/api/admin/services' && req.method === 'GET') return sendJson(res, 200, { services: db.catalog || [] });
+  if (p === '/api/admin/services/pros' && req.method === 'GET') {
+    const sid = String(url.searchParams.get('id') || '').trim();
+    const onIds = onlineAgentIds();
+    const list = (db.agents || []).filter(a => !a.blocked && (a.status || 'approved') === 'approved' && (!sid || agentHasService(a, sid))).map(a => ({
+      id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', ville: a.villeIci || a.ville || '', quartier: a.quartier || '',
+      online: onIds.has(a.id) || !!a.online, services: a.services || []
+    }));
+    return sendJson(res, 200, { ok: true, id: sid, n: list.length, pros: list });
+  }
   if (p === '/api/annonce') {
     if (typeof quizRevealIfDue === 'function') try { quizRevealIfDue(); } catch (e) {}
     const a = db.annonce || null;
