@@ -7,8 +7,8 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#15c98a",
-  "theme_color": "#15c98a",
+  "background_color": "#1a1a1a",
+  "theme_color": "#1a1a1a",
   "lang": "fr",
   "icons": [
     { "src": "/hq-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
