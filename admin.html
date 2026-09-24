@@ -132,6 +132,13 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
 </header>
 
 <div class="wrap">
+  <div class="panel" style="margin-bottom:14px" id="panel-search">
+    <h3>🔎 Recherche générale</h3>
+    <div class="body" style="padding:12px 14px">
+      <input id="hq-q" placeholder="Nom, tél, ville, mission, métier, gestionnaire…" oninput="searchHQ()" style="width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:14px;font-weight:700">
+      <div id="hq-q-out" style="margin-top:10px;max-height:240px;overflow:auto;font-size:13px"></div>
+    </div>
+  </div>
   <!-- KPI -->
   <div class="kpis">
     <div class="kpi green"><span>🟢 Professionnels en ligne</span><b id="k-agents">0</b><small id="k-agents-sub">sur 0 professionnel(s)</small></div>
@@ -358,6 +365,7 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
         </div>
         <input id="acp-mail" placeholder="✉️ E-mail (facultatif)" maxlength="60" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
                 <select id="acp-service" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <option value="maison">🧹 Ménage maison</option><option value="bureaux">🏢 Bureaux</option><option value="canapes">🛋️ Canapés & tapis</option><option value="vitres">🪟 Vitres</option><option value="grand">🏰 Grand ménage</option><option value="plomberie">🔧 Plomberie</option><option value="electricite">💡 Électricité</option><option value="clim">❄️ Climatisation</option><option value="serrurerie">🔐 Serrurerie</option><option value="jardinage">�;background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
           <option value="maison">🧹 Ménage maison</option><option value="bureaux">🏢 Bureaux</option><option value="canapes">🛋️ Canapés & tapis</option><option value="vitres">🪟 Vitres</option><option value="grand">🏰 Grand ménage</option><option value="plomberie">🔧 Plomberie</option><option value="electricite">💡 Électricité</option><option value="clim">❄️ Climatisation</option><option value="serrurerie">🔐 Serrurerie</option><option value="jardinage">🌿 Jardinage</option><option value="lavageauto">🚗 Lavage auto</option><option value="bricolage">🛠️ Bricolage</option><option value="demen">📦 Déménagement</option><option value="cuisine">🍽️ Cuisinier</option><option value="cours">📚 Cours à domicile</option><option value="custom">✨ Demande sur mesure</option>
         </select>
         <div style="margin-top:10px;background:rgba(255,138,0,.12);border:1.5px dashed rgba(255,138,0,.5);border-radius:12px;padding:11px 12px">
@@ -405,6 +413,17 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
       <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Scrollez, cliquez un service ou un sous-service pour voir les pros.</p>
       <div id="sv-tree" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:8px"></div>
       <div id="sv-pros" style="margin-top:10px;max-height:220px;overflow:auto"></div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px" id="panel-freeze">
+    <h3>⛔ Coupure générale des écritures (PDG)</h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Personne n’écrit plus : gestionnaires, <b>clients</b> et <b>professionnels</b> (missions, messages, inscriptions, profils). Lecture seule. Vous (PDG) restez maître du HQ. Mot de passe obligatoire.</p>
+      <input id="frz-pw" type="password" placeholder="Votre mot de passe PDG" style="width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:8px">
+      <button type="button" onclick="gelerGest(true)" style="width:100%;background:rgba(255,107,107,.14);border:1.5px solid rgba(255,107,107,.45);color:var(--red);font-weight:900;padding:12px;border-radius:12px;cursor:pointer;font-family:inherit;margin-bottom:7px">⛔ Couper toutes les écritures</button>
+      <button type="button" onclick="gelerGest(false)" class="btn-main" style="width:100%">✅ Réactiver les écritures</button>
+      <div id="frz-state" style="margin-top:8px;font-size:12.5px;font-weight:800;color:var(--amber)"></div>
     </div>
   </div>
 
@@ -576,6 +595,39 @@ async function nudgeOff(role, id, nom){
 }
 function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 let ME = null, TEAM = [];
+let _hqQtm=null;
+function searchHQ(){
+  clearTimeout(_hqQtm);
+  _hqQtm=setTimeout(runSearchHQ, 220);
+}
+async function runSearchHQ(){
+  const q=((document.getElementById('hq-q')||{}).value||'').trim();
+  const out=document.getElementById('hq-q-out'); if(!out) return;
+  if(q.length<1){ out.innerHTML=''; return; }
+  try{
+    const d=await fetch('/api/admin/search?q='+encodeURIComponent(q),{cache:'no-store'}).then(r=>r.json());
+    const row=(k,arr,fn)=> arr&&arr.length ? ('<b style="display:block;margin:8px 0 4px">'+k+'</b>'+arr.map(fn).join('')) : '';
+    out.innerHTML =
+      row('🧑‍💼 Pros', d.agents, a=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>'+a.nom+'</b> '+(a.online?'●':'')+' <small>'+(a.tel||'')+' · '+(a.ville||'')+'</small></div>')+
+      row('👤 Clients', d.clients, c=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>'+c.nom+'</b> <small>'+(c.tel||'')+' · '+(c.ville||'')+'</small></div>')+
+      row('📋 Missions', d.missions, m=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>'+m.id+'</b> · '+(m.service||'')+' · '+(m.status||'')+' <small>'+(m.client||'')+'</small></div>')+
+      row('👑 Gestionnaires', d.gests, g=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>'+g.nom+'</b> <small>'+(g.ident||'')+'</small></div>')+
+      row('🏙️ Villes', d.cities, v=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)">🏙️ <b>'+v.nom+'</b></div>')
+      || '<span style="color:var(--muted)">Aucun résultat</span>';
+  }catch(e){ out.textContent='Recherche impossible'; }
+}
+async function gelerGest(frozen){
+  const password=((document.getElementById('frz-pw')||{}).value||'');
+  if(!password) return alert('❌ Entrez votre mot de passe PDG');
+  if(frozen && !confirm('Couper TOUTES les écritures : gestionnaires, clients et professionnels ?')) return;
+  const r=await fetch('/api/admin/gest-freeze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password, frozen})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  document.getElementById('frz-pw').value='';
+  const st=document.getElementById('frz-state');
+  if(st) st.textContent = d.gestFrozen ? '⛔ Écritures coupées (tous)' : '✅ Écritures actives';
+  alert(d.gestFrozen ? '⛔ Plus personne n’écrit (sauf vous, PDG).' : '✅ Écritures réactivées.');
+}
 async function creerVilleHQ(){
   const nom=((document.getElementById('nv-nom')||{}).value||'').trim();
   const quartiers=((document.getElementById('nv-q')||{}).value||'').trim();
@@ -878,6 +930,12 @@ async function loadTeam(){
   try{ ME = await fetchJ('/api/admin/whoami'); }catch(e){ ME = {role:'pdg', nom:'PDG'}; }
   document.querySelector('#team-gate').style.display = ME && ME.role==='pdg' ? 'none' : 'block';
   document.querySelector('#team-form').style.display = ME && ME.role==='pdg' ? 'block' : 'none';
+  const frz=document.getElementById('panel-freeze'); if(frz) frz.style.display = (ME && ME.role==='pdg') ? '' : 'none';
+  const st=document.getElementById('frz-state');
+  if(st && ME) st.textContent = ME.gestFrozen ? '⛔ Écritures actuellement coupées (tous)' : '✅ Écritures actuellement actives';
+  if(ME && ME.role==='gest' && ME.gestFrozen){
+    alert('⛔ Le PDG a coupé toutes les écritures. Lecture seule.');
+  }
   if(!ME || ME.role !== 'pdg'){ document.querySelector('#team-cnt').textContent = (ME && ME.nom)?('connecté : '+ME.nom):'—'; return; }
   try{ TEAM = await fetchJ('/api/admin/admins'); }catch(e){ TEAM = []; }
   renderAdmins();
@@ -1383,6 +1441,22 @@ setInterval(loadAll, 12000); // secours
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
       <b style="flex:1;font-size:16px">🏆 Réponses du quiz</b>
       <button type="button" onclick="closeQuizClicks()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button>
+    </div>
+    <div id="qz-modal-stats" style="font-size:13px;font-weight:800;color:var(--amber);margin-bottom:8px"></div>
+    <div id="qz-modal-list" style="font-size:13px"></div>
+  </div>
+</div>
+
+</body>
+</html>s:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button>
+    </div>
+    <div id="qz-modal-stats" style="font-size:13px;font-weight:800;color:var(--amber);margin-bottom:8px"></div>
+    <div id="qz-modal-list" style="font-size:13px"></div>
+  </div>
+</div>
+
+</body>
+</html>uizClicks()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button>
     </div>
     <div id="qz-modal-stats" style="font-size:13px;font-weight:800;color:var(--amber);margin-bottom:8px"></div>
     <div id="qz-modal-list" style="font-size:13px"></div>

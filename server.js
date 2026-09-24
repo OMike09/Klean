@@ -72,6 +72,7 @@ function hqIdentity(req) {
   }
   return null;
 }
+function writesFrozen() { return !!(db.config && db.config.gestFrozen); }
 function pdgOnly(req, res) { const id = hqIdentity(req); if (!id || id.role !== 'pdg') { sendJson(res, 403, { error: 'Réservé au PDG' }); return false; } return true; }
 function fieldTokenOf(f) { return sha256(f.passHash + '::klean-field:' + f.id); }
 function fieldIdentity(req) {
@@ -279,6 +280,10 @@ function emitAdmin(kind, text) { broadcast(adminSockets(), { type: 'admin_event'
 
 function routeWsMessage(sock, msg) {
   sock.meta = sock.meta || { missions: new Set() };
+  if (writesFrozen() && msg.type !== 'ping') {
+    wsSend(sock, { type: 'frozen', error: 'Écriture désactivée par le PDG' });
+    return;
+  }
   switch (msg.type) {
     case 'hello':
       sock.meta.role = msg.role === 'agent' ? 'agent' : (msg.role === 'admin' && sock.meta.hqAuthed ? 'admin' : 'client');
@@ -499,7 +504,15 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
 
   /* --- API --- */
-  if (p === '/api/health') return sendJson(res, 200, { ok: true, storage: pgClient ? 'postgres' : 'fichier', agentsEnLigne: onlineAgents().length, agentsTotal: db.agents.length, clientsTotal: db.clients.length, missions: db.missions.length });
+  if (p === '/api/health') return sendJson(res, 200, { ok: true, storage: pgClient ? 'postgres' : 'fichier', agentsEnLigne: onlineAgents().length, agentsTotal: db.agents.length, clientsTotal: db.clients.length, missions: db.missions.length, writeFrozen: writesFrozen() });
+
+  const meth = (req.method || 'GET').toUpperCase();
+  const freezeAllow = ['/api/admin/login', '/api/admin/setup', '/api/admin/logout', '/api/admin/password', '/api/admin/gest-freeze'];
+  if (writesFrozen() && !['GET', 'HEAD', 'OPTIONS'].includes(meth) && !freezeAllow.includes(p)) {
+    const id = hqIdentity(req);
+    if (!(id && id.role === 'pdg' && p.startsWith('/api/admin')))
+      return sendJson(res, 403, { error: 'Écriture désactivée par le PDG — comptes clients, pros et gestionnaires en lecture seule', frozen: true });
+  }
 
   if (p === '/api/match' && req.method === 'GET') {
     const cli = findClientByToken(req);
@@ -721,6 +734,11 @@ const server = http.createServer(async (req, res) => {
     return res.end('{"ok":true}');
   }
   if (p.startsWith('/api/admin') && !isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+  if (p.startsWith('/api/admin') && !['/api/admin/whoami', '/api/admin/logout', '/api/admin/gest-freeze'].includes(p)) {
+    const id = hqIdentity(req);
+    if (id && id.role === 'gest' && db.config && db.config.gestFrozen)
+      return sendJson(res, 403, { error: 'Activités gestionnaire désactivées par le PDG', frozen: true });
+  }
 
   /* --- API CLIENTS (comptes sécurisés) --- */
   if (p === '/api/clients/register' && req.method === 'POST') {
@@ -1203,7 +1221,35 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/admin/whoami' && req.method === 'GET') {
     const id = hqIdentity(req);
-    return sendJson(res, 200, { role: id.role, nom: id.nom });
+    return sendJson(res, 200, { role: id.role, nom: id.nom, gestFrozen: !!(db.config && db.config.gestFrozen) });
+  }
+  if (p === '/api/admin/gest-freeze' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    if (!db.admin || hashPassword(db.admin.salt, b.password || '') !== db.admin.passHash)
+      return sendJson(res, 401, { error: 'Mot de passe PDG incorrect' });
+    db.config = db.config || {};
+    db.config.gestFrozen = !!b.frozen;
+    saveDb();
+    auditLog(db.config.gestFrozen ? 'ecriture_gel' : 'ecriture_degel', { par: 'PDG' });
+    emitAdmin('admin', db.config.gestFrozen ? '⛔ Écriture coupée (gestionnaires, clients, pros)' : '✅ Écriture réactivée');
+    if (db.config.gestFrozen) {
+      for (const s of [...sockets]) {
+        try { wsSend(s, { type: 'frozen', error: 'Écriture désactivée par le PDG' }); } catch (e) {}
+      }
+    }
+    return sendJson(res, 200, { ok: true, gestFrozen: db.config.gestFrozen });
+  }
+  if (p === '/api/admin/search' && req.method === 'GET') {
+    const q = String(url.searchParams.get('q') || '').trim().toLowerCase();
+    if (q.length < 1) return sendJson(res, 200, { clients: [], agents: [], missions: [], gests: [], cities: [] });
+    const hit = (s) => String(s || '').toLowerCase().includes(q);
+    const clients = (db.clients || []).filter(c => hit(c.nom) || hit(c.tel) || hit(c.ville) || hit(c.quartier)).slice(0, 30).map(c => ({ id: c.id, nom: c.nom, tel: c.tel, ville: c.ville, kind: 'client' }));
+    const agents = (db.agents || []).filter(a => hit(a.nom) || hit(a.tel) || hit(a.tel1) || hit(a.ville) || hit(a.quartier) || (a.services || []).some(hit)).slice(0, 30).map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1, ville: a.ville, services: a.services, kind: 'pro', online: !!a.online }));
+    const missions = (db.missions || []).filter(m => hit(m.id) || hit(m.service) || hit(m.quartier) || hit((m.client || {}).nom)).slice(0, 20).map(m => ({ id: m.id, service: m.service, status: m.status, client: (m.client || {}).nom, kind: 'mission' }));
+    const gests = (db.admins || []).filter(a => hit(a.nom) || hit(a.ident)).slice(0, 15).map(a => ({ id: a.id, nom: a.nom, ident: a.ident, blocked: !!a.blocked, kind: 'gest' }));
+    const cities = (db.cities || []).filter(c => hit(c.nom)).map(c => ({ id: c.id, nom: c.nom, kind: 'ville' }));
+    return sendJson(res, 200, { q, clients, agents, missions, gests, cities });
   }
 
   /* --- 🔁 Réattribution manuelle d'urgence d'une mission (gestionnaire autorisé) --- */
