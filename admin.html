@@ -416,11 +416,22 @@ async function fetchJ(url){
   if(!r.ok) throw 0;
   return r.json();
 }
+(function bootCounts(){
+  fetch('/api/health',{cache:'no-store'}).then(r=>r.json()).then(h=>{
+    const sub=document.querySelector('#k-agents-sub');
+    if(sub) sub.textContent='sur '+(h.agentsTotal||0)+' professionnel(s)';
+    const a=document.querySelector('#k-agents');
+    if(a && !(h.agentsEnLigne>0)) { /* laisse 0 en ligne */ }
+    [['#c-inscrits', h.clientsTotal],['#c-clients', h.clientsTotal],['#c-done', h.missionsTerminees||0]].forEach(([id,v])=>{
+      const el=document.querySelector(id); if(el) el.textContent = (v||0);
+    });
+  }).catch(()=>{});
+})();
 async function loadAll(){
   try{
     ME = await fetchJ('/api/admin/whoami').catch(()=>ME);
     const soft = u => fetchJ(u).catch(()=>null);
-    const [ov, ms, ags, cands, ppl, cfg, aud] = await Promise.all([
+    let [ov, ms, ags, cands, ppl, cfg, aud] = await Promise.all([
       soft('/api/admin/overview'),
       soft('/api/admin/missions'),
       soft('/api/admin/agents'),
@@ -430,6 +441,14 @@ async function loadAll(){
       soft('/api/admin/audit')
     ]);
     applyRole(); loadSupport();
+    if(!ov || !(ov.agentsTotal || ov.clientsTotal)){
+      try{
+        const h = await fetch('/api/health',{cache:'no-store'}).then(r=>r.json());
+        ov = Object.assign({agentsEnLigne:0,missionsToday:0,missionsActive:0,caToday:0,commToday:0,caTotal:0,commTotal:0,gainAgentsTotal:0,missionsDone:0,candsPending:0,ca7:[]}, ov||{}, {
+          agentsTotal: h.agentsTotal, clientsTotal: h.clientsTotal, missionsTotal: h.missions
+        });
+      }catch(e){}
+    }
     if(ov) renderOverview(ov);
     if(ms) renderMissions(ms);
     if(ags) renderAgents(ags);
