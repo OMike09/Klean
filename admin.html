@@ -419,17 +419,21 @@ async function fetchJ(url){
 async function loadAll(){
   try{
     ME = await fetchJ('/api/admin/whoami').catch(()=>ME);
+    const soft = u => fetchJ(u).catch(()=>null);
     const [ov, ms, ags, cands, ppl, cfg, aud] = await Promise.all([
-      fetchJ('/api/admin/overview'),
-      fetchJ('/api/admin/missions'),
-      fetchJ('/api/admin/agents'),
-      fetchJ('/api/admin/candidatures'),
-      fetchJ('/api/admin/inscrits'),
+      soft('/api/admin/overview'),
+      soft('/api/admin/missions'),
+      soft('/api/admin/agents'),
+      soft('/api/admin/candidatures'),
+      soft('/api/admin/inscrits'),
       fetch('/api/config').then(r=>r.json()).catch(()=>({commission:25})),
-      fetchJ('/api/admin/audit').catch(()=>null)
+      soft('/api/admin/audit')
     ]);
     applyRole(); loadSupport();
-    renderOverview(ov); renderMissions(ms); renderAgents(ags); renderCands(cands);
+    if(ov) renderOverview(ov);
+    if(ms) renderMissions(ms);
+    if(ags) renderAgents(ags);
+    if(cands) renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
     if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
     loadTeam(); loadAnnonce(); loadHqChat(); loadFields();
