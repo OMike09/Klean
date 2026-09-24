@@ -357,27 +357,23 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
           <input id="acp-ville" placeholder="🏙️ Ville (libre)" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
         </div>
         <input id="acp-mail" placeholder="✉️ E-mail (facultatif)" maxlength="60" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        <select id="acp-service" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+                <select id="acp-service" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
           <option value="maison">🧹 Ménage maison</option><option value="bureaux">🏢 Bureaux</option><option value="canapes">🛋️ Canapés & tapis</option><option value="vitres">🪟 Vitres</option><option value="grand">🏰 Grand ménage</option><option value="plomberie">🔧 Plomberie</option><option value="electricite">💡 Électricité</option><option value="clim">❄️ Climatisation</option><option value="serrurerie">🔐 Serrurerie</option><option value="jardinage">🌿 Jardinage</option><option value="lavageauto">🚗 Lavage auto</option><option value="bricolage">🛠️ Bricolage</option><option value="demen">📦 Déménagement</option><option value="cuisine">🍽️ Cuisinier</option><option value="cours">📚 Cours à domicile</option><option value="custom">✨ Demande sur mesure</option>
-   y" id="missions"><div class="empty">Aucune mission pour le moment</div></div>
-    </div>
-
-    <div style="display:flex;flex-direction:column;gap:14px">
-      <!-- Journal temps réel -->
-      <div class="panel">
-        <h3>⚡ Journal temps réel</h3>
-        <div class="body" id="feed"><div class="empty">En attente d'événements…<br>Les demandes apparaîtront ici en direct.</div></div>
-      </div>
-      <!-- Professionnels -->
-      <div class="panel">
-        <h3>🧑‍💼 Professionnels <span class="cnt" id="a-cnt">—</span></h3>
-        <div class="body" id="agents"><div class="empty">Aucun professionnel inscrit</div></div>
+        </select>
+        <div style="margin-top:10px;background:rgba(255,138,0,.12);border:1.5px dashed rgba(255,138,0,.5);border-radius:12px;padding:11px 12px">
+          <b style="font-size:12.5px;color:#b36b00">🔑 Accès à remettre au professionnel</b>
+          <p style="font-size:11.5px;color:var(--muted);margin:4px 0 8px">Touchez « Générer » — le code et le mot de passe s’affichent ici (pas dans la barre d’adresse).</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <input id="acp-pin" readonly placeholder="Code de liaison" style="padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:18px;font-weight:900;letter-spacing:.12em;text-align:center">
+            <input id="acp-pw" readonly placeholder="Mot de passe" style="padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:13px;font-weight:800;text-align:center">
+          </div>
+          <button type="button" onclick="genererCodePro()" style="margin-top:8px;width:100%;background:rgba(255,138,0,.22);border:1.5px solid rgba(255,138,0,.55);color:#b36b00;font-weight:900;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit">⚡ Générer le code automatiquement</button>
+        </div>
+        <button class="btn-main" style="width:100%;margin-top:9px" onclick="createProHQ()">🏗️ Ouvrir le compte pro (validation immédiate)</button>
+        <div id="acp-result" style="display:none;margin-top:10px;background:rgba(13,166,120,.12);border:1.5px solid rgba(13,166,120,.35);border-radius:12px;padding:11px;font-size:13px;line-height:1.5"></div>
       </div>
     </div>
   </div>
-
-  <footer>KLEAN HQ — pilotez votre flotte dans toute la Côte d'Ivoire · les données se mettent à jour en temps réel ⚡</footer>
-</div>
 
 <script>
 const SVC = {maison:'🏠',bureaux:'🏢',canapes:'🛋️',vitres:'🪟',demenagement:'🧼',sdb:'🚿',grand:'🧹'};
@@ -547,6 +543,12 @@ async function nudgeOff(role, id, nom){
 }
 function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 let ME = null, TEAM = [];
+function genererCodePro(){
+  const pin = String(Math.floor(100000 + Math.random()*900000));
+  const pw = 'Klean-' + Math.floor(1000 + Math.random()*9000) + '!';
+  const a=document.getElementById('acp-pin'), b=document.getElementById('acp-pw');
+  if(a) a.value=pin; if(b) b.value=pw;
+}
 function toggleAcctForm(which){
   const c = document.getElementById('acct-client'), p = document.getElementById('acct-pro');
   const showC = which==='client' && c.style.display==='none';
@@ -572,11 +574,19 @@ async function createProHQ(){
   const ville=((document.getElementById('acp-ville')||{}).value||'').trim(), mail=((document.getElementById('acp-mail')||{}).value||'').trim();
   const service=(document.getElementById('acp-service')||{}).value||'maison';
   if(prenom.length<2||nom.length<2||tel.replace(/\D/g,'').length<8) return alert('❌ Prénom + nom + téléphone requis');
-  const r=await fetch('/api/admin/agents/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,prenom,tel,quartier,ville,mail,service})});
+  if(!(document.getElementById('acp-pin')||{}).value) genererCodePro();
+  const pin=((document.getElementById('acp-pin')||{}).value||'').trim();
+  const password=((document.getElementById('acp-pw')||{}).value||'').trim();
+  const r=await fetch('/api/admin/agents/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,prenom,tel,quartier,ville,mail,service,pin,password})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok) return alert('⚠️ '+(d.error||'Création impossible'));
-  alert('🧑‍💼 COMPTE PROFESSIONNEL CRÉÉ — VALIDÉ IMMÉDIATEMENT\n\nRemettez-lui ce CODE DE LIAISON (ne notez que pour la remise en main propre) :\n\n    📞 '+d.tel+'\n    🔑 '+d.pin+'\n\nDans l\'app, il touche « Je suis un professionnel » → carte 🤝 « enregistré par le gestionnaire » → numéro + code.\n⚠️ Le code fonctionne UNE SEULE FOIS, puis s\'efface.');
-  document.getElementById('acp-prenom').value='';document.getElementById('acp-nom').value='';document.getElementById('acp-tel').value='';
+  const box=document.getElementById('acp-result');
+  if(box){
+    box.style.display='block';
+    box.innerHTML='<b>✅ Compte créé — remettez ces accès (dans le cadre, pas dans la barre d’adresse)</b><br>Tél : <b>'+d.tel+'</b><br>Code de liaison (1 fois) : <b style="font-size:22px;letter-spacing:.12em">'+d.pin+'</b><br>Mot de passe : <b>'+d.password+'</b><br><small>App → Je suis un professionnel → tél + mot de passe, ou tél + code.</small>';
+  }
+  if(document.getElementById('acp-pin')) document.getElementById('acp-pin').value=d.pin||pin;
+  if(document.getElementById('acp-pw')) document.getElementById('acp-pw').value=d.password||password;
   loadAll();
 }
 async function reassignMission(id, clientNom){

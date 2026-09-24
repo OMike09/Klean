@@ -1184,7 +1184,7 @@ const server = http.createServer(async (req, res) => {
     const tel1 = String(b.tel || '').replace(/\D/g, '');
     if (tel1.length < 8) return sendJson(res, 400, { error: 'Numéro de téléphone invalide' });
     if (db.agents.find(a => String(a.tel1 || '').replace(/\D/g, '') === tel1)) return sendJson(res, 409, { error: 'Ce numéro est déjà inscrit chez les professionnels' });
-    const pin = String(Math.floor(100000 + Math.random() * 900000));
+    const pin = String(b.pin || '').replace(/\D/g, '').slice(0, 8) || String(Math.floor(100000 + Math.random() * 900000));
     const pw = String(b.password || '') || ('Klean-' + Math.floor(1000 + Math.random() * 9000) + '!');
     const salt = crypto.randomBytes(12).toString('hex');
     const services = Array.isArray(b.services) && b.services.length ? b.services : [b.service || 'maison'];
