@@ -1467,21 +1467,20 @@ server.on('upgrade', (req, sock) => {
 });
 
 process.on('SIGTERM', () => { try { saveDbNow(); } catch (e) {} setTimeout(() => process.exit(0), 300); });
+process.on('unhandledRejection', e => { console.log('⚠️  Promesse :', e && e.message); });
 
-initStorage().then(() => {
-  /* Sauvegarde avant l'arrêt du conteneur (redeploy Render envoie SIGTERM) */
-process.on('SIGTERM', () => { try { saveDbNow(); } catch (e) { } setTimeout(() => process.exit(0), 400); });
-
+/* Render vérifie /api/health dès que le port écoute : on écoute D’ABORD, Neon ensuite */
 server.listen(PORT, '0.0.0.0', () => {
-    console.log('');
-    console.log("  ✨ SERVEUR CENTRAL KLEAN — Côte d'Ivoire 🇨🇮");
-    console.log('  ────────────────────────────────────');
-    console.log('  🌐 Application : http://localhost:' + PORT);
-    console.log('  🎛️  Tableau HQ : http://localhost:' + PORT + '/admin');
-    console.log('  🔑 Mot de passe: ' + (db.admin ? 'déjà configuré ✓' : 'à créer à la 1re ouverture de /admin'));
-    console.log('  📡 WebSocket   : ws://localhost:' + PORT + '/ws');
+  console.log('');
+  console.log("  ✨ SERVEUR CENTRAL KLEAN — Côte d'Ivoire 🇨🇮");
+  console.log('  ────────────────────────────────────');
+  console.log('  🌐 Application : http://localhost:' + PORT);
+  console.log('  🎛️  Tableau HQ : http://localhost:' + PORT + '/admin');
+  console.log('  📡 WebSocket   : ws://localhost:' + PORT + '/ws');
+  console.log('  ────────────────────────────────────');
+  console.log('');
+  initStorage().then(() => {
+    console.log('  🔑 Mot de passe HQ : ' + (db.admin ? 'déjà configuré ✓' : 'à créer à /admin'));
     console.log('  💰 Commission  : ' + (feePct() * 100) + '% par mission');
-    console.log('  ────────────────────────────────────');
-    console.log('');
-  });
-}).catch(e => { console.error('Démarrage impossible :', e); process.exit(1); });
+  }).catch(e => { console.error('Stockage :', e); });
+});
