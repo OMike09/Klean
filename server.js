@@ -574,7 +574,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=; Path=/; Max-Age=0' });
     return res.end('{"ok":true}');
   }
-  if (p =tartsWith('/api/admin') && !isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+  if (p.startsWith('/api/admin') && !isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
 
   /* --- API CLIENTS (comptes sécurisés) --- */
   if (p === '/api/clients/register' && req.method === 'POST') {
