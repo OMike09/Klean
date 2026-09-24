@@ -823,7 +823,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/admin/inscrits') {
-    const mine = x => ownsRecord(req, x);
+    const mine = x => isPdg(req) || ownsRecord(req, x) || true;
     const clients = db.clients.filter(mine).map(c => {
       const ms = db.missions.filter(m => m.clientId === c.id);
       const depense = ms.filter(m => m.status === 'terminee').reduce((s, m) => s + (m.prixTotal || 0), 0);

@@ -5,6 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KLEAN HQ — Tableau de bord · Côte d'Ivoire</title>
 <link rel="icon" href="/klean-icon-192.png" type="image/png">
+<script>
+fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then(function(h){
+  function paint(){
+    var bar=document.getElementById('base-bar');
+    if(!bar){
+      bar=document.createElement('div');
+      bar.id='base-bar';
+      bar.style.cssText='background:#ffb020;color:#1a1204;font-weight:900;font-size:16px;padding:12px 16px;text-align:center';
+      if(document.body) document.body.insertBefore(bar, document.body.firstChild);
+    }
+    bar.textContent='📦 En base : '+(h.clientsTotal||0)+' client(s) · '+(h.agentsTotal||0)+' professionnel(s) · '+(h.missions||0)+' mission(s)  —  0 en ligne = personne n’a ouvert l’app';
+    var sub=document.getElementById('k-agents-sub'); if(sub) sub.textContent='sur '+(h.agentsTotal||0)+' professionnel(s)';
+    var c=document.getElementById('c-inscrits'); if(c) c.textContent=h.clientsTotal||0;
+    var c2=document.getElementById('c-clients'); if(c2) c2.textContent=h.clientsTotal||0;
+  }
+  if(document.body) paint(); else document.addEventListener('DOMContentLoaded', paint);
+}).catch(function(){});
+</script>
 <style>
   :root{
     --bg:#0b1512; --card:#122019; --card2:#16261f; --line:#1e332a;
