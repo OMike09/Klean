@@ -4,7 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KLEAN HQ — Tableau de bord · Côte d'Ivoire</title>
-<link rel="icon" href="/klean-icon-192.png" type="image/png">
+<link rel="icon" href="/hq-icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/hq-icon-192.png">
+<link rel="manifest" href="/manifest-hq.json">
+<meta name="theme-color" content="#15c98a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="KLEAN HQ">
 <script>
 fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then(function(h){
   function paint(){
@@ -500,6 +505,7 @@ async function fetchJ(url){
 })();
 async function loadAll(){
   try{
+    paintHqGo();
     ME = await fetchJ('/api/admin/whoami').catch(()=>ME);
     const soft = u => fetchJ(u).catch(()=>null);
     let [ov, ms, ags, cands, ppl, cfg, aud] = await Promise.all([
@@ -1479,29 +1485,6 @@ setInterval(loadAll, 12000); // secours
   </div>
 </div>
 
-</body>
-</html>s:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button>
-    </div>
-    <div id="qz-modal-stats" style="font-size:13px;font-weight:800;color:var(--amber);margin-bottom:8px"></div>
-    <div id="qz-modal-list" style="font-size:13px"></div>
-  </div>
-</div>
-
-</body>
-</html>uizClicks()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button>
-    </div>
-    <div id="qz-modal-stats" style="font-size:13px;font-weight:800;color:var(--amber);margin-bottom:8px"></div>
-    <div id="qz-modal-list" style="font-size:13px"></div>
-  </div>
-</div>
-
-</body>
-</html>s:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button>
-    </div>
-    <div id="qz-modal-stats" style="font-size:13px;font-weight:800;color:var(--amber);margin-bottom:8px"></div>
-    <div id="qz-modal-list" style="font-size:13px"></div>
-  </div>
-</div>
-
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/hq-sw.js');}</script>
 </body>
 </html>
