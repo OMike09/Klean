@@ -57,13 +57,17 @@ function connectWS(){
     applyNetOverrides();
     toast('🛰️ Connecté au serveur KLEAN — temps réel activé');
     // si un profil agent existe et était en ligne → se réannoncer
-    if (agent && agent.nom && agent.online) netAnnounceOnline();
+    if (agent && agent.nom && (agent.online || localStorage.getItem('k2_stayOnline')==='1')) {
+      agent.online = true; try{ saveAll(); }catch(e){}
+      netAnnounceOnline(); startProStayAlive();
+    }
+    if(typeof refreshProOrb==='function') refreshProOrb();
   };
   ws.onmessage = ev => { try { routeNet(JSON.parse(ev.data)); } catch(e){} };
-  ws.onclose = () => { NET.on = false; };
-  setInterval(() => wsSend({type:'ping'}), 25000);
-  // 🔁 Surveillance du statut de candidature (en attente → validé)
-  setInterval(()=>{
+  ws.onclose = () => { NET.on = false; if(!NET._reconn){ NET._reconn=true; setTimeout(()=>{ NET._reconn=false; connectWS(); }, 2500); } };
+  if(!NET._pingIv) NET._pingIv = setInterval(() => wsSend({type:'ping'}), 25000);
+  if(NET._statIv) return;
+  NET._statIv = setInterval(()=>{
     if(NET.on && typeof agent!=='undefined' && agent.apply && agent.apply.status==='pending' && agent.apply.agentId){
       fetch('/api/agents/'+agent.apply.agentId+'/status', {cache:'no-store'}).then(r=>r.json()).then(d=>{
         if(d.status === 'approved') agentApplyApproved();
@@ -430,18 +434,50 @@ async function netQuickOnboard(){
   netAnnounceOnline();
   toast('🎉 Bienvenue '+nom+' ! Vous êtes en ligne.');
 }
+function startProStayAlive(){
+  try{ localStorage.setItem('k2_stayOnline','1'); }catch(e){}
+  netStartPosWatch();
+  try{ if(navigator.wakeLock) navigator.wakeLock.request('screen').then(l=>{ window._kleanLock=l; }).catch(()=>{}); }catch(e){}
+  try{ if(typeof agentPushActivate==='function') agentPushActivate(); else if(typeof agentPushEnsure==='function') agentPushEnsure(); }catch(e){}
+  if(NET._hb) return;
+  const beat=()=>{
+    if(!agent || !agent.online || !NET.agentId) return;
+    const body={agentId:NET.agentId, stayOnline:true};
+    if(NET.pos){ body.lat=NET.pos.lat; body.lng=NET.pos.lng; }
+    fetch('/api/agents/heartbeat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(()=>{});
+    if(NET.on) netAnnounceOnline();
+  };
+  NET._hb=setInterval(beat, 20000);
+  beat();
+  if(!NET._vis){
+    NET._vis=true;
+    document.addEventListener('visibilitychange', ()=>{
+      if(document.visibilityState==='visible' && agent && agent.online){
+        try{ if(navigator.wakeLock) navigator.wakeLock.request('screen').then(l=>{ window._kleanLock=l; }).catch(()=>{}); }catch(e){}
+        beat();
+      }
+    });
+  }
+}
+function stopProStayAlive(){
+  try{ localStorage.removeItem('k2_stayOnline'); }catch(e){}
+  if(NET._hb){ clearInterval(NET._hb); NET._hb=null; }
+  try{ window._kleanLock && window._kleanLock.release(); }catch(e){}
+}
 function netToggleOnline(){
   if(!agent.apply || agent.apply.status !== 'approved'){
-    return toast('🛡️ Votre dossier doit d\'abord être validé par KLEAN');
+    return toast('🛡️ Dossier à valider, ou liez le compte créé par le PDG/gest (tél + code)');
   }
   if(!agent.nom) return toast('Complétez d\'abord votre dossier 👤');
   agent.online = !agent.online; saveAll(); renderAgentDash();
+  if(typeof refreshProOrb==='function') refreshProOrb();
   if(agent.online){
     agentAlertUnlock && agentAlertUnlock();
-    try{ agentPushEnsure && agentPushEnsure(); }catch(e){}
     netAnnounceOnline();
-    toast('🟢 En ligne — les vraies demandes arrivent');
+    startProStayAlive();
+    toast('🟢 En ligne partout — GPS + sonnerie même en veille');
   } else {
+    stopProStayAlive();
     wsSend({type:'agent_offline', agentId:NET.agentId});
     toast('⚪ Hors ligne'); hideRequest();
   }

@@ -376,7 +376,7 @@
       <span style="display:flex;align-items:center"><img src="/klean-icon-192.png" alt="KLEAN" style="width:32px;height:32px;border-radius:9px;margin-right:6px;box-shadow:0 3px 10px rgba(7,110,79,.35)">KLEAN</span>
       <span style="font-size:12.5px;font-weight:900;color:var(--pd);letter-spacing:.6px;border-left:2px solid var(--line);padding-left:9px;margin-left:4px">SERVICES À DOMICILE — CI</span>
     </div>
-
+    <button type="button" id="pro-orb" onclick="openProOrb()" title="Profil pro" style="display:none;width:42px;height:42px;border-radius:50%;border:2.5px solid var(--p);background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font-weight:900;font-size:16px;cursor:pointer;position:relative;flex:none;box-shadow:0 4px 12px rgba(13,166,120,.35)">P<span id="pro-orb-dot" style="position:absolute;right:-1px;bottom:-1px;width:12px;height:12px;border-radius:50%;background:#9aa;border:2px solid #fff"></span></button>
   </div>
 
 </div>
@@ -1547,6 +1547,7 @@ function renderAgentDash(){
   $('#agent-missions-n').textContent = agent.missionsDone+' mission'+(agent.missionsDone>1?'s':'');
   renderMissionPanel();
   if(typeof loadProRoam==='function') loadProRoam();
+  if(typeof refreshProOrb==='function') refreshProOrb();
 }
 /* ═════════ CANDIDATURE AGENT (vérifiée par le propriétaire) ═════════ */
 agent.apply = agent.apply || {status: agent.nom ? 'approved' : 'none', agentId: localStorage.getItem('k2_agentId')||null, reason:''};
@@ -1561,8 +1562,13 @@ async function claimAgentAccount(){
     if(!r.ok){ toast('⚠️ ' + (d.error || 'Liaison impossible')); return; }
     localStorage.setItem('k2_agentId', d.agentId);
     if(typeof NET !== 'undefined') NET.agentId = d.agentId;
-    toast('🎉 Compte professionnel lié — bienvenue ' + (d.nom || '') + ' !');
-    saveAll(); setTimeout(()=>location.reload(), 900);
+    agent.nom = d.nom || agent.nom;
+    agent.tel = tel;
+    agent.apply = {status:'approved', agentId:d.agentId, nom:d.nom||agent.nom};
+    saveAll();
+    refreshProOrb();
+    toast('🎉 Compte lié — touchez le rond en haut pour profil / en ligne');
+    setTimeout(()=>{ setMode('agent'); showView('view-agent', document.querySelector('#nav-agent .nav-btn'), 'agent'); }, 400);
   }catch(e){ toast('📵 Réseau fragile — réessayez'); }
 }
 function renderAgentGate(){
@@ -1841,10 +1847,48 @@ async function submitApplication(){
   toast('✅ (Démo) Dossier validé — en production le propriétaire vérifie d\'abord 🛡️');
 }
 function agentLogout(){
-  if(!confirm('🚪 Se déconnecter de ce compte professionnel ?\n\nVotre compte reste chez KLEAN — pour revenir, utilisez votre liaison ou le gestionnaire.')) return;
+  if(!confirm('🚪 Se déconnecter de ce compte professionnel ?\n\nVotre compte reste chez KLEAN — pour revenir : tél + mot de passe, ou code de liaison.')) return;
+  try{ localStorage.removeItem('k2_stayOnline'); }catch(e){}
+  if(typeof NET !== 'undefined'){ try{ wsSend({type:'agent_offline', agentId:NET.agentId}); }catch(e){} NET.agentId = null; }
   localStorage.removeItem('k2_agentId'); localStorage.removeItem('k2_agent');
-  if(typeof NET !== 'undefined') NET.agentId = null;
   location.reload();
+}
+function proIsIn(){
+  return !!(agent && ((agent.apply && agent.apply.status==='approved' && (agent.apply.agentId||localStorage.getItem('k2_agentId'))) || (agent.nom && localStorage.getItem('k2_agentId'))));
+}
+function refreshProOrb(){
+  const b=document.getElementById('pro-orb'); if(!b) return;
+  const on=proIsIn();
+  b.style.display = on ? 'inline-flex' : 'none';
+  b.style.alignItems='center'; b.style.justifyContent='center';
+  const letter=((agent&& (agent.nom|| (agent.apply&&agent.apply.nom))) || 'P').trim().charAt(0).toUpperCase() || 'P';
+  if(b.firstChild && b.firstChild.nodeType===3) b.firstChild.textContent=letter;
+  else { b.insertBefore(document.createTextNode(letter), b.firstChild); }
+  const d=document.getElementById('pro-orb-dot');
+  if(d) d.style.background = (agent&&agent.online) ? '#22c55e' : '#9aa';
+}
+function openProOrb(){
+  refreshProOrb();
+  const on = !!(agent && agent.online);
+  const nom = (agent && (agent.nom || (agent.apply && agent.apply.nom))) || 'Professionnel';
+  const ov=document.createElement('div');
+  ov.id='pro-orb-modal';
+  ov.style.cssText='position:fixed;inset:0;z-index:9000;background:rgba(8,18,14,.55);display:flex;align-items:flex-start;justify-content:flex-end;padding:58px 12px 16px';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  ov.innerHTML='<div style="background:#fff;width:min(340px,94vw);border-radius:18px;padding:14px 14px 16px;box-shadow:0 16px 40px rgba(0,0,0,.25)">'+
+    '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#0da678,#0a8a62);color:#fff;font-weight:900;display:flex;align-items:center;justify-content:center">'+(nom[0]||'P').toUpperCase()+'</div><div style="flex:1"><b style="display:block">'+nom+'</b><small style="color:#6b7c73">'+(on?'🟢 En ligne — détectable':'⚪ Hors ligne')+'</small></div><button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove()" style="border:1px solid #e4eae7;background:#f3f6f5;border-radius:9px;padding:6px 9px;font-weight:800;cursor:pointer">✕</button></div>'+
+    '<button type="button" onclick="goProView(\'profil\')" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #e4eae7;background:#fff;font:inherit;font-weight:800;margin-bottom:7px;cursor:pointer">👤 Voir mon profil</button>'+
+    '<button type="button" onclick="goProView(\'dash\')" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #e4eae7;background:#fff;font:inherit;font-weight:800;margin-bottom:7px;cursor:pointer">📊 Tableau de bord</button>'+
+    '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); toggleOnline(); setTimeout(refreshProOrb,200);" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid '+(on?'#0da678':'#ff8a00')+';background:'+(on?'#e7f7f1':'#fff4e5')+';font:inherit;font-weight:900;margin-bottom:7px;cursor:pointer">'+(on?'⚪ Passer hors ligne':'🟢 Passer en ligne (GPS + sonnerie)')+'</button>'+
+    '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); agentLogout();" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #f5c6c7;background:#fff;color:#e5484d;font:inherit;font-weight:800;cursor:pointer">🚪 Se déconnecter</button>'+
+    '<p style="font-size:11px;color:#6b7c73;margin:10px 0 0;line-height:1.4">GPS + sonnerie même en veille. Compte créé par PDG/gest : même rond après tél + code ou mot de passe.</p></div>';
+  document.body.appendChild(ov);
+}
+function goProView(which){
+  const m=document.getElementById('pro-orb-modal'); if(m) m.remove();
+  if(typeof setMode==='function') setMode('agent');
+  if(which==='profil'){ showView('view-agent-profil', document.querySelector('#nav-agent .nav-btn[data-v=view-agent-profil]'), 'agent'); if(typeof fillProfile==='function') fillProfile(); }
+  else { showView('view-agent', document.querySelector('#nav-agent .nav-btn'), 'agent'); }
 }
 let _proPhotoNew = '';
 function openProEditor(){
@@ -2321,6 +2365,7 @@ function fallbackCopy(txt, done){
   }
   // Deep-link « Mode agent » (raccourcis du manifest / ?mode=agent)
   if(new URLSearchParams(location.search).get('mode') === 'agent') setMode('agent');
+  if(typeof refreshProOrb==='function') refreshProOrb();
   /* ══ PWA : service worker + bouton « Installer l'app » ══ */
   if('serviceWorker' in navigator && location.protocol.startsWith('http')){
     navigator.serviceWorker.register('/sw.js').catch(()=>{});

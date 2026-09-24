@@ -256,7 +256,7 @@ function vapidKeys() {
 async function pushNewMissionToAgents(m, svcNom) {
   if (!webpush || !vapidKeys()) return;
   const payload = JSON.stringify({ title: '🔔 Nouvelle demande KLEAN', body: svcNom + ' · ' + (m.quartier || '') + ' · ' + (m.prixTotal || 0).toLocaleString('fr-FR') + ' F — touchez pour accepter', url: '/?mode=agent', missionId: m.id });
-  const targets = db.agents.filter(ag => (ag.status || 'approved') === 'approved' && !ag.blocked && Array.isArray(ag.pushSubs) && ag.pushSubs.length);
+  const targets = db.agents.filter(ag => (ag.status || 'approved') === 'approved' && !ag.blocked && (ag.stayOnline || ag.online) && Array.isArray(ag.pushSubs) && ag.pushSubs.length && (!m.service || agentHasService(ag, m.service)));
   let dirty = false;
   for (const ag of targets) {
     for (const sub of [...ag.pushSubs]) {
@@ -296,7 +296,7 @@ function routeWsMessage(sock, msg) {
       ag.nom = msg.nom || ag.nom; ag.quartier = msg.quartier || ag.quartier; ag.tel = msg.tel || ag.tel;
       if (msg.ville) ag.ville = String(msg.ville).slice(0, 60);
       ag.mobile = true;
-      ag.online = true; ag.lastSeen = nowISO();
+      ag.online = true; ag.stayOnline = true; ag.lastSeen = nowISO();
       sock.meta.role = 'agent'; sock.meta.online = true; sock.meta.agentId = ag.id;
       saveDb();
       wsSend(sock, { type: 'agent_registered', agentId: ag.id });
@@ -306,7 +306,7 @@ function routeWsMessage(sock, msg) {
     }
     case 'agent_offline': {
       const ag = db.agents.find(a => a.id === (sock.meta.agentId || msg.agentId));
-      if (ag) { ag.online = false; saveDb(); emitAdmin('agent', `⚪ ${ag.nom} est hors ligne`); }
+      if (ag) { ag.online = false; ag.stayOnline = false; saveDb(); emitAdmin('agent', `⚪ ${ag.nom} est hors ligne`); }
       sock.meta.online = false;
       console.log('⚪ Agent hors ligne');
       break;
