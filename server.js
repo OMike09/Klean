@@ -122,7 +122,16 @@ async function initStorage() {
       await pgClient.connect();
       await pgClient.query('CREATE TABLE IF NOT EXISTS klean_state (id smallint PRIMARY KEY, data jsonb NOT NULL, updated timestamptz NOT NULL DEFAULT now())');
       const r = await pgClient.query('SELECT data FROM klean_state WHERE id=1');
-      if (r.rows.length) db = r.rows[0].data;
+      if (r.rows.length) {
+        const incoming = r.rows[0].data || {};
+        const nIn = (incoming.agents||[]).length + (incoming.clients||[]).length + (incoming.missions||[]).length;
+        const nMem = (db.agents||[]).length + (db.clients||[]).length + (db.missions||[]).length;
+        if (nIn === 0 && nMem > 0) {
+          console.log('  🛡️  Neon vide — on garde les dossiers déjà en mémoire (pas d’écrasement)');
+        } else {
+          db = incoming;
+        }
+      }
       else {
         /* 📦 Première connexion Neon : on TRANSPLANTE les comptes actuels (db.json) — rien n'est perdu */
         try {
@@ -164,10 +173,17 @@ async function initStorage() {
   storageReady = true;
 }
 function saveDbNow() {
+  if (!storageReady) return;
+  const n = (db.agents||[]).length + (db.clients||[]).length + (db.missions||[]).length + ((db.admin) ? 1 : 0);
   const snap = JSON.stringify(db, null, 1);
   try { fs.writeFileSync(DB_FILE + '.tmp', snap); fs.renameSync(DB_FILE + '.tmp', DB_FILE); } catch (e) {}
   if (pgClient) {
-    pgClient.query('UPDATE klean_state SET data=$1, updated=now() WHERE id=1', [JSON.parse(snap)])
+    pgClient.query('SELECT jsonb_array_length(COALESCE(data->\'agents\', \'[]\'::jsonb)) + jsonb_array_length(COALESCE(data->\'clients\', \'[]\'::jsonb)) AS n FROM klean_state WHERE id=1')
+      .then(r => {
+        const oldN = r.rows[0] ? Number(r.rows[0].n) : 0;
+        if (oldN > 0 && n === 0) { console.log('  🛡️  sauvegarde refusée : base mémoire vide, Neon a encore ' + oldN + ' dossier(s)'); return; }
+        return pgClient.query('UPDATE klean_state SET data=$1, updated=now() WHERE id=1', [JSON.parse(snap)]);
+      })
       .catch(e => console.log('  ⚠️  sauvegarde Postgres : ' + e.message));
   }
 }
