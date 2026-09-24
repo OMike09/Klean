@@ -836,6 +836,26 @@ const CITIES_SOON = ['San-Pédro','Daloa','Korhogo','Man','Gagnoa','Abengourou',
     if(!have.has(n.toLowerCase())){ CITIES.push({id:n.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]+/g,'-'), nom:n, actif:true, quartiers:[n+'-Centre','Marché','Gare']}); have.add(n.toLowerCase()); }
   });
 })();
+function absorbServerCities(list){
+  if(!Array.isArray(list)) return;
+  const have = new Set(CITIES.map(x=>x.nom.toLowerCase()));
+  list.forEach(ci=>{
+    const nom=(ci.nom||'').trim(); if(!nom) return;
+    if(have.has(nom.toLowerCase())) return;
+    const id=ci.id || nom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-');
+    CITIES.push({id, nom, actif:true, quartiers: Array.isArray(ci.quartiers)&&ci.quartiers.length?ci.quartiers:[nom+'-Centre','Marché','Gare']});
+    have.add(nom.toLowerCase());
+  });
+  try{ if(typeof renderHomeRoad==='function') renderHomeRoad(); if(typeof renderCityModal==='function' && document.getElementById('city-list')) renderCityModal(); }catch(e){}
+}
+async function loadServerCities(){
+  try{
+    const d=await fetch('/api/cities',{cache:'no-store'}).then(r=>r.json());
+    absorbServerCities(d.cities||d);
+  }catch(e){}
+}
+loadServerCities();
+setInterval(loadServerCities, 20000);
 function currentCity(){ return CITIES.find(x=>x.id===(c.city||'bouake')) || CITIES[0]; }
 function currentQuartiers(){ return currentCity().quartiers; }
 const QUARTIERS = CITIES[0].quartiers; // compat (Bouaké par défaut)

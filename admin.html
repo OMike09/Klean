@@ -375,6 +375,17 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
     </div>
   </div>
 
+  <div class="panel" style="margin-bottom:14px" id="panel-villes">
+    <h3>🏙️ Villes KLEAN</h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Ajoutez une ville : elle apparaît tout de suite chez les clients et les professionnels (liste, GPS, inscription).</p>
+      <input id="nv-nom" placeholder="Nom de la ville * (ex : Séguéla)" maxlength="40" style="width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <input id="nv-q" placeholder="Quartiers (virgules) — facultatif" maxlength="240" style="width:100%;margin-top:7px;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <button class="btn-main" style="width:100%;margin-top:8px" onclick="creerVilleHQ()">➕ Créer la ville (actualise partout)</button>
+      <div id="nv-list" style="margin-top:10px;font-size:13px"></div>
+    </div>
+  </div>
+
 <script>
 const SVC = {maison:'🏠',bureaux:'🏢',canapes:'🛋️',vitres:'🪟',demenagement:'🧼',sdb:'🚿',grand:'🧹'};
 const SVC_N = {maison:'Maison',bureaux:'Bureaux',canapes:'Canapés',vitres:'Vitres',demenagement:'Après dém.',sdb:'SDB',grand:'Grand ménage',plomberie:'Plomberie',electricite:'Électricité',clim:'Climatisation',serrurerie:'Serrurerie',electro:'Électroménager',jardinage:'Jardinage',lavageauto:'Lavage auto',bricolage:'Bricolage',demen:'Déménagement',cuisine:'Cuisinier',cours:'📚 Cours ou formation à domicile',canal:'📡 Canal+ domicile',evenement:'🎉 Après événement',entretien:'🗓️ Entretien régulier',placement:'👥 Placement',custom:'🛠️ Demande sur mesure'};
@@ -473,7 +484,7 @@ async function loadAll(){
     if(cands) renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
     if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
-    loadTeam(); loadAnnonce(); loadQuizHQ(); loadHqChat(); loadFields();
+    loadTeam(); loadAnnonce(); loadQuizHQ(); loadHqChat(); loadFields(); loadVillesHQ();
     if(!window._qzPoll){ window._qzPoll=setInterval(loadQuizHQ, 1000); }
   }catch(e){
     console.warn('HQ : une partie des données n’a pas chargé', e);
@@ -1282,6 +1293,14 @@ setInterval(loadAll, 12000); // secours
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
       <b style="flex:1;font-size:16px">🏆 Réponses du quiz</b>
       <button type="button" onclick="closeQuizClicks()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button>
+    </div>
+    <div id="qz-modal-stats" style="font-size:13px;font-weight:800;color:var(--amber);margin-bottom:8px"></div>
+    <div id="qz-modal-list" style="font-size:13px"></div>
+  </div>
+</div>
+
+</body>
+</html>s:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button>
     </div>
     <div id="qz-modal-stats" style="font-size:13px;font-weight:800;color:var(--amber);margin-bottom:8px"></div>
     <div id="qz-modal-list" style="font-size:13px"></div>

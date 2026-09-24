@@ -164,6 +164,7 @@ async function initStorage() {
   db.mutedChats = db.mutedChats || [];
   db.fieldAgents = db.fieldAgents || [];
   db.fieldChat = db.fieldChat || [];
+  db.cities = db.cities || [];
   /* Pré-initialisation optionnelle du mot de passe via ADMIN_PIN (1er démarrage seulement) */
   if (!db.admin && process.env.ADMIN_PIN) {
     const salt = crypto.randomBytes(12).toString('hex');
@@ -1816,7 +1817,7 @@ server.on('upgrade', (req, sock) => {
     sockets.delete(sock);
     if (sock.meta && sock.meta.agentId) {
       const ag = db.agents.find(a => a.id === sock.meta.agentId);
-      if (ag && ![...sockets].some(s => s.meta && s.meta.agentId === ag.id)) { ag.online = false; saveDb(); }
+      if (ag && ![...sockets].some(s => s.meta && s.meta.agentId === ag.id)) { if (!ag.stayOnline) { ag.online = false; saveDb(); } }
     }
     if (sock.meta && sock.meta.clientId) {
       const cl = db.clients.find(c => c.id === sock.meta.clientId);
