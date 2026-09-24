@@ -114,7 +114,7 @@ async function initStorage() {
   if (process.env.DATABASE_URL) {
     try {
       const { Client } = require('pg');
-      pgClient = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+      pgClient = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 8000 });
       await pgClient.connect();
       await pgClient.query('CREATE TABLE IF NOT EXISTS klean_state (id smallint PRIMARY KEY, data jsonb NOT NULL, updated timestamptz NOT NULL DEFAULT now())');
       const r = await pgClient.query('SELECT data FROM klean_state WHERE id=1');
