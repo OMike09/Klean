@@ -37,7 +37,16 @@ Render gratuit **endort** le serveur après ~15 min sans visite. Au 1ᵉʳ clic,
 - + **toutes les autres villes de Côte d'Ivoire** sélectionnables (quartier tapé à la main).
 - + **saisie libre** : le client peut taper n'importe quelle ville inconnue.
 
-## 8. La boucle de mise à jour (à mémoriser)
+## 8. SMS hors ligne (KLEAN-SERVICES CI)
+Les réseaux CI n’acceptent qu’**11 caractères** comme nom d’expéditeur. L’écran du destinataire affiche **KLEAN-SV CI** ; le texte commence par **KLEAN-SERVICES CI**.
+Sur **Render → Environment** (après compte [developer.orange.com](https://developer.orange.com) API **SMS Côte d’Ivoire**) :
+- `ORANGE_SMS_CLIENT_ID`
+- `ORANGE_SMS_CLIENT_SECRET`
+- optionnel : `SMS_SENDER` (défaut `KLEAN-SV CI`) — à faire **whitelister** par Orange (~5 jours)
+Alternative : `TWILIO_SID` + `TWILIO_TOKEN` + `TWILIO_FROM`.
+HQ : panneau Personnes → **💬 SMS**, ou « Tous les hors ligne ». Sans ces clés, le bouton explique « SMS non configuré ».
+
+## 9. La boucle de mise à jour (à mémoriser)
 1. Vous décrivez le changement → 2. je le construis et teste → 3. dossier **A_ENVOYER N** (règle : toujours le numéro le plus grand) → 4. upload GitHub → 5. Render redéploie (~3 min) → 6. je vérifie à distance.
 
 ## 9. Sécurité déjà en place

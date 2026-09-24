@@ -373,7 +373,7 @@
   <div class="topbar-in">
     <div class="logo" style="display:flex;align-items:center">
       <span style="display:flex;align-items:center"><img src="/klean-icon-192.png" alt="KLEAN" style="width:32px;height:32px;border-radius:9px;margin-right:6px;box-shadow:0 3px 10px rgba(7,110,79,.35)">KLEAN</span>
-      <span style="font-size:12px;font-weight:900;color:var(--pd);letter-spacing:.6px;line-height:1.15;border-left:2px solid var(--line);padding-left:9px;margin-left:2px">SERVICES À<br>DOMICILE</span>
+      <span style="font-size:13px;font-weight:900;color:var(--pd);letter-spacing:.5px;border-left:2px solid var(--line);padding-left:9px;margin-left:4px">KLEAN-SERVICES CI</span>
     </div>
 
   </div>
@@ -382,6 +382,10 @@
 
 <!-- ══════════════════ CLIENT : ACCUEIL ══════════════════ -->
 <div class="view active" id="view-home">
+  <div id="aff-bar" class="hidden" style="overflow:hidden;white-space:nowrap;background:linear-gradient(90deg,#ffb020,#ff8a00);color:#1a1204;font-weight:900;font-size:16px;padding:12px 0;margin:0 0 12px;border-radius:14px;letter-spacing:.3px">
+    <div id="aff-track" style="display:inline-block;padding-left:100%;animation:kleanMarquee 18s linear infinite"></div>
+  </div>
+  <style>@keyframes kleanMarquee{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}</style>
   <button id="svc-city-big" onclick="cityInfo()" style="width:100%;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-radius:16px;padding:13px 15px;margin:0 0 12px;box-shadow:0 4px 14px rgba(7,110,79,.28);text-align:left">
     <span style="font-size:27px">🛠️</span>
     <span style="flex:1;min-width:0">
@@ -2344,6 +2348,16 @@ function showInstallFab(){
       toast('📲 iPhone : touchez « Partager » ⬆ puis « Sur l\'écran d\'accueil » pour installer KLEAN comme une app');
     }, 9000);
   }
+})();
+(function loadAffiche(){
+  fetch('/api/annonce',{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    if(!d || !d.annonce || !d.annonce.message) return;
+    const bar=document.getElementById('aff-bar'), tr=document.getElementById('aff-track');
+    if(!bar||!tr) return;
+    const ic = d.annonce.type==='alerte'?'⚠️ ': d.annonce.type==='maj'?'✨ ':'ℹ️ ';
+    tr.textContent = ic + d.annonce.message + '   ·   ' + ic + d.annonce.message + '   ·   ';
+    bar.classList.remove('hidden');
+  }).catch(()=>{});
 })();
 </script>
 <script src="net.js"></script>

@@ -73,11 +73,27 @@ function hqIdentity(req) {
   return null;
 }
 function pdgOnly(req, res) { const id = hqIdentity(req); if (!id || id.role !== 'pdg') { sendJson(res, 403, { error: 'Réservé au PDG' }); return false; } return true; }
-function act(req) { const id = hqIdentity(req); return (id && id.nom) || 'PDG'; }
+function fieldTokenOf(f) { return sha256(f.passHash + '::klean-field:' + f.id); }
+function fieldIdentity(req) {
+  const c = req.headers.cookie || '';
+  for (const part of c.split(';')) {
+    const t = part.trim();
+    if (!t.startsWith('klean_field=')) continue;
+    const tok = t.slice(12);
+    const f = (db.fieldAgents || []).find(x => !x.blocked && fieldTokenOf(x) === tok);
+    if (f) return { role: 'field', nom: f.nom, id: f.id, gestId: f.createdById || null };
+  }
+  return null;
+}
+function act(req) { const id = hqIdentity(req) || fieldIdentity(req); return (id && id.nom) || 'PDG'; }
 function actorId(req) { const id = hqIdentity(req); return id ? (id.role === 'pdg' ? 'pdg' : id.id) : null; }
 function isPdg(req) { const id = hqIdentity(req); return id && id.role === 'pdg'; }
 function ownsRecord(req, rec) {
   if (isPdg(req)) return true;
+  const hq = hqIdentity(req);
+  if (hq && hq.role === 'gest') return rec && (rec.createdById === hq.id || rec.createdByGestId === hq.id);
+  const f = fieldIdentity(req);
+  if (f) return rec && rec.createdById === f.id;
   const id = actorId(req);
   return rec && rec.createdById === id;
 }
@@ -212,6 +228,62 @@ function vapidKeys() {
   catch (e) { console.log('⚠️ VAPID invalide :', e.message); return null; }
   return db.settings.vapid;
 }
+function smsSenderName() {
+  const s = String(process.env.SMS_SENDER || 'KLEAN-SV CI').replace(/[^A-Za-z0-9 -]/g, '').slice(0, 11);
+  return s || 'KLEAN-SV CI';
+}
+function toE164CI(tel) {
+  let d = String(tel || '').replace(/\D/g, '');
+  if (d.startsWith('00225')) d = d.slice(2);
+  if (d.startsWith('225')) return '+' + d;
+  if (d.length === 10 || d.length === 8) return '+225' + d;
+  return d.length >= 8 ? '+' + d : null;
+}
+function httpJson(method, url, headers, body) {
+  const https = require('https');
+  const u = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = https.request({ method, hostname: u.hostname, path: u.pathname + u.search, headers: headers || {} }, res => {
+      let b = '';
+      res.on('data', c => b += c);
+      res.on('end', () => { try { resolve({ status: res.statusCode, json: b ? JSON.parse(b) : {}, raw: b }); } catch (e) { resolve({ status: res.statusCode, json: {}, raw: b }); } });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+let orangeToken = { val: null, exp: 0 };
+async function sendSms(tel, text) {
+  const dest = toE164CI(tel);
+  if (!dest) return { ok: false, error: 'Numéro invalide' };
+  const msg = ('KLEAN-SERVICES CI — ' + String(text || '').replace(/^KLEAN[- ]SERVICES?\s*CI?\s*[—:-]?\s*/i, '')).slice(0, 320);
+  const sender = smsSenderName();
+  try {
+    if (process.env.TWILIO_SID && process.env.TWILIO_TOKEN) {
+      const from = process.env.TWILIO_FROM || sender;
+      const auth = Buffer.from(process.env.TWILIO_SID + ':' + process.env.TWILIO_TOKEN).toString('base64');
+      const form = new URLSearchParams({ To: dest, From: from, Body: msg }).toString();
+      const r = await httpJson('POST', 'https://api.twilio.com/2010-04-01/Accounts/' + process.env.TWILIO_SID + '/Messages.json', { Authorization: 'Basic ' + auth, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(form) }, form);
+      return { ok: r.status >= 200 && r.status < 300, provider: 'twilio', error: r.json.message || r.json.error_message };
+    }
+    if (process.env.ORANGE_SMS_CLIENT_ID && process.env.ORANGE_SMS_CLIENT_SECRET) {
+      if (!orangeToken.val || Date.now() > orangeToken.exp) {
+        const form = 'grant_type=client_credentials';
+        const auth = Buffer.from(process.env.ORANGE_SMS_CLIENT_ID + ':' + process.env.ORANGE_SMS_CLIENT_SECRET).toString('base64');
+        const t = await httpJson('POST', 'https://api.orange.com/oauth/v3/token', { Authorization: 'Basic ' + auth, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(form) }, form);
+        orangeToken.val = t.json.access_token || null;
+        orangeToken.exp = Date.now() + Math.max(60, (t.json.expires_in || 3600) - 60) * 1000;
+      }
+      if (!orangeToken.val) return { ok: false, error: 'Orange : identifiants refusés' };
+      const senderAddr = process.env.ORANGE_SMS_ADDRESS || 'tel:+2250000';
+      const payload = JSON.stringify({ outboundSMSMessageRequest: { address: ['tel:' + dest], senderAddress: senderAddr, senderName: sender, outboundSMSTextMessage: { message: msg } } });
+      const r = await httpJson('POST', 'https://api.orange.com/smsmessaging/v1/outbound/' + encodeURIComponent(senderAddr) + '/requests', { Authorization: 'Bearer ' + orangeToken.val, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }, payload);
+      return { ok: r.status >= 200 && r.status < 300, provider: 'orange', error: (r.json.requestError && r.json.requestError.serviceException && r.json.requestError.serviceException.text) || r.raw };
+    }
+  } catch (e) { return { ok: false, error: e.message }; }
+  return { ok: false, error: 'SMS non configuré. Sur Render → Environment : ORANGE_SMS_CLIENT_ID et ORANGE_SMS_CLIENT_SECRET. Sender à whitelister : KLEAN-SV CI (le SMS commence par KLEAN-SERVICES CI)' };
+}
 /* Envoie la notification « poche » à tous les agents validés ayant activé les alertes.
    Le web push arrive MÊME application fermée / écran éteint (Android) — c'est là sa force. */
 async function pushNewMissionToAgents(m, svcNom) {
@@ -241,6 +313,10 @@ function routeWsMessage(sock, msg) {
     case 'hello':
       sock.meta.role = msg.role === 'agent' ? 'agent' : (msg.role === 'admin' && sock.meta.hqAuthed ? 'admin' : 'client');
       sock.meta.deviceId = msg.deviceId || null;
+      if (msg.role === 'client' && msg.clientId) {
+        const cl = db.clients.find(c => c.id === msg.clientId && !c.blocked);
+        if (cl) { cl.online = true; cl.lastSeen = nowISO(); sock.meta.clientId = cl.id; sock.meta.role = 'client'; }
+      }
       break;
     case 'ping': break;
     case 'agent_online': {
@@ -554,7 +630,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': 'klean_hq=; Path=/; Max-Age=0' });
     return res.end('{"ok":true}');
   }
-  if (p.startsWith('/api/admin') && !isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+  if (p =tartsWith('/api/admin') && !isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
 
   /* --- API CLIENTS (comptes sécurisés) --- */
   if (p === '/api/clients/register' && req.method === 'POST') {
@@ -979,7 +1055,8 @@ const server = http.createServer(async (req, res) => {
     const perr = validPassword(pw);
     if (perr) return sendJson(res, 400, { error: 'Mot de passe faible : ' + perr });
     const salt = crypto.randomBytes(12).toString('hex');
-    const cl = { id: uid('CL'), nom, tel, quartier: String(b.quartier || '').trim(), ville: String(b.ville || '').trim().slice(0, 60), mail: String(b.mail || '').trim().slice(0, 80), salt, passHash: hashPassword(salt, pw), createdAt: nowISO(), createdBy: act(req), createdById: actorId(req) };
+    const fid = fieldIdentity(req);
+    const cl = { id: uid('CL'), nom, tel, quartier: String(b.quartier || '').trim(), ville: String(b.ville || '').trim().slice(0, 60), mail: String(b.mail || '').trim().slice(0, 80), salt, passHash: hashPassword(salt, pw), createdAt: nowISO(), createdBy: act(req), createdById: actorId(req) || (fid && fid.id), createdByGestId: fid ? fid.gestId : (hqIdentity(req) && hqIdentity(req).role === 'gest' ? hqIdentity(req).id : null) };
     db.clients.push(cl); saveDb();
     auditLog('client_cree_hq', { nom, tel, par: act(req) });
     emitAdmin('client', '👤 Compte client créé par ' + act(req) + ' : ' + nom + ' (' + tel + ')');
@@ -997,7 +1074,7 @@ const server = http.createServer(async (req, res) => {
     const na = { id: uid('AG'), nom: (prenom + ' ' + nom).trim(), prenom, tel1, quartier: String(b.quartier || '').trim(), ville: String(b.ville || '').trim().slice(0, 60), mail: String(b.mail || '').trim().slice(0, 80), adresse: String(b.adresse || '').trim(),
       naissance: '', experience: b.experience || 0, pieceType: '', pieceNum: '', tel2: '', urgenceNom: '', urgenceTel: '', ref1Nom: '', ref1Tel: '',
       services, niveau: '', photo: '', pushSubs: [], hist: [{ at: Date.now(), by: act(req), ev: '🏗️ Compte créé à la main par l’équipe — vérification immédiate' }],
-      status: 'approved', approvedAt: nowISO(), createdAt: nowISO(), createdBy: act(req), claimPin: pin, online: false, pos: null };
+      status: 'approved', approvedAt: nowISO(), createdAt: nowISO(), createdBy: act(req), createdById: actorId(req), createdByGestId: fieldIdentity(req) ? fieldIdentity(req).gestId : ((hqIdentity(req)||{}).role==='gest' ? hqIdentity(req).id : null), claimPin: pin, online: false, pos: null, kind: 'pro' };
     db.agents.push(na); saveDb();
     auditLog('pro_cree_hq', { pro: na.nom, tel: tel1, par: act(req) });
     emitAdmin('agent', '🏗️ ' + act(req) + ' a créé le professionnel ' + na.nom + ' — code de liaison remis en main');
@@ -1191,6 +1268,78 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true });
   }
 
+  if (p === '/api/admin/nudge' && req.method === 'POST') {
+    const b = await readBody(req);
+    const rec = b.role === 'client' ? db.clients.find(c => c.id === b.id) : db.agents.find(a => a.id === b.id);
+    if (!rec) return sendJson(res, 404, { error: 'introuvable' });
+    if (!ownsRecord(req, rec) && !isPdg(req)) return sendJson(res, 403, { error: 'Pas votre compte' });
+    const text = String(b.text || 'Vous n’êtes pas en ligne — vous pourriez perdre des clients. Ouvrez KLEAN et passez en ligne.').slice(0, 220);
+    db.supportMsgs.push({ id: uid('SR'), role: b.role === 'client' ? 'client' : 'pro', uid: rec.id, nom: rec.nom, from: 'hq', par: act(req), text, at: nowISO(), readHQ: true, readUser: false });
+    if (webpush && Array.isArray(rec.pushSubs)) {
+      const payload = JSON.stringify({ title: '🔔 KLEAN-SERVICES CI', body: text, url: '/', vibrate: true });
+      for (const sub of rec.pushSubs) { try { await webpush.sendNotification(sub, payload, { TTL: 3600, urgency: 'high' }); } catch (e) {} }
+    }
+    const sms = await sendSms(rec.tel || rec.tel1, text);
+    saveDb();
+    return sendJson(res, 200, { ok: true, sms: sms.ok, smsError: sms.ok ? null : sms.error });
+  }
+  if (p === '/api/admin/sms' && req.method === 'POST') {
+    const b = await readBody(req);
+    const text = String(b.text || 'Ouvrez KLEAN : une interpellation HQ vous attend.').slice(0, 220);
+    const targets = [];
+    if (b.allOffline) {
+      (db.clients || []).forEach(c => { if (!c.online && !c.blocked) targets.push(c); });
+      (db.agents || []).forEach(a => { if (!a.online && !a.blocked && (a.status || 'approved') === 'approved') targets.push(a); });
+      (db.fieldAgents || []).forEach(f => { if (!f.blocked) targets.push(f); });
+    } else if (b.role === 'field') {
+      const f = (db.fieldAgents || []).find(x => x.id === b.id); if (f) targets.push(f);
+    } else if (b.role === 'client') {
+      const c = db.clients.find(x => x.id === b.id); if (c) targets.push(c);
+    } else if (b.role === 'pro') {
+      const a = db.agents.find(x => x.id === b.id); if (a) targets.push(a);
+    } else if (b.tel) {
+      targets.push({ nom: b.nom || b.tel, tel: b.tel });
+    }
+    if (!targets.length) return sendJson(res, 400, { error: 'Aucun destinataire' });
+    let sent = 0, fail = 0, lastErr = null;
+    for (const rec of targets) {
+      if (rec.id && !ownsRecord(req, rec) && !isPdg(req)) continue;
+      const sms = await sendSms(rec.tel || rec.tel1, text);
+      if (sms.ok) sent++; else { fail++; lastErr = sms.error; }
+    }
+    auditLog('sms_interpellation', { par: act(req), sent, fail, n: targets.length });
+    saveDb();
+    return sendJson(res, 200, { ok: sent > 0, sent, fail, error: lastErr });
+  }
+  if (p === '/api/admin/field' && req.method === 'GET') {
+    const list = (db.fieldAgents || []).filter(f => isPdg(req) || ownsRecord(req, f));
+    return sendJson(res, 200, list.map(f => ({ id: f.id, nom: f.nom, tel: f.tel, blocked: !!f.blocked, createdAt: f.createdAt, createdBy: f.createdBy })));
+  }
+  if (p === '/api/admin/field' && req.method === 'POST') {
+    const b = await readBody(req);
+    const nom = String(b.nom || '').trim();
+    const tel = String(b.tel || '').replace(/\D/g, '');
+    if (nom.length < 2 || tel.length < 8) return sendJson(res, 400, { error: 'Nom + téléphone requis' });
+    db.fieldAgents = db.fieldAgents || [];
+    if (db.fieldAgents.some(x => x.tel === tel)) return sendJson(res, 409, { error: 'Numéro déjà utilisé' });
+    const pw = String(b.password || '') || ('Klean-' + Math.floor(1000 + Math.random() * 9000) + '!');
+    const salt = crypto.randomBytes(12).toString('hex');
+    const f = { id: uid('FD'), nom, tel, salt, passHash: hashPassword(salt, pw), createdAt: nowISO(), createdBy: act(req), createdById: actorId(req), blocked: false };
+    db.fieldAgents.push(f); saveDb();
+    return sendJson(res, 201, { ok: true, nom, tel, password: pw });
+  }
+  const fBlk = p.match(/^\/api\/admin\/field\/(.+)\/(block|unblock|delete)$/);
+  if (fBlk && req.method === 'POST') {
+    const f = (db.fieldAgents || []).find(x => x.id === fBlk[1]);
+    if (!f) return sendJson(res, 404, {});
+    if (!isPdg(req) && !ownsRecord(req, f)) return sendJson(res, 403, { error: 'Pas votre agent de terrain' });
+    if (fBlk[2] === 'delete') { trashPush('field', f); db.fieldAgents = db.fieldAgents.filter(x => x.id !== f.id); }
+    else if (fBlk[2] === 'block') f.blocked = true;
+    else f.blocked = false;
+    saveDb();
+    return sendJson(res, 200, { ok: true });
+  }
+
   /* ─── Requête gestionnaire → PDG (bloquer/supprimer un compte) ─── */
   if (p === '/api/admin/account-request' && req.method === 'POST') {
     const b = await readBody(req);
@@ -1351,6 +1500,14 @@ const server = http.createServer(async (req, res) => {
   }
 
   /* --- Fichiers statiques --- */
+  if (p === '/field' || p === '/field.html') {
+    fs.readFile(path.join(__dirname, 'field.html'), (err, data) => {
+      if (err) { res.writeHead(404); res.end('404'); return; }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(data);
+    });
+    return;
+  }
   if (p === '/admin' || p === '/admin.html') {
     // pas de redirection (certains proxies la cassent) : on sert directement le bon HTML
     const target = path.join(__dirname, isAdminReq(req) ? 'admin.html' : 'admin-login.html');
@@ -1385,6 +1542,10 @@ server.on('upgrade', (req, sock) => {
     if (sock.meta && sock.meta.agentId) {
       const ag = db.agents.find(a => a.id === sock.meta.agentId);
       if (ag && ![...sockets].some(s => s.meta && s.meta.agentId === ag.id)) { ag.online = false; saveDb(); }
+    }
+    if (sock.meta && sock.meta.clientId) {
+      const cl = db.clients.find(c => c.id === sock.meta.clientId);
+      if (cl && ![...sockets].some(s => s.meta && s.meta.clientId === cl.id)) { cl.online = false; saveDb(); }
     }
   };
   sock.on('close', bye); sock.on('error', bye);

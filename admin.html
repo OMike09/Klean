@@ -144,6 +144,14 @@
         <input id="tm-pw" type="password" placeholder="🔑 Mot de passe (8+ signes · lettre · chiffre · symbole)" style="margin-top:8px;width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px" maxlength="64">
         <button class="btn-main" style="width:100%;flex:none;margin-top:9px" onclick="createAdmin()">➕ Créer cet administrateur</button>
       </div>
+      <div id="field-box" style="margin-top:10px">
+        <b style="font-size:12.5px">🧭 Agents de terrain</b>
+        <p style="font-size:11.5px;color:var(--muted);margin:4px 0 8px">Ils recense et créent seulement clients + professionnels. PDG et gestionnaires peuvent les bloquer / supprimer. Lien : /field</p>
+        <input id="fd-nom" placeholder="Nom *" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:6px">
+        <input id="fd-tel" placeholder="Téléphone *" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:6px">
+        <button class="btn-main" style="width:100%" onclick="createField()">➕ Créer l'agent de terrain</button>
+        <div id="field-list" style="margin-top:8px"></div>
+      </div>
       <div id="admins"></div>
     </div>
   </div>
@@ -171,13 +179,6 @@
     <h3>💬 Support & messages <span class="cnt" id="sup-cnt">—</span></h3>
     <div class="body" style="padding:12px 14px">
       <div id="sup-convs"></div>
-      <div id="sup-chat" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">
-        <div id="sup-msgs" style="max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:9px"></div>
-        <div style="display:flex;gap:6px">
-          <input id="sup-input" placeholder="Répondre (signé à votre nom)…" maxlength="400" style="flex:1;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
-          <button class="btn-main" style="flex:none" onclick="supReply()">Envoyer</button>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -251,9 +252,31 @@
     <div class="body" id="audit"><div class="empty">—</div></div>
   </div>
 
+  <div class="panel" style="margin-bottom:14px" id="panel-online-cli">
+    <h3>🟢 Clients en ligne <span class="cnt" id="oncli-cnt">—</span></h3>
+    <div class="body" id="oncli-list" style="padding:8px 0"><div class="empty">Aucun client connecté pour le moment.</div></div>
+  </div>
+
   <!-- Toutes les personnes inscrites (agents + clients) avec recherche -->
   <div class="panel" style="margin-bottom:14px">
     <h3>👥 Personnes inscrites <span class="cnt" id="people-cnt">—</span></h3>
+    <div style="padding:10px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="PEOPLE_FILTER='all';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">Tous</button>
+      <button onclick="PEOPLE_FILTER='on';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--p);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">🟢 En ligne</button>
+      <button onclick="PEOPLE_FILTER='off';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">⚪ Hors ligne</button>
+    </div>
+    <div style="padding:10px 16px 0">
+      <div style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px 12px">
+        <b style="font-size:12.5px">📲 SMS hors ligne — KLEAN-SERVICES CI</b>
+        <p style="margin:6px 0 8px;font-size:11.5px;color:var(--muted);line-height:1.4">Le SMS arrive sur le numéro même si l’app est fermée. Le réseau CI n’affiche que 11 caractères : <b>KLEAN-SV CI</b>. Le texte commence par <b>KLEAN-SERVICES CI</b>.</p>
+        <textarea id="sms-txt" maxlength="200" placeholder="Message d’interpellation…" style="width:100%;min-height:64px;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <input id="sms-tel" placeholder="📞 Numéro (optionnel)" maxlength="16" style="flex:1;min-width:140px;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <button onclick="smsDirect()" style="background:var(--p);border:0;color:#042;font-size:11.5px;font-weight:900;padding:10px 14px;border-radius:9px;cursor:pointer;font-family:inherit">Envoyer à ce n°</button>
+          <button onclick="smsAllOff()" style="background:rgba(255,176,32,.15);border:1px solid rgba(255,176,32,.45);color:var(--amber);font-size:11.5px;font-weight:900;padding:10px 14px;border-radius:9px;cursor:pointer;font-family:inherit">Tous les hors ligne</button>
+        </div>
+      </div>
+    </div>
     <div style="padding:10px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
       <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="toggleAcctForm('client')">➕ Créer un compte client</button>
       <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="toggleAcctForm('pro')">➕ Créer un compte pro</button>
@@ -397,7 +420,7 @@ async function loadAll(){
     renderOverview(ov); renderMissions(ms); renderAgents(ags); renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
     if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
-    loadTeam(); loadAnnonce(); loadHqChat();
+    loadTeam(); loadAnnonce(); loadHqChat(); loadFields();
   }catch(e){
     // Aperçu sans serveur : exiger la connexion locale avant la démo
     if(localStorage.getItem('k2_hq_ok') !== '1'){ location.href = 'admin-login.html'; return; }
@@ -460,6 +483,36 @@ function renderOverview(o){
 
 /* ─── Personnes inscrites : agents + clients, avec recherche ─── */
 let PEOPLE = {agents:[], clients:[]};
+let PEOPLE_FILTER = 'all';
+async function nudgeOff(role, id, nom){
+  if(!confirm('📲 Envoyer une alerte poche + SMS KLEAN-SERVICES CI à '+nom+' ?')) return;
+  const r=await fetch('/api/admin/nudge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role,id})});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok) alert('📲 Envoyé à '+nom+(j.sms?' · SMS KLEAN-SERVICES CI OK':(j.smsError?' · SMS : '+j.smsError:'')));
+  else alert('⚠️ Envoi impossible');
+}
+async function smsOne(role,id,nom){
+  const text=prompt('SMS KLEAN-SERVICES CI à '+nom+' :','Vous n’êtes pas en ligne. Ouvrez KLEAN.');
+  if(text===null) return;
+  const r=await fetch('/api/admin/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role,id,text})});
+  const j=await r.json().catch(()=>({}));
+  alert(j.ok?('✅ SMS envoyé ('+(j.sent||1)+')'):('⚠️ '+(j.error||'SMS non configuré')));
+}
+async function smsDirect(){
+  const tel=(document.getElementById('sms-tel')||{}).value||'';
+  const text=(document.getElementById('sms-txt')||{}).value||'Ouvrez KLEAN : interpellation HQ.';
+  if(tel.replace(/\D/g,'').length<8) return alert('❌ Numéro invalide');
+  const r=await fetch('/api/admin/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tel,text})});
+  const j=await r.json().catch(()=>({}));
+  alert(j.ok?'✅ SMS KLEAN-SERVICES CI envoyé':'⚠️ '+(j.error||'SMS non configuré sur Render'));
+}
+async function smsAllOff(){
+  const text=(document.getElementById('sms-txt')||{}).value||'Vous n’êtes pas en ligne. Ouvrez KLEAN.';
+  if(!confirm('Envoyer ce SMS KLEAN-SERVICES CI à TOUS les comptes hors ligne ?')) return;
+  const r=await fetch('/api/admin/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({allOffline:true,text})});
+  const j=await r.json().catch(()=>({}));
+  alert(j.ok?('✅ '+(j.sent||0)+' SMS · '+(j.fail||0)+' échec(s)'):('⚠️ '+(j.error||'SMS non configuré')));
+}
 function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 let ME = null, TEAM = [];
 function toggleAcctForm(which){
@@ -575,32 +628,29 @@ function renderSupport(){
   const box = document.getElementById('sup-convs'); if(!box) return;
   const list = (SUPV && SUPV.conversations) || [];
   document.querySelector('#sup-cnt').textContent = list.length ? list.length+' conversation(s)' : '—';
+  const mm = (SUPV && SUPV.messages) || [];
   box.innerHTML = list.map(c=>{
     const open = SUP_OPEN && SUP_OPEN.role===c.role && SUP_OPEN.uid===c.uid;
-    return `<div class="agrow" style="margin-bottom:6px;cursor:pointer" onclick="supToggle('${c.role}','${c.uid}','${(c.nom||'').replace(/'/g,'')}')">
+    const thread = !open ? '' : `<div onclick="event.stopPropagation()" style="margin:8px 0 4px 46px">
+      <div style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;margin-bottom:8px">${mm.map(s=>{
+        const me=s.from==='hq';
+        return `<div style="align-self:${me?'flex-end':'flex-start'};max-width:90%;background:${me?'rgba(21,201,138,.14)':'var(--card2)'};border:1px solid var(--line);border-radius:11px;padding:7px 10px;font-size:12.5px">${s.text}<small style="display:block;color:var(--muted);font-size:9.5px">${me?('vous ('+(s.par||'')+')'):(s.nom||'')} · ${(s.at||'').slice(11,16)}</small></div>`;
+      }).join('')||'—'}</div>
+      <div style="display:flex;gap:6px"><input id="sup-input" placeholder="Répondre sous ${c.nom}…" maxlength="400" style="flex:1;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px"><button class="btn-main" style="flex:none" onclick="supReply()">Envoyer</button></div>
+    </div>`;
+    return `<div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--line)"><div class="agrow" style="cursor:pointer" onclick="supToggle('${c.role}','${c.uid}','${(c.nom||'').replace(/'/g,'')}')">
       <div class="avatar" style="background:${c.role==='pro'?'linear-gradient(135deg,#15c98a,#0a8f60)':'linear-gradient(135deg,#5b8ab8,#2c567c)'}">${(c.nom||'?')[0].toUpperCase()}</div>
       <div style="flex:1;min-width:0">
         <b>${c.nom}</b> <span class="badge">${c.role==='pro'?'PRO':'CLIENT'}</span>${c.unreadHQ?(' <span class="badge" style="background:rgba(255,107,107,.16);color:var(--red);border-color:rgba(255,107,107,.4)">'+c.unreadHQ+' NON LU'+(c.unreadHQ>1?'S':'')+'</span>'):''}<br>
         <small style="color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;max-width:190px">${((c.last&&c.last.text)||'').slice(0,60)}</small>
       </div>
       <span style="color:var(--muted);font-size:13px">${open?'▾':'▸'}</span>
-    </div>`;
-  }).join('') || '<div class="empty">Aucun message encore.<br>Le support apparaîtra ici dès qu\u2019un client ou un professionnel écrira.</div>';
-  if(SUP_OPEN){
-    document.getElementById('sup-chat').style.display='block';
-    const mm = (SUPV && SUPV.messages) || [];
-    const sc = document.getElementById('sup-msgs');
-    sc.innerHTML = mm.map(s=>{
-      const me = s.from==='hq';
-      return `<div style="align-self:${me?'flex-end':'flex-start'};max-width:84%;background:${me?'rgba(21,201,138,.14)':'var(--card2)'};border:1px solid ${me?'rgba(21,201,138,.35)':'var(--line)'};border-radius:11px;padding:7px 10px;font-size:12.5px;line-height:1.42">${s.text}<small style="display:block;color:var(--muted);font-size:9.5px;margin-top:2px">${me?('vous ('+(s.par||'')+')'):(s.nom||'')} · ${(s.at||'').slice(11,16)}</small></div>`;
-    }).join('') || '<div class="empty">—</div>';
-    sc.scrollTop = sc.scrollHeight;
-  }
+    </div>${thread}</div>`;
+  }).join('') || '<div class="empty">Aucun message encore.</div>';
 }
 async function supToggle(role, uid, nom){
   if(SUP_OPEN && SUP_OPEN.role===role && SUP_OPEN.uid===uid){
     SUP_OPEN = null;
-    const chat = document.getElementById('sup-chat'); if(chat) chat.style.display='none';
     renderSupport(); return;
   }
   SUP_OPEN = {role, uid, nom}; await loadSupport();
@@ -656,8 +706,13 @@ function renderPeople(){
   const el = document.querySelector('#people'); if(!el) return;
   const q = pNorm((document.querySelector('#people-search')||{}).value || '');
   document.querySelector('#people-cnt').textContent = PEOPLE.agents.length + ' agent(s) · ' + PEOPLE.clients.length + ' client(s)';
-  const Ag = PEOPLE.agents.filter(a => !q || pNorm(a.nom+' '+a.tel+' '+a.quartier+' '+(a.services||[]).map(x=>SVC_N[x]||x).join(' ')).includes(q));
-  const Cl = PEOPLE.clients.filter(c => !q || pNorm(c.nom+' '+c.tel+' '+c.quartier).includes(q));
+  const onf = x => PEOPLE_FILTER==='all' || (PEOPLE_FILTER==='on' ? !!x.online : !x.online);
+  const Ag = PEOPLE.agents.filter(a => onf(a) && (!q || pNorm(a.nom+' '+a.tel+' '+a.quartier+' '+(a.services||[]).map(x=>SVC_N[x]||x).join(' ')).includes(q)));
+  const Cl = PEOPLE.clients.filter(c => onf(c) && (!q || pNorm(c.nom+' '+c.tel+' '+c.quartier).includes(q)));
+  const onC = (PEOPLE.clients||[]).filter(c=>c.online);
+  const oc=document.getElementById('oncli-list'); const occ=document.getElementById('oncli-cnt');
+  if(occ) occ.textContent = onC.length+' en ligne';
+  if(oc) oc.innerHTML = onC.length ? onC.map(c=>`<div class="agrow"><div class="avatar">${(c.nom||'?')[0]}<span class="doton"></span></div><div><b>${c.nom}</b><small>📞 ${c.tel||''}</small></div></div>`).join('') : '<div class="empty">Aucun client connecté pour le moment.</div>';
   const agentRow = a => {
     const [cls, txt] = CST[a.status] || ['b-pending', a.status||'?'];
     return `<div class="agrow">
@@ -673,7 +728,9 @@ function renderPeople(){
             <button style="background:var(--card2);border:1px solid rgba(255,176,32,.4);color:var(--amber);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="askMoreInfo('${a.id}')">➕ Infos</button>
             <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer" onclick="decideCand('${a.id}','reject','${(a.nom||'').replace(/'/g,'')}')">✕ Rejeter</button></div>` : `<div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap">
             <button style="background:${a.blocked?'rgba(21,201,138,.15)':'var(--card2)'};border:1px solid ${a.blocked?'rgba(21,201,138,.4)':'rgba(255,176,32,.4)'};color:${a.blocked?'var(--p)':'var(--amber)'};font-size:10.5px;font-weight:900;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="actionPro('${a.id}','${a.blocked?'unblock':'block'}','${(a.nom||'').replace(/'/g,'')}')">${a.blocked?'✅ Débloquer':'🔒 Bloquer'}</button>
-            <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="actionPro('${a.id}','delete','${(a.nom||'').replace(/'/g,'')}')">🗑️ Supprimer</button></div>`}
+            <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="actionPro('${a.id}','delete','${(a.nom||'').replace(/'/g,'')}')">🗑️ Supprimer</button>
+            ${a.online?'':`<button style="background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.4);color:var(--amber);font-size:10px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="nudgeOff('pro','${a.id}','${(a.nom||'').replace(/'/g,'')}')">📲 Pas en ligne</button>
+            <button style="background:rgba(21,201,138,.12);border:1px solid rgba(21,201,138,.35);color:var(--p);font-size:10px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="smsOne('pro','${a.id}','${(a.nom||'').replace(/'/g,'')}')">💬 SMS</button>`}</div>`}
         </div>
       </div>
       <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:10.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;flex-shrink:0" onclick="togglePeopleDet('${a.id}')">🔍 Profil</button>
@@ -682,12 +739,13 @@ function renderPeople(){
   const clientRow = c => `<div class="agrow">
       <div class="avatar" style="background:linear-gradient(135deg,var(--blue),#2f6fd0)">${(c.nom||'?')[0].toUpperCase()}</div>
       <div style="flex:1;min-width:0">
-        <b>${c.nom}</b> <span class="badge" style="background:rgba(74,163,255,.14);color:var(--blue);border-color:rgba(74,163,255,.3)">CLIENT</span>${c.photo?' 📷':''}${c.blocked?' <span class="badge" style="background:rgba(255,107,107,.16);color:var(--red);border-color:rgba(255,107,107,.4)">BLOQUÉ</span>':''}<br>
+        <b>${c.nom}</b> <span class="badge" style="background:rgba(74,163,255,.14);color:var(--blue);border-color:rgba(74,163,255,.3)">CLIENT</span> ${c.online?'<span class="badge b-active">en ligne</span>':'<span class="badge">hors ligne</span>'}${c.photo?' 📷':''}${c.blocked?' <span class="badge" style="background:rgba(255,107,107,.16);color:var(--red);border-color:rgba(255,107,107,.4)">BLOQUÉ</span>':''}<br>
         <small>📞 ${c.tel||'—'} · 📍 ${c.quartier||'quartier non précisé'}</small><br>
         <small>🧾 ${c.missions||0} mission(s) · 💸 ${fmt(c.depense||0)} dépensés · inscrit le ${(c.createdAt||'').slice(0,10)}</small>
         <div style="margin-top:7px;display:flex;gap:6px">
           <button style="background:${c.blocked?'rgba(21,201,138,.15)':'var(--card2)'};border:1px solid ${c.blocked?'rgba(21,201,138,.4)':'rgba(255,176,32,.4)'};color:${c.blocked?'var(--p)':'var(--amber)'};font-size:10px;font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit" onclick="actionClient('${c.id}','${c.blocked?'unblock':'block'}','${(c.nom||'').replace(/'/g,'')}')">${c.blocked?'✅ Débloquer':'🔒 Bloquer'}</button>
           <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10px;font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit" onclick="actionClient('${c.id}','delete','${(c.nom||'').replace(/'/g,'')}')">🗑️ Supprimer</button>
+          ${c.online?'':`<button style="background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.4);color:var(--amber);font-size:10px;font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit" onclick="nudgeOff('client','${c.id}','${(c.nom||'').replace(/'/g,'')}')">📲 Pas en ligne</button>`}
         </div>
       </div>
     </div>`;
@@ -995,6 +1053,49 @@ setInterval(loadAll, 12000); // secours
   /* ouvert par défaut : le quotidien — fermé par défaut : tout ce qui est long/archivé */
   const FOLD_BY_DEFAULT = ['équipe dirigeante', 'affiche', "chiffre d'affaires", 'réglages', "journal d'audit", 'journal temps réel', 'professionnels', 'personnes inscrites'];
   const OPEN_BY_DEFAULT = ['vérification', 'support', 'missions'];
+  function isFoldByDefault(titre){
+    const t = (titre || '').toLowerCase();
+    if (OPEN_BY_DEFAULT.some(k => t.includes(k))) return false;
+    return FOLD_BY_DEFAULT.some(k => t.includes(k));
+  }
+  function keyOf(panel, i, titre){
+    if (panel.id) return panel.id;
+    return 'panel-' + i + '-' + (titre || '').toLowerCase().replace(/[^a-zàâéèêëâôûùç]+/gi, '-').slice(0, 30);
+  }
+  function refresh(){
+    const mem = load();
+    document.querySelectorAll('.panel').forEach((p, i) => {
+      const h3 = p.querySelector('h3');
+      if (!h3) return;
+      const k = keyOf(p, i, h3.textContent || '');
+      let ic = h3.querySelector('.fold-ic');
+      if (!ic) {
+        ic = document.createElement('span');
+        ic.className = 'fold-ic';
+        h3.appendChild(ic);
+        h3.addEventListener('click', () => {
+          const f = !p.classList.contains('folded');
+          p.classList.toggle('folded', f);
+          const m = load(); m[k] = f; save(m);
+          ic.textContent = f ? '▸' : '▾';
+          ic.style.transform = f ? 'rotate(-90deg)' : '';
+        });
+      }
+      const folded = (k in mem) ? mem[k] : isFoldByDefault(h3.textContent || '');
+      p.classList.toggle('folded', folded);
+      ic.textContent = folded ? '▸' : '▾';
+      ic.style.transform = folded ? 'rotate(-90deg)' : '';
+    });
+  }
+  window.addEventListener('load', refresh);
+  /* re-annoter après chaque rechargement complet (les contenus arrivent en websock) */
+  setInterval(() => { if (document.querySelector('.panel .fold-ic') === null) refresh(); }, 4000);
+  document.addEventListener && document.addEventListener('DOMContentLoaded', refresh);
+})();
+</script>
+</body>
+</html>
+ssions'];
   function isFoldByDefault(titre){
     const t = (titre || '').toLowerCase();
     if (OPEN_BY_DEFAULT.some(k => t.includes(k))) return false;
