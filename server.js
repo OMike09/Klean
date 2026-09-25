@@ -842,6 +842,12 @@ const server = http.createServer(async (req, res) => {
       subsNoms: (b.subsNoms && typeof b.subsNoms === 'object' && !Array.isArray(b.subsNoms)) ? Object.fromEntries(Object.entries(b.subsNoms).slice(0, 10).map(([k, ar]) => [String(k).slice(0, 20), (Array.isArray(ar) ? ar : []).slice(0, 12).map(x => String(x).slice(0, 80))])) : {},
       online: false
     };
+    if (b.password) {
+      const perr = validPassword(b.password);
+      if (perr) return sendJson(res, 400, { error: perr });
+      const salt = crypto.randomBytes(12).toString('hex');
+      ag.salt = salt; ag.passHash = hashPassword(salt, b.password);
+    }
     ag.history = [{ at: nowISO(), by: 'agent', action: 'dossier envoye' }];
     if (reApply) {
       ag.history = (reApply.history || []).concat([{ at: nowISO(), by: 'agent', action: 'dossier renvoye apres infos demandees' }]);
@@ -1200,11 +1206,22 @@ const server = http.createServer(async (req, res) => {
     const type = ['maj', 'info', 'alerte', 'quiz'].includes(b.type) ? b.type : 'info';
     const choices = Array.isArray(b.choices) ? b.choices.map(x => String(x).trim().slice(0, 80)).filter(Boolean).slice(0, 4) : [];
     if (type === 'quiz' && choices.length < 2) return sendJson(res, 400, { error: 'Quiz : au moins 2 choix' });
+    if (type === 'quiz' && db.annonce && db.annonce.type === 'quiz') {
+      db.quizSeries = db.quizSeries || [];
+      db.quizSeries.push({
+        question: db.annonce.question || db.annonce.message,
+        goods: (db.quizAnswers || []).filter(x => x.ok).map(x => x.nom),
+        at: nowISO()
+      });
+    }
+    const answerSeconds = type === 'quiz' ? Math.max(0, Math.min(7200, parseInt(b.answerSeconds, 10) || 0)) : 0;
     db.annonce = { id: uid('AN'), message: msg, type, at: nowISO(), par: act(req),
       question: type === 'quiz' ? (String(b.question || '').trim().slice(0, 180) || msg) : '',
       choices: type === 'quiz' ? choices : [],
       good: type === 'quiz' ? Math.max(0, Math.min(3, parseInt(b.good, 10) || 0)) : 0,
-      closed: false, winners: [] };
+      closed: false, winners: [],
+      answerSeconds,
+      answerEndsAt: answerSeconds ? new Date(Date.now() + answerSeconds * 1000).toISOString() : null };
     db.quizAnswers = [];
     saveDb();
     auditLog('annonce_publiee', { type, par: act(req) });
@@ -1569,7 +1586,10 @@ const server = http.createServer(async (req, res) => {
 
   function shuffleCopy(arr) {
     const copy = arr.slice();
-    for (let i = copy.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = copy[i]; copy[i] = copy[j]; copy[j] = t; }
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = (crypto.randomInt ? crypto.randomInt(i + 1) : Math.floor(Math.random() * (i + 1)));
+      const t = copy[i]; copy[i] = copy[j]; copy[j] = t;
+    }
     return copy;
   }
   function quizRevealIfDue() {
@@ -1594,6 +1614,8 @@ const server = http.createServer(async (req, res) => {
     const a = db.annonce;
     if (!a || a.type !== 'quiz') return sendJson(res, 400, { error: 'Pas de quiz en cours' });
     if (a.closed || a.countdownEndsAt) return sendJson(res, 409, { error: 'Quiz terminé — le décompte a commencé', winners: a.winners || [] });
+    if (a.answerEndsAt && Date.now() > new Date(a.answerEndsAt).getTime())
+      return sendJson(res, 409, { error: 'Temps de réponse écoulé' });
     const nom = String(b.nom || '').trim().slice(0, 40) || 'Anonyme';
     const who = String(b.accountId || b.deviceId || nom || ('anon-' + (req.socket.remoteAddress || ''))).slice(0, 80);
     db.quizAnswers = db.quizAnswers || [];
@@ -1619,7 +1641,8 @@ const server = http.createServer(async (req, res) => {
       clicks: ans.map(x => ({ nom: x.nom, choice: letters[x.choice] || '?', at: x.at })),
       winners: (a && a.winners) || [],
       countdownEndsAt: a && a.countdownEndsAt, countdownRevealed: !!(a && a.countdownRevealed),
-      pendingN: a && a.pendingN, rounds: (a && a.rounds) || [], stagePool: (a && a.stagePool) || []
+      pendingN: a && a.pendingN, rounds: (a && a.rounds) || [], stagePool: (a && a.stagePool) || [],
+      answerEndsAt: a && a.answerEndsAt, series: (db.quizSeries || []).length
     });
   }
   if (p === '/api/admin/quiz/stop' && req.method === 'POST') {
@@ -1663,6 +1686,47 @@ const server = http.createServer(async (req, res) => {
     db.annonce.countdownRevealed = false;
     quizRevealIfDue();
     return sendJson(res, 200, { ok: true, winners: db.annonce.winners || [], nOk: (db.quizAnswers || []).filter(x => x.ok).length });
+  }
+  if (p === '/api/admin/quiz/pick' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    if (!db.annonce || db.annonce.type !== 'quiz') return sendJson(res, 400, { error: 'Pas de quiz' });
+    const b = await readBody(req);
+    const nom = String(b.nom || '').trim().slice(0, 60);
+    if (nom.length < 2) return sendJson(res, 400, { error: 'Nom du gagnant requis' });
+    db.annonce.closed = true;
+    db.annonce.countdownRevealed = true;
+    db.annonce.winners = [nom];
+    db.annonce.pickedByPdg = true;
+    db.annonce.rounds = db.annonce.rounds || [];
+    db.annonce.rounds.push({ at: nowISO(), n: 1, winners: [nom], seconds: 0, by: 'PDG' });
+    saveDb();
+    auditLog('quiz_gagnant_pdg', { nom, par: 'PDG' });
+    return sendJson(res, 200, { ok: true, winners: [nom] });
+  }
+  if (p === '/api/admin/quiz/final' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const n = Math.max(1, Math.min(50, parseInt(b.n, 10) || 1));
+    const seconds = Math.max(5, Math.min(3600, parseInt(b.seconds, 10) || 30));
+    const names = [];
+    (db.quizSeries || []).forEach(q => (q.goods || []).forEach(g => names.push(g)));
+    (db.quizAnswers || []).filter(x => x.ok).forEach(x => names.push(x.nom));
+    const pool = [...new Set(names.filter(Boolean))];
+    if (!pool.length) return sendJson(res, 400, { error: 'Aucune bonne réponse dans la série' });
+    if (!db.annonce || db.annonce.type !== 'quiz') {
+      db.annonce = { id: uid('AN'), type: 'quiz', message: 'Tirage final', question: 'Tirage final de la série', choices: [], good: 0, at: nowISO(), par: 'PDG' };
+    }
+    const a = db.annonce;
+    a.closed = true;
+    a.countdownEndsAt = new Date(Date.now() + seconds * 1000).toISOString();
+    a.countdownSeconds = seconds;
+    a.countdownRevealed = false;
+    a.pendingN = Math.min(n, pool.length);
+    a.winners = [];
+    a.stagePool = pool;
+    a.finalDraw = true;
+    saveDb();
+    return sendJson(res, 200, { ok: true, pool: pool.length, n: a.pendingN, seconds, countdownEndsAt: a.countdownEndsAt });
   }
 
   if (p === '/api/field/login' && req.method === 'POST') {

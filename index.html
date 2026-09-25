@@ -6,15 +6,15 @@
 <link rel="icon" href="/klean-icon-192.png" type="image/png">
 <title>KLEAN — Le Yango des services à domicile | Côte d'Ivoire</title>
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#0da678">
+<meta name="theme-color" content="#E85D04">
 <link rel="apple-touch-icon" href="/klean-icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="KLEAN">
 <style>
   :root{
-    --p:#0da678; --pd:#0a8a62; --pl:#e7f7f1;
-    --ink:#14211c; --muted:#6b7c73; --bg:#f3f6f5; --card:#fff;
+    --p:#E85D04; --pd:#C2410C; --pl:#FFF4E8;
+    --ink:#1A1410; --muted:#7A6A5E; --bg:#F7F4F0; --card:#fff;
     --line:#e4eae7; --danger:#e5484d; --amber:#ffb020; --blue:#2b6cb0; --wa:#25d366;
     --r:16px; --shadow:0 6px 24px rgba(18,33,28,.08);
   }
@@ -31,8 +31,8 @@
   .logo .bubble{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,var(--p),var(--pd));display:flex;align-items:center;justify-content:center;font-size:17px}
   .city-chip{font-size:12px;color:var(--pd);background:var(--pl);padding:6px 12px;border-radius:99px;font-weight:800}
   .modebar{display:grid;grid-template-columns:1fr 1fr;background:var(--bg);border-radius:14px;padding:5px;gap:6px;margin-top:10px}
-  .modebar button{padding:11px 6px;border-radius:10px;font-weight:800;font-size:13.5px;color:var(--pd);background:#fff;border:1.5px solid rgba(7,110,79,.4);box-shadow:0 1px 4px rgba(0,0,0,.05)}
-  .modebar button.on{background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-color:var(--pd);box-shadow:0 4px 12px rgba(7,110,79,.35)}
+  .modebar button{padding:11px 6px;border-radius:10px;font-weight:800;font-size:13.5px;color:var(--pd);background:#fff;border:1.5px solid rgba(194,65,12,.4);box-shadow:0 1px 4px rgba(0,0,0,.05)}
+  .modebar button.on{background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-color:var(--pd);box-shadow:0 4px 12px rgba(194,65,12,.35)}
 
   .view{display:none;min-height:100vh;padding-bottom:96px}
   .view.active{display:block}
@@ -40,7 +40,7 @@
   .wrap{padding:16px}
 
   /* HERO */
-  .hero{background:linear-gradient(135deg,#0da678 0%,#0a8a62 55%,#076e4f 100%);color:#fff;padding:26px 20px 40px;border-radius:0 0 30px 30px;position:relative;overflow:hidden}
+  .hero{background:linear-gradient(135deg,#E85D04 0%,#C2410C 55%,#9A3412 100%);color:#fff;padding:26px 20px 40px;border-radius:0 0 30px 30px;position:relative;overflow:hidden}
   .hero::after{content:"";position:absolute;right:-60px;top:-60px;width:200px;height:200px;background:rgba(255,255,255,.08);border-radius:50%}
   .phase-tag{display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);font-size:11px;font-weight:800;padding:5px 12px;border-radius:99px;margin-bottom:12px}
   .hero h1{font-size:26px;line-height:1.25;font-weight:800;margin-bottom:10px;max-width:330px}
@@ -106,7 +106,7 @@
   .svc-check{display:flex;flex-wrap:wrap;gap:7px}
   .svc-check button{padding:8px 12px;border-radius:99px;border:2px solid var(--line);background:#fff;font-size:12px;font-weight:800;color:var(--muted)}
   .svc-check button.sel{border-color:var(--p);background:var(--pl);color:var(--pd)}
-  .ap-sub-grp{margin-top:12px;background:var(--pl);border:1.5px solid rgba(7,110,79,.25);border-radius:12px;padding:11px 12px}
+  .ap-sub-grp{margin-top:12px;background:var(--pl);border:1.5px solid rgba(194,65,12,.25);border-radius:12px;padding:11px 12px}
   .ap-sub-t{font-size:12.5px;font-weight:700;color:var(--pd);margin-bottom:8px}
   .photo-btn{width:100%;border:2px dashed var(--p);background:var(--pl);border-radius:12px;padding:14px;font-weight:800;color:var(--pd);font-size:13px}
   .status-card{text-align:center;padding:30px 20px}
@@ -178,7 +178,7 @@
   .bookbar .prow b{font-size:20px;color:var(--pd)}
   .bookbar .btns{display:flex;gap:10px}
   .btn-ghost{flex:1;padding:14px;border-radius:14px;background:var(--bg);color:var(--ink);font-weight:800;font-size:14.5px}
-  .btn-main{flex:2;padding:14px;border-radius:14px;background:var(--p);color:#fff;font-weight:800;font-size:14.5px;box-shadow:0 6px 16px rgba(13,166,120,.35)}
+  .btn-main{flex:2;padding:14px;border-radius:14px;background:var(--p);color:#fff;font-weight:800;font-size:14.5px;box-shadow:0 6px 16px rgba(232,93,4,.35)}
   .view#view-book{padding-bottom:210px}
 
   /* SEARCH RADAR */
@@ -329,7 +329,7 @@
   .acc-field b{font-size:16px}
   label,.inp-row label{font-size:13.5px}
   /* Bouton flottant « Installer l'app » (PWA) */
-  .ins-fab{position:fixed;right:14px;bottom:88px;z-index:80;border:none;border-radius:99px;background:linear-gradient(135deg,#0da678,#076e4f);color:#fff;font-family:'Manrope',sans-serif;font-weight:800;font-size:14px;padding:13px 18px;box-shadow:0 10px 26px rgba(7,110,79,.4);display:flex;align-items:center;gap:7px;cursor:pointer}
+  .ins-fab{position:fixed;right:14px;bottom:88px;z-index:80;border:none;border-radius:99px;background:linear-gradient(135deg,#E85D04,#9A3412);color:#fff;font-family:'Manrope',sans-serif;font-weight:800;font-size:14px;padding:13px 18px;box-shadow:0 10px 26px rgba(194,65,12,.4);display:flex;align-items:center;gap:7px;cursor:pointer}
   /* Villes */
   .city-row{display:flex;align-items:center;gap:12px;width:100%;padding:13px 14px;border:1.5px solid var(--line);border-radius:14px;background:#fff;margin-bottom:9px;cursor:pointer;font-family:'Manrope',sans-serif;text-align:left}
   .city-row:active{transform:scale(.985)}
@@ -340,7 +340,7 @@
   .req-gain small{display:block;font-size:10.5px;color:var(--pd);font-weight:600}
   .req-btns{display:flex;gap:10px}
   .btn-refuse{flex:1;padding:15px;border-radius:14px;background:var(--bg);color:var(--muted);font-weight:800;font-size:14.5px}
-  .btn-accept{flex:2;padding:15px;border-radius:14px;background:var(--p);color:#fff;font-weight:800;font-size:15px;box-shadow:0 6px 16px rgba(13,166,120,.4)}
+  .btn-accept{flex:2;padding:15px;border-radius:14px;background:var(--p);color:#fff;font-weight:800;font-size:15px;box-shadow:0 6px 16px rgba(232,93,4,.4)}
 
   /* NAV */
   .navbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:#fff;border-top:1px solid var(--line);display:none;z-index:50;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
@@ -361,7 +361,7 @@
 #splash b{font-size:32px;letter-spacing:4px;color:#eafaf2;font-weight:900}
 #splash span{color:#8aa39a;font-size:13.5px}
 .sp-bar{width:140px;height:5px;border-radius:99px;background:rgba(21,201,138,.16);margin-top:10px;overflow:hidden}
-.sp-bar i{display:block;height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#15c98a,#0da678);animation:spLoad 2.9s linear forwards}
+.sp-bar i{display:block;height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#FB923C,#E85D04);animation:spLoad 2.9s linear forwards}
 @keyframes spLoad{to{width:100%}}
 </style>
 </head>
@@ -373,10 +373,10 @@
 <div class="topbar">
   <div class="topbar-in">
     <div class="logo" style="display:flex;align-items:center">
-      <span style="display:flex;align-items:center"><img src="/klean-icon-192.png" alt="KLEAN" style="width:32px;height:32px;border-radius:9px;margin-right:6px;box-shadow:0 3px 10px rgba(7,110,79,.35)">KLEAN</span>
+      <span style="display:flex;align-items:center"><img src="/klean-icon-192.png" alt="KLEAN" style="width:32px;height:32px;border-radius:9px;margin-right:6px;box-shadow:0 3px 10px rgba(194,65,12,.35)">KLEAN</span>
       <span style="font-size:12.5px;font-weight:900;color:var(--pd);letter-spacing:.6px;border-left:2px solid var(--line);padding-left:9px;margin-left:4px">SERVICES À DOMICILE — CI</span>
     </div>
-    <button type="button" id="pro-orb" onclick="openProOrb()" title="Profil pro" style="display:none;width:42px;height:42px;border-radius:50%;border:2.5px solid var(--p);background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font-weight:900;font-size:16px;cursor:pointer;position:relative;flex:none;box-shadow:0 4px 12px rgba(13,166,120,.35)">P<span id="pro-orb-dot" style="position:absolute;right:-1px;bottom:-1px;width:12px;height:12px;border-radius:50%;background:#9aa;border:2px solid #fff"></span></button>
+    <button type="button" id="pro-orb" onclick="openProOrb()" title="Profil pro" style="display:none;width:42px;height:42px;border-radius:50%;border:2.5px solid var(--p);background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font-weight:900;font-size:16px;cursor:pointer;position:relative;flex:none;box-shadow:0 4px 12px rgba(232,93,4,.35)">P<span id="pro-orb-dot" style="position:absolute;right:-1px;bottom:-1px;width:12px;height:12px;border-radius:50%;background:#9aa;border:2px solid #fff"></span></button>
   </div>
 
 </div>
@@ -389,7 +389,7 @@
 
 <!-- ══════════════════ CLIENT : ACCUEIL ══════════════════ -->
 <div class="view active" id="view-home">
-  <button id="svc-city-big" onclick="cityInfo()" style="width:100%;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-radius:16px;padding:13px 15px;margin:0 0 12px;box-shadow:0 4px 14px rgba(7,110,79,.28);text-align:left">
+  <button id="svc-city-big" onclick="cityInfo()" style="width:100%;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-radius:16px;padding:13px 15px;margin:0 0 12px;box-shadow:0 4px 14px rgba(194,65,12,.28);text-align:left">
     <span style="font-size:27px">🛠️</span>
     <span style="flex:1;min-width:0">
       <b style="display:block;font-size:15.5px;line-height:1.3;letter-spacing:.3px">🏙️ VILLE OÙ FAIRE LE SERVICE</b>
@@ -581,13 +581,13 @@
       <text x="172" y="122" font-size="9.5" fill="#9aa89f" font-weight="700">Grand Commerce 🛒</text>
       <text x="30" y="210" font-size="9.5" fill="#9aa89f" font-weight="700">Koko</text>
       <!-- itinéraire -->
-      <path id="route-path" d="" stroke="#0da678" stroke-width="3.5" fill="none" stroke-dasharray="1 8" stroke-linecap="round"/>
+      <path id="route-path" d="" stroke="#E85D04" stroke-width="3.5" fill="none" stroke-dasharray="1 8" stroke-linecap="round"/>
       <!-- client -->
-      <circle id="pin-pulse" class="pin-pulse" cx="0" cy="0" r="12" fill="#0da678" opacity=".5"/>
+      <circle id="pin-pulse" class="pin-pulse" cx="0" cy="0" r="12" fill="#E85D04" opacity=".5"/>
       <circle id="pin-client" cx="0" cy="0" r="8" fill="#14211c" stroke="#fff" stroke-width="3"/>
       <text id="pin-flag" x="0" y="0" font-size="13" text-anchor="middle">🏠</text>
       <!-- agent -->
-      <g id="pin-agent"><circle r="13" fill="#0da678" stroke="#fff" stroke-width="3"/><text y="4.5" font-size="12" text-anchor="middle">🛵</text></g>
+      <g id="pin-agent"><circle r="13" fill="#E85D04" stroke="#fff" stroke-width="3"/><text y="4.5" font-size="12" text-anchor="middle">🛵</text></g>
     </svg>
   </div>
   <div class="track-card">
@@ -694,8 +694,8 @@
     </div>
     <button class="btn-line" style="width:100%;margin-bottom:10px;color:var(--pd);font-weight:800;border-color:var(--pl);background:var(--pl)" onclick="locateMeGPS()">📡 Me localiser par GPS — ville la plus proche</button>
     <p class="note" style="margin:-4px 0 10px">💡 Ex : inscrit à Kounahiri, en déplacement à Abidjan → choisissez <b>Abidjan</b> ici ; les pros d'Abidjan répondront.</p>
-    <input class="inp" id="city-search" placeholder="🔍 Tapez votre ville… (Bouaké, Séguéla, Katiola…)" oninput="renderCityModal(this.value)" style="margin-bottom:12px" autocomplete="off">
-    <div id="city-list"></div>
+    <input class="inp" id="city-search" placeholder="🔍 Tapez pour chercher une ville…" oninput="renderCityModal(this.value)" style="margin-bottom:12px" autocomplete="off">
+    <div id="city-list" style="max-height:48vh;overflow:auto"></div>
     <button class="btn-ghost" style="width:100%" onclick="closeCityModal()">Fermer</button>
   </div>
 </div>
@@ -704,7 +704,7 @@
   <div class="req-modal">
     <div class="req-head">
       <div class="ring-wrap">
-        <svg width="54" height="54"><circle cx="27" cy="27" r="23" fill="none" stroke="#e4eae7" stroke-width="4"/><circle id="req-ring" cx="27" cy="27" r="23" fill="none" stroke="#0da678" stroke-width="4" stroke-linecap="round" stroke-dasharray="144.5" stroke-dashoffset="0"/></svg>
+        <svg width="54" height="54"><circle cx="27" cy="27" r="23" fill="none" stroke="#e4eae7" stroke-width="4"/><circle id="req-ring" cx="27" cy="27" r="23" fill="none" stroke="#E85D04" stroke-width="4" stroke-linecap="round" stroke-dasharray="144.5" stroke-dashoffset="0"/></svg>
         <div class="ring-txt" id="req-count">20</div>
       </div>
       <div><b>🔔 Nouvelle demande !</b><small id="req-sub">Un client cherche un professionnel près de vous</small></div>
@@ -836,6 +836,20 @@ const CITIES_SOON = ['San-Pédro','Daloa','Korhogo','Man','Gagnoa','Abengourou',
     if(!have.has(n.toLowerCase())){ CITIES.push({id:n.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]+/g,'-'), nom:n, actif:true, quartiers:[n+'-Centre','Marché','Gare']}); have.add(n.toLowerCase()); }
   });
 })();
+function sortCities(){
+  CITIES.sort((a,b)=>(a.nom||'').localeCompare(b.nom||'','fr',{sensitivity:'base'}));
+}
+sortCities();
+function citiesAZ(){
+  const seen=new Set();
+  return CITIES.filter(x=>{
+    const k=(x.nom||'').toLowerCase();
+    if(!k||seen.has(k)) return false; seen.add(k); return true;
+  });
+}
+function cityOptionsHTML(){
+  return citiesAZ().map(ci=>'<option value="'+ci.nom+'">'+ci.nom+'</option>').join('');
+}
 function absorbServerCities(list){
   if(!Array.isArray(list)) return;
   const have = new Set(CITIES.map(x=>x.nom.toLowerCase()));
@@ -846,6 +860,7 @@ function absorbServerCities(list){
     CITIES.push({id, nom, actif:true, quartiers: Array.isArray(ci.quartiers)&&ci.quartiers.length?ci.quartiers:[nom+'-Centre','Marché','Gare']});
     have.add(nom.toLowerCase());
   });
+  sortCities();
   try{ if(typeof renderHomeRoad==='function') renderHomeRoad(); if(typeof renderCityModal==='function' && document.getElementById('city-list')) renderCityModal(); }catch(e){}
 }
 async function loadServerCities(){
@@ -872,6 +887,22 @@ async function loadServerServices(){
 }
 loadServerServices();
 setInterval(loadServerServices, 20000);
+function paintWriteFreeze(on){
+  var b=document.getElementById('klean-freeze');
+  if(on){
+    if(!b){
+      b=document.createElement('div'); b.id='klean-freeze';
+      b.style.cssText='position:sticky;top:0;z-index:9999;background:#7a1f1f;color:#fff;font-weight:800;text-align:center;padding:10px 12px;font-size:13px';
+      b.textContent='⛔ Plateforme en lecture seule (PDG) — vous ne pouvez pas écrire pour le moment.';
+      if(document.body) document.body.insertBefore(b, document.body.firstChild);
+    }
+  } else if(b) b.remove();
+}
+async function loadWriteFreeze(){
+  try{ const h=await fetch('/api/health',{cache:'no-store'}).then(r=>r.json()); paintWriteFreeze(!!h.writeFrozen); }catch(e){}
+}
+loadWriteFreeze();
+setInterval(loadWriteFreeze, 20000);
 function currentCity(){ return CITIES.find(x=>x.id===(c.city||'bouake')) || CITIES[0]; }
 function currentQuartiers(){ return currentCity().quartiers; }
 const QUARTIERS = CITIES[0].quartiers; // compat (Bouaké par défaut)
@@ -906,9 +937,32 @@ function setCity(id, silent){
   if(typeof loadHomeEngine==='function') loadHomeEngine();
   if(!silent) toast('📍 '+city.nom+((window._stats&&window._stats.agentsEnLigne!=null)?' — '+window._stats.agentsEnLigne+' professionnel(s) en ligne maintenant':''));
 }
-function cityInfo(){ renderCityModal(); $('#city-modal-bg').classList.add('show'); }
-function closeCityModal(){ $('#city-modal-bg').classList.remove('show'); }
-function pickCity(id){ setCity(id); closeCityModal(); }
+let _villeTarget=null;
+function cityInfo(){ openVilleFor(null); }
+function openVilleFor(inputId){
+  _villeTarget=inputId||null;
+  const inp=document.getElementById('city-search'); if(inp) inp.value='';
+  renderCityModal('');
+  $('#city-modal-bg').classList.add('show');
+  setTimeout(()=>{ const s=document.getElementById('city-search'); if(s) s.focus(); }, 80);
+}
+function closeCityModal(){ $('#city-modal-bg').classList.remove('show'); _villeTarget=null; }
+function pickCity(id){
+  const city=CITIES.find(x=>x.id===id)||CITIES[0];
+  if(_villeTarget){
+    const el=document.getElementById(_villeTarget);
+    if(el){
+      if(el.tagName==='SELECT'){
+        if(![...el.options].some(o=>o.value===city.nom)){ const o=document.createElement('option'); o.value=city.nom; o.textContent=city.nom; el.insertBefore(o, el.lastElementChild); }
+        el.value=city.nom;
+        el.dispatchEvent(new Event('change'));
+      } else el.value=city.nom;
+    }
+    const t=_villeTarget; _villeTarget=null; closeCityModal(); _villeTarget=null;
+    return;
+  }
+  setCity(id); closeCityModal();
+}
 /* 🏙️ Villes autorisées supplémentaires — activées à la demande, quartier tapé à la main */
 function pickSoonCity(nom){
   const id = 'ville-' + nom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]+/g,'-').slice(0,30);
@@ -942,19 +996,17 @@ function renderCityModal(filter){
   const el = $('#city-list'); if(!el) return;
   const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
   const f = norm(filter);
-  const list = CITIES.filter(x => !f || norm(x.nom).includes(f));
+  const list = citiesAZ().filter(x => !f || norm(x.nom).includes(f));
   el.innerHTML =
     (list.length
       ? list.map(x=>`<button class="city-row ${c.city===x.id?'on':''}" onclick="pickCity('${x.id}')"><span style="font-size:20px">🏙️</span><span style="text-align:left"><b style="display:block;font-size:14.5px">${x.nom}</b><small style="color:var(--muted);font-size:11.5px">${x.quartiers.length} quartiers</small></span><span class="st">${c.city===x.id?'Votre ville':'✅ Actif'}</span></button>`).join('')
       : `<p class="note">Aucune ville ne correspond à « ${filter} »</p>`) +
-    (f ? '' : CITIES_SOON.map(n=>`<button class="city-row soon" onclick="pickSoonCity(decodeURIComponent('${encodeURIComponent(n)}'))"><span style="font-size:20px">🏙️</span><span style="text-align:left"><b style="display:block;font-size:14.5px">${n}</b><small style="font-size:11.5px">Ville autorisée — quartier à taper</small></span><span class="st">✅ Choisir</span></button>`).join('')) +
     `<div style="text-align:center;margin-top:12px"><button class="btn-ghost" style="flex:none;padding:10px 16px" onclick="pickTypedCity()">✏️ Ma ville n'y est pas — je la tape moi-même</button></div>`;
 }
 function renderHomeRoad(){
   const el = $('#home-road'); if(!el) return;
   el.innerHTML =
-    CITIES.map(x=>`<button class="city ${c.city===x.id?'ok':'soon'}" style="border:none;font-family:inherit;cursor:pointer;${c.city===x.id?'':'background:var(--pl);color:var(--pd)'}" onclick="pickCity('${x.id}')">${c.city===x.id?'✅':'📍'} ${x.nom}${c.city===x.id?' — Votre ville':''}</button>`).join('') +
-    CITIES_SOON.map(n=>`<span class="city soon">🔜 ${n}</span>`).join('');
+    citiesAZ().map(x=>`<button class="city ${c.city===x.id?'ok':'soon'}" style="border:none;font-family:inherit;cursor:pointer;${c.city===x.id?'':'background:var(--pl);color:var(--pd)'}" onclick="pickCity('${x.id}')">${c.city===x.id?'✅':'📍'} ${x.nom}${c.city===x.id?' — Votre ville':''}</button>`).join('');
 }
 let bookings = JSON.parse(localStorage.getItem('k2_bookings')||'[]');
 let agent = JSON.parse(localStorage.getItem('k2_agent')||'null') || {nom:'',quartier:'Koko',tel:'',online:false,rating:5.0,missionsDone:0,gains:{day:'',today:0,total:0,comm:0},hist:[]};
@@ -1687,7 +1739,7 @@ function renderAgentGate(){
       <div class="inp-row"><label>Date de naissance *</label><input class="inp" id="ap-naissance" type="date"></div>
       <div class="inp-row"><label>Années d'expérience</label><input class="inp" id="ap-experience" type="number" min="0" max="30" placeholder="0"></div>
     </div>
-    <div class="inp-row"><label>🏙️ Ville de résidence * — où vous vivez ?</label><select class="inp" id="ap-ville" onchange="document.getElementById('ap-ville2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— choisir votre ville —</option>${CITIES.map(ci=>`<option value="${ci.nom}">${ci.nom}</option>`).join('')}${CITIES_SOON.map(ci=>`<option value="${ci}">${ci}</option>`).join('')}<option value="__autre">✏️ Ma ville n'est pas dans la liste — je l'écris</option></select></div>
+    <div class="inp-row"><label>🏙️ Ville de résidence * — où vous vivez ?</label><button type="button" class="btn-line" style="width:100%;margin-bottom:8px;font-weight:800" onclick="openVilleFor('ap-ville')">🔍 Chercher / choisir une ville (A→Z)</button><select class="inp" id="ap-ville" onchange="document.getElementById('ap-ville2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— choisir votre ville —</option>${cityOptionsHTML()}<option value="__autre">✏️ Ma ville n'est pas dans la liste — je l'écris</option></select></div>
     <div class="inp-row" id="ap-ville2-row" style="display:none"><label>✏️ Écrivez le nom de votre ville</label><input class="inp" id="ap-ville2" maxlength="40" placeholder="Ex : Séguéla…"></div>
     <div class="inp-row"><label>✉️ E-mail <small style="font-weight:400;color:var(--muted)">(optionnel)</small></label><input class="inp" id="ap-mail" type="email" maxlength="60" placeholder="ex : nom@gmail.com"></div>
     <div class="two">
@@ -1739,6 +1791,8 @@ function renderAgentGate(){
       </select>
     </div>
 
+    <div class="inp-row"><label>🔑 Mot de passe du compte pro * <button type="button" onclick="togglePw('ap-pw')" style="float:right;font-size:12px;font-weight:800;color:var(--pd)">👁 Voir</button></label><input class="inp" id="ap-pw" type="password" placeholder="lettres + chiffres + symbole"></div>
+    <div class="inp-row"><label>Confirmez * <button type="button" onclick="togglePw('ap-pw2')" style="float:right;font-size:12px;font-weight:800;color:var(--pd)">👁 Voir</button></label><input class="inp" id="ap-pw2" type="password"></div>
     <p class="note" style="text-align:left">🛡️ En soumettant, je certifie l'exactitude de ces informations. Elles seront vérifiées par le propriétaire KLEAN avant validation.</p>
     <button class="btn-main" style="width:100%;flex:none" onclick="submitApplication()">📤 Envoyer mon dossier de candidature</button>
   </div>`;
@@ -1829,6 +1883,10 @@ async function onClientAvatar(input){
     } else toast('📷 Photo de profil enregistrée ✓');
   });
 }
+function togglePw(id){
+  const i=document.getElementById(id); if(!i) return;
+  i.type = i.type==='password' ? 'text' : 'password';
+}
 const V_AP = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
 async function submitApplication(){
   const dossier = {
@@ -1844,8 +1902,11 @@ async function submitApplication(){
     ref2Nom: V_AP('ap-ref2nom'), ref2Tel: V_AP('ap-ref2tel'),
     services: Object.keys(applySvc).filter(k=>applySvc[k]),
     niveau: V_AP('ap-niveau'),
+    password: V_AP('ap-pw'),
     deviceId: (typeof NET!=='undefined' && NET.deviceId) || 'demo'
   };
+  if(!dossier.password) return toast('❌ Choisissez un mot de passe (bouton 👁 pour le voir)');
+  if(dossier.password !== V_AP('ap-pw2')) return toast('❌ Les deux mots de passe ne correspondent pas');
   const need = {nom:'Nom', prenom:'Prénom', naissance:'Date de naissance', tel1:'Téléphone', adresse:'Adresse', pieceNum:'N° de pièce', urgenceNom:'Personne à alerter', urgenceTel:'Tél. urgence', ref1Nom:'Référence 1', ref1Tel:'Tél. référence'};
   for(const k in need){ if(!dossier[k]) return toast('❌ Champ requis : '+need[k]); }
   if(dossier.tel1.length < 8) return toast('❌ Téléphone principal invalide');
@@ -1912,10 +1973,10 @@ function openProOrb(){
   ov.style.cssText='position:fixed;inset:0;z-index:9000;background:rgba(8,18,14,.55);display:flex;align-items:flex-start;justify-content:flex-end;padding:58px 12px 16px';
   ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
   ov.innerHTML='<div style="background:#fff;width:min(340px,94vw);border-radius:18px;padding:14px 14px 16px;box-shadow:0 16px 40px rgba(0,0,0,.25)">'+
-    '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#0da678,#0a8a62);color:#fff;font-weight:900;display:flex;align-items:center;justify-content:center">'+(nom[0]||'P').toUpperCase()+'</div><div style="flex:1"><b style="display:block">'+nom+'</b><small style="color:#6b7c73">'+(on?'🟢 En ligne — détectable':'⚪ Hors ligne')+'</small></div><button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove()" style="border:1px solid #e4eae7;background:#f3f6f5;border-radius:9px;padding:6px 9px;font-weight:800;cursor:pointer">✕</button></div>'+
+    '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#E85D04,#C2410C);color:#fff;font-weight:900;display:flex;align-items:center;justify-content:center">'+(nom[0]||'P').toUpperCase()+'</div><div style="flex:1"><b style="display:block">'+nom+'</b><small style="color:#6b7c73">'+(on?'🟢 En ligne — détectable':'⚪ Hors ligne')+'</small></div><button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove()" style="border:1px solid #e4eae7;background:#f3f6f5;border-radius:9px;padding:6px 9px;font-weight:800;cursor:pointer">✕</button></div>'+
     '<button type="button" onclick="goProView(\'profil\')" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #e4eae7;background:#fff;font:inherit;font-weight:800;margin-bottom:7px;cursor:pointer">👤 Voir mon profil</button>'+
     '<button type="button" onclick="goProView(\'dash\')" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #e4eae7;background:#fff;font:inherit;font-weight:800;margin-bottom:7px;cursor:pointer">📊 Tableau de bord</button>'+
-    '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); toggleOnline(); setTimeout(refreshProOrb,200);" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid '+(on?'#0da678':'#ff8a00')+';background:'+(on?'#e7f7f1':'#fff4e5')+';font:inherit;font-weight:900;margin-bottom:7px;cursor:pointer">'+(on?'⚪ Passer hors ligne':'🟢 Passer en ligne (GPS + sonnerie)')+'</button>'+
+    '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); toggleOnline(); setTimeout(refreshProOrb,200);" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid '+(on?'#E85D04':'#ff8a00')+';background:'+(on?'#FFF4E8':'#fff4e5')+';font:inherit;font-weight:900;margin-bottom:7px;cursor:pointer">'+(on?'⚪ Passer hors ligne':'🟢 Passer en ligne (GPS + sonnerie)')+'</button>'+
     '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); agentLogout();" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #f5c6c7;background:#fff;color:#e5484d;font:inherit;font-weight:800;cursor:pointer">🚪 Se déconnecter</button>'+
     '<p style="font-size:11px;color:#6b7c73;margin:10px 0 0;line-height:1.4">GPS + sonnerie même en veille. Compte créé par PDG/gest : même rond après tél + code ou mot de passe.</p></div>';
   document.body.appendChild(ov);
@@ -2095,25 +2156,25 @@ function renderAccount(){
     <p class="sub">Gratuit · vos réservations sont retrouvées sur tous vos appareils, et vos infos sont pré-remplies à chaque ménage.</p>
     <div class="inp-row"><label>👤 Nom complet *</label><input class="inp" id="ac-nom" placeholder="Ex : John Sery Michael"></div>
     <div class="inp-row"><label>📞 Téléphone * (identifiant du compte)</label><div class="phone-wrap"><span class="prefix">+225</span><input type="tel" id="ac-tel" placeholder="01 02 03 04 05" maxlength="14"></div></div>
-    <div class="inp-row"><label>🏙️ Ville de résidence * — où vous vivez ?</label><select class="inp" id="ac-ville" onchange="document.getElementById('ac-ville2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— choisir votre ville —</option>${CITIES.map(ci=>`<option value="${ci.nom}">${ci.nom}</option>`).join('')}${CITIES_SOON.map(ci=>`<option value="${ci}">${ci}</option>`).join('')}<option value="__autre">✏️ Ma ville n'est pas dans la liste — je l'écris</option></select></div>
+    <div class="inp-row"><label>🏙️ Ville de résidence * — où vous vivez ?</label><button type="button" class="btn-line" style="width:100%;margin-bottom:8px;font-weight:800" onclick="openVilleFor('ac-ville')">🔍 Chercher / choisir une ville (A→Z)</button><select class="inp" id="ac-ville" onchange="document.getElementById('ac-ville2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— choisir votre ville —</option>${cityOptionsHTML()}<option value="__autre">✏️ Ma ville n'est pas dans la liste — je l'écris</option></select></div>
     <div class="inp-row" id="ac-ville2-row" style="display:none"><label>✏️ Écrivez le nom de votre ville</label><input class="inp" id="ac-ville2" maxlength="40" placeholder="Ex : Séguéla, Bouaflé…"></div>
     <div class="inp-row"><label>📍 Votre quartier * — à écrire vous-même</label><input class="inp" id="ac-quartier" list="dl-ac-quartier" placeholder="Ex : Koko, Nimbo, Angré…" autocomplete="off"><datalist id="dl-ac-quartier">${[...new Set(CITIES.flatMap(ci=>ci.quartiers))].map(q=>`<option value="${q}">`).join('')}</datalist></div>
     <div class="inp-row"><label>✉️ E-mail <small style="font-weight:400;color:var(--muted)">(optionnel — factures & confirmations)</small></label><input class="inp" id="ac-mail" type="email" maxlength="60" placeholder="ex : nom@gmail.com"></div>
-    <div class="inp-row"><label>🔑 Mot de passe robuste *</label><input class="inp" id="ac-pw" type="password" placeholder="lettres + chiffres + symbole" oninput="accStrength()"></div>
+    <div class="inp-row"><label>🔑 Mot de passe robuste * <button type="button" onclick="togglePw('ac-pw')" style="float:right;font-size:12px;font-weight:800;color:var(--pd)">👁 Voir</button></label><input class="inp" id="ac-pw" type="password" placeholder="lettres + chiffres + symbole" oninput="accStrength()"></div>
     <div class="rules" id="acc-rules">
       <div id="acc-r-len">○ Au moins 8 caractères</div>
       <div id="acc-r-az">○ Contient une lettre</div>
       <div id="acc-r-09">○ Contient un chiffre</div>
       <div id="acc-r-sym">○ Contient un symbole</div>
     </div>
-    <div class="inp-row"><label>Confirmez *</label><input class="inp" id="ac-pw2" type="password"></div>
+    <div class="inp-row"><label>Confirmez * <button type="button" onclick="togglePw('ac-pw2')" style="float:right;font-size:12px;font-weight:800;color:var(--pd)">👁 Voir</button></label><input class="inp" id="ac-pw2" type="password"></div>
     <button class="btn-main" style="width:100%;flex:none" onclick="clientRegister()">🚀 Créer mon compte sécurisé</button>
   </div>` : `
   <div class="gate-card">
     <h4>👋 Bon retour !</h4>
     <p class="sub">Connectez-vous avec votre téléphone et votre mot de passe.</p>
     <div class="inp-row"><label>📞 Téléphone</label><div class="phone-wrap"><span class="prefix">+225</span><input type="tel" id="al-tel" placeholder="01 02 03 04 05" maxlength="14"></div></div>
-    <div class="inp-row"><label>🔑 Mot de passe</label><input class="inp" id="al-pw" type="password"></div>
+    <div class="inp-row"><label>🔑 Mot de passe <button type="button" onclick="togglePw('al-pw')" style="float:right;font-size:12px;font-weight:800;color:var(--pd)">👁 Voir</button></label><input class="inp" id="al-pw" type="password"></div>
     <button class="btn-main" style="width:100%;flex:none" onclick="clientLogin()">🔓 Se connecter</button>
   </div>`}
   <p class="note">🔒 Votre mot de passe est stocké hashé (chiffré) — personne ne peut le lire, pas même KLEAN.</p>`;
@@ -2473,11 +2534,19 @@ function paintQuiz(a){
     qb.innerHTML='<b style="font-size:15px">🏆 Quiz KLEAN</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p><p style="font-size:13px;font-weight:800">Réponses fermées — attendez le décompte du PDG.</p>';
     qb.classList.remove('hidden'); _quizPaint=key; return;
   }
+  if(a.answerEndsAt && Date.now()>new Date(a.answerEndsAt).getTime() && !counting && !shown){
+    if(_quizPaint!==key+'|to'){
+      qb.innerHTML='<b style="font-size:15px">🏆 Quiz</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p><p style="font-weight:800">⏱ Temps de réponse écoulé.</p>';
+      qb.classList.remove('hidden'); _quizPaint=key+'|to';
+    }
+    return;
+  }
   const mine=quizMyPick(a.id);
-  const key2=key+'|p'+(mine==null?'':mine);
+  const key2=key+'|p'+(mine==null?'':mine)+'|'+(a.answerEndsAt||'');
   if(_quizPaint===key2) return;
   const ch=(a.choices||[]).filter(Boolean);
   const locked=mine!=null;
+  const tAns=a.answerEndsAt?('<p style="font-weight:900;color:var(--amber);text-align:center">⏱ Répondez avant '+fmtCd(a.answerEndsAt).txt+'</p>'):'';
   const opts=ch.length ? ch.map((c,i)=>{
     const on=locked && Number(mine)===i;
     const bg=on?'#ff8a00':'#f3f6f5';
@@ -2485,7 +2554,7 @@ function paintQuiz(a){
     const bd=on?'#ff8a00':'#e4eae7';
     return '<button type="button" data-qi="'+i+'" onclick="sendQuiz('+i+')" '+(locked?'disabled':'')+' style="width:100%;text-align:left;margin-top:7px;padding:11px 12px;border-radius:12px;border:2px solid '+bd+';background:'+bg+';color:'+col+';font:inherit;font-weight:800;cursor:'+(locked?'default':'pointer')+'">'+(String.fromCharCode(65+i))+'. '+c+(on?'  ✓':'')+'</button>';
   }).join('') : '<p style="color:#e5484d;font-weight:800">Les choix n’ont pas été publiés. Le PDG doit republier le quiz avec A, B…</p>';
-  qb.innerHTML='<b style="font-size:15px">🏆 Quiz KLEAN</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p>'+opts+'<small id="quiz-ok" style="display:block;margin-top:8px;color:#6b7c73">'+(locked?'Réponse enregistrée — un seul clic.':'Touchez une seule fois.')+'</small>';
+  qb.innerHTML='<b style="font-size:15px">🏆 Quiz KLEAN</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p>'+tAns+opts+'<small id="quiz-ok" style="display:block;margin-top:8px;color:#6b7c73">'+(locked?'Réponse enregistrée — un seul clic.':'Touchez une seule fois.')+'</small>';
   qb.classList.remove('hidden'); _quizPaint=key2;
 }
 function quizWho(){
