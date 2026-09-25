@@ -428,7 +428,9 @@
       <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Ajoutez une ville : elle apparaît tout de suite chez les clients et les professionnels (liste, GPS, inscription).</p>
       <input id="nv-nom" placeholder="Nom de la ville * (ex : Séguéla)" maxlength="40" style="width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
       <input id="nv-q" placeholder="Quartiers (virgules) — facultatif" maxlength="240" style="width:100%;margin-top:7px;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
-      <button class="btn-main" style="width:100%;margin-top:8px" onclick="creerVilleHQ()">➕ Créer la ville (actualise partout)</button>
+      <button class="btn-main" style="width:100%;margin-top:8px" onclick="creerVilleHQ()">➕ Créer la ville (déployée tout de suite)</button>
+      <button type="button" onclick="ouvrirFenetreVilles()" style="width:100%;margin-top:7px;background:linear-gradient(135deg,#4aa3ff,#1f6fd0);border:none;color:#fff;font-weight:900;padding:12px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:13px">🏙️ Ouvrir la fenêtre des villes (créer · lister · déployer)</button>
+      <small id="nv-deploy-state" style="display:block;margin-top:7px;font-weight:800;color:var(--amber)">État : —</small>
       <div id="nv-list" style="margin-top:10px;font-size:13px"></div>
     </div>
   </div>
@@ -441,9 +443,16 @@
       <input id="sv-nom" placeholder="Nom du service *" maxlength="60" style="width:100%;margin-top:7px;padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
       <input id="sv-desc" placeholder="Description courte" maxlength="80" style="width:100%;margin-top:7px;padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
       <input id="sv-base" type="number" placeholder="Prix de base (F)" style="width:100%;margin-top:7px;padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <select id="sv-cat" style="width:100%;margin-top:7px;padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+        <option value="clean">🧹 Ménage &amp; nettoyage</option>
+        <option value="tech">🔧 Dépannage &amp; technique</option>
+        <option value="home" selected>🏡 Extérieur &amp; maison</option>
+      </select>
       <textarea id="sv-opts" placeholder="Sous-services, un par ligne : Nom | prix&#10;ex : Fuite | 5000" rows="4" style="width:100%;margin-top:7px;padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit"></textarea>
       <button class="btn-main" style="width:100%;margin-top:8px" onclick="creerServiceHQ()">➕ Créer le service</button>
-      <button type="button" onclick="actualiserServicesHQ()" style="width:100%;margin-top:7px;background:rgba(255,138,0,.16);border:1.5px solid rgba(255,138,0,.45);color:#b36b00;font-weight:900;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit">🔄 Actualiser partout</button>
+      <button type="button" id="btn-deploy-svc" onclick="deployerServicesHQ()" style="width:100%;margin-top:7px;background:linear-gradient(135deg,#15c98a,#0a8a62);border:none;color:#04150c;font-weight:900;padding:12px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:13.5px">🚀 Déployer vers les clients &amp; pros</button>
+      <small id="sv-deploy-state" style="display:block;margin-top:7px;font-weight:800;color:var(--amber)">État : —</small>
+      <button type="button" onclick="actualiserServicesHQ()" style="width:100%;margin-top:7px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit">🔄 Recharger la liste ici</button>
     </div>
   </div>
   <div class="panel" style="margin-bottom:14px" id="panel-svc-browse">
@@ -715,6 +724,73 @@ async function gelerGest(frozen){
   if(st) st.textContent = d.gestFrozen ? '⛔ Écritures coupées (tous)' : '✅ Écritures actives';
   alert(d.gestFrozen ? '⛔ Plus personne n’écrit (sauf vous, PDG).' : '✅ Écritures réactivées.');
 }
+async function ouvrirFenetreVilles(){
+  const w=document.getElementById('win-villes');
+  if(!w) return alert('Fenêtre introuvable — rechargez la page (Ctrl+F5)');
+  w.style.display='block'; document.body.style.overflow='hidden';
+  chargerVillesHQ();
+}
+function fermerFenetreVilles(){
+  const w=document.getElementById('win-villes');
+  if(w) w.style.display='none';
+  document.body.style.overflow='';
+}
+async function chargerVillesHQ(){
+  const box=document.getElementById('wv-list');
+  const st=document.getElementById('wv-state');
+  if(box) box.innerHTML='Chargement…';
+  let d=null;
+  try{ d=await fetch('/api/cities',{cache:'no-store'}).then(r=>r.json()); }catch(e){}
+  if(!d){ if(box) box.innerHTML='<div class="empty">Impossible de charger les villes.</div>'; return; }
+  const villes=d.cities||[];
+  if(st) st.innerHTML = (d.dirty?'🟠 Ville créée non déployée — touchez 🚀':'🟢 Toutes les villes sont déployées')
+    + ' · '+villes.length+' ville(s) côté serveur' + (d.deployAt?(' · dernier envoi : '+String(d.deployAt).slice(0,16).replace('T',' · ')):'');
+  if(box) box.innerHTML = villes.length ? villes.map(v=>`<div class="agrow" style="align-items:flex-start">
+      <div style="flex:1"><b>🏙️ ${(v.nom||'').replace(/</g,'&lt;')}</b> ${v.actif?'<span class="badge b-done">active</span>':'<span class="badge">bientôt</span>'}<br>
+      <small>${(v.quartiers||[]).length} quartier(s)${(v.quartiers||[]).length?(' · '+(v.quartiers||[]).slice(0,6).join(', ')+(v.quartiers.length>6?'…':'')):''}</small><br>
+      <small style="color:var(--muted)">ajoutée le ${(v.at||'').slice(0,10)||'—'}${v.par?(' par '+v.par):''} · id ${v.id}</small></div>
+      </div>`).join('') : '<div class="empty">Aucune ville créée depuis le HQ (les villes de base de l’app restent actives).</div>';
+  etatDeployVilles(d);
+}
+function etatDeployVilles(d){
+  const el=document.getElementById('nv-deploy-state');
+  if(!el||!d) return;
+  el.innerHTML=(d.dirty?'🟠 À déployer':'🟢 Déployé partout')+' · '+(d.cities||[]).length+' ville(s) créée(s) au HQ';
+  el.style.color=d.dirty?'var(--amber)':'var(--p)';
+}
+async function creerVilleFenetre(){
+  const nom=((document.getElementById('wv-nom')||{}).value||'').trim();
+  if(nom.length<2) return alert('❌ Nom de la ville requis');
+  const quartiers=((document.getElementById('wv-q')||{}).value||'').trim();
+  let d={}, ok=false;
+  try{
+    const r=await fetch('/api/admin/cities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,quartiers})});
+    d=await r.json().catch(()=>({})); ok=r.ok;
+    if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  }catch(e){ return alert('⚠️ Serveur injoignable'); }
+  document.getElementById('wv-nom').value=''; document.getElementById('wv-q').value='';
+  alert('🏙️ '+nom+' créée et déployée automatiquement'+(d.n?(' — '+d.n+' ville(s) au total'):'')
+    +'.\n\nElle apparaît immédiatement chez les clients (liste 📍, inscription) et chez les pros (fenêtre « Où allez-vous travailler ? »).');
+  chargerVillesHQ();
+  if(typeof loadAll==='function') loadAll();
+}
+async function deployerVillesHQ(){
+  const btn=document.getElementById('wv-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Déploiement…'; }
+  let d={}, ok=false;
+  try{
+    const r=await fetch('/api/admin/cities/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    d=await r.json().catch(()=>({})); ok=r.ok;
+    if(!r.ok) alert('⚠️ '+(d.error||'Déploiement impossible'));
+  }catch(e){ alert('⚠️ Serveur injoignable'); }
+  if(btn){ btn.disabled=false; btn.textContent='🚀 Déployer les villes vers tous les écrans'; }
+  if(ok) alert('🚀 '+(d.n||0)+' ville(s) envoyée(s) à tous les téléphones (clients ET pros).');
+  chargerVillesHQ();
+  if(typeof loadAll==='function') loadAll();
+}
+async function creerVilleVille2(){
+  await creerVilleHQ();
+}
 async function creerVilleHQ(){
   const nom=((document.getElementById('nv-nom')||{}).value||'').trim();
   const quartiers=((document.getElementById('nv-q')||{}).value||'').trim();
@@ -722,7 +798,10 @@ async function creerVilleHQ(){
   const r=await fetch('/api/admin/cities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,quartiers})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  const d2=await r.json().catch(()=>({}));
+  alert('🏙️ Ville « '+nom+' » créée et DÉPLOYÉE automatiquement'+(d2.n?(' — '+d2.n+' ville(s) au total'):'')+'.\n\nElle apparaît tout de suite chez les clients et les pros (liste 📍, inscription, ville de service).');
   document.getElementById('nv-nom').value=''; document.getElementById('nv-q').value='';
+  chargerVillesHQ();
   alert('🏙️ Ville « '+d.city.nom+' » créée — elle s’affiche chez clients et pros.');
   loadVillesHQ();
 }
@@ -747,17 +826,46 @@ async function creerServiceHQ(){
     ic: ((document.getElementById('sv-ic')||{}).value||'🛠️').trim(),
     nom, desc: ((document.getElementById('sv-desc')||{}).value||'').trim(),
     base: parseInt((document.getElementById('sv-base')||{}).value,10)||5000,
+    cat: ((document.getElementById('sv-cat')||{}).value||'home'),
     opts: parseOptsHQ()
   })});
   const d=await r.json().catch(()=>({}));
   if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
   ['sv-nom','sv-desc','sv-opts','sv-base','sv-ic'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
-  alert('🛠️ Service « '+d.service.nom+' » créé.');
+  alert('🛠️ Service « '+d.service.nom+' » créé.\n\n👉 Touchez maintenant « 🚀 Déployer vers les clients & pros » : il apparaîtra tout de suite dans leurs listes.');
+  loadCatalogHQ(); etatDeploySvc();
+}
+async function deployerServicesHQ(){
+  const btn=document.getElementById('btn-deploy-svc');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Déploiement…'; }
+  let d={}, ok=false;
+  try{
+    const r=await fetch('/api/admin/services/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    d=await r.json().catch(()=>({})); ok=r.ok;
+    if(!r.ok) alert('⚠️ '+(d.error||'Déploiement impossible'));
+  }catch(e){ alert('⚠️ Serveur injoignable'); }
+  if(btn){ btn.disabled=false; btn.textContent='🚀 Déployer vers les clients & pros'; }
+  if(!ok) return;
+  etatDeploySvc(d);
+  alert('🚀 '+(d.n||0)+' service(s) déployé(s) !\n\nLes clients et les pros les voient immédiatement (notification envoyée à chaque téléphone connecté) — et sous 20 secondes même pour les autres.');
   loadCatalogHQ();
+}
+async function etatDeploySvc(d){
+  const el=document.getElementById('sv-deploy-state');
+  if(!el) return;
+  if(!d){
+    try{ d=await fetch('/api/services',{cache:'no-store'}).then(r=>r.json()); }catch(e){ d=null; }
+  }
+  if(!d) return;
+  const n=(d.services||[]).length;
+  const quand=(d.deployAt||'').slice(0,16).replace('T',' · ');
+  el.innerHTML = (d.dirty ? '🟠 <b>Un service n’est pas encore déployé</b> — touchez 🚀' : '🟢 Tout est déployé chez les clients et les pros')
+    + ' · ' + n + ' service(s)' + (quand ? (' · dernier envoi : ' + quand) : '');
+  el.style.color = d.dirty ? 'var(--amber)' : 'var(--p)';
 }
 async function actualiserServicesHQ(){
   await loadCatalogHQ();
-  alert('🔄 Liste actualisée. Clients et pros la rechargent en moins de 20 s.');
+  await deployerServicesHQ();
 }
 async function loadCatalogHQ(){
   try{
@@ -771,6 +879,7 @@ async function loadCatalogHQ(){
       return '<div style="border-bottom:1px solid var(--line);padding:4px 0"><button type="button" onclick="voirProsService(\''+s.id+'\')" style="width:100%;text-align:left;background:transparent;border:none;padding:8px;font:inherit;font-weight:800;cursor:pointer">'+(s.ic||'🛠️')+' '+(s.nom||s.id)+(s.builtin?'':' <small style="color:var(--amber)">nouveau</small>')+'</button>'+subs+'</div>';
     }).join('');
   }catch(e){}
+  etatDeploySvc();
 }
 async function voirProsService(id){
   const box=document.getElementById('sv-pros'); if(!box) return;
@@ -820,7 +929,7 @@ async function createProHQ(){
   const prenom=((document.getElementById('w-p-prenom')||{}).value||'').trim(), nom=((document.getElementById('w-p-nom')||{}).value||'').trim();
   const tel=((document.getElementById('w-p-tel')||{}).value||'').trim(), quartier=((document.getElementById('w-p-quartier')||{}).value||'').trim();
   const ville=((document.getElementById('w-p-ville')||{}).value||'').trim(), mail=((document.getElementById('w-p-mail')||{}).value||'').trim();
-  const villeService=((document.getElementById('w-p-ville-svc')||{}).value||ville).trim();
+  const villeService='';
   const service=(document.getElementById('w-p-service')||{}).value||'maison';
   const pin=((document.getElementById('w-p-code')||{}).value||'').replace(/\D/g,'').trim();
   const password=((document.getElementById('w-p-pw')||{}).value||'').trim();
@@ -2026,10 +2135,8 @@ setInterval(loadAll, 12000); // secours
           <input id="w-p-tel" placeholder="📞 Tél. principal *" maxlength="16" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
           <input id="w-p-quartier" placeholder="📍 Quartier" maxlength="40" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-          <input id="w-p-ville" placeholder="🏙️ Ville d’habitation" maxlength="40" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <input id="w-p-ville-svc" placeholder="🛠️ Ville de service (comme le client)" maxlength="40" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        </div>
+        <input id="w-p-ville" placeholder="🏙️ Ville où il habite (facultatif)" maxlength="40" style="margin-top:8px;width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <p style="font-size:11.5px;color:var(--muted);margin:7px 0 0;line-height:1.4">🛠️ La <b>ville de service</b> n’est plus demandée ici : dès que le pro ouvre son compte dans l’app, une fenêtre « Où allez-vous travailler ? » s’affiche et il choisit sa ville (il peut la changer quand il veut).</p>
         <input id="w-p-mail" placeholder="✉️ E-mail (facultatif)" maxlength="60" style="margin-top:8px;width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
         <select id="w-p-service" style="margin-top:8px;width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
           <option value="maison">🧹 Ménage maison</option><option value="bureaux">🏢 Bureaux</option><option value="canapes">🛋️ Canapés &amp; tapis</option><option value="vitres">🪟 Vitres</option><option value="grand">🏰 Grand ménage</option><option value="plomberie">🔧 Plomberie</option><option value="electricite">💡 Électricité</option><option value="clim">❄️ Climatisation</option><option value="serrurerie">🔐 Serrurerie</option><option value="jardinage">🌿 Jardinage</option><option value="lavageauto">🚗 Lavage auto</option><option value="bricolage">🛠️ Bricolage</option><option value="demen">📦 Déménagement</option><option value="cuisine">🍽️ Cuisinier</option><option value="cours">📚 Cours à domicile</option><option value="custom">✨ Demande sur mesure</option>
@@ -2057,6 +2164,27 @@ setInterval(loadAll, 12000); // secours
         <div id="w-k-list" style="margin-top:10px;font-size:13px"></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ═══════════ 🏙️ FENÊTRE « VILLES KLEAN » — lot 87 ═══════════ -->
+<div id="win-villes" style="display:none;position:fixed;inset:0;z-index:91;background:rgba(8,16,13,.7);backdrop-filter:blur(3px);overflow:auto;padding:14px" onclick="if(event.target===this)fermerFenetreVilles()">
+  <div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:560px;width:100%;margin:auto;box-shadow:0 18px 60px rgba(0,0,0,.5);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:14px 15px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,rgba(74,163,255,.16),rgba(74,163,255,.04))">
+      <div style="flex:1"><b style="font-size:15px;display:block">🏙️ Villes KLEAN</b>
+      <small style="color:var(--muted);font-size:11.5px">Créez une ville → elle part automatiquement chez les clients et les pros</small></div>
+      <button type="button" onclick="fermerFenetreVilles()" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-weight:900;border-radius:10px;padding:8px 12px;cursor:pointer;font-family:inherit">✕</button>
+    </div>
+    <div style="padding:13px 15px 4px">
+      <input id="wv-nom" placeholder="🏙️ Nom de la ville * (ex : Séguéla)" maxlength="40" style="width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:13px">
+      <input id="wv-q" placeholder="📍 Quartiers (virgules) — facultatif" maxlength="240" style="width:100%;margin-top:7px;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:13px">
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button type="button" onclick="creerVilleFenetre()" style="flex:1;min-width:150px;background:linear-gradient(135deg,var(--p),var(--pd));border:none;color:#fff;font-weight:900;padding:12px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:13px">➕ Créer &amp; déployer</button>
+        <button type="button" id="wv-btn" onclick="deployerVillesHQ()" style="flex:1;min-width:150px;background:linear-gradient(135deg,#4aa3ff,#1f6fd0);border:none;color:#fff;font-weight:900;padding:12px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:13px">🚀 Déployer les villes</button>
+      </div>
+      <small id="wv-state" style="display:block;margin-top:8px;font-weight:800;color:var(--amber)">État : —</small>
+    </div>
+    <div id="wv-list" style="padding:10px 15px 18px;font-size:13px;max-height:46vh;overflow:auto"></div>
   </div>
 </div>
 
@@ -2199,6 +2327,14 @@ function rendreCodes(){
     const act = (kind === 'pro')
       ? (' · ⭐ ' + (x.note || 5) + '/5 · ✅ ' + (x.terminees || 0) + '/' + (x.missions || 0) + ' mission(s)')
       : (' · 🧾 ' + (x.missions || 0) + ' mission(s) · 💸 ' + fmt(x.depense || 0));
+    const tech = (kind === 'pro')
+      ? ('<br><small style="color:' + (x.hasGps ? 'var(--p)' : 'var(--muted)') + ';font-weight:800">'
+          + (x.hasGps ? ('📡 GPS actif' + (x.gpsAge != null ? (' (il y a ' + x.gpsAge + ' s)') : '') + (x.villeIci ? (' · près de ' + echa(x.villeIci)) : '')) : '📡 Sans GPS')
+          + ' · ' + (x.sonnerie ? ('🔊 sonnerie en veille (' + x.sonnerie + ')') : '🔇 sonnerie non activée')
+          + (x.demandes ? (' · 📥 ' + x.demandes + ' demande(s) reçue(s)') : '')
+          + (x.ville && x.villeIci && String(x.villeIci).toLowerCase() !== String(x.ville).toLowerCase() ? (' · 🚗 vu à ' + echa(x.villeIci)) : '')
+          + '</small>')
+      : '';
     const annul = x.annulees ? (' · <span style="color:var(--red)">' + x.annulees + ' annulée(s)</span>') : '';
     const dern = x.derniere ? (' · 🕒 ' + String(x.derniere).slice(0, 10)) : '';
     const motif = (x.blocked && x.blockReason) ? ('<br><small style="color:var(--red);font-weight:800">Motif : ' + echa(x.blockReason) + '</small>') : '';
@@ -2211,7 +2347,7 @@ function rendreCodes(){
       + '<b style="font-size:13px">' + (kind === 'pro' ? '🧑‍💼 ' : '👤 ') + echa(x.nom) + '</b>' + bloque + '<br>'
       + '<small style="color:var(--muted)">📞 ' + echa(x.tel) + (x.ville ? ' · 🏙️ ' + echa(x.ville) : '') + '</small><br>'
       + '<small>' + etat + liaison + '</small><br>'
-      + '<small style="color:var(--muted)">' + act + annul + dern + '</small>' + motif
+      + '<small style="color:var(--muted)">' + act + annul + dern + '</small>' + tech + motif
       + '</div>'
       + '<div style="text-align:right">'
       + '<div style="font-size:20px;font-weight:900;letter-spacing:.14em;color:var(--amber)">' + (x.code ? echa(x.code) : '—') + '</div>'

@@ -228,6 +228,7 @@ function wsSend(sock, obj) {
   try { sock.write(Buffer.concat([header, data])); } catch (e) {}
 }
 function broadcast(list, obj) { list.forEach(s => wsSend(s, obj)); }
+function bcAll(obj) { for (const s of [...sockets]) { try { wsSend(s, obj); } catch (e) {} } }
 function handleWsData(sock) {
   let buf = Buffer.alloc(0);
   return chunk => {
@@ -503,6 +504,8 @@ function broadcastNewMission(m) {
     if (exc.includes(s.meta && s.meta.agentId)) continue;
     wsSend(s, { type: 'mission_request', mission: Object.assign({}, base, { dist: (typeof s._dist === 'number' ? s._dist : base.dist) }) });
     sent++;
+    const agT = db.agents.find(a => a.id === (s.meta && s.meta.agentId));
+    if (agT) { agT.demandes = (agT.demandes || 0) + 1; agT.lastDemandAt = nowISO(); }
   }
   console.log('📢 Mission ' + m.id + ' (' + m.service + ' · ' + m.prixTotal + ' F) diffusée à ' + sent + ' agent(s)');
   emitAdmin('mission', '📥 Nouvelle demande ' + m.id + ' — ' + m.service + ' · ' + m.quartier + ' · ' + m.prixTotal.toLocaleString('fr-FR') + ' F (' + m.client.nom + ')');
@@ -684,8 +687,29 @@ const server = http.createServer(async (req, res) => {
       ag.villeIci = nearestVille(b.lat, b.lng);
     }
     if (b.villeService) ag.villeService = String(b.villeService).slice(0, 60);
+    ag.hbCount = (ag.hbCount || 0) + 1;
     saveDb();
-    return sendJson(res, 200, { ok: true, online: true, stayOnline: true });
+    return sendJson(res, 200, {
+      ok: true, online: true, stayOnline: true, reachKm: reachKm(), gpsNationOn: gpsNationOn(),
+      lastSeen: ag.lastSeen, demandes: ag.demandes || 0, hb: ag.hbCount
+    });
+  }
+  /* 🛰️ POSTE DE VEILLE — le pro voit que la connexion tient vraiment (son, GPS, contact serveur) */
+  if (p === '/api/agents/veille' && req.method === 'GET') {
+    const ag = db.agents.find(a => a.id === String(url.searchParams.get('agentId') || ''));
+    if (!ag) return sendJson(res, 404, { error: 'pro introuvable' });
+    const gpsAge = agentHasGps(ag) ? Math.round((Date.now() - (ag.pos.at || 0)) / 1000) : null;
+    const lastAge = ag.lastSeen ? Math.round((Date.now() - Date.parse(ag.lastSeen)) / 1000) : null;
+    return sendJson(res, 200, {
+      ok: true, online: agentIsOnline(ag), stayOnline: !!ag.stayOnline,
+      lastSeen: ag.lastSeen || null, lastSeenAge: lastAge,
+      gps: agentHasGps(ag) ? { lat: Math.round(ag.pos.lat * 10000) / 10000, lng: Math.round(ag.pos.lng * 10000) / 10000, age: gpsAge, villeIci: ag.villeIci || nearestVille(ag.pos.lat, ag.pos.lng) } : null,
+      sonnerie: (Array.isArray(ag.pushSubs) ? ag.pushSubs.length : 0),
+      demandes: ag.demandes || 0, hb: ag.hbCount || 0,
+      villeService: ag.villeService || '', ville: ag.ville || '',
+      services: Array.isArray(ag.services) ? ag.services : [],
+      reachKm: reachKm(), gpsNationOn: gpsNationOn(), now: Date.now()
+    });
   }
   if (p === '/api/agents/me' && req.method === 'PUT') {
     const b = await readBody(req);
@@ -730,6 +754,47 @@ const server = http.createServer(async (req, res) => {
       ok: true, ville, scope: m.matchScope || 'city',
       nOnline: cards.length, nSame: same.length, nOther: other.length,
       sameCity: same.slice(0, 40), otherCities: other.slice(0, 40), service: svc
+    });
+  }
+
+  /* 📞 LE PLUS PROCHE — le client voit qui peut venir : même quartier, GPS le plus proche, puis même ville */
+  if (p === '/api/pros/proches' && req.method === 'GET') {
+    const qN = String(url.searchParams.get('quartier') || '').trim().toLowerCase();
+    const vN = normVille(url.searchParams.get('ville') || '');
+    const svc = String(url.searchParams.get('service') || '').trim();
+    const lat = parseFloat(url.searchParams.get('lat'));
+    const lng = parseFloat(url.searchParams.get('lng'));
+    const cli = findClientByToken(req);
+    if (!vN && cli && cli.ville) {} // le client connecté garde sa ville si rien n'est passé
+    const myLat = Number.isFinite(lat) ? lat : null, myLng = Number.isFinite(lng) ? lng : null;
+    const onIds = onlineAgentIds();
+    const m = { villeN: vN, lat: myLat, lng: myLng };
+    const list = (db.agents || [])
+      .filter(a => !a.blocked && (a.status || 'approved') === 'approved')
+      .filter(a => agentHasService(a, svc))
+      .map(a => {
+        const card = publicMatchCard(a, m, agentIsOnline(a));
+        const qPro = String(a.quartier || '').trim().toLowerCase();
+        const memeQuartier = !!(qN && qPro && qPro === qN);
+        let score = 90;
+        let why = 'autre ville';
+        if (memeQuartier) { score = 1; why = 'même quartier que vous'; }
+        else if (card.hasGps && card.distKm != null) { score = 10 + Math.min(60, card.distKm); why = 'à ' + card.distKm + ' km de vous (GPS)'; }
+        else if (card.sameCity) { score = 75; why = 'même ville (' + (a.villeService || a.ville || '') + ')'; }
+        if (!card.online) score += 100;              // les pros en ligne d'abord
+        card.memeQuartier = memeQuartier;
+        card.pourquoi = why;
+        card.score = score;
+        /* le numéro s'affiche si : pas de GPS, ou même ville, ou le pro est HORS du rayon (trop loin → on peut toujours l'appeler) */
+        const tropLoin = (card.hasGps && card.distKm != null && card.distKm > reachKm());
+        card.tel = (card.telAffiche || tropLoin) ? card.tel : '';
+        return card;
+      })
+      .sort((a, b) => a.score - b.score)
+      .slice(0, 40);
+    return sendJson(res, 200, {
+      ok: true, quartier: qN, ville: vN, service: svc, n: list.length,
+      enLigne: list.filter(x => x.online).length, pros: list
     });
   }
 
@@ -1354,7 +1419,9 @@ const server = http.createServer(async (req, res) => {
     });
     const pros = db.agents.map(a => {
       const ms = db.missions.filter(m => m.agentId === a.id);
-      return { kind: 'pro', id: a.id, nom: a.nom, tel: a.tel1 || a.tel || '', ville: a.villeService || a.ville || '', quartier: a.quartier || '', code: a.codeAcces || a.claimPin || '', enAttenteLiaison: !!(a.claimPin), lie: !a.claimPin, blocked: !!a.blocked, blockReason: a.blockReason || '', online: agentIsOnline(a), createdAt: a.createdAt || '',
+      return { kind: 'pro', id: a.id, nom: a.nom, tel: a.tel1 || a.tel || '', ville: a.villeService || a.ville || '', villeIci: a.villeIci || '', quartier: a.quartier || '', code: a.codeAcces || a.claimPin || '', enAttenteLiaison: !!(a.claimPin), lie: !a.claimPin, blocked: !!a.blocked, blockReason: a.blockReason || '', online: agentIsOnline(a), createdAt: a.createdAt || '',
+        hasGps: agentHasGps(a), gpsAge: agentHasGps(a) ? Math.round((Date.now() - (a.pos.at || 0)) / 1000) : null,
+        sonnerie: (Array.isArray(a.pushSubs) ? a.pushSubs.length : 0), lastSeen: a.lastSeen || '', demandes: a.demandes || 0,
         missions: ms.length, terminees: ms.filter(m => m.status === 'terminee').length, annulees: ms.filter(m => m.status === 'annulee').length,
         note: Math.round(((agentStats(a) || {}).rating || a.rating || 5) * 10) / 10,
         derniere: (ms.slice().sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || '')))[0] || {}).createdAt || '' };
@@ -1402,9 +1469,28 @@ const server = http.createServer(async (req, res) => {
     hidePay: !!(db.config && db.config.payDest && db.config.payDest.hide),
     cities: db.cities || [],
     services: db.catalog || [],
+    servicesVersion: db.catalogVersion || 1,
+    citiesVersion: db.citiesVersion || 1,
     supportChat: db.config && db.config.supportChat === false ? false : true
   });
-  if (p === '/api/cities' && req.method === 'GET') return sendJson(res, 200, { ok: true, cities: db.cities || [] });
+  if (p === '/api/cities' && req.method === 'GET')
+    return sendJson(res, 200, {
+      ok: true, cities: db.cities || [],
+      version: db.citiesVersion || 1, deployAt: db.citiesDeployAt || null, dirty: !!db.citiesDirty
+    });
+  /* 🚀 DÉPLOYER les villes (création, quartiers) vers tous les écrans */
+  if (p === '/api/admin/cities/deploy' && req.method === 'POST') {
+    db.cities = db.cities || [];
+    db.citiesVersion = (db.citiesVersion || 1) + 1;
+    db.citiesDeployAt = nowISO();
+    db.citiesDeployBy = act(req);
+    db.citiesDirty = false;
+    saveDb();
+    bcAll({ type: 'cities_deploy', version: db.citiesVersion, n: db.cities.length, at: db.citiesDeployAt, by: db.citiesDeployBy });
+    emitAdmin('admin', '🚀 ' + act(req) + ' a déployé ' + db.cities.length + ' ville(s) vers tous les écrans');
+    auditLog('villes_deployees', { n: db.cities.length, version: db.citiesVersion, par: act(req) });
+    return sendJson(res, 200, { ok: true, n: db.cities.length, version: db.citiesVersion, deployAt: db.citiesDeployAt });
+  }
   if (p === '/api/admin/cities' && req.method === 'POST') {
     const b = await readBody(req);
     const nom = String(b.nom || '').trim().slice(0, 40);
@@ -1415,13 +1501,37 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 409, { error: 'Cette ville existe déjà' });
     const quartiers = String(b.quartiers || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean).slice(0, 40);
     const city = { id, nom, actif: true, quartiers: quartiers.length ? quartiers : [nom + '-Centre', 'Marché', 'Gare'], at: nowISO(), par: act(req) };
-    db.cities.push(city); saveDb();
-    auditLog('ville_ajoutee', { nom, par: act(req) });
-    emitAdmin('admin', '🏙️ Nouvelle ville : ' + nom);
-    return sendJson(res, 201, { ok: true, city });
+    db.cities.push(city); db.citiesDirty = true;
+    /* ✨ déploiement AUTOMATIQUE : la ville part tout de suite vers clients et pros */
+    db.citiesVersion = (db.citiesVersion || 1) + 1;
+    db.citiesDeployAt = nowISO(); db.citiesDeployBy = act(req); db.citiesDirty = false;
+    saveDb();
+    bcAll({ type: 'cities_deploy', version: db.citiesVersion, n: db.cities.length, at: db.citiesDeployAt, by: db.citiesDeployBy });
+    auditLog('ville_ajoutee', { nom, par: act(req), deploy: true });
+    emitAdmin('admin', '🏙️ Nouvelle ville déployée partout : ' + nom);
+    return sendJson(res, 201, { ok: true, city, deployed: true, version: db.citiesVersion, n: db.cities.length });
   }
   if (p === '/api/admin/cities' && req.method === 'GET') return sendJson(res, 200, { cities: db.cities || [] });
-  if (p === '/api/services' && req.method === 'GET') return sendJson(res, 200, { ok: true, services: db.catalog || [] });
+  if (p === '/api/services' && req.method === 'GET')
+    return sendJson(res, 200, {
+      ok: true, services: db.catalog || [],
+      version: db.catalogVersion || 1, deployAt: db.catalogDeployAt || null, deployBy: db.catalogDeployBy || '',
+      dirty: !!db.catalogDirty
+    });
+  /* 🚀 DÉPLOYER les services créés vers les écrans clients ET pros (instantané) */
+  if (p === '/api/admin/services/deploy' && req.method === 'POST') {
+    db.catalog = db.catalog || [];
+    db.catalogVersion = (db.catalogVersion || 1) + 1;
+    db.catalogDeployAt = nowISO();
+    db.catalogDeployBy = act(req);
+    db.catalogDirty = false;
+    saveDb();
+    bcAll({ type: 'services_deploy', version: db.catalogVersion, n: db.catalog.length, at: db.catalogDeployAt, by: db.catalogDeployBy });
+    emitAdmin('admin', '🚀 ' + act(req) + ' a déployé ' + db.catalog.length + ' service(s) vers tous les écrans');
+    auditLog('services_deployes', { n: db.catalog.length, version: db.catalogVersion, par: act(req) });
+    console.log('🚀 Services déployés (' + db.catalog.length + ') par ' + act(req));
+    return sendJson(res, 200, { ok: true, n: db.catalog.length, version: db.catalogVersion, deployAt: db.catalogDeployAt });
+  }
   if (p === '/api/admin/services' && req.method === 'POST') {
     const b = await readBody(req);
     const nom = String(b.nom || '').trim().slice(0, 60);
@@ -1435,9 +1545,9 @@ const server = http.createServer(async (req, res) => {
       prix: Math.max(0, parseInt(o.prix, 10) || 0)
     })).filter(o => o.nom) : [];
     const svc = { id, ic: String(b.ic || '🛠️').slice(0, 4), nom, desc: String(b.desc || '').slice(0, 80), base: Math.max(0, parseInt(b.base, 10) || 5000), cat: String(b.cat || 'home').slice(0, 12), opts, at: nowISO(), par: act(req) };
-    db.catalog.push(svc); saveDb();
+    db.catalog.push(svc); db.catalogDirty = true; saveDb();
     auditLog('service_ajoute', { nom, par: act(req) });
-    emitAdmin('admin', '🛠️ Service créé : ' + nom);
+    emitAdmin('admin', '🛠️ Service créé : ' + nom + ' — touchez 🚀 Déployer pour l’envoyer aux clients et aux pros');
     return sendJson(res, 201, { ok: true, service: svc });
   }
   if (p === '/api/admin/services' && req.method === 'GET') return sendJson(res, 200, { services: db.catalog || [] });

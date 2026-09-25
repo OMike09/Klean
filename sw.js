@@ -1,7 +1,7 @@
 /* ═══════════ KLEAN — Service Worker (PWA) ═══════════
    L'app s'installe et reste ouvrable même réseau lent.
    API & temps réel : toujours en direct (jamais de cache). */
-const CACHE = 'klean-v40'; // ⚠️ à incrémenter à chaque déploiement (force l'oubli de l'ancien)
+const CACHE = 'klean-v41'; // ⚠️ à incrémenter à chaque déploiement (force l'oubli de l'ancien)
 const SHELL = [
   '/', '/index.html', '/net.js', '/manifest.json',
   '/klean-icon-192.png', '/klean-icon-512.png'

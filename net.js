@@ -52,7 +52,7 @@ function connectWS(){
   const ws = new WebSocket(proto + '://' + location.host + '/ws');
   NET.ws = ws;
   ws.onopen = () => {
-    NET.on = true;
+    NET.on = true; NET._essais = 0;
     wsSend({type:'hello', role:'client', deviceId:NET.deviceId, clientId: (typeof client!=='undefined' && client && client.id) ? client.id : null});
     applyNetOverrides();
     toast('🛰️ Connecté au serveur KLEAN — temps réel activé');
@@ -64,7 +64,16 @@ function connectWS(){
     if(typeof refreshProOrb==='function') refreshProOrb();
   };
   ws.onmessage = ev => { try { routeNet(JSON.parse(ev.data)); } catch(e){} };
-  ws.onclose = () => { NET.on = false; if(!NET._reconn){ NET._reconn=true; setTimeout(()=>{ NET._reconn=false; connectWS(); }, 2500); } };
+  ws.onclose = () => {
+    NET.on = false;
+    /* 🔁 on ne laisse JAMAIS tomber un pro en veille : on retente sans fin, de plus en plus vite si besoin */
+    NET._essais = (NET._essais || 0) + 1;
+    const delai = Math.min(15000, 1500 * NET._essais);
+    clearTimeout(NET._reconnT);
+    NET._reconnT = setTimeout(()=>{ connectWS(); }, delai);
+    try{ if(typeof renderVeille==='function') renderVeille(); }catch(e){}
+  };
+  ws.onerror = () => { try{ if(typeof renderVeille==='function') renderVeille(); }catch(e){} };
   if(!NET._pingIv) NET._pingIv = setInterval(() => wsSend({type:'ping'}), 25000);
   if(NET._statIv) return;
   NET._statIv = setInterval(()=>{
@@ -77,6 +86,32 @@ function connectWS(){
   }, 12000);
 }
 function wsSend(o){ if(NET.ws && NET.ws.readyState === 1) NET.ws.send(JSON.stringify(o)); }
+
+/* 🔧 AUTO-RÉPARATION DE LA VEILLE — toutes les 30 s :
+   - WebSocket coupé → on reconnecte
+   - le serveur ne me voit plus (dernier contact > 70 s) → je me réannonce + heartbeat tout de suite
+   - le GPS est tombé → je redemande une position
+   Le pro reste « joignable » même après une coupure réseau, une mise en veille du téléphone ou un redémarrage du serveur. */
+function veilleAutoRepare(){
+  try{
+    if(typeof agent==='undefined' || !agent || !agent.online) return;
+    if(!agent.apply || agent.apply.status !== 'approved') return;
+    if(!NET.on){ try{ connectWS(); }catch(e){} }
+    else { netAnnounceOnline(); }
+    if(typeof VEILLE==='object' && VEILLE && VEILLE.ok && VEILLE.lastSeenAge != null && VEILLE.lastSeenAge > 70){
+      try{ fetch('/api/agents/heartbeat',{method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(Object.assign({agentId:NET.agentId, stayOnline:true, villeService:(agent.villeService||agent.ville||'')}, (NET.pos?{lat:NET.pos.lat,lng:NET.pos.lng}:{})))}).catch(()=>{}); }catch(e){}
+      try{ toast('🛰️ Veille relancée — le serveur vous retrouve'); }catch(e){}
+    }
+    if(!NET.pos){ try{ netStartPosWatch(); }catch(e){} }
+    try{ if(typeof verifierVeille==='function') verifierVeille(); }catch(e){}
+  }catch(e){}
+}
+if(typeof window!=='undefined' && !window._kleanVeilleAuto){
+  window._kleanVeilleAuto = true;
+  setInterval(veilleAutoRepare, 30000);
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') setTimeout(veilleAutoRepare, 800); });
+}
 
 /* ───────── Remplacement des flux simulés par les flux réels ───────── */
 function applyNetOverrides(){
@@ -376,6 +411,19 @@ function routeNet(msg){
       try { if (window.supRefreshBadge) window.supRefreshBadge(); } catch (e) { }
       break;
 
+    case 'services_deploy':           // → TOUS : le HQ a publié de nouveaux services
+      try { if (window.kleanOnServicesDeploy) window.kleanOnServicesDeploy(msg); } catch (e) { }
+      break;
+
+    case 'cities_deploy':             // → TOUS : le HQ a publié une ville
+      try { if (window.kleanOnCitiesDeploy) window.kleanOnCitiesDeploy(msg); } catch (e) { }
+      break;
+
+    case 'veille_rappel':             // → PRO en veille : rappel GPS / sonnerie
+      toast('🛰️ ' + (msg.text || 'Vérifiez votre GPS et vos sonneries'));
+      try { if (typeof verifierVeille === 'function') verifierVeille(true); } catch (e) { }
+      break;
+
     case 'mission_update': {           // → CLIENT (et agent assigné)
       // côté agent : le client a annulé
       if(activeMission && activeMission.id === msg.missionId && msg.status === 'annulee'){
@@ -439,6 +487,7 @@ async function netEnsureAgentRegistered(){
 function netAnnounceOnline(){
   netStartPosWatch();
   wsSend({type:'agent_online', agentId:NET.agentId, nom:agent.nom, quartier:agent.quartier, tel:agent.tel, ville: agent.ville || (typeof cityName==='function'?cityName(typeof c!=='undefined'&&c.city): '') || '', villeService: agent.villeService || agent.ville || ''});
+  try{ if(typeof verifierVeille==='function') verifierVeille(); }catch(e){}
 }
 async function netQuickOnboard(){
   const nom = document.querySelector('#ob-nom').value.trim();
