@@ -1262,15 +1262,20 @@ const server = http.createServer(async (req, res) => {
       });
     }
     const answerSeconds = type === 'quiz' ? Math.max(0, Math.min(7200, parseInt(b.answerSeconds, 10) || 0)) : 0;
+    const quizWho = type === 'quiz' ? {
+      clients: ['all', 'done', 'none'].includes(b.clients) ? b.clients : 'done',
+      pros: ['all', 'done', 'none'].includes(b.pros) ? b.pros : 'done'
+    } : null;
     db.annonce = { id: uid('AN'), message: msg, type, at: nowISO(), par: act(req),
       question: type === 'quiz' ? (String(b.question || '').trim().slice(0, 180) || msg) : '',
       choices: type === 'quiz' ? choices : [],
       good: type === 'quiz' ? Math.max(0, Math.min(3, parseInt(b.good, 10) || 0)) : 0,
       closed: false, winners: [],
       answerSeconds,
-      answerEndsAt: answerSeconds ? new Date(Date.now() + answerSeconds * 1000).toISOString() : null };
+      answerEndsAt: answerSeconds ? new Date(Date.now() + answerSeconds * 1000).toISOString() : null,
+      quizWho };
     db.quizAnswers = [];
-    if (type === 'quiz') db.lastQuiz = { message: msg, question: db.annonce.question, choices: db.annonce.choices, good: db.annonce.good, answerSeconds };
+    if (type === 'quiz') db.lastQuiz = { message: msg, question: db.annonce.question, choices: db.annonce.choices, good: db.annonce.good, answerSeconds, quizWho: db.annonce.quizWho };
     saveDb();
     auditLog('annonce_publiee', { type, par: act(req) });
     emitAdmin('annonce', '📣 Affiche publiée pour tous les utilisateurs');
@@ -1711,6 +1716,52 @@ const server = http.createServer(async (req, res) => {
     return a;
   }
 
+  function missionDoneClient(id) {
+    return (db.missions || []).some(m => m.clientId === id && m.status === 'terminee');
+  }
+  function missionDoneAgent(id) {
+    return (db.missions || []).some(m => m.agentId === id && m.status === 'terminee');
+  }
+  function quizRuleOk(rule, hasDone) {
+    const r = rule || 'done';
+    if (r === 'all') return true;
+    if (r === 'done') return !!hasDone;
+    if (r === 'none') return !hasDone;
+    return true;
+  }
+  function quizPlayerFrom(req, b) {
+    const cli = findClientByToken(req);
+    if (cli) return { role: 'client', id: cli.id, nom: cli.nom, done: missionDoneClient(cli.id) };
+    const who = String((b && (b.accountId || b.who || b.deviceId)) || '').slice(0, 80);
+    if (who.startsWith('CL-')) {
+      const id = who.slice(3);
+      const c = (db.clients || []).find(x => x.id === id);
+      if (c) return { role: 'client', id: c.id, nom: c.nom, done: missionDoneClient(c.id) };
+    }
+    if (who.startsWith('AG-')) {
+      const id = who.slice(3);
+      const ag = (db.agents || []).find(x => x.id === id || x.tel === id || x.tel1 === id);
+      if (ag) return { role: 'agent', id: ag.id, nom: ag.nom, done: missionDoneAgent(ag.id) };
+    }
+    const ag2 = (db.agents || []).find(x => x.id === who);
+    if (ag2) return { role: 'agent', id: ag2.id, nom: ag2.nom, done: missionDoneAgent(ag2.id) };
+    return { role: 'guest', id: who, nom: '', done: false };
+  }
+  function quizMayPlay(player, a) {
+    const w = (a && a.quizWho) || { clients: 'done', pros: 'done' };
+    if (player.role === 'client') return quizRuleOk(w.clients, player.done);
+    if (player.role === 'agent') return quizRuleOk(w.pros, player.done);
+    return quizRuleOk(w.clients, false);
+  }
+
+  if (p === '/api/quiz/eligible' && req.method === 'GET') {
+    const a = db.annonce;
+    if (!a || a.type !== 'quiz') return sendJson(res, 200, { ok: true, can: false, reason: 'Pas de quiz' });
+    const player = quizPlayerFrom(req, { accountId: url.searchParams.get('who') || '' });
+    const can = quizMayPlay(player, a);
+    return sendJson(res, 200, { ok: true, can, role: player.role, done: player.done, quizWho: a.quizWho || { clients: 'done', pros: 'done' } });
+  }
+
   if (p === '/api/quiz/answer' && req.method === 'POST') {
     const b = await readBody(req);
     const a = db.annonce;
@@ -1718,6 +1769,15 @@ const server = http.createServer(async (req, res) => {
     if (a.closed || a.countdownEndsAt) return sendJson(res, 409, { error: 'Quiz terminé — le décompte a commencé', winners: a.winners || [] });
     if (a.answerEndsAt && Date.now() > new Date(a.answerEndsAt).getTime())
       return sendJson(res, 409, { error: 'Temps de réponse écoulé' });
+    const player = quizPlayerFrom(req, b);
+    if (!quizMayPlay(player, a)) {
+      const w = a.quizWho || { clients: 'done', pros: 'done' };
+      const side = player.role === 'agent' ? 'professionnels' : 'clients';
+      const need = (player.role === 'agent' ? w.pros : w.clients) === 'none'
+        ? 'réservé à ceux qui n’ont pas encore de mission terminée'
+        : 'réservé à ceux qui ont déjà une mission terminée (pas une mission en attente)';
+      return sendJson(res, 403, { error: 'Quiz ' + need + ' (' + side + ')' });
+    }
     const nom = String(b.nom || '').trim().slice(0, 40) || 'Anonyme';
     const who = String(b.accountId || b.deviceId || nom || ('anon-' + (req.socket.remoteAddress || ''))).slice(0, 80);
     db.quizAnswers = db.quizAnswers || [];
@@ -1766,7 +1826,8 @@ const server = http.createServer(async (req, res) => {
       good: src.good || 0,
       closed: false, winners: [], hideClient: false, hideAgent: false,
       answerSeconds,
-      answerEndsAt: answerSeconds ? new Date(Date.now() + answerSeconds * 1000).toISOString() : null
+      answerEndsAt: answerSeconds ? new Date(Date.now() + answerSeconds * 1000).toISOString() : null,
+      quizWho: src.quizWho || { clients: 'done', pros: 'done' }
     };
     db.quizAnswers = [];
     db.quizChat = [];

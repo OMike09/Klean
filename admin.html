@@ -890,7 +890,20 @@ async function publierAnnonce(){
     payload.good = parseInt((document.getElementById('qz-ok')||{}).value,10)||0;
     payload.answerSeconds = parseInt((document.getElementById('qz-ans-sec')||{}).value,10)||0;
     if(payload.choices.length<2) return alert('❌ Quiz : remplissez au moins les choix A et B — c\'est ce que voient les comptes');
+    window._quizPayload = payload;
+    const m=document.getElementById('quiz-who-modal'); if(m){ m.style.display='flex'; return; }
   }
+  await sendAnnonce(payload);
+}
+function closeQuizWho(){ const m=document.getElementById('quiz-who-modal'); if(m) m.style.display='none'; }
+async function confirmQuizWho(){
+  const payload=window._quizPayload; if(!payload) return closeQuizWho();
+  payload.clients = (document.querySelector('input[name="qw-cli"]:checked')||{}).value || 'done';
+  payload.pros = (document.querySelector('input[name="qw-pro"]:checked')||{}).value || 'done';
+  closeQuizWho();
+  await sendAnnonce(payload);
+}
+async function sendAnnonce(payload){
   const r = await fetch('/api/admin/annonce', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
   const d = await r.json().catch(()=>({}));
   if(!r.ok) return alert('⚠️ '+(d.error||'Publication impossible'));
@@ -1648,6 +1661,23 @@ setInterval(loadAll, 12000); // secours
     <button type="button" onclick="doRetirer('all')" style="width:100%;margin-bottom:7px;background:rgba(255,107,107,.14);border:1.5px solid rgba(255,107,107,.45);color:var(--red);font-weight:900;padding:11px;border-radius:12px;cursor:pointer;font-family:inherit">🌐 Tous les écrans (quiz actuel)</button>
     <button type="button" onclick="doRetirer('series')" style="width:100%;margin-bottom:10px;background:rgba(255,107,107,.22);border:1.5px solid rgba(255,107,107,.5);color:var(--red);font-weight:900;padding:11px;border-radius:12px;cursor:pointer;font-family:inherit">🗑️ Tous les quiz de la série</button>
     <button type="button" onclick="closeRetirer()" style="width:100%;background:var(--card2);border:1px solid var(--line);padding:10px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">Annuler</button>
+  </div>
+</div>
+
+<div id="quiz-who-modal" style="display:none;position:fixed;inset:0;z-index:85;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:440px;width:100%;padding:16px 16px 18px">
+    <b style="display:block;font-size:16px;margin-bottom:6px">🏆 Qui peut jouer à ce quiz ?</b>
+    <p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;line-height:1.45">Une mission <b>en attente ne compte pas</b>. Seule une mission <b>terminée</b> (client qui a payé / pro qui a assisté) compte.</p>
+    <div style="font-size:13px;font-weight:800;margin:8px 0 6px">👤 Clients</div>
+    <label style="display:block;font-size:13px;margin:5px 0"><input type="radio" name="qw-cli" value="none"> Sans mission terminée</label>
+    <label style="display:block;font-size:13px;margin:5px 0"><input type="radio" name="qw-cli" value="done" checked> Uniquement déjà une mission terminée</label>
+    <label style="display:block;font-size:13px;margin:5px 0"><input type="radio" name="qw-cli" value="all"> Tout le monde</label>
+    <div style="font-size:13px;font-weight:800;margin:14px 0 6px">🧑‍💼 Professionnels</div>
+    <label style="display:block;font-size:13px;margin:5px 0"><input type="radio" name="qw-pro" value="none"> Sans mission terminée</label>
+    <label style="display:block;font-size:13px;margin:5px 0"><input type="radio" name="qw-pro" value="done" checked> Uniquement déjà assisté un client (terminée)</label>
+    <label style="display:block;font-size:13px;margin:5px 0"><input type="radio" name="qw-pro" value="all"> Tout le monde</label>
+    <button type="button" class="btn-main" style="width:100%;margin-top:14px" onclick="confirmQuizWho()">🏆 Publier le quiz avec ces règles</button>
+    <button type="button" onclick="closeQuizWho()" style="width:100%;margin-top:7px;background:var(--card2);border:1px solid var(--line);padding:10px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">Annuler</button>
   </div>
 </div>
 </body>

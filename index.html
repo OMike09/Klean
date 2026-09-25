@@ -2506,8 +2506,14 @@ function fmtCd(ends){
   const m=Math.floor(left/60), s=String(left%60).padStart(2,'0');
   return {left, txt: m+':'+s};
 }
+function paintQuizBlocked(a){
+  const qb=document.getElementById('quiz-box'); if(!qb||!a) return;
+  qb.innerHTML='<b style="font-size:15px">🏆 Quiz</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+(a.question||'')+'</p><p style="font-size:13px;font-weight:800;color:#c0392b;line-height:1.4">Ce quiz est réservé selon vos missions <b>terminées</b> (une mission en attente ne compte pas). Vous ne pouvez pas participer cette fois.</p>';
+  qb.classList.remove('hidden');
+}
 function paintQuiz(a){
   const qb=document.getElementById('quiz-box'); if(!qb||!a||a.type!=='quiz') return;
+  if(window._quizCan===false){ paintQuizBlocked(a); return; }
   window._annonceId = a.id || '';
   a.question = a.question || a.message || 'Quiz KLEAN';
   const counting=a.countdownEndsAt && !a.countdownRevealed;
@@ -2599,6 +2605,14 @@ function loadAffiche(){
     window._lastAfficheMeta=d;
     paintQuiz(a);
     paintAffReact(d);
+    if(a.type==='quiz'){
+      const w=quizWho();
+      fetch('/api/quiz/eligible?who='+encodeURIComponent(w.accountId),{cache:'no-store', headers:(function(){ const h={}; try{ const c=JSON.parse(localStorage.getItem('k2_client')||'null'); if(c&&c.token) h['X-Client-Token']=c.token; }catch(e){} return h; })()}).then(r=>r.json()).then(e=>{
+        window._quizCan=e.can;
+        window._quizCanWhy=e.can?'':(e.reason||'');
+        if(!e.can) paintQuizBlocked(a);
+      }).catch(()=>{});
+    }
   }).catch(()=>{});
 }
 function paintAffReact(d){
@@ -2731,7 +2745,11 @@ async function sendQuiz(i){
   markQuizOrange(i);
   const w=quizWho();
   try{
-    await fetch('/api/quiz/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({choice:i, nom:w.nom, accountId:w.accountId, deviceId:w.accountId})});
+    const hdr={'Content-Type':'application/json'};
+    try{ const c=JSON.parse(localStorage.getItem('k2_client')||'null'); if(c&&c.token) hdr['X-Client-Token']=c.token; }catch(e){}
+    const r=await fetch('/api/quiz/answer',{method:'POST',headers:hdr,body:JSON.stringify({choice:i, nom:w.nom, accountId:w.accountId, deviceId:w.accountId})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ toast(d.error||'Participation refusée'); window._quizCan=false; if(window._lastQuizA) paintQuizBlocked(window._lastQuizA); }
   }catch(e){}
 }
 </script>
