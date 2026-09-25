@@ -367,7 +367,7 @@
 </head>
 <body>
 <div id="splash"><img src="/klean-icon-512.png" alt="KLEAN"><b>KLEAN</b><span>Services à domicile · Côte d'Ivoire 🇨🇮</span><div class="sp-bar"><i></i></div></div>
-<script>setTimeout(function(){var s=document.getElementById('splash');if(!s)return;s.classList.add('off');setTimeout(function(){s.remove()},550)},3000);</script>
+<script>(function(){function kill(){var s=document.getElementById('splash');if(!s||s.dataset.gone)return;s.dataset.gone='1';s.classList.add('off');setTimeout(function(){s.remove()},400);}setTimeout(kill,3000);document.addEventListener('click',kill,{once:true,capture:true});document.addEventListener('touchstart',kill,{once:true,capture:true});})();</script>
 
 <!-- ═══════ TOP ═══════ -->
 <div class="topbar">
@@ -1120,6 +1120,9 @@ function setMode(m){
   }
 }
 function goProConnect(){ _wantProClaim = true; setMode('agent'); }
+function goCreatePro(){ try{ setMode('agent'); window.scrollTo({top:0,behavior:'smooth'}); }catch(e){ toast('⚠️ Écran pro indisponible'); } }
+function goCreateClient(){ accTab='register'; goClientAccount(); setTimeout(function(){ var t=document.getElementById('acc-forms-slot'); if(t) t.scrollIntoView({behavior:'smooth'}); },80); }
+function goBookings(){ try{ setMode('client'); var btn=document.querySelector('#nav-client .nav-btn[data-v="view-bookings"]'); showView('view-bookings', btn, 'client'); }catch(e){} }
 function goClientAccount(){
   mode = 'client';
   $('#nav-client').classList.add('show'); $('#nav-agent').classList.remove('show');
@@ -2136,7 +2139,7 @@ function _accHeroHTML(){
       <button class="btn-ghost" style="padding:8px 11px;margin-top:6px;font-size:12px;color:var(--danger)" onclick="clientLogout()">⏻ Se déconnecter</button>
     </span>` : `
     <span style="flex:none;display:flex;flex-direction:column;gap:6px">
-      <button class="btn-main" style="padding:9px 14px;font-size:12.5px" onclick="accTab='register';renderAccount();${scrollForm}">✨ Créer</button>
+      <button class="btn-main" style="padding:9px 14px;font-size:12.5px" onclick="goCreateClient()">✨ Créer</button>
       <button class="btn-line" style="padding:8px 11px;font-size:12px" onclick="accTab='login';renderAccount();${scrollForm}">🔑 Se connecter</button>
     </span>`}
   </div>
@@ -2152,7 +2155,7 @@ function _accHeroHTML(){
       <button class="btn-ghost" style="padding:8px 11px;margin-top:6px;font-size:12px;color:var(--danger)" onclick="agentLogout()">⏻ Se déconnecter</button>
     </span>` : `
     <span style="flex:none;display:flex;flex-direction:column;gap:6px">
-      <button class="btn-main" style="padding:9px 14px;font-size:12.5px" onclick="setMode('agent')">📝 Créer</button>
+      <button class="btn-main" style="padding:9px 14px;font-size:12.5px" onclick="goCreatePro()">📝 Créer</button>
       <button class="btn-line" style="padding:8px 11px;font-size:12px" onclick="goProConnect()">🔑 Se connecter</button>
     </span>`}
   </div>`;
