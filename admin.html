@@ -124,9 +124,19 @@ fetch('/api/health',{cache:'no-store'}).then(function(r){return r.json();}).then
     .kpis{grid-template-columns:1fr 1fr}
     .grid{grid-template-columns:1fr}
   }
+  #hq-splash{position:fixed;inset:0;z-index:99999;background:#0b0b0b;display:flex;align-items:center;justify-content:center;transition:opacity .45s ease}
+  #hq-splash img{width:min(82vw,420px);height:min(82vw,420px);object-fit:cover;border-radius:50%;box-shadow:0 12px 40px rgba(0,0,0,.45)}
+  #hq-splash.hide{opacity:0;pointer-events:none}
 </style>
 </head>
 <body>
+<div id="hq-splash"><img src="/hq-icon-512.png" alt=""></div>
+<script>
+(function(){
+  function go(){ var s=document.getElementById('hq-splash'); if(!s) return; s.classList.add('hide'); setTimeout(function(){ s.remove(); }, 500); }
+  setTimeout(go, 3000);
+})();
+</script>
 <header>
   <div class="h-in">
     <div class="logo"><span class="bubble">✨</span>KLEAN <span class="hq-tag">HQ · Côte d'Ivoire 🇨🇮</span></div>
