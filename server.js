@@ -288,6 +288,38 @@ async function pushNewMissionToAgents(m, svcNom) {
 
 function onlineAgents() { return [...sockets].filter(s => s.meta && s.meta.role === 'agent' && s.meta.online); }
 function onlineAgentIds() { return new Set(onlineAgents().map(s => s.meta && s.meta.agentId).filter(Boolean)); }
+function lastSeenFresh(iso) {
+  if (!iso) return false;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && (Date.now() - t) < 120000;
+}
+function presenceHits(cands, role) {
+  prunePresence();
+  const keys = new Set((cands || []).filter(Boolean).map(x => String(x)));
+  for (const [k, v] of presence) {
+    if (!v) continue;
+    if (keys.has(String(k))) return true;
+    if (v.id && keys.has(String(v.id))) return true;
+    if (v.tel && keys.has(String(v.tel))) return true;
+    if (role && v.role === role && v.nom && keys.has(String(v.nom))) return true;
+  }
+  return false;
+}
+function agentIsOnline(a) {
+  if (!a || a.blocked) return false;
+  if (onlineAgentIds().has(a.id)) return true;
+  if ([...sockets].some(s => s.meta && s.meta.agentId === a.id)) return true;
+  if (presenceHits([a.id, 'AG-' + a.id, a.tel, a.tel1, a.nom, 'AG-' + (a.tel || ''), 'AG-' + (a.nom || '')], 'agent')) return true;
+  if ((a.online || a.stayOnline) && lastSeenFresh(a.lastSeen)) return true;
+  return false;
+}
+function clientIsOnline(c) {
+  if (!c || c.blocked) return false;
+  if ([...sockets].some(s => s.meta && s.meta.clientId === c.id)) return true;
+  if (presenceHits([c.id, 'CL-' + c.id, c.tel, c.nom, 'CL-' + (c.tel || ''), 'CL-' + (c.nom || '')], 'client')) return true;
+  if (c.online && lastSeenFresh(c.lastSeen)) return true;
+  return false;
+}
 function subsOf(missionId) { return [...sockets].filter(s => s.meta && s.meta.missions && s.meta.missions.has(missionId)); }
 function adminSockets() { return [...sockets].filter(s => s.meta && s.meta.role === 'admin'); }
 /* Envoie un événement au(x) tableau(x) de bord HQ en temps réel */
@@ -355,7 +387,7 @@ function publicMissionForAgent(m) {
   return {
     id: m.id, service: m.service, pieces: m.pieces, depth: m.depth,
     quartier: m.quartier, time: m.time, date: m.date,
-    dist: m.dist, prixTotal: m.prixTotal,
+    dist: m.dist, prixTotal: m.prixTotal, quote: !!m.quote, quotedPrix: m.quotedPrix || 0,
     lat: m.lat, lng: m.lng,               // 📍 position GPS du client (pour l'agent)
     clientNom: m.client.nom,
     desc: m.desc || '',                   // 📝 description/matière précisée par le client
@@ -435,7 +467,7 @@ function missionTargets(m) {
   for (const s of all) {
     const ag = db.agents.find(a => a.id === (s.meta && s.meta.agentId));
     if (!ag) continue;
-    if (m.service && !agentHasService(ag, m.service)) continue;
+    if (m.service && m.service !== 'custom' && !agentHasService(ag, m.service)) continue;
     const r = rankPro(m, ag);
     s._dist = r.dist; s._ring = r.ring; s._mode = r.mode;
     scored.push(s);
@@ -622,7 +654,17 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/presence' && req.method === 'POST') {
     const b = await readBody(req);
     const who = String(b.who || b.accountId || ('anon-' + (req.socket.remoteAddress || ''))).slice(0, 80);
-    presence.set(who, { at: Date.now(), screen: String(b.screen || 'home').slice(0, 20), role: String(b.role || 'client').slice(0, 12), nom: String(b.nom || '').slice(0, 40) });
+    presence.set(who, { at: Date.now(), screen: String(b.screen || 'home').slice(0, 20), role: String(b.role || 'client').slice(0, 12), nom: String(b.nom || '').slice(0, 40), id: String(b.id || '').slice(0, 80), tel: String(b.tel || '').slice(0, 20) });
+    try {
+      if (b.role === 'agent' && b.id) {
+        const ag = db.agents.find(a => a.id === b.id);
+        if (ag) { ag.lastSeen = nowISO(); if (!ag.blocked) ag.online = true; }
+      }
+      if (b.role === 'client' && b.id) {
+        const cl = db.clients.find(x => x.id === b.id);
+        if (cl) { cl.lastSeen = nowISO(); if (!cl.blocked) cl.online = true; }
+      }
+    } catch (e) {}
     return sendJson(res, 200, { ok: true, live: liveHome() });
   }
 
@@ -647,14 +689,15 @@ const server = http.createServer(async (req, res) => {
     if (typeof m.lat !== 'number' || isNaN(m.lat)) m.lat = null;
     if (typeof m.lng !== 'number' || isNaN(m.lng)) m.lng = null;
     const onIds = onlineAgentIds();
-    const cards = (db.agents || []).filter(a => !a.blocked && (a.status || 'approved') === 'approved').map(a => publicMatchCard(a, m, onIds.has(a.id)));
+    const svc = String(url.searchParams.get('service') || (mLive && mLive.service) || '');
+    const cards = (db.agents || []).filter(a => !a.blocked && (a.status || 'approved') === 'approved').map(a => publicMatchCard(a, m, agentIsOnline(a)));
     cards.sort((a, b) => (Number(!b.online) - Number(!a.online)) || (a.ring - b.ring) || ((a.distKm || 99) - (b.distKm || 99)));
     const same = cards.filter(x => x.sameCity);
     const other = cards.filter(x => !x.sameCity);
     return sendJson(res, 200, {
       ok: true, ville, scope: m.matchScope || 'city',
       nOnline: onIds.size, nSame: same.length, nOther: other.length,
-      sameCity: same.slice(0, 40), otherCities: other.slice(0, 40), service: svc || ''
+      sameCity: same.slice(0, 40), otherCities: other.slice(0, 40), service: svc
     });
   }
 
@@ -683,6 +726,7 @@ const server = http.createServer(async (req, res) => {
       desc: (typeof b.desc === 'string' ? b.desc : '').slice(0, 280),
       photos: Array.isArray(b.photos) ? b.photos.filter(x => typeof x === 'string' && x.length < 600000).slice(0, 3) : [],
       budget: Math.max(0, parseInt(b.budget) || 0),
+      quote: !!(b.quote || b.service === 'custom'),
       lat: typeof b.lat === 'number' ? b.lat : null,
       lng: typeof b.lng === 'number' ? b.lng : null,
       ville: String(b.ville || b.cityNom || b.city || '').slice(0, 60),
@@ -1081,8 +1125,72 @@ const server = http.createServer(async (req, res) => {
     })));
   }
 
+  if (p === '/api/admin/quotes' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const list = (db.missions || []).filter(m => m.service === 'custom' || m.quote).slice(-80).reverse().map((m, i, arr) => ({
+      n: arr.length - i,
+      id: m.id, status: m.status, desc: m.desc || '', photos: m.photos || [],
+      budget: m.budget || 0, prixTotal: m.prixTotal || 0, quotedPrix: m.quotedPrix || 0,
+      ville: m.ville || '', quartier: m.quartier || '', adresse: m.adresse || '',
+      client: m.client && m.client.nom, tel: m.client && m.client.tel,
+      agentId: m.agentId || '',
+      agent: m.agentId ? ((db.agents.find(a => a.id === m.agentId) || {}).nom || '') : '',
+      at: m.createdAt
+    }));
+    const open = list.filter(x => ['pending', 'quoted', 'recherche'].includes(x.status)).length;
+    return sendJson(res, 200, { ok: true, n: list.length, open, list });
+  }
+  if (p === '/api/admin/quotes/assign' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, {});
+    const b = await readBody(req);
+    const m = db.missions.find(x => x.id === b.id);
+    const ag = db.agents.find(a => a.id === b.agentId && !a.blocked);
+    if (!m || !ag) return sendJson(res, 404, { error: 'Mission ou pro introuvable' });
+    m.agentId = ag.id; m.status = 'accepted'; m.assignedBy = act(req); m.assignedAt = nowISO();
+    if (b.prix) { m.prixTotal = Math.round(Number(b.prix) || m.prixTotal || 0); m.quote = false; }
+    saveDb();
+    emitToMission(m, { type: 'mission_update', status: 'accepted', missionId: m.id,
+      agent: { nom: ag.nom, note: agentStats(ag).rating, missions: agentStats(ag).missionsDone, tel: ag.tel1 || ag.tel, photo: ag.photo || '' },
+      dist: m.dist });
+    const sock = [...sockets].find(s => s.meta && s.meta.agentId === ag.id);
+    if (sock) wsSend(sock, { type: 'mission_request', mission: publicMissionForAgent(m) });
+    emitAdmin('mission', '👑 ' + act(req) + ' a attribué ' + m.id + ' à ' + ag.nom);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/admin/quotes/price' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, {});
+    const b = await readBody(req);
+    const m = db.missions.find(x => x.id === b.id);
+    if (!m) return sendJson(res, 404, { error: 'Mission introuvable' });
+    const prix = Math.max(500, Math.round(Number(b.prix) || 0));
+    m.quotedPrix = prix; m.status = 'quoted'; m.quoteBy = act(req);
+    saveDb();
+    emitToMission(m, { type: 'quote_offer', missionId: m.id, prix, par: act(req) });
+    emitAdmin('mission', '💰 Prix proposé ' + prix.toLocaleString('fr-FR') + ' F pour ' + m.id);
+    return sendJson(res, 200, { ok: true, prix });
+  }
+  if (p === '/api/missions/quote-reply' && req.method === 'POST') {
+    const b = await readBody(req);
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous' });
+    const m = db.missions.find(x => x.id === b.id && x.clientId === cli.id);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    if (b.accept) {
+      m.prixTotal = m.quotedPrix || m.prixTotal;
+      m.quote = false; m.status = 'pending';
+      saveDb();
+      broadcastNewMission(m);
+      emitToMission(m, { type: 'mission_update', status: 'pending', missionId: m.id, prixTotal: m.prixTotal });
+      return sendJson(res, 200, { ok: true, prixTotal: m.prixTotal });
+    }
+    m.status = 'annulee'; saveDb();
+    emitToMission(m, { type: 'mission_update', status: 'annulee', missionId: m.id });
+    return sendJson(res, 200, { ok: true, refused: true });
+  }
+
   if (p === '/api/admin/agents') {
-    return sendJson(res, 200, db.agents.map(a => ({ id: a.id, nom: a.nom, quartier: a.quartier, ville: a.ville || '', mail: a.mail || '', online: !!a, status: a.status || 'approved', blocked: !!a.blocked, ...agentStats(a) })));
+    const onA = onlineAgentIds();
+    return sendJson(res, 200, db.agents.map(a => ({ id: a.id, nom: a.nom, quartier: a.quartier, ville: a.ville || '', mail: a.mail || '', online: agentIsOnline(a), status: a.status || 'approved', blocked: !!a.blocked, ...agentStats(a) })));
   }
 
   if (p === '/api/admin/inscrits') {
@@ -1091,9 +1199,9 @@ const server = http.createServer(async (req, res) => {
       const ms = db.missions.filter(m => m.clientId === c.id);
       const depense = ms.filter(m => m.status === 'terminee').reduce((s, m) => s + (m.prixTotal || 0), 0);
       const paiements = ms.filter(m => m.status === 'terminee').map(m => ({ id: m.id, montant: m.prixTotal, at: m.finishedAt || m.createdAt, service: m.service }));
-      return { id: c.id, nom: c.nom, tel: c.tel, quartier: c.quartier || '', ville: c.ville || '', createdAt: c.createdAt, photo: !!c.photo, missions: ms.length, depense, blocked: !!c.blocked, createdBy: c.createdBy || '', createdById: c.createdById || '', online: !!c.online, paiements };
+      return { id: c.id, nom: c.nom, tel: c.tel, quartier: c.quartier || '', ville: c.ville || '', createdAt: c.createdAt, photo: !!c.photo, missions: ms.length, depense, blocked: !!c.blocked, createdBy: c.createdBy || '', createdById: c.createdById || '', online: clientIsOnline(c), paiements };
     });
-    const agents = db.agents.filter(mine).map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', quartier: a.quartier || '', ville: a.ville || '', villeService: a.villeService || a.ville || '', mail: a.mail || '', status: a.status || 'approved', online: !!a.online, niveau: a.niveau || '', services: a.services || [], kind: a.kind || 'pro', createdAt: a.createdAt, photo: !!a.photo, blocked: !!a.blocked, createdBy: a.createdBy || '', createdById: a.createdById || '', ...agentStats(a) }));
+    const agents = db.agents.filter(mine).map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', quartier: a.quartier || '', ville: a.ville || '', villeService: a.villeService || a.ville || '', mail: a.mail || '', status: a.status || 'approved', online: agentIsOnline(a), niveau: a.niveau || '', services: a.services || [], kind: a.kind || 'pro', createdAt: a.createdAt, photo: !!a.photo, blocked: !!a.blocked, createdBy: a.createdBy || '', createdById: a.createdById || '', ...agentStats(a) }));
     return sendJson(res, 200, { clients: clients.slice().reverse(), agents: agents.slice().reverse(), canModerate: isPdg(req) });
   }
 
@@ -1149,7 +1257,7 @@ const server = http.createServer(async (req, res) => {
     const onIds = onlineAgentIds();
     const list = (db.agents || []).filter(a => !a.blocked && (a.status || 'approved') === 'approved' && (!sid || agentHasService(a, sid))).map(a => ({
       id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', ville: a.villeIci || a.ville || '', quartier: a.quartier || '',
-      online: onIds.has(a.id) || !!a.online, services: a.services || []
+      online: agentIsOnline(a), services: a.services || []
     }));
     return sendJson(res, 200, { ok: true, id: sid, n: list.length, pros: list });
   }
@@ -1504,7 +1612,7 @@ const server = http.createServer(async (req, res) => {
     const add = (title, panel, items) => { if (items && items.length) sections.push({ title, panel, items }); };
     add('🧑‍💼 Pros', 'people', take((db.agents || []).filter(a => hit(a.nom, a.tel, a.tel1, a.mail, a.ville, a.quartier, a.id, a.services, a.status)).map(a => ({ t: a.nom, s: [a.tel || a.tel1, a.ville, a.status].filter(Boolean).join(' · ') })), 40));
     add('👤 Clients', 'people', take((db.clients || []).filter(c => hit(c.nom, c.tel, c.mail, c.ville, c.quartier, c.id)).map(c => ({ t: c.nom, s: [c.tel, c.ville].filter(Boolean).join(' · ') })), 40));
-    add('🟢 Clients en ligne', 'panel-online-cli', take((db.clients || []).filter(c => c.online && hit(c.nom, c.tel)).map(c => ({ t: c.nom, s: 'en ligne' })), 20));
+    add('🟢 Clients en ligne', 'panel-online-cli', take((db.clients || []).filter(c => clientIsOnline(c) && hit(c.nom, c.tel)).map(c => ({ t: c.nom, s: 'en ligne' })), 20));
     add('📋 Missions', 'panel-ca7', take((db.missions || []).filter(m => hit(m.id, m.service, m.quartier, m.adresse, m.status, m.paiement, (m.client || {}).nom, (m.client || {}).tel, m.agentId)).map(m => ({ t: m.id + ' · ' + (m.service || ''), s: [m.status, (m.client || {}).nom, m.quartier].filter(Boolean).join(' · ') })), 30));
     add('👑 Gestionnaires', 'panel-team', take((db.admins || []).filter(a => hit(a.nom, a.ident, a.id)).map(a => ({ t: a.nom, s: a.ident || '' })), 20));
     add('🧭 Agents de terrain', 'panel-team', take((db.fieldAgents || []).filter(f => hit(f.nom, f.ident, f.tel, f.id)).map(f => ({ t: f.nom, s: f.ident || f.tel || '' })), 20));
@@ -2455,7 +2563,7 @@ const server = http.createServer(async (req, res) => {
        (!String(a.ville || '').trim() && a.quartier && qList.includes(String(a.quartier).trim().toLowerCase())))
     );
     return sendJson(res, 200, {
-      agentsEnLigne: actifs.filter(a => a.online).length,
+      agentsEnLigne: actifs.filter(a => agentIsOnline(a)).length,
       agentsTotal: actifs.length,
       missionsTotal: db.missions.length,
       missionsTerminees: db.missions.filter(m => m.status === 'terminee').length
@@ -2511,7 +2619,7 @@ server.on('upgrade', (req, sock) => {
   const key = req.headers['sec-websocket-key'];
   const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
   sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n');
-  sock.meta = { missions: new Set(), ip: clientIp(req), hqAuthed: (req.headers.cookie || '').includes('klean_hq=' + adminToken()) };
+  sock.meta = { missions: new Set(), ip: clientIp(req), hqAuthed: !!hqIdentity(req) };
   sockets.add(sock);
   sock.on('data', handleWsData(sock));
   const bye = () => {

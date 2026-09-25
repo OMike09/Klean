@@ -2699,11 +2699,14 @@ setInterval(loadAd, 20000);
 function pingPresence(){
   try{
     const w=quizWho();
-    fetch('/api/presence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({who:w.accountId, nom:w.nom, role:(mode==='agent'?'agent':'client'), screen:'home'})}).catch(()=>{});
+    const cid=(typeof client!=='undefined' && client && client.id)?client.id:'';
+    const aid=(typeof agent!=='undefined' && agent && (agent.id|| (agent.apply&&agent.apply.agentId))) || (typeof localStorage!=='undefined' && localStorage.getItem('k2_agentId')) || '';
+    const tel=(mode==='agent'?(agent&& (agent.tel||agent.tel1)):(client&&client.tel))||'';
+    fetch('/api/presence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({who:w.accountId, nom:w.nom, role:(mode==='agent'?'agent':'client'), screen:'home', id: (mode==='agent'?aid:cid), tel})}).catch(()=>{});
   }catch(e){}
 }
 pingPresence();
-setInterval(pingPresence, 20000);
+setInterval(pingPresence, 8000);
 function bounceHomeBubble(){
   const slot=document.getElementById('home-win-slot');
   if(!slot) return;
