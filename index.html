@@ -2588,7 +2588,7 @@ function loadAffiche(){
     const a=d.annonce;
     const bar=document.getElementById('aff-bar'), tr=document.getElementById('aff-track');
     if(bar&&tr&&a.message){
-      const ic = a.type==='alerte'?'⚠️ ': a.type==='quiz'?'🏆 ': a.type==='maj'?'✨ ':'ℹ️ ';
+      const ic = a.type==='alerte'?'🚨 ': a.type==='quiz'?'🏆 ': a.type==='maj'?'✨ ':'ℹ️ ';
       const tx = ic + a.message + '     ·     ';
       tr.textContent = tx+tx+tx+tx;
       bar.classList.remove('hidden');
@@ -2619,6 +2619,65 @@ async function loadAd(){
 }
 loadAd();
 setInterval(loadAd, 20000);
+function pingPresence(){
+  try{
+    const w=quizWho();
+    fetch('/api/presence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({who:w.accountId, nom:w.nom, role:(mode==='agent'?'agent':'client'), screen:'home'})}).catch(()=>{});
+  }catch(e){}
+}
+pingPresence();
+setInterval(pingPresence, 20000);
+function bounceHomeBubble(){
+  let b=document.getElementById('home-win-bubble');
+  if(!b){
+    b=document.createElement('button'); b.id='home-win-bubble'; b.type='button';
+    b.style.cssText='position:fixed;right:14px;bottom:92px;z-index:95;width:64px;height:64px;border-radius:50%;border:none;background:linear-gradient(135deg,#ff8a00,#e85d04);color:#fff;font-weight:900;font-size:22px;box-shadow:0 8px 24px rgba(232,93,4,.5);cursor:pointer;animation:kleanBounce 0.7s ease-in-out infinite';
+    b.textContent='🏆';
+    b.onclick=openHomeWinChat;
+    document.body.appendChild(b);
+    if(!document.getElementById('klean-bounce-css')){
+      const s=document.createElement('style'); s.id='klean-bounce-css';
+      s.textContent='@keyframes kleanBounce{0%,100%{transform:translateY(0) scale(1)}40%{transform:translateY(-14px) scale(1.08)}70%{transform:translateY(-4px) scale(.96)}}';
+      document.head.appendChild(s);
+    }
+  }
+  b.style.display='block';
+}
+function hideHomeBubble(){ const b=document.getElementById('home-win-bubble'); if(b) b.style.display='none'; }
+async function pollWinBubble(){
+  try{
+    const w=quizWho();
+    const d=await fetch('/api/quiz/chat?who='+encodeURIComponent(w.accountId),{cache:'no-store'}).then(r=>r.json());
+    if(d && d.winner && d.messages && d.messages.length) bounceHomeBubble();
+    else hideHomeBubble();
+    if(window._homeWinOpen) paintHomeWin(d);
+  }catch(e){}
+}
+setInterval(pollWinBubble, 4000);
+pollWinBubble();
+function openHomeWinChat(){
+  let m=document.getElementById('home-win-modal');
+  if(!m){
+    m=document.createElement('div'); m.id='home-win-modal';
+    m.style.cssText='position:fixed;inset:0;z-index:96;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;padding:12px';
+    m.innerHTML='<div style="background:#fff;border-radius:18px 18px 8px 8px;width:100%;max-width:480px;max-height:70vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="flex:1">🏆 Message du PDG</b><button type="button" onclick="closeHomeWin()" style="border:1px solid #ddd;background:#f3f3f3;border-radius:9px;padding:6px 10px;font-weight:800">Fermer</button></div><div id="home-win-msgs" style="flex:1;min-height:140px;overflow:auto;margin-bottom:8px"></div><div style="display:flex;gap:6px"><input id="home-win-in" placeholder="Répondre au PDG…" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid #ddd;font:inherit" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendHomeWin();}"><button type="button" onclick="sendHomeWin()" style="background:#E85D04;color:#fff;border:none;border-radius:10px;padding:10px 12px;font-weight:900">Envoyer</button></div></div>';
+    m.onclick=function(e){ if(e.target===m) closeHomeWin(); };
+    document.body.appendChild(m);
+  }
+  m.style.display='flex'; window._homeWinOpen=true; pollWinBubble();
+}
+function closeHomeWin(){ const m=document.getElementById('home-win-modal'); if(m) m.style.display='none'; window._homeWinOpen=false; }
+function paintHomeWin(d){
+  const box=document.getElementById('home-win-msgs'); if(!box||!d) return;
+  box.innerHTML=(d.messages||[]).map(m=>'<div style="margin:6px 0;text-align:'+(m.from==='pdg'?'left':'right')+'"><span style="display:inline-block;max-width:86%;background:'+(m.from==='pdg'?'#fff4e5':'#e7f7f1')+';border-radius:11px;padding:7px 10px;font-size:13px">'+(m.text||'')+'<small style="display:block;opacity:.7">'+(m.nom||'')+'</small></span></div>').join('');
+  box.scrollTop=box.scrollHeight;
+}
+async function sendHomeWin(){
+  const inp=document.getElementById('home-win-in'); const v=(inp&&inp.value||'').trim(); if(!v) return;
+  const w=quizWho();
+  await fetch('/api/quiz/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v, nom:w.nom, who:w.accountId})});
+  inp.value=''; pollWinBubble();
+}
 function markQuizOrange(i){
   const qb=document.getElementById('quiz-box'); if(!qb) return;
   qb.querySelectorAll('button[data-qi]').forEach(btn=>{

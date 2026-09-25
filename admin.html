@@ -189,10 +189,11 @@
         <select id="ann-type" onchange="document.getElementById('ann-quiz').style.display=this.value==='quiz'?'block':'none'" style="flex:1;min-width:130px;padding:10px 11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">
           <option value="maj">✨ Mise à jour</option>
           <option value="info">ℹ️ Information</option>
-          <option value="alerte">⚠️ Importante</option>
+          <option value="alerte">🚨 Urgent</option>
           <option value="quiz">🏆 Quiz</option>
         </select>
         <button class="btn-main" style="flex:none" onclick="publierAnnonce()">📢 Publier</button>
+        <span id="ann-live" style="font-size:12px;font-weight:800;color:var(--p);align-self:center">🟢 Accueil : —</span>
         <button style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:11px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="retirerAnnonce()">✕ Retirer</button>
       </div>
       <div id="ann-quiz" style="display:none;margin-top:8px;background:var(--card2);border-radius:12px;padding:10px">
@@ -209,6 +210,7 @@
         </select>
         <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
           <span id="qz-stats" style="font-size:12px;font-weight:800;color:var(--amber)">Quiz : —</span>
+          <span id="qz-live" style="font-size:12px;font-weight:800;color:var(--p)">🟢 Accueil : —</span>
           <label style="font-size:11px;font-weight:800">Gagnants <input id="qz-nwin" type="number" min="1" max="50" value="1" title="Nombre de gagnants ce tour" style="width:52px;padding:7px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></label>
           <label style="font-size:11px;font-weight:800">Temps pour répondre (sec) <input id="qz-ans-sec" type="number" min="0" max="7200" value="60" title="0 = pas de limite. Empêche de tricher en cherchant trop longtemps." style="width:64px;padding:7px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></label>
           <label style="font-size:11px;font-weight:800">Décompte tirage (sec) <input id="qz-sec" type="number" min="5" max="3600" value="30" title="Durée du décompte, choisie par le PDG" style="width:64px;padding:7px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></label>
@@ -555,6 +557,7 @@ async function loadAll(){
     if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
     loadTeam(); loadAnnonce(); loadQuizHQ(); if(!(document.activeElement && document.activeElement.id==='hqchat-in')) loadHqChat(); loadFields(); loadVillesHQ(); loadCatalogHQ();
     if(!window._qzPoll){ window._qzPoll=setInterval(loadQuizHQ, 1000); }
+    if(!window._livePoll){ window._livePoll=setInterval(paintAnnLive, 4000); paintAnnLive(); }
   }catch(e){
     console.warn('HQ : une partie des données n’a pas chargé', e);
   }
@@ -858,12 +861,21 @@ async function loadAnnonce(){
     const el = document.getElementById('ann-cur');
     if(!el) return;
     el.innerHTML = d && d.annonce
-      ? ('Affiche en cours : <b>'+( {maj:'✨ Mise à jour', info:'ℹ️ Information', alerte:'⚠️ Importante', quiz:'🏆 Quiz'} [d.annonce.type] || 'Info')+'</b> — « '+d.annonce.message+' » <br><span style="color:#8aa79a">publiée le '+(d.annonce.at||'').slice(0,10)+' par '+(d.annonce.par||'—')+' — version serveur '+(d.version||'')+'</span>')
+      ? ('Affiche en cours : <b>'+( {maj:'✨ Mise à jour', info:'ℹ️ Information', alerte:'🚨 Urgent', quiz:'🏆 Quiz'} [d.annonce.type] || 'Info')+'</b> — « '+d.annonce.message+' » <br><span style="color:#8aa79a">publiée le '+(d.annonce.at||'').slice(0,10)+' par '+(d.annonce.par||'—')+' — version serveur '+(d.version||'')+'</span>')
       : ('Aucune affiche en cours. <span style="color:#8aa79a">Version serveur : '+(d && d.version || '…')+'</span>');
     if(d && d.annonce && d.annonce.type==='quiz'){
       const qz=document.getElementById('ann-quiz'); if(qz) qz.style.display='block';
       const sel=document.getElementById('ann-type'); if(sel) sel.value='quiz';
     }
+  }catch(e){}
+  paintAnnLive();
+}
+async function paintAnnLive(){
+  try{
+    const L=await fetch('/api/admin/live',{cache:'no-store'}).then(r=>r.json());
+    const txt='🟢 Accueil : '+(L.home||0)+' · '+(L.clients||0)+' client(s) · '+(L.agents||0)+' pro(s)';
+    const a=document.getElementById('ann-live'); if(a) a.textContent=txt;
+    const q=document.getElementById('qz-live'); if(q) q.textContent=txt;
   }catch(e){}
 }
 async function publierAnnonce(){
@@ -882,7 +894,9 @@ async function publierAnnonce(){
   const d = await r.json().catch(()=>({}));
   if(!r.ok) return alert('⚠️ '+(d.error||'Publication impossible'));
   document.getElementById('ann-msg').value='';
-  alert('📣 Publié ! Tous les clients et tous les professionnels verront l\'affiche en moins d\'une minute (ou à leur prochaine ouverture).');
+  let liveTxt='';
+  try{ const L=await fetch('/api/admin/live',{cache:'no-store'}).then(r=>r.json()); liveTxt='\n🟢 Accueil : '+(L.home||0)+' personne(s).'; }catch(e){}
+  alert('📣 Publié !'+liveTxt);
   loadAnnonce(); loadQuizHQ();
 }
 let _qzTick=null;
@@ -891,6 +905,8 @@ async function loadQuizHQ(){
     const d = await fetch('/api/admin/quiz',{cache:'no-store'}).then(r=>r.json());
     const s=document.getElementById('qz-stats');
     if(s) s.textContent = d.active ? ('Clics : '+(d.nTotal||0)+' compte(s) · '+(d.nOk||0)+' bonne(s)'+(d.closed?' · réponses fermées':'')) : 'Quiz : —';
+    const lv=document.getElementById('qz-live');
+    if(lv){ const L=d.live||{}; lv.textContent = '🟢 Accueil : '+(L.home||0)+' · '+((L.clients||0)+' client(s)')+' · '+(L.agents||0)+' pro(s)'; }
     const w=document.getElementById('qz-winners');
     const rounds=(d.rounds||[]).map((r,i)=>'Tour '+(i+1)+' ('+r.n+') : '+(r.winners||[]).join(', ')).join(' · ');
     if(w) w.textContent = (d.countdownRevealed && d.winners&&d.winners.length) ? ('🏆 '+(d.winners.length===1?'Gagnant : ':'Encore en lice : ')+d.winners.join(', ')+(rounds?' | '+rounds:'')) : '';
@@ -919,11 +935,47 @@ async function openQuizClicks(){
   if(st) st.textContent = (d.active?(d.question||'Quiz'):'Aucun quiz')+' — '+list.length+' personne(s). '+letters.map(L=> L+': '+(by[L]||0)).join(' · ');
   const box=document.getElementById('qz-modal-list');
   if(box){
+    box.style.maxHeight='48vh'; box.style.overflow='auto';
     box.innerHTML = list.length
-      ? list.map((x,i)=>'<div style="display:flex;gap:8px;align-items:center;padding:9px 8px;border-bottom:1px solid var(--line)"><span style="width:22px;color:var(--muted);font-size:11px">'+(i+1)+'</span><b style="flex:1">'+(x.nom||'Anonyme')+'</b><span style="background:rgba(255,138,0,.2);color:#b36b00;font-weight:900;padding:4px 10px;border-radius:99px">'+x.choice+'</span></div>').join('')
-      : '<div class="empty">Personne n’a encore cliqué.</div>';
+      ? list.map((x,i)=>'<div onclick="clickQuizPerson(\''+String(x.nom||'').replace(/'/g,'')+'\',\''+String(x.who||'').replace(/'/g,'')+'\')" style="display:flex;gap:8px;align-items:center;padding:10px 8px;border-bottom:1px solid var(--line);cursor:pointer"><span style="width:22px;color:var(--muted);font-size:11px">'+(i+1)+'</span><b style="flex:1">'+(x.nom||'Anonyme')+'</b>'+(x.ok?' <span style="color:var(--p);font-size:11px">✓</span>':'')+'<span style="background:rgba(255,138,0,.2);color:#b36b00;font-weight:900;padding:4px 10px;border-radius:99px">'+x.choice+'</span></div>').join('')
+      : '<div class="empty">Personne n’a encore cliqué. Scrollez ici dès qu’ils répondent.</div>';
   }
 }
+async function clickQuizPerson(nom, who){
+  if(!confirm('👑 Désigner « '+nom+' » comme gagnant et lui écrire ?')) return;
+  const r=await fetch('/api/admin/quiz/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom, who})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert(d.error||'Impossible');
+  closeQuizClicks();
+  openWinChat(nom);
+}
+function openWinChat(nom){
+  let m=document.getElementById('win-chat-modal');
+  if(!m){
+    m=document.createElement('div'); m.id='win-chat-modal';
+    m.style.cssText='position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:420px;width:100%;max-height:86vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><b style="flex:1" id="win-chat-title">🏆 Gagnant</b><button type="button" onclick="closeWinChat()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div><div id="win-chat-msgs" style="flex:1;min-height:180px;max-height:46vh;overflow:auto;margin-bottom:8px"></div><div style="display:flex;gap:6px"><input id="win-chat-in" maxlength="400" placeholder="Écrire au gagnant…" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendWinChat();}"><button type="button" class="btn-main" style="flex:none" onclick="sendWinChat()">Envoyer</button></div></div>';
+    document.body.appendChild(m);
+  }
+  m.style.display='flex';
+  const t=document.getElementById('win-chat-title'); if(t) t.textContent='🏆 '+nom;
+  loadWinChat();
+}
+function closeWinChat(){ const m=document.getElementById('win-chat-modal'); if(m) m.style.display='none'; }
+async function loadWinChat(){
+  try{
+    const d=await fetch('/api/admin/quiz/chat',{cache:'no-store'}).then(r=>r.json());
+    const box=document.getElementById('win-chat-msgs'); if(!box) return;
+    box.innerHTML=(d.messages||[]).map(m=>'<div style="margin:6px 0;text-align:'+(m.from==='pdg'?'right':'left')+'"><span style="display:inline-block;max-width:86%;background:'+(m.from==='pdg'?'rgba(232,93,4,.18)':'var(--card2)')+';border-radius:11px;padding:7px 10px;font-size:13px">'+(m.text||'')+'<small style="display:block;opacity:.7">'+(m.nom||'')+'</small></span></div>').join('')||'<div class="empty">Écrivez au gagnant.</div>';
+    box.scrollTop=box.scrollHeight;
+  }catch(e){}
+}
+async function sendWinChat(){
+  const inp=document.getElementById('win-chat-in'); const v=(inp&&inp.value||'').trim(); if(!v) return;
+  await fetch('/api/admin/quiz/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v})});
+  inp.value=''; loadWinChat();
+}
+setInterval(()=>{ if(document.getElementById('win-chat-modal') && document.getElementById('win-chat-modal').style.display==='flex') loadWinChat(); }, 4000);
 function closeQuizClicks(){ const m=document.getElementById('qz-modal'); if(m) m.style.display='none'; }
 function tickQuizCd(ends, revealed){
   const el=document.getElementById('qz-cd'); if(!el) return;
