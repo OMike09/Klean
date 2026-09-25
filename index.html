@@ -538,7 +538,7 @@
   </div>
 
   <div class="bookbar">
-    <div class="prow"><small id="bb-label">Total estimé</small><b id="bb-price">— FCFA</b></div>
+    <div class="prow"><small id="bb-label">Total estimé</small><b id="bb-price" role="button" onclick="if(c.service==='custom') nextStep()" style="cursor:pointer">— FCFA</b></div>
     <div class="btns">
       <button class="btn-ghost" onclick="prevStep()">← Retour</button>
       <button class="btn-main" id="btn-next" onclick="nextStep()">Continuer →</button>
@@ -680,6 +680,7 @@
       <div class="inp-row"><label>📍 Quartier principal</label><select class="inp" id="prof-quartier"></select></div>
       <div class="inp-row"><label>📞 Téléphone</label><div class="phone-wrap"><span class="prefix">+225</span><input type="tel" id="prof-tel" placeholder="07 00 00 00 00"></div></div>
       <button class="btn-main" style="width:100%;flex:none" onclick="saveProfile()">💾 Enregistrer</button>
+      <button class="btn-line" style="width:100%;margin-top:10px" onclick="openKleanService()">📞 Contactez Klean-Service</button>
     </div>
     <p class="note">🛡️ Chaque professionnel KLEAN est vérifié (pièce d'identité + références) par le gestionnaire avant activation, puis noté après chaque mission.</p>
   </div>
@@ -1167,16 +1168,19 @@ const DEPTH_LABELS = {
 function depthLabel(svc, d){ return (svc.cat==='clean'?DEPTH_LABELS.clean:DEPTH_LABELS.other)[d]; }
 
 function calcPrice(obj){
-  const svc = SERVICES.find(s=>s.id===obj.service);
+  if(!SERVICES.find(s=>s.id==='custom') && typeof CSVC!=='undefined') SERVICES.push(CSVC);
+  const svc = SERVICES.find(s=>s.id===obj.service) || {id:'', base:0, cat:'', opts:[]};
+  if(obj.service==='custom' || svc.cat==='custom') return {svc, baseSvc:0, extrasTotal:0, remise:0, total:0};
   const pieceMult = usePieces(svc) ? PIECE_MULT[obj.pieces] : 1;
-  const baseSvc = svc.base * pieceMult * DEPTH[obj.depth];
+  const dep = DEPTH[obj.depth] || 1;
+  const baseSvc = (svc.base||0) * pieceMult * dep;
   const list = extraListOf(svc);
   let extrasTotal = 0;
-  list.forEach(e=>{ if(obj.extras[e.id]) extrasTotal+=e.prix; });
+  list.forEach(e=>{ if(obj.extras && obj.extras[e.id]) extrasTotal+=e.prix; });
   let sub = baseSvc + extrasTotal;
   let remise = 0;
   if(obj.promo && PROMOS[obj.promo]) remise = sub * PROMOS[obj.promo];
-  return {svc, baseSvc, extrasTotal, remise, total: sub - remise};
+  return {svc, baseSvc, extrasTotal, remise, total: Math.max(0, sub - remise)};
 }
 
 /* ══════════ ASSISTANT (CLIENT) ══════════ */
@@ -1186,8 +1190,8 @@ function goStep(n){
   step = n;
   for(let i=1;i<=4;i++){ $('#step'+i).classList.toggle('on',i===n); $('#dot'+i).classList.toggle('done',i<=n); }
   $('#step-title').innerHTML = `Étape ${n}/4<b>${STEP_TITLES[n-1]}</b>`;
-  $('#btn-next').textContent = n===4 ? '🛵 Trouver un professionnel' : 'Continuer →';
-  $('#bb-label').textContent = n===4 ? 'Total (payé après la mission)' : 'Total estimé';
+  $('#btn-next').textContent = n===4 ? (c.service==='custom' ? '💬 Envoyer la demande (à convenir)' : '🛵 Trouver un professionnel') : 'Continuer →';
+  $('#bb-label').textContent = n===4 ? (c.service==='custom' ? 'Prix à convenir' : 'Total (payé après la mission)') : 'Total estimé';
   if(n===4 && client){ $('#inp-nom').value = client.nom; $('#inp-tel').value = client.tel; }
   updatePriceBar();
   window.scrollTo({top:0,behavior:'smooth'});
@@ -2178,6 +2182,7 @@ function renderAccount(){
     <button class="btn-line" onclick="goBookings()">📋 <span>Mes réservations</span></button>
     <button class="btn-line" onclick="startBooking()">🧹 <span>Nouvelle réservation</span></button>
     <button class="btn-line" onclick="clientChangePw()">🔑 <span>Changer mon mot de passe</span></button>
+    <button class="btn-line" onclick="openKleanService()">📞 <span>Contactez Klean-Service</span></button>
     <button class="btn-line" style="color:var(--danger)" onclick="clientLogout()">⏻ <span>Se déconnecter</span></button>`;
     return;
   }
