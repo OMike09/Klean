@@ -115,7 +115,8 @@
 <header>
   <div class="h-in">
     <div class="logo"><span class="bubble">✨</span>KLEAN <span class="hq-tag">HQ · Côte d'Ivoire 🇨🇮</span></div>
-    <button onclick="changePwd()" title="Changer le mot de passe" style="margin-left:auto;background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">🔑 Mot de passe</button>
+    <button onclick="ouvrirFenetreComptes('client')" title="Créer un compte client ou professionnel avec ses codes d'accès" style="margin-left:auto;background:linear-gradient(135deg,var(--p),var(--pd));border:none;color:#fff;font-size:11.5px;font-weight:900;padding:8px 13px;border-radius:99px;cursor:pointer;font-family:inherit">🏗️ Créer un compte</button>
+    <button onclick="changePwd()" title="Changer le mot de passe" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">🔑 Mot de passe</button>
     <button onclick="logout()" title="Se déconnecter" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">⏻ Quitter</button>
     <div class="live" id="live-pill"><span class="pt"></span><span id="live-txt">EN DIRECT</span></div>
   </div>
@@ -345,6 +346,14 @@
       <button class="btn-main" onclick="savePayDest()">Enregistrer</button>
     </div>
   </div>
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-demande-comptes">
+    <h3>🟠 Demandes des gestionnaires <span class="cnt" id="dem-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.45">Un gestionnaire ne peut pas bloquer ni supprimer lui-même : il vous demande. Touchez <b>✅ Appliquer</b> et l'action se fait tout de suite (le motif est transmis à la personne).</p>
+      <div id="dem-list"><div class="empty">Aucune demande en attente</div></div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px;display:none" id="panel-trash">
     <h3>♻️ Récupération de comptes supprimés</h3>
     <div class="body" id="trash-list" style="padding:12px 14px"><div class="empty">Vide</div></div>
@@ -358,11 +367,23 @@
       <button onclick="saveComm()" style="background:var(--p);border:none;color:#04130c;font-weight:900;padding:9px 16px;border-radius:10px;cursor:pointer;font-family:inherit">Enregistrer</button>
       <small style="color:var(--muted);font-size:11.5px">applied aux nouvelles missions</small>
     </div>
-    <div style="padding:0 16px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <label style="font-size:12.5px;color:var(--muted);font-weight:700">📡 Rayon de recherche des pros :</label>
-      <input id="cfg-reach" type="number" min="1" max="80" step="1" style="width:76px;background:var(--card2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:9px 11px;font-size:14px;font-family:inherit;text-align:center;font-weight:800">
-      <span style="font-weight:900">km</span>
-      <small style="color:var(--muted);font-size:11.5px">GPS : seuls les pros dans ce rayon voient la demande en priorité</small>
+    <div style="padding:12px 16px 16px;margin:0 16px 14px;background:rgba(255,138,0,.1);border:1.5px solid rgba(255,138,0,.4);border-radius:14px">
+      <b style="display:block;font-size:14px;margin-bottom:6px">📡 Rayon GPS — toute la Côte d’Ivoire</b>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.4">Écrivez le rayon en km, puis touchez <b>Activer</b>. Le moteur croise clients et pros sur tout le territoire (GPS si disponible, sinon appel).</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12.5px;font-weight:800">Rayon</label>
+        <input id="cfg-reach" type="number" min="1" max="800" step="1" placeholder="ex : 600" style="width:90px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);border-radius:10px;padding:10px 11px;font-size:16px;font-family:inherit;text-align:center;font-weight:900">
+        <span style="font-weight:900">km</span>
+        <button type="button" id="btn-gps-nation" onclick="activerGpsNation(true)" style="flex:1;min-width:160px;background:linear-gradient(135deg,#E85D04,#C2410C);border:none;color:#fff;font-weight:900;padding:12px 14px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:14px">🟢 Activer tout le territoire</button>
+        <button type="button" onclick="activerGpsNation(false)" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:12px 12px;border-radius:12px;cursor:pointer;font-family:inherit">Couper</button>
+      </div>
+      <small id="gps-nation-state" style="display:block;margin-top:8px;font-weight:800;color:var(--amber)">État : —</small>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button type="button" onclick="document.getElementById('cfg-reach').value=15" style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:11px">15 km</button>
+        <button type="button" onclick="document.getElementById('cfg-reach').value=50" style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:11px">50 km</button>
+        <button type="button" onclick="document.getElementById('cfg-reach').value=150" style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:11px">150 km</button>
+        <button type="button" onclick="document.getElementById('cfg-reach').value=600" style="background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:11px">600 km (tout CI)</button>
+      </div>
     </div>
     <div style="padding:0 16px 14px">
       <button type="button" onclick="openBulleMsg()" style="width:100%;background:rgba(21,201,138,.14);border:1.5px solid rgba(21,201,138,.4);color:var(--p);font-weight:900;padding:11px 12px;border-radius:12px;cursor:pointer;font-family:inherit">📞 Activer / désactiver Contactez Klean-Service</button>
@@ -388,52 +409,15 @@
       <button onclick="PEOPLE_FILTER='on';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--p);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">🟢 En ligne</button>
       <button onclick="PEOPLE_FILTER='off';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">⚪ Hors ligne</button>
     </div>
-    <div style="padding:10px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
-      <button type="button" style="position:relative;z-index:6;pointer-events:auto;background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="event.stopPropagation();toggleAcctForm('client')">➕ Créer un compte client</button>
-      <button type="button" style="position:relative;z-index:6;pointer-events:auto;background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="event.stopPropagation();toggleAcctForm('pro')">➕ Créer un compte pro</button>
-    </div>
-    <div id="acct-client" style="display:none;padding:10px 16px 0">
-      <div style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px 12px">
-        <b style="font-size:12px">🏗️ Compte client guidé</b><br>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-          <input id="acc-nom" placeholder="👤 Nom complet *" maxlength="60" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <input id="acc-tel" placeholder="📞 Téléphone *" maxlength="16" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+    <div style="padding:10px 16px 14px">
+      <div style="background:rgba(232,93,4,.10);border:1.5px solid rgba(232,93,4,.35);border-radius:14px;padding:12px 13px">
+        <b style="display:block;font-size:13.5px;margin-bottom:4px">🏗️ Créer un compte — client ou professionnel</b>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.4">Une fenêtre s’ouvre : vous remplissez la fiche, l’appli fabrique le <b>code d’accès</b> et le mot de passe, et vous les remettez à la personne (📋 copier ou 📲 WhatsApp).</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn-main" style="flex:1;min-width:150px" onclick="ouvrirFenetreComptes('client')">👤 Nouveau compte client</button>
+          <button type="button" class="btn-main" style="flex:1;min-width:150px;background:linear-gradient(135deg,#4aa3ff,#1f6fd0)" onclick="ouvrirFenetreComptes('pro')">🧑‍💼 Nouveau compte pro</button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-          <input id="acc-quartier" placeholder="📍 Quartier" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <input id="acc-ville" placeholder="🏙️ Ville (libre — ex : Kounahiri)" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        </div>
-        <input id="acc-mail" placeholder="✉️ E-mail (facultatif)" maxlength="60" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        <input id="acc-pw" placeholder="🔑 Mot de passe (vide = généré automatiquement)" maxlength="64" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        <button class="btn-main" style="width:100%;margin-top:9px" onclick="createClientHQ()">🏗️ Ouvrir le compte client</button>
-      </div>
-    </div>
-    <div id="acct-pro" style="display:none;padding:10px 16px 0">
-      <div style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px 12px">
-        <b style="font-size:12px">🧑‍💼 Compte professionnel guidé <span style="color:var(--muted);font-weight:600">(validé d'office par vous)</span></b><br>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-          <input id="acp-prenom" placeholder="Prénom *" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <input id="acp-nom" placeholder="Nom *" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <input id="acp-tel" placeholder="📞 Tél. principal *" maxlength="16" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <input id="acp-quartier" placeholder="📍 Quartier" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <input id="acp-ville" placeholder="🏙️ Ville d'habitation" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <input id="acp-ville-svc" placeholder="🛠️ Ville de service (comme le client)" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        </div>
-        <input id="acp-mail" placeholder="✉️ E-mail (facultatif)" maxlength="60" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        <select id="acp-service" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <option value="maison">🧹 Ménage maison</option><option value="bureaux">🏢 Bureaux</option><option value="canapes">🛋️ Canapés & tapis</option><option value="vitres">🪟 Vitres</option><option value="grand">🏰 Grand ménage</option><option value="plomberie">🔧 Plomberie</option><option value="electricite">💡 Électricité</option><option value="clim">❄️ Climatisation</option><option value="serrurerie">🔐 Serrurerie</option><option value="jardinage">🌿 Jardinage</option><option value="lavageauto">🚗 Lavage auto</option><option value="bricolage">🛠️ Bricolage</option><option value="demen">📦 Déménagement</option><option value="cuisine">🍽️ Cuisinier</option><option value="cours">📚 Cours à domicile</option><option value="custom">✨ Demande sur mesure</option>
-        </select>
-        <div style="margin-top:10px;background:rgba(255,138,0,.12);border:1.5px dashed rgba(255,138,0,.5);border-radius:12px;padding:11px 12px">
-          <b style="font-size:12.5px;color:#b36b00">🔑 Accès à remettre au professionnel</b>
-          <p style="font-size:11.5px;color:var(--muted);margin:4px 0 8px">Touchez « Générer » — le code et le mot de passe s’affichent ici (pas dans la barre d’adresse).</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <input id="acp-pin" readonly placeholder="Code de liaison" style="padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:18px;font-weight:900;letter-spacing:.12em;text-align:center">
-            <input id="acp-pw" readonly placeholder="Mot de passe" style="padding:11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:13px;font-weight:800;text-align:center">
-          </div>
-          <button type="button" onclick="genererCodePro()" style="margin-top:8px;width:100%;background:rgba(255,138,0,.22);border:1.5px solid rgba(255,138,0,.55);color:#b36b00;font-weight:900;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit">⚡ Générer le code automatiquement</button>
-        </div>
-        <button class="btn-main" style="width:100%;margin-top:9px" onclick="createProHQ()">🏗️ Ouvrir le compte pro (validation immédiate)</button>
-        <div id="acp-result" style="display:none;margin-top:10px;background:rgba(13,166,120,.12);border:1.5px solid rgba(13,166,120,.35);border-radius:12px;padding:11px;font-size:13px;line-height:1.5"></div>
+        <button type="button" onclick="ouvrirFenetreComptes('codes')" style="width:100%;margin-top:8px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:12.5px">🎟️ Tous les comptes &amp; codes d’accès</button>
       </div>
     </div>
   </div>
@@ -676,6 +660,7 @@ const HQ_GO = [
   ['panel-hqchat','🟠 Fil PDG'],
   ['panel-promo','🎟️ Promos & partenaires'],
   ['panel-paydest','💳 Numéros de paiement'],
+  ['panel-demande-comptes','🟠 Demandes blocage/suppression'],
   ['panel-trash','♻️ Comptes supprimés'],
   ['panel-cfg','⚙️ Réglages'],
   ['panel-audit','📜 Audit'],
@@ -801,54 +786,64 @@ async function voirProsService(id){
 function genererCodePro(){
   const pin = String(Math.floor(100000 + Math.random()*900000));
   const pw = 'Klean-' + Math.floor(1000 + Math.random()*9000) + '!';
-  const a=document.getElementById('acp-pin'), b=document.getElementById('acp-pw');
-  if(a) a.value=pin; if(b) b.value=pw;
+  [['w-p-code',pin],['w-p-pw',pw],['w-c-code',pin],['w-c-pw',pw]].forEach(([id,v])=>{ const el=document.getElementById(id); if(el) el.value=v; });
 }
-function toggleAcctForm(which){
-  const people = document.getElementById('people');
-  if(people) people.classList.remove('folded');
-  const c = document.getElementById('acct-client'), p = document.getElementById('acct-pro');
-  if(!c || !p){ alert('Formulaire introuvable — rechargez la page (Ctrl+F5)'); return; }
-  const showC = which==='client' && (c.style.display==='none' || !c.style.display);
-  const showP = which==='pro' && (p.style.display==='none' || !p.style.display);
-  c.style.display = showC ? 'block' : 'none';
-  p.style.display = showP ? 'block' : 'none';
-  const el = showC ? c : (showP ? p : null);
-  if(el) el.scrollIntoView({behavior:'smooth', block:'nearest'});
-}
+/* 🏗️ Les boutons « créer un compte » ouvrent désormais la FENÊTRE (tout en un) */
+function toggleAcctForm(which){ ouvrirFenetreComptes(which==='pro'?'pro':'client'); }
 async function createClientHQ(){
-  const nom=((document.getElementById('acc-nom')||{}).value||'').trim(), tel=((document.getElementById('acc-tel')||{}).value||'').trim();
-  const quartier=((document.getElementById('acc-quartier')||{}).value||'').trim(), password=(document.getElementById('acc-pw')||{}).value||'';
-  const ville=((document.getElementById('acc-ville')||{}).value||'').trim(), mail=((document.getElementById('acc-mail')||{}).value||'').trim();
+  const nom=((document.getElementById('w-c-nom')||{}).value||'').trim(), tel=((document.getElementById('w-c-tel')||{}).value||'').trim();
+  const quartier=((document.getElementById('w-c-quartier')||{}).value||'').trim(), password=(document.getElementById('w-c-pw')||{}).value||'';
+  const ville=((document.getElementById('w-c-ville')||{}).value||'').trim(), mail=((document.getElementById('w-c-mail')||{}).value||'').trim();
+  const pin=((document.getElementById('w-c-code')||{}).value||'').replace(/\D/g,'').trim();
   if(nom.length<2||tel.replace(/\D/g,'').length<8) return alert('❌ Nom + numéro valide requis');
-  const r=await fetch('/api/admin/clients/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel,quartier,ville,mail,password})});
-  const d=await r.json().catch(()=>({}));
-  if(!r.ok) return alert('⚠️ '+(d.error||'Création impossible'));
-  alert('👤 COMPTE CLIENT CRÉÉ\n\nRemettez-lui ses accès :\nTéléphone : '+d.tel+'\nMot de passe : '+d.password+(d.passwordGenere?' (généré automatiquement)':'')+'\n\nIl se connecte dans l\'app : « Se connecter ».');
-  document.getElementById('acc-nom').value='';document.getElementById('acc-tel').value='';document.getElementById('acc-pw').value='';
-  loadAll();
-}
-async function createProHQ(){
-  const prenom=((document.getElementById('acp-prenom')||{}).value||'').trim(), nom=((document.getElementById('acp-nom')||{}).value||'').trim();
-  const tel=((document.getElementById('acp-tel')||{}).value||'').trim(), quartier=((document.getElementById('acp-quartier')||{}).value||'').trim();
-  const ville=((document.getElementById('acp-ville')||{}).value||'').trim(), mail=((document.getElementById('acp-mail')||{}).value||'').trim();
-  const villeService=((document.getElementById('acp-ville-svc')||{}).value||ville).trim();
-  const service=(document.getElementById('acp-service')||{}).value||'maison';
-  if(prenom.length<2||nom.length<2||tel.replace(/\D/g,'').length<8) return alert('❌ Prénom + nom + téléphone requis');
-  if(!(document.getElementById('acp-pin')||{}).value) genererCodePro();
-  const pin=((document.getElementById('acp-pin')||{}).value||'').trim();
-  const password=((document.getElementById('acp-pw')||{}).value||'').trim();
-  const r=await fetch('/api/admin/agents/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,prenom,tel,quartier,ville,villeService,mail,service,pin,password})});
-  const d=await r.json().catch(()=>({}));
-  if(!r.ok) return alert('⚠️ '+(d.error||'Création impossible'));
-  const box=document.getElementById('acp-result');
+  if(pin && pin.length<4) return alert('❌ Le code d’accès doit faire 4 à 8 chiffres (ou laissez vide : on le tire au hasard)');
+  const btn=document.getElementById('w-c-btn'); if(btn){ btn.disabled=true; btn.textContent='⏳ Création…'; }
+  let d={}, ok=false;
+  try{
+    const r=await fetch('/api/admin/clients/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel,quartier,ville,mail,password,pin})});
+    d=await r.json().catch(()=>({})); ok=r.ok;
+    if(!r.ok) alert('⚠️ '+(d.error||'Création impossible'));
+  }catch(e){ alert('⚠️ Serveur injoignable — réessayez'); }
+  if(btn){ btn.disabled=false; btn.textContent='🏗️ Ouvrir le compte client'; }
+  if(!ok) return;
+  const box=document.getElementById('w-c-res');
   if(box){
     box.style.display='block';
-    box.innerHTML='<b>✅ Compte créé — remettez ces accès (dans le cadre, pas dans la barre d’adresse)</b><br>Tél : <b>'+d.tel+'</b><br>Code de liaison (1 fois) : <b style="font-size:22px;letter-spacing:.12em">'+d.pin+'</b><br>Mot de passe : <b>'+d.password+'</b><br><small>App → Je suis un professionnel → tél + mot de passe, ou tél + code.</small>';
+    box.dataset.txt = messageAcces('client', d);
+    box.innerHTML = blocAcces('client', d);
   }
-  if(document.getElementById('acp-pin')) document.getElementById('acp-pin').value=d.pin||pin;
-  if(document.getElementById('acp-pw')) document.getElementById('acp-pw').value=d.password||password;
+  ['w-c-nom','w-c-tel','w-c-quartier','w-c-ville','w-c-mail','w-c-code','w-c-pw'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
   loadAll();
+  if(typeof chargerCodesAcces==='function') chargerCodesAcces(true);
+}
+async function createProHQ(){
+  const prenom=((document.getElementById('w-p-prenom')||{}).value||'').trim(), nom=((document.getElementById('w-p-nom')||{}).value||'').trim();
+  const tel=((document.getElementById('w-p-tel')||{}).value||'').trim(), quartier=((document.getElementById('w-p-quartier')||{}).value||'').trim();
+  const ville=((document.getElementById('w-p-ville')||{}).value||'').trim(), mail=((document.getElementById('w-p-mail')||{}).value||'').trim();
+  const villeService=((document.getElementById('w-p-ville-svc')||{}).value||ville).trim();
+  const service=(document.getElementById('w-p-service')||{}).value||'maison';
+  const pin=((document.getElementById('w-p-code')||{}).value||'').replace(/\D/g,'').trim();
+  const password=((document.getElementById('w-p-pw')||{}).value||'').trim();
+  if(prenom.length<2||nom.length<2||tel.replace(/\D/g,'').length<8) return alert('❌ Prénom + nom + téléphone requis');
+  if(pin && pin.length<4) return alert('❌ Le code d’accès doit faire 4 à 8 chiffres (ou laissez vide : on le tire au hasard)');
+  const btn=document.getElementById('w-p-btn'); if(btn){ btn.disabled=true; btn.textContent='⏳ Création…'; }
+  let d={}, ok=false;
+  try{
+    const r=await fetch('/api/admin/agents/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,prenom,tel,quartier,ville,villeService,mail,service,pin,password})});
+    d=await r.json().catch(()=>({})); ok=r.ok;
+    if(!r.ok) alert('⚠️ '+(d.error||'Création impossible'));
+  }catch(e){ alert('⚠️ Serveur injoignable — réessayez'); }
+  if(btn){ btn.disabled=false; btn.textContent='🏗️ Ouvrir le compte pro (validé d’office)'; }
+  if(!ok) return;
+  const box=document.getElementById('w-p-res');
+  if(box){
+    box.style.display='block';
+    box.dataset.txt = messageAcces('pro', d);
+    box.innerHTML = blocAcces('pro', d);
+  }
+  ['w-p-prenom','w-p-nom','w-p-tel','w-p-quartier','w-p-code','w-p-pw'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  loadAll();
+  if(typeof chargerCodesAcces==='function') chargerCodesAcces(true);
 }
 async function reassignMission(id, clientNom){
   const reason = prompt('🔁 RÉATTRIBUER D\'URGENCE la mission '+id+' ('+(clientNom||'client')+') ?\n\nLe professionnel actuel la perd et ne peut plus la reprendre.\nLes autres professionnels en ligne sont avertis immédiatement.\n\nMotif (tracé dans l\'historique) :');
@@ -1564,6 +1559,26 @@ function renderConfig(cfg){
   const c = (cfg && cfg.commission)!=null ? cfg.commission : 25;
   const el = document.getElementById('cfg-comm'); if(el) el.value = c;
   const er = document.getElementById('cfg-reach'); if(er) er.value = (cfg && cfg.reachKm) || 15;
+  paintGpsNation(cfg);
+}
+function paintGpsNation(cfg){
+  const st=document.getElementById('gps-nation-state');
+  const on=!!(cfg && cfg.gpsNationOn);
+  const km=(cfg && cfg.reachKm) || 15;
+  if(st) st.textContent = on ? ('🟢 EN MARCHE — '+km+' km sur toute la Côte d’Ivoire. Clients et pros se croisent (GPS ou appel).') : ('⚪ À l’arrêt — saisissez le km puis Activer.');
+  const b=document.getElementById('btn-gps-nation');
+  if(b){ b.textContent = on ? ('🟢 Rayon '+km+' km — actif') : '🟢 Activer tout le territoire'; }
+}
+async function activerGpsNation(on){
+  const km = parseFloat((document.getElementById('cfg-reach')||{}).value);
+  if(on && (isNaN(km) || km<1)) return alert('Écrivez d’abord le rayon en km (ex : 50, 150 ou 600 pour tout le pays).');
+  const r=await fetch('/api/admin/gps-nation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:!!on, reachKm: isNaN(km)?undefined:km})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('❌ '+(d.error||'Impossible — réservé au PDG'));
+  paintGpsNation(d);
+  alert(d.gpsNationOn
+    ? ('✅ GPS activé : rayon '+d.reachKm+' km sur toute la Côte d’Ivoire.\nClients et professionnels se croisent dans ce rayon (GPS) ou par appel.')
+    : '⚪ Rayon GPS coupé.');
 }
 async function openBulleMsg(){
   let m=document.getElementById('bulle-msg-modal');
@@ -1630,35 +1645,8 @@ async function askPdg(role, id, kind, nom){
   if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
   alert('🟠 Demande envoyée au PDG. Il décidera.');
 }
-async function actionPro(id, action, nom){
-  if(ME && ME.role !== 'pdg'){
-    if(action==='delete'||action==='block') return askPdg('pro', id, action==='delete'?'delete':'block', nom);
-  }
-  if(action==='delete'){
-    if(!confirm('🗑️ SUPPRIMER '+nom+' ?\n\nSon dossier et son compte disparaîtront définitivement.\n(Ses missions passées restent dans l\'historique.)')) return;
-    const r = await fetch('/api/admin/agents/'+id, {method:'DELETE'});
-    const d = await r.json().catch(()=>({}));
-    if(!r.ok) return alert('⚠️ '+(d.error||'Action impossible'));
-    alert('🗑️ '+nom+' supprimé.'); setTimeout(loadAll, 300); return;
-  }
-  const bloc = action==='block';
-  if(!confirm(bloc ? '🔒 Bloquer '+nom+' ?\n\nIl sera mis hors ligne et ne recevra plus aucune demande.' : '✅ Débloquer '+nom+' ?\nIl pourra de nouveau recevoir des missions.')) return;
-  await fetch('/api/admin/agents/'+id+'/'+(bloc?'block':'unblock'), {method:'POST'});
-  setTimeout(loadAll, 300);
-}
-async function actionClient(id, action, nom){
-  if(action==='delete'){
-    if(!confirm('🗑️ SUPPRIMER le client '+nom+' ?\n\nSon compte disparaîtra définitivement.')) return;
-    const r = await fetch('/api/admin/clients/'+id, {method:'DELETE'});
-    const d = await r.json().catch(()=>({}));
-    if(!r.ok) return alert('⚠️ '+(d.error||'Action impossible'));
-    alert('🗑️ Client '+nom+' supprimé.'); setTimeout(loadAll, 300); return;
-  }
-  const bloc = action==='block';
-  if(!confirm(bloc ? '🔒 Bloquer le client '+nom+' ?\n\nIl ne pourra plus passer de demandes.' : '✅ Débloquer '+nom+' ?')) return;
-  await fetch('/api/admin/clients/'+id+'/'+(bloc?'block':'unblock'), {method:'POST'});
-  setTimeout(loadAll, 300);
-}
+async function actionPro(id, action, nom){ return agirCompte('pro', id, action, nom); }
+async function actionClient(id, action, nom){ return agirCompte('client', id, action, nom); }
 function renderChart(days){
   const max = Math.max(1, ...days.map(d=>d.ca));
   document.querySelector('#chart').innerHTML = days.map(d=>`
@@ -1798,7 +1786,24 @@ async function retirerAd(){
   alert('✕ Pub retirée.');
 }
 async function loadPdgExtras(){
-  ['panel-promo','panel-paydest','panel-trash'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display=''; });
+  ['panel-promo','panel-paydest','panel-trash','panel-demande-comptes'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display=''; });
+  try{
+    const dm = await fetchJ('/api/admin/account-request/voir');
+    const enA = (dm && dm.enAttente) || [], hist = (dm && dm.historique) || [];
+    const cnt = document.getElementById('dem-cnt'); if(cnt) cnt.textContent = enA.length + ' en attente';
+    const box = document.getElementById('dem-list');
+    if(box){
+      box.innerHTML = (enA.length ? enA.map(x=>`<div class="agrow" style="align-items:flex-start">
+        <div style="flex:1"><b>${x.nom||'?'}</b> <span class="badge" style="background:${x.kind==='delete'?'rgba(255,107,107,.16)':'rgba(255,176,32,.14)'};color:${x.kind==='delete'?'var(--red)':'var(--amber)'}">${x.kind==='delete'?'SUPPRESSION':'BLOCAGE'}</span> <span class="badge" style="background:rgba(74,163,255,.14);color:var(--blue)">${x.role==='client'?'CLIENT':'PRO'}</span><br>
+        <small>🟠 ${x.by||'gestionnaire'} · ${(x.at||'').slice(0,16).replace('T',' · ')}</small><br>
+        <small style="color:var(--amber);font-weight:700">Motif : ${(x.motif||'non précisé').replace(/</g,'&lt;')}</small></div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button style="background:rgba(21,201,138,.16);border:1px solid rgba(21,201,138,.45);color:var(--p);font-size:11px;font-weight:900;padding:8px 11px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="deciderDemande('${x.id}',true)">✅ Appliquer</button>
+          <button style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:8px 11px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="deciderDemande('${x.id}',false)">✕ Refuser</button>
+        </div></div>`).join('') : '<div class="empty">Aucune demande en attente</div>');
+      if(hist.length) box.innerHTML += '<div style="margin-top:12px;font-size:11.5px;color:var(--muted);font-weight:800">Historique</div>' + hist.map(x=>`<div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:12px">${x.status==='acceptee'?'✅':'✕'} <b>${x.nom||'?'}</b> — ${x.kind==='delete'?'suppression':'blocage'} (${x.by||''})</div>`).join('');
+    }
+  }catch(e){}
   try{
     const pr=await fetchJ('/api/admin/promos');
     document.getElementById('promo-list').innerHTML=(pr||[]).map(x=>`<div class="agrow"><div><b>${x.code}</b> ${x.active?'<span class="badge b-done">actif</span>':'<span class="badge b-cancel">annulé</span>'}<br><small>${x.unique?'usage unique':x.maxUses+' uses'} · ${x.uses||0} utilisés · jusqu'au ${(x.until||'').slice(0,10)}</small></div>${x.active?`<button style="margin-left:auto;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.3);color:var(--red);font-size:10px;font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer" onclick="cancelPromo('${x.id}')">Annuler</button>`:''}</div>`).join('')||'<div class="empty">Aucun code</div>';
@@ -1809,8 +1814,18 @@ async function loadPdgExtras(){
   }catch(e){}
   try{
     const tr=await fetchJ('/api/admin/trash');
-    document.getElementById('trash-list').innerHTML=(tr||[]).length?(tr||[]).map(x=>`<div class="agrow"><div><b>${(x.data&&x.data.nom)||'?'}</b> <span class="badge">${x.kind}</span><br><small>${(x.at||'').slice(0,16)}</small></div><button class="btn-main" style="flex:none;padding:7px 10px" onclick="restoreTrash('${x.id}')">♻️ Restaurer</button></div>`).join(''):'<div class="empty">Aucun compte à récupérer</div>';
+    document.getElementById('trash-list').innerHTML=(tr||[]).length?(tr||[]).map(x=>`<div class="agrow"><div><b>${(x.data&&x.data.nom)||'?'}</b> <span class="badge">${x.kind}</span><br><small>${(x.at||'').slice(0,16)}</small></div><button class="btn-main" style="flex:none;padding:7px 10px" onclick="restoreTrash('${x.id}')">♻️ Restaurer${x.missions?(' + '+x.missions+' mission(s)'):''}</button></div>`).join(''):'<div class="empty">Aucun compte à récupérer</div>';
   }catch(e){}
+}
+async function deciderDemande(id, accepter){
+  if(accepter && !confirm('✅ Appliquer cette demande ?\n\nLe blocage ou la suppression se fera tout de suite, avec le motif écrit par le gestionnaire.')) return;
+  const r = await fetch('/api/admin/account-request/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id, accept:!!accepter})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  alert(accepter ? (d.applique ? ('✅ Fait : ' + (d.kind==='delete'?'suppression':'blocage') + ' de ' + (d.nom||'') + (d.detail?('\n\n⚠️ '+d.detail):'')) : 'Demande acceptée, mais le compte n’existe plus.')
+                 : '✕ Demande refusée.');
+  loadPdgExtras(); if(typeof loadAll==='function') loadAll();
+  if(typeof chargerCodesAcces==='function') chargerCodesAcces(true);
 }
 async function createPromo(){
   const code=document.getElementById('pr-code').value, days=document.getElementById('pr-days').value, maxUses=document.getElementById('pr-uses').value, unique=document.getElementById('pr-unique').checked;
@@ -1825,7 +1840,14 @@ async function createPartner(){
   const r=await fetch('/api/admin/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel})});
   if(r.ok){ document.getElementById('pt-nom').value=''; document.getElementById('pt-tel').value=''; loadPdgExtras(); }
 }
-async function restoreTrash(id){ await fetch('/api/admin/trash/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); loadPdgExtras(); loadAll(); }
+async function restoreTrash(id){
+  const r = await fetch('/api/admin/trash/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Restauration impossible'));
+  alert('♻️ '+(d.nom||'Compte')+' restauré.'
+    + (d.missionsRamenees ? ('\n\n'+d.missionsRamenees+' ancienne(s) mission(s) remise(s) en circulation — les pros en ligne sont prévenus tout de suite.') : '\n\nSes anciennes missions restent dans son historique.'));
+  loadPdgExtras(); loadAll();
+}
 async function savePayDest(){
   const wave=(document.getElementById('pay-wave').value||'').split(',').map(s=>s.trim()).filter(Boolean);
   await fetch('/api/admin/paydest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wave, om:document.getElementById('pay-om').value, moov:document.getElementById('pay-moov').value, hide:document.getElementById('pay-hide').checked})});
@@ -1950,5 +1972,375 @@ setInterval(loadAll, 12000); // secours
     <button type="button" onclick="closeQuizWho()" style="width:100%;margin-top:7px;background:var(--card2);border:1px solid var(--line);padding:10px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">Annuler</button>
   </div>
 </div>
+<!-- ═══════════ 🏗️ FENÊTRE « CRÉER UN COMPTE » (PDG / gestionnaires) — lot 85 ═══════════ -->
+<div id="win-comptes" style="display:none;position:fixed;inset:0;z-index:90;background:rgba(8,16,13,.68);backdrop-filter:blur(3px);overflow:auto;padding:14px" onclick="if(event.target===this)fermerFenetreComptes()">
+  <div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:560px;width:100%;margin:auto;box-shadow:0 18px 60px rgba(0,0,0,.5);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:14px 15px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,rgba(232,93,4,.18),rgba(232,93,4,.05))">
+      <div style="flex:1">
+        <b style="font-size:15px;display:block">🏗️ Ouvrir un compte</b>
+        <small style="color:var(--muted);font-size:11.5px">Le PDG / gestionnaire crée la fiche et remet les codes d’accès</small>
+      </div>
+      <button type="button" onclick="fermerFenetreComptes()" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-weight:900;border-radius:10px;padding:8px 12px;cursor:pointer;font-family:inherit">✕</button>
+    </div>
+
+    <div style="display:flex;gap:6px;padding:10px 12px 0;flex-wrap:wrap">
+      <button type="button" id="wt-client" onclick="ongletComptes('client')" style="flex:1;min-width:120px;background:var(--p);border:none;color:#fff;font-weight:900;padding:10px 8px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:12.5px">👤 Client</button>
+      <button type="button" id="wt-pro" onclick="ongletComptes('pro')" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:900;padding:10px 8px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:12.5px">🧑‍💼 Professionnel</button>
+      <button type="button" id="wt-codes" onclick="ongletComptes('codes')" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:900;padding:10px 8px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:12.5px">🎟️ Comptes &amp; codes</button>
+    </div>
+
+    <div style="padding:12px 14px 18px">
+      <!-- ───── 👤 CLIENT ───── -->
+      <div id="wsec-client">
+        <p style="font-size:12px;color:var(--muted);margin:2px 0 9px;line-height:1.4">Le client se connecte dans l’app avec <b>téléphone + code d’accès</b> (ou téléphone + mot de passe).</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <input id="w-c-nom" placeholder="👤 Nom complet *" maxlength="60" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="w-c-tel" placeholder="📞 Téléphone *" maxlength="16" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <input id="w-c-quartier" placeholder="📍 Quartier" maxlength="40" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="w-c-ville" placeholder="🏙️ Ville (ex : Bouaké)" maxlength="40" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        </div>
+        <input id="w-c-mail" placeholder="✉️ E-mail (facultatif)" maxlength="60" style="margin-top:8px;width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <div style="margin-top:10px;background:rgba(255,138,0,.12);border:1.5px dashed rgba(255,138,0,.5);border-radius:12px;padding:11px 12px">
+          <b style="font-size:12.5px;color:#b36b00">🎟️ Codes d’accès à remettre au client</b>
+          <p style="font-size:11.5px;color:var(--muted);margin:4px 0 8px">Écrivez votre propre code, ou laissez « Générer » le fabriquer. Le mot de passe peut rester vide : il sera créé automatiquement.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <input id="w-c-code" inputmode="numeric" maxlength="8" placeholder="Code d’accès (4-8 chiffres)" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:16px;font-weight:900;letter-spacing:.1em;text-align:center">
+            <input id="w-c-pw" placeholder="Mot de passe (facultatif)" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px;font-weight:800;text-align:center">
+          </div>
+          <button type="button" onclick="genererCodePro()" style="margin-top:8px;width:100%;background:rgba(255,138,0,.22);border:1.5px solid rgba(255,138,0,.55);color:#b36b00;font-weight:900;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit">⚡ Générer le code d’accès</button>
+        </div>
+        <button type="button" id="w-c-btn" onclick="createClientHQ()" style="width:100%;margin-top:10px;background:linear-gradient(135deg,var(--p),var(--pd));border:none;color:#fff;font-weight:900;padding:13px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:14px">🏗️ Ouvrir le compte client</button>
+        <div id="w-c-res" style="display:none;margin-top:10px"></div>
+      </div>
+
+      <!-- ───── 🧑‍💼 PROFESSIONNEL ───── -->
+      <div id="wsec-pro" style="display:none">
+        <p style="font-size:12px;color:var(--muted);margin:2px 0 9px;line-height:1.4">Compte <b>validé d’office</b> par vous. Le pro se lie ensuite avec <b>téléphone + code d’accès</b> dans « Je suis un professionnel ».</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <input id="w-p-prenom" placeholder="Prénom *" maxlength="40" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="w-p-nom" placeholder="Nom *" maxlength="40" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <input id="w-p-tel" placeholder="📞 Tél. principal *" maxlength="16" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="w-p-quartier" placeholder="📍 Quartier" maxlength="40" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <input id="w-p-ville" placeholder="🏙️ Ville d’habitation" maxlength="40" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="w-p-ville-svc" placeholder="🛠️ Ville de service (comme le client)" maxlength="40" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        </div>
+        <input id="w-p-mail" placeholder="✉️ E-mail (facultatif)" maxlength="60" style="margin-top:8px;width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <select id="w-p-service" style="margin-top:8px;width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <option value="maison">🧹 Ménage maison</option><option value="bureaux">🏢 Bureaux</option><option value="canapes">🛋️ Canapés &amp; tapis</option><option value="vitres">🪟 Vitres</option><option value="grand">🏰 Grand ménage</option><option value="plomberie">🔧 Plomberie</option><option value="electricite">💡 Électricité</option><option value="clim">❄️ Climatisation</option><option value="serrurerie">🔐 Serrurerie</option><option value="jardinage">🌿 Jardinage</option><option value="lavageauto">🚗 Lavage auto</option><option value="bricolage">🛠️ Bricolage</option><option value="demen">📦 Déménagement</option><option value="cuisine">🍽️ Cuisinier</option><option value="cours">📚 Cours à domicile</option><option value="custom">✨ Demande sur mesure</option>
+        </select>
+        <div style="margin-top:10px;background:rgba(255,138,0,.12);border:1.5px dashed rgba(255,138,0,.5);border-radius:12px;padding:11px 12px">
+          <b style="font-size:12.5px;color:#b36b00">🎟️ Codes d’accès à remettre au professionnel</b>
+          <p style="font-size:11.5px;color:var(--muted);margin:4px 0 8px">Ce code reste valable : le pro peut se reconnecter avec à tout moment (et vous pouvez le changer ici).</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <input id="w-p-code" inputmode="numeric" maxlength="8" placeholder="Code d’accès (4-8 chiffres)" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:16px;font-weight:900;letter-spacing:.1em;text-align:center">
+            <input id="w-p-pw" placeholder="Mot de passe (facultatif)" style="padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px;font-weight:800;text-align:center">
+          </div>
+          <button type="button" onclick="genererCodePro()" style="margin-top:8px;width:100%;background:rgba(255,138,0,.22);border:1.5px solid rgba(255,138,0,.55);color:#b36b00;font-weight:900;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit">⚡ Générer le code d’accès</button>
+        </div>
+        <button type="button" id="w-p-btn" onclick="createProHQ()" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#4aa3ff,#1f6fd0);border:none;color:#fff;font-weight:900;padding:13px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:14px">🏗️ Ouvrir le compte pro (validé d’office)</button>
+        <div id="w-p-res" style="display:none;margin-top:10px"></div>
+      </div>
+
+      <!-- ───── 🎟️ COMPTES & CODES ───── -->
+      <div id="wsec-codes" style="display:none">
+        <p style="font-size:12px;color:var(--muted);margin:2px 0 9px;line-height:1.4">Retrouvez un client ou un pro et <b>redonnez-lui un code d’accès</b> (perdu, oublié, ou nouveau mot de passe).</p>
+        <div style="display:flex;gap:8px">
+          <input id="w-k-q" placeholder="🔎 Nom ou téléphone…" oninput="rendreCodes()" style="flex:1;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <button type="button" onclick="chargerCodesAcces()" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px 13px;border-radius:10px;cursor:pointer;font-family:inherit">🔄</button>
+        </div>
+        <div id="w-k-list" style="margin-top:10px;font-size:13px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 📜 FENÊTRE « MISSIONS DU COMPTE » — lot 86 ═══════════ -->
+<div id="win-missions" style="display:none;position:fixed;inset:0;z-index:92;background:rgba(8,16,13,.7);backdrop-filter:blur(3px);overflow:auto;padding:14px" onclick="if(event.target===this)fermerMissionsClient()">
+  <div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:560px;width:100%;margin:auto;box-shadow:0 18px 60px rgba(0,0,0,.5);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:14px 15px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,rgba(74,163,255,.16),rgba(74,163,255,.04))">
+      <b id="win-mis-titre" style="flex:1;font-size:15px">📜 Anciennes missions</b>
+      <button type="button" onclick="fermerMissionsClient()" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-weight:900;border-radius:10px;padding:8px 12px;cursor:pointer;font-family:inherit">✕</button>
+    </div>
+    <div id="win-mis-stats" style="padding:12px 15px 6px;font-size:12.5px;font-weight:800;color:var(--muted);line-height:1.5"></div>
+    <div id="win-mis-list" style="padding:4px 15px 18px;font-size:13px"></div>
+  </div>
+</div>
+
+<script>
+/* ═══════════ 🏗️ FENÊTRE DE CRÉATION DE COMPTES + CODES D'ACCÈS — lot 85 ═══════════
+   Le PDG ouvre la fenêtre, remplit la fiche, et remet les codes au client / au pro.
+   — code d'accès : 4 à 8 chiffres, choisi à la main ou tiré au hasard
+   — le code marche à la connexion (client) et à la liaison (pro) */
+let ONGLET_COMPTES = 'client';
+let CODES_ACCES = { clients: [], pros: [] };
+
+function echa(v){
+  return String(v==null?'':v).replace(/[&<>"']/g, function(c){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+  });
+}
+function ouvrirFenetreComptes(which){
+  const w = document.getElementById('win-comptes');
+  if(!w){ alert('Fenêtre introuvable — rechargez la page (Ctrl+F5)'); return; }
+  w.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+  ongletComptes(which === 'pro' ? 'pro' : (which === 'codes' ? 'codes' : 'client'));
+  if(which === 'codes') chargerCodesAcces();
+}
+function fermerFenetreComptes(){
+  const w = document.getElementById('win-comptes');
+  if(w) w.style.display = 'none';
+  document.body.style.overflow = '';
+}
+function ongletComptes(t){
+  ONGLET_COMPTES = t;
+  const map = { client: ['wsec-client','wt-client'], pro: ['wsec-pro','wt-pro'], codes: ['wsec-codes','wt-codes'] };
+  Object.keys(map).forEach(function(k){
+    const sec = document.getElementById(map[k][0]), btn = document.getElementById(map[k][1]);
+    if(sec) sec.style.display = (k === t) ? 'block' : 'none';
+    if(btn){
+      const on = (k === t);
+      btn.style.background = on ? 'linear-gradient(135deg,var(--p),var(--pd))' : 'var(--card2)';
+      btn.style.border = on ? '1.5px solid transparent' : '1.5px solid var(--line)';
+      btn.style.color = on ? '#fff' : 'var(--ink)';
+    }
+  });
+  if(t === 'codes') chargerCodesAcces(true);
+}
+function lienWhatsApp(tel, texte){
+  const n = String(tel||'').replace(/\D/g,'').replace(/^225/,'');
+  if(!n) return '';
+  return 'https://wa.me/225' + n + '?text=' + encodeURIComponent(texte).replace(/'/g, '%27');
+}
+function messageAcces(kind, d){
+  const app = location.origin;
+  if(kind === 'pro'){
+    return 'KLEAN — votre compte professionnel est prêt ✅\n'
+      + 'Application : ' + app + '\n'
+      + 'Nom : ' + (d.nom || '') + '\n'
+      + 'Téléphone : ' + (d.tel || '') + '\n'
+      + '🎟️ Code d’accès : ' + (d.code || d.pin || '') + '\n'
+      + '🔑 Mot de passe : ' + (d.password || '') + '\n\n'
+      + 'Ouvrez l’app → « Je suis un professionnel » → tapez le téléphone + le code d’accès → votre compte se lie tout seul.';
+  }
+  return 'KLEAN — votre compte client est ouvert ✅\n'
+    + 'Application : ' + app + '\n'
+    + 'Nom : ' + (d.nom || '') + '\n'
+    + 'Téléphone : ' + (d.tel || '') + '\n'
+    + '🎟️ Code d’accès : ' + (d.code || d.pin || '') + '\n'
+    + '🔑 Mot de passe : ' + (d.password || '') + '\n\n'
+    + 'Ouvrez l’app → « Se connecter » → téléphone + code d’accès (ou mot de passe).';
+}
+function blocAcces(kind, d){
+  const wa = lienWhatsApp(d.tel, messageAcces(kind, d));
+  return '<div style="background:rgba(21,201,138,.12);border:1.5px solid rgba(21,201,138,.4);border-radius:14px;padding:12px 13px">'
+    + '<b style="font-size:13.5px;display:block;margin-bottom:7px">✅ Compte créé — remettez ces accès</b>'
+    + '<div style="font-size:13px;line-height:1.75">'
+    + (kind === 'pro' ? ('Nom : <b>' + echa(d.nom||'') + '</b><br>') : ('Nom : <b>' + echa(d.nom||'') + '</b><br>'))
+    + '📞 Téléphone : <b style="font-size:15px">' + echa(d.tel||'') + '</b><br>'
+    + '🎟️ Code d’accès : <b style="font-size:24px;letter-spacing:.14em;color:var(--amber)">' + echa(d.code||d.pin||'') + '</b><br>'
+    + '🔑 Mot de passe : <b>' + echa(d.password||'') + '</b>' + (d.passwordGenere ? ' <small style="color:var(--muted)">(généré)</small>' : '') + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
+    + '<button type="button" onclick="copierTexte(this.dataset.t)" data-t="' + echa(messageAcces(kind, d)) + '" style="flex:1;min-width:130px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:900;padding:11px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:12.5px">📋 Copier les accès</button>'
+    + (wa ? ('<button type="button" onclick="window.open(\'' + wa + '\',\'_blank\')" style="flex:1;min-width:130px;background:#25D366;border:none;color:#06301b;font-weight:900;padding:11px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:12.5px">📲 Envoyer par WhatsApp</button>') : '')
+    + '</div>'
+    + '<small style="display:block;margin-top:8px;color:var(--muted)">' + (kind === 'pro' ? 'App → « Je suis un professionnel » → téléphone + code d’accès.' : 'App → « Se connecter » → téléphone + code d’accès.') + '</small>'
+    + '</div>';
+}
+function copierTexte(t){
+  const txt = String(t || '');
+  const fin = function(){ alert('📋 Copié ! Vous pouvez coller le message au client / au pro (WhatsApp, SMS…).'); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(fin).catch(function(){ copieSecours(txt, fin); });
+  } else copieSecours(txt, fin);
+}
+function copieSecours(txt, fin){
+  const ta = document.createElement('textarea');
+  ta.value = txt; ta.style.position = 'fixed'; ta.style.top = '-1000px';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); fin(); }catch(e){ alert('Copie impossible — notez à la main :\n\n' + txt); }
+  ta.remove();
+}
+async function chargerCodesAcces(silencieux){
+  try{
+    const r = await fetch('/api/admin/acces', { cache: 'no-store' });
+    if(!r.ok) throw new Error('http ' + r.status);
+    const d = await r.json();
+    CODES_ACCES = { clients: d.clients || [], pros: d.pros || [] };
+    rendreCodes();
+  }catch(e){
+    if(silencieux) return;
+    const el = document.getElementById('w-k-list');
+    if(el) el.innerHTML = '<p style="color:var(--red);font-size:12.5px">Impossible de charger la liste — vérifiez la connexion puis 🔄.</p>';
+  }
+}
+function rendreCodes(){
+  const el = document.getElementById('w-k-list');
+  if(!el) return;
+  const q = (document.getElementById('w-k-q') || {}).value || '';
+  const qn = q.replace(/\D/g, '');
+  const ql = q.trim().toLowerCase();
+  const filtre = function(x){
+    if(!q.trim()) return true;
+    const nom = String(x.nom || '').toLowerCase();
+    const tel = String(x.tel || '').replace(/\D/g, '');
+    return (nom.indexOf(ql) >= 0) || (qn && tel.indexOf(qn) >= 0);
+  };
+  const row = function(x, kind){
+    const bloque = x.blocked ? ' <span style="color:var(--red);font-weight:900">🚫 BLOQUÉ</span>' : '';
+    const etat = x.online ? '<span style="color:var(--p);font-weight:900">🟢 en ligne</span>' : '<span style="color:var(--muted)">⚪ hors ligne</span>';
+    const liaison = (kind === 'pro' && x.enAttenteLiaison) ? ' · <span style="color:var(--amber);font-weight:800">code pas encore utilisé</span>' : '';
+    const act = (kind === 'pro')
+      ? (' · ⭐ ' + (x.note || 5) + '/5 · ✅ ' + (x.terminees || 0) + '/' + (x.missions || 0) + ' mission(s)')
+      : (' · 🧾 ' + (x.missions || 0) + ' mission(s) · 💸 ' + fmt(x.depense || 0));
+    const annul = x.annulees ? (' · <span style="color:var(--red)">' + x.annulees + ' annulée(s)</span>') : '';
+    const dern = x.derniere ? (' · 🕒 ' + String(x.derniere).slice(0, 10)) : '';
+    const motif = (x.blocked && x.blockReason) ? ('<br><small style="color:var(--red);font-weight:800">Motif : ' + echa(x.blockReason) + '</small>') : '';
+    const msg = 'KLEAN — vos accès : téléphone ' + (x.tel||'') + ' · code d’accès ' + ((x.code||'—')) + ' · mot de passe inchangé (demandez-en un nouveau au besoin).';
+    const wa = lienWhatsApp(x.tel, msg);
+    const B = 'border-radius:9px;cursor:pointer;font-family:inherit;font-size:11px;';
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--line)">'
+      + '<div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">'
+      + '<div style="flex:1;min-width:170px">'
+      + '<b style="font-size:13px">' + (kind === 'pro' ? '🧑‍💼 ' : '👤 ') + echa(x.nom) + '</b>' + bloque + '<br>'
+      + '<small style="color:var(--muted)">📞 ' + echa(x.tel) + (x.ville ? ' · 🏙️ ' + echa(x.ville) : '') + '</small><br>'
+      + '<small>' + etat + liaison + '</small><br>'
+      + '<small style="color:var(--muted)">' + act + annul + dern + '</small>' + motif
+      + '</div>'
+      + '<div style="text-align:right">'
+      + '<div style="font-size:20px;font-weight:900;letter-spacing:.14em;color:var(--amber)">' + (x.code ? echa(x.code) : '—') + '</div>'
+      + '<div style="display:flex;gap:6px;margin-top:6px;justify-content:flex-end;flex-wrap:wrap">'
+      + '<button type="button" onclick="remettreCode(\'' + kind + '\',\'' + x.id + '\',\'code\')" style="background:rgba(255,138,0,.18);border:1.5px solid rgba(255,138,0,.45);color:#b36b00;font-weight:900;padding:7px 9px;' + B + '">🎟️ Nouveau code</button>'
+      + '<button type="button" onclick="remettreCode(\'' + kind + '\',\'' + x.id + '\',\'mdp\')" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-weight:800;padding:7px 9px;' + B + '">🔑 Mot de passe</button>'
+      + '<button type="button" onclick="voirMissionsCompte(\'' + kind + '\',\'' + x.id + '\',\'' + echaJS(x.nom) + '\')" style="background:rgba(74,163,255,.14);border:1px solid rgba(74,163,255,.4);color:var(--blue);font-weight:900;padding:7px 9px;' + B + '">📜 Missions</button>'
+      + '<button type="button" onclick="agirCompte(\'' + kind + '\',\'' + x.id + '\',\'' + (x.blocked ? 'unblock' : 'block') + '\',\'' + echaJS(x.nom) + '\')" style="background:' + (x.blocked ? 'rgba(21,201,138,.15)' : 'var(--card2)') + ';border:1px solid ' + (x.blocked ? 'rgba(21,201,138,.4)' : 'rgba(255,176,32,.45)') + ';color:' + (x.blocked ? 'var(--p)' : 'var(--amber)') + ';font-weight:900;padding:7px 9px;' + B + '">' + (x.blocked ? '✅ Débloquer' : '🚫 Bloquer') + '</button>'
+      + '<button type="button" onclick="agirCompte(\'' + kind + '\',\'' + x.id + '\',\'delete\',\'' + echaJS(x.nom) + '\')" style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.35);color:var(--red);font-weight:800;padding:7px 9px;' + B + '">🗑️ Supprimer</button>'
+      + (wa ? ('<button type="button" onclick="window.open(\'' + wa + '\',\'_blank\')" style="background:#25D366;border:none;color:#06301b;font-weight:900;padding:7px 9px;' + B + '">📲</button>') : '')
+      + '</div></div></div></div>';
+  };
+  const clients = CODES_ACCES.clients.filter(filtre);
+  const pros = CODES_ACCES.pros.filter(filtre);
+  let html = '';
+  html += '<div style="font-size:12px;font-weight:900;color:var(--blue);margin:4px 0 2px">👤 Clients (' + clients.length + ')</div>';
+  html += clients.length ? clients.map(function(x){ return row(x, 'client'); }).join('') : '<div style="color:var(--muted);font-size:12px;padding:6px 0">Aucun client.</div>';
+  html += '<div style="font-size:12px;font-weight:900;color:var(--amber);margin:12px 0 2px">🧑‍💼 Professionnels (' + pros.length + ')</div>';
+  html += pros.length ? pros.map(function(x){ return row(x, 'pro'); }).join('') : '<div style="color:var(--muted);font-size:12px;padding:6px 0">Aucun professionnel.</div>';
+  el.innerHTML = html;
+}
+async function remettreCode(kind, id, mode){
+  let body = { kind: kind, id: id };
+  if(mode === 'code'){
+    const v = prompt('🎟️ Nouveau code d’accès (4 à 8 chiffres).\n\nLaissez vide pour en tirer un au hasard :', '');
+    if(v === null) return;
+    const code = String(v).replace(/\D/g, '');
+    if(code && code.length < 4) return alert('❌ 4 chiffres minimum (ou vide pour un code au hasard)');
+    body.code = code;
+  }else{
+    if(!confirm('🔑 Créer un NOUVEAU mot de passe pour ce compte ?\nL’ancien ne marchera plus.')) return;
+    body.nouveauMdp = true;
+    body.code = '';
+  }
+  const r = await fetch('/api/admin/acces/code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const d = await r.json().catch(function(){ return {}; });
+  if(!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+  const txt = messageAcces(kind, { nom: d.nom, tel: d.tel, code: d.code, password: d.password || '(inchangé)' });
+  alert('✅ ' + (kind === 'pro' ? 'PROFESSIONNEL' : 'CLIENT') + ' — ' + d.nom + '\n\n'
+    + '📞 ' + d.tel + '\n🎟️ Code d’accès : ' + d.code + (d.password ? ('\n🔑 Nouveau mot de passe : ' + d.password) : '')
+    + (kind === 'pro' ? '\n\nIl peut se relier tout de suite avec téléphone + code.' : '\n\nIl se connecte avec téléphone + code.'));
+  copierTexte(txt);
+  chargerCodesAcces(true);
+}
+/* ═══════════ 🚫 BLOQUER / 🗑️ SUPPRIMER UN COMPTE CLIENT OU PRO — lot 86 ═══════════
+   Le PDG seul bloque ou supprime. Un gestionnaire envoie une demande au PDG.
+   Le motif écrit ici est montré à la personne bloquée quand elle essaie de se connecter. */
+function echaJS(v){ return String(v==null?'':v).replace(/\\/g,'').replace(/'/g,' ').replace(/"/g,' '); }
+function estPdg(){ return !(typeof ME !== 'undefined' && ME && ME.role !== 'pdg'); }
+function urlCompte(kind, id, suffixe){
+  return (kind === 'pro' ? '/api/admin/agents/' : '/api/admin/clients/') + id + (suffixe || '');
+}
+async function agirCompte(kind, id, action, nom){
+  if(!estPdg()) return askPdg(kind, id, action === 'delete' ? 'delete' : (action === 'unblock' ? 'unblock' : 'block'), nom);
+  if(action === 'delete') return supprimerCompte(kind, id, nom);
+  if(action === 'unblock') return debloquerCompte(kind, id, nom);
+  return bloquerCompte(kind, id, nom);
+}
+async function bloquerCompte(kind, id, nom){
+  const motif = prompt('🚫 BLOQUER ' + nom + ' (' + (kind === 'pro' ? 'professionnel' : 'client') + ')\n\nÉcrivez la consigne non respectée — ce motif sera montré à la personne :', 'Non-respect des consignes KLEAN');
+  if(motif === null) return;
+  const r = await fetch(urlCompte(kind, id, '/block'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ motif: motif }) });
+  const d = await r.json().catch(function(){ return {}; });
+  if(!r.ok) return alert('⚠️ ' + (d.error || 'Réservé au PDG'));
+  alert('🚫 ' + nom + ' bloqué.' + (d.blockReason ? ('\nMotif : ' + d.blockReason) : '')
+    + (kind === 'pro' ? '\n\nIl est mis HORS LIGNE : il ne reçoit plus aucune demande.' : '\n\nIl ne peut plus passer de demande, et son compte lui explique pourquoi.'));
+  chargerCodesAcces(true); if(typeof loadAll === 'function') loadAll();
+}
+async function debloquerCompte(kind, id, nom){
+  if(!confirm('✅ Débloquer ' + nom + ' ?\n\nLa personne pourra de nouveau utiliser KLEAN.')) return;
+  const r = await fetch(urlCompte(kind, id, '/unblock'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const d = await r.json().catch(function(){ return {}; });
+  if(!r.ok) return alert('⚠️ ' + (d.error || 'Réservé au PDG'));
+  alert('✅ ' + nom + ' débloqué.' + (kind === 'pro' ? '\nIl peut rallumer son téléphone et recevoir des missions.' : ''));
+  chargerCodesAcces(true); if(typeof loadAll === 'function') loadAll();
+}
+async function supprimerCompte(kind, id, nom){
+  const motif = prompt('🗑️ SUPPRIMER ' + nom + ' (' + (kind === 'pro' ? 'professionnel' : 'client') + ')\n\nCe qui va se passer :\n• les missions en cours sont arrêtées\n• le compte part à la CORBEILLE (récupérable par vous)\n\nMotif (tracé pour vous) :', 'Non-respect des consignes KLEAN');
+  if(motif === null) return;
+  if(!confirm('Confirmer la suppression de ' + nom + ' ?')) return;
+  const r = await fetch(urlCompte(kind, id, ''), { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ motif: motif }) });
+  const d = await r.json().catch(function(){ return {}; });
+  if(!r.ok) return alert('⚠️ ' + (d.error || 'Action impossible'));
+  alert('🗑️ ' + nom + ' supprimé.\nSon compte est dans « ♻️ Comptes supprimés » si vous voulez le ramener (avec ses missions).');
+  chargerCodesAcces(true); if(typeof loadAll === 'function') loadAll();
+}
+/* 📜 Toutes les missions d'un compte (même anciennes, même après suppression) */
+async function voirMissionsCompte(kind, id, nom){
+  const w = document.getElementById('win-missions');
+  if(!w) return;
+  w.style.display = 'block';
+  document.getElementById('win-mis-titre').textContent = '📜 ' + (kind === 'pro' ? 'Missions de ' : 'Anciennes missions de ') + (nom || '');
+  document.getElementById('win-mis-stats').textContent = 'Chargement…';
+  document.getElementById('win-mis-list').innerHTML = '';
+  let d = {};
+  try{
+    const u = (kind === 'pro' ? '/api/admin/missions-pro?id=' : '/api/admin/missions-client?id=') + encodeURIComponent(id);
+    const r = await fetch(u, { cache: 'no-store' });
+    d = await r.json().catch(function(){ return {}; });
+    if(!r.ok) throw new Error(d.error || 'erreur');
+  }catch(e){
+    document.getElementById('win-mis-stats').textContent = 'Impossible de charger les missions.';
+    return;
+  }
+  const ST = { pending: ['⏳', 'En diffusion'], accepted: ['✅', 'Acceptée'], enroute: ['🛵', 'En route'], arrive: ['📍', 'Arrivé'], encours: ['🧽', 'En cours'], terminee: ['🏁', 'Terminée'], annulee: ['✕', 'Annulée'] };
+  document.getElementById('win-mis-stats').innerHTML = (d.total || 0) + ' mission(s) · ✅ ' + (d.terminees || 0) + ' terminée(s) · <span style="color:var(--red)">' + (d.annulees || 0) + ' annulée(s)</span> · 💰 ' + fmt(kind === 'pro' ? (d.ca || 0) : (d.depense || 0))
+    + (d.derniere ? ('<br>🕒 Dernière : ' + String(d.derniere).slice(0, 16).replace('T', ' · ')) : '');
+  const el = document.getElementById('win-mis-list');
+  if(!(d.missions || []).length){ el.innerHTML = '<div style="color:var(--muted);font-size:12.5px;padding:10px 0">Aucune mission pour ce compte.</div>'; return; }
+  el.innerHTML = d.missions.map(function(m){
+    const st = ST[m.status] || ['•', m.status];
+    const qui = kind === 'pro' ? ('👤 ' + echa(m.client || 'client') + (m.clientTel ? ' · ' + echa(m.clientTel) : '')) : (m.pro ? ('🧑\u200d💼 ' + echa(m.pro)) : '🧑\u200d💼 pro non encore pris');
+    return '<div style="padding:9px 0;border-bottom:1px solid var(--line)">'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+      + '<b style="font-size:13px">' + st[0] + ' ' + echa(m.serviceNom || m.service) + '</b>'
+      + '<span style="font-size:11.5px;font-weight:900;color:' + (m.status === 'terminee' ? 'var(--p)' : (m.status === 'annulee' ? 'var(--red)' : 'var(--amber)')) + '">' + st[1] + '</span>'
+      + '<b style="margin-left:auto;font-size:13px">' + fmt(m.prixTotal || 0) + '</b></div>'
+      + '<small style="color:var(--muted)">#' + echa(m.id) + ' · ' + String(m.at || '').slice(0, 16).replace('T', ' · ')
+      + (m.quartier ? (' · 📍 ' + echa(m.quartier)) : '') + (m.ville ? (' · 🏙️ ' + echa(m.ville)) : '') + '</small><br>'
+      + '<small>' + qui + (m.note ? (' · ⭐ ' + m.note + '/5') : '') + (m.motifAnnulation ? (' · <span style="color:var(--red)">motif : ' + echa(m.motifAnnulation) + '</span>') : '') + '</small>'
+      + '</div>';
+  }).join('');
+}
+function fermerMissionsClient(){
+  const w = document.getElementById('win-missions');
+  if(w) w.style.display = 'none';
+}
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape'){ fermerFenetreComptes(); fermerMissionsClient(); } });
+</script>
+
 </body>
 </html>

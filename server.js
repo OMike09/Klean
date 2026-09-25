@@ -436,7 +436,11 @@ function agentHasService(ag, svc) {
   return list.includes(svc);
 }
 function reachKm() {
-  return (db.config && typeof db.config.reachKm === 'number') ? db.config.reachKm : 15;
+  const n = db.config && typeof db.config.reachKm === 'number' ? db.config.reachKm : 15;
+  return Math.max(1, Math.min(800, n));
+}
+function gpsNationOn() {
+  return !!(db.config && db.config.gpsNationOn);
 }
 function agentHasGps(ag) {
   return !!(ag && ag.pos && typeof ag.pos.lat === 'number' && typeof ag.pos.lng === 'number');
@@ -448,7 +452,11 @@ function rankPro(m, ag) {
   if (gps && typeof m.lat === 'number' && typeof m.lng === 'number') {
     dist = Math.round(haversineKm(m.lat, m.lng, ag.pos.lat, ag.pos.lng) * 10) / 10;
   }
-  const inReach = gps && dist != null && dist <= reachKm();
+  const rk = reachKm();
+  const nation = gpsNationOn();
+  const inReach = nation
+    ? (gps && dist != null ? dist <= rk : true)
+    : (gps && dist != null && dist <= rk);
   let ring = 9;
   if (same && inReach) ring = 1;
   else if (same && gps) ring = 2;
@@ -456,7 +464,7 @@ function rankPro(m, ag) {
   else if (!same && inReach) ring = 4;
   else if (!same && gps) ring = 5;
   else ring = 6;
-  return { same, gps, dist, inReach, ring, mode: gps ? 'gps' : 'appel' };
+  return { same, gps, dist, inReach, ring, mode: gps ? 'gps' : 'appel', reachKm: rk, nation };
 }
 function missionTargets(m) {
   /* Partout en CI, métier uniquement. Classement : GPS proche → même ville → ailleurs. */
@@ -761,7 +769,7 @@ const server = http.createServer(async (req, res) => {
     };
     const cli = findClientByToken(req);   // 👤 mission rattachée au compte client
     if (!cli) return sendJson(res, 401, { error: 'Inscription requise : créez votre compte client gratuit pour réserver' });
-    if (cli.blocked) return sendJson(res, 403, { error: 'Compte bloqué par le gestionnaire — contactez le support' });
+    if (cli.blocked) return sendJson(res, 403, { error: 'Compte bloqué' + (cli.blockReason ? ' — motif : ' + cli.blockReason : '') + ' · Contactez Klean-Service', blocked: true });
     m.clientId = cli.id;
     const actives = db.missions.filter(x => x.clientId === cli.id && !['terminee', 'annulee'].includes(x.status)).length;
     if (actives >= 3) return sendJson(res, 409, { error: 'Maximum 3 missions actives en même temps' });
@@ -945,13 +953,64 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/clients/login' && req.method === 'POST') {
+    const ipc = req.socket.remoteAddress || '?';
+    const rcc = loginTries.get(ipc + '|cli') || { n: 0, t: 0 };
+    if (rcc.n >= 10 && Date.now() - rcc.t < 600000) return sendJson(res, 429, { error: 'Trop d’essais — patientez 10 minutes' });
     const b = await readBody(req);
     const tel = String(b.tel || '').replace(/\D/g, '');
     const cl = db.clients.find(x => x.tel === tel);
-    if (!cl || hashPassword(cl.salt, b.password || '') !== cl.passHash)
-      return sendJson(res, 401, { error: 'Téléphone ou mot de passe incorrect' });
-    if (cl.blocked) return sendJson(res, 403, { error: 'Compte bloqué par le gestionnaire — contactez le support' });
+    if (cl && cl.blocked) return sendJson(res, 403, { error: 'Compte bloqué' + (cl.blockReason ? ' — motif : ' + cl.blockReason : '') + ' · Contactez Klean-Service', blocked: true });
+    const saisi = String(b.password || '').replace(/\s/g, '');
+    let bon = !!(cl && hashPassword(cl.salt, b.password || '') === cl.passHash);
+    if (!bon && cl && cl.codeAcces && /^\d{4,8}$/.test(saisi) && saisi === String(cl.codeAcces)) bon = true; // 🎟️ connexion par code d'accès
+    if (!bon) {
+      loginTries.set(ipc + '|cli', { n: rcc.n + 1, t: rcc.t || Date.now() });
+      return sendJson(res, 401, { error: 'Téléphone, mot de passe ou code d’accès incorrect' });
+    }
+    loginTries.delete(ipc + '|cli');
+    if (cl.blocked) return sendJson(res, 403, { error: 'Compte bloqué' + (cl.blockReason ? ' — motif : ' + cl.blockReason : '') + ' · Contactez Klean-Service', blocked: true });
     return sendJson(res, 200, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom, quartier: cl.quartier, ville: cl.ville || '', mail: cl.mail || '', photo: cl.photo || '' });
+  }
+
+  /* 📜 MES ANCIENNES MISSIONS — le client retrouve tout son historique, sur n'importe quel téléphone
+     (avant, l'historique vivait seulement dans le navigateur : réinstallation = tout perdu) */
+  if (p === '/api/clients/missions' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous pour retrouver vos anciennes missions', needLogin: true });
+    const tel = String(cli.tel || '').replace(/\D/g, '');
+    const miennes = db.missions.filter(m =>
+      m.clientId === cli.id ||
+      (tel && m.client && String(m.client.tel || '').replace(/\D/g, '') === tel));
+    const liste = miennes.slice()
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .slice(0, 200)
+      .map(m => {
+        const ag = m.agentId ? db.agents.find(a => a.id === m.agentId) : null;
+        return {
+          id: m.id, service: m.service, serviceNom: SVC_NAMES[m.service] || m.service,
+          status: m.status, pro: ag ? ag.nom : '', proTel: ag ? String(ag.tel1 || ag.tel || '') : '',
+          date: m.date || '', time: m.time || '', quartier: m.quartier || '', ville: m.ville || '',
+          pieces: m.pieces || 0, prixTotal: m.prixTotal || 0, paiement: m.paiement || 'cash',
+          note: m.note || 0, at: m.createdAt || '', fin: m.finishedAt || '',
+          motifAnnulation: m.cancelReason || '', devis: !!m.quote
+        };
+      });
+    const terminees = liste.filter(m => m.status === 'terminee');
+    return sendJson(res, 200, {
+      ok: true, missions: liste, total: liste.length, terminees: terminees.length,
+      depense: terminees.reduce((s, m) => s + (m.prixTotal || 0), 0),
+      blocked: !!cli.blocked, blockReason: cli.blockReason || ''
+    });
+  }
+
+  /* 👤 Sa fiche + état du compte (bloqué ou non, avec le motif) — GET /api/clients/me */
+  if (p === '/api/clients/me' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Session requise', needLogin: true });
+    return sendJson(res, 200, {
+      ok: true, nom: cli.nom, tel: cli.tel, quartier: cli.quartier || '', ville: cli.ville || '',
+      mail: cli.mail || '', photo: cli.photo || '', blocked: !!cli.blocked, blockReason: cli.blockReason || ''
+    });
   }
 
   /* ✏️ Compléter sa fiche (quartier, nom) — PUT /api/clients/me (jeton) */
@@ -1229,10 +1288,116 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { clients: clients.slice().reverse(), agents: agents.slice().reverse(), canModerate: isPdg(req) });
   }
 
+  /* --- 📜 Anciennes missions d'un client (PDG / gestionnaires) --- */
+  if (p === '/api/admin/missions-client' && req.method === 'GET') {
+    const cid = String(url.searchParams.get('id') || '').trim();
+    const ctel = String(url.searchParams.get('tel') || '').replace(/\D/g, '');
+    let nom = '', id = cid;
+    if (cid) { const cl = db.clients.find(c => c.id === cid); if (cl) nom = cl.nom; }
+    if (!id && ctel) { const cl = db.clients.find(c => String(c.tel || '').replace(/\D/g, '') === ctel); if (cl) { id = cl.id; nom = cl.nom; } }
+    const liste = db.missions.filter(m =>
+      (id && m.clientId === id) ||
+      (ctel && m.client && String(m.client.tel || '').replace(/\D/g, '') === ctel))
+      .slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .slice(0, 300)
+      .map(m => {
+        const ag = m.agentId ? db.agents.find(a => a.id === m.agentId) : null;
+        return {
+          id: m.id, service: m.service, serviceNom: SVC_NAMES[m.service] || m.service, status: m.status,
+          pro: ag ? ag.nom : '', proTel: ag ? String(ag.tel1 || ag.tel || '') : '',
+          date: m.date || '', time: m.time || '', quartier: m.quartier || '', ville: m.ville || '',
+          pieces: m.pieces || 0, prixTotal: m.prixTotal || 0, note: m.note || 0,
+          at: m.createdAt || '', fin: m.finishedAt || '', motifAnnulation: m.cancelReason || '',
+          telMission: (m.client && m.client.tel) || ''
+        };
+      });
+    const fin = liste.filter(m => m.status === 'terminee');
+    return sendJson(res, 200, {
+      ok: true, nom: nom || (liste[0] && liste[0].telMission) || '', id,
+      missions: liste, total: liste.length, terminees: fin.length,
+      annulees: liste.filter(m => m.status === 'annulee').length,
+      depense: fin.reduce((x, m) => x + (m.prixTotal || 0), 0),
+      derniere: (liste[0] || {}).at || ''
+    });
+  }
+
+  /* --- 📜 Missions d'un professionnel (PDG / gestionnaires) --- */
+  if (p === '/api/admin/missions-pro' && req.method === 'GET') {
+    const pid = String(url.searchParams.get('id') || '').trim();
+    const pro = db.agents.find(a => a.id === pid);
+    const liste = db.missions.filter(m => m.agentId === pid)
+      .slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .slice(0, 300)
+      .map(m => ({
+        id: m.id, service: m.service, serviceNom: SVC_NAMES[m.service] || m.service, status: m.status,
+        client: (m.client && m.client.nom) || '', clientTel: (m.client && m.client.tel) || '',
+        date: m.date || '', time: m.time || '', quartier: m.quartier || '', ville: m.ville || '',
+        prixTotal: m.prixTotal || 0, note: m.note || 0, at: m.createdAt || '', fin: m.finishedAt || ''
+      }));
+    const fin = liste.filter(m => m.status === 'terminee');
+    return sendJson(res, 200, {
+      ok: true, nom: pro ? pro.nom : '', missions: liste, total: liste.length,
+      terminees: fin.length, annulees: liste.filter(m => m.status === 'annulee').length,
+      ca: fin.reduce((x, m) => x + (m.prixTotal || 0), 0), derniere: (liste[0] || {}).at || ''
+    });
+  }
+
+  /* --- 🎟️ Codes d'accès : liste + remise d'un nouveau code (PDG / gestionnaires) --- */
+  if (p === '/api/admin/acces' && req.method === 'GET') {
+    const clients = db.clients.map(c => {
+      const ms = db.missions.filter(m => m.clientId === c.id);
+      const fin = ms.filter(m => m.status === 'terminee');
+      return { kind: 'client', id: c.id, nom: c.nom, tel: c.tel, ville: c.ville || '', quartier: c.quartier || '', code: c.codeAcces || '', hasPw: !!c.passHash, blocked: !!c.blocked, blockReason: c.blockReason || '', online: clientIsOnline(c), createdAt: c.createdAt || '',
+        missions: ms.length, terminees: fin.length, annulees: ms.filter(m => m.status === 'annulee').length,
+        depense: fin.reduce((x, m) => x + (m.prixTotal || 0), 0),
+        derniere: (ms.slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || {}).createdAt || '' };
+    });
+    const pros = db.agents.map(a => {
+      const ms = db.missions.filter(m => m.agentId === a.id);
+      return { kind: 'pro', id: a.id, nom: a.nom, tel: a.tel1 || a.tel || '', ville: a.villeService || a.ville || '', quartier: a.quartier || '', code: a.codeAcces || a.claimPin || '', enAttenteLiaison: !!(a.claimPin), lie: !a.claimPin, blocked: !!a.blocked, blockReason: a.blockReason || '', online: agentIsOnline(a), createdAt: a.createdAt || '',
+        missions: ms.length, terminees: ms.filter(m => m.status === 'terminee').length, annulees: ms.filter(m => m.status === 'annulee').length,
+        note: Math.round(((agentStats(a) || {}).rating || a.rating || 5) * 10) / 10,
+        derniere: (ms.slice().sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || '')))[0] || {}).createdAt || '' };
+    });
+    return sendJson(res, 200, { ok: true, clients, pros });
+  }
+  if (p === '/api/admin/acces/code' && req.method === 'POST') {
+    const b = await readBody(req);
+    const kind = b.kind === 'pro' ? 'pro' : 'client';
+    const rec = kind === 'pro' ? db.agents.find(a => a.id === b.id) : db.clients.find(c => c.id === b.id);
+    if (!rec) return sendJson(res, 404, { error: 'Compte introuvable' });
+    const tousLesCodes = () => [...db.clients.map(x => x.codeAcces), ...db.agents.map(x => x.codeAcces || x.claimPin)].filter(Boolean).map(String);
+    let code = String(b.code || '').replace(/\D/g, '').slice(0, 8);
+    if (code && code.length < 4) return sendJson(res, 400, { error: 'Le code d’accès doit faire 4 à 8 chiffres' });
+    if (!code) { do { code = String(Math.floor(100000 + Math.random() * 900000)); } while (tousLesCodes().includes(code)); }
+    else if (tousLesCodes().includes(code) && String(rec.codeAcces || rec.claimPin || '') !== code)
+      return sendJson(res, 409, { error: 'Ce code est déjà utilisé par un autre compte — choisissez-en un autre' });
+    const out = { ok: true, kind, id: rec.id, nom: rec.nom, tel: kind === 'pro' ? (rec.tel1 || rec.tel || '') : rec.tel, code };
+    if (kind === 'pro') {
+      rec.codeAcces = code; rec.claimPin = code;
+      (rec.hist = rec.hist || []).push({ at: Date.now(), by: act(req), ev: '🎟️ Nouveau code d’accès remis par ' + act(req) });
+    } else rec.codeAcces = code;
+    if (b.password) {
+      const perr = validPassword(b.password);
+      if (perr) return sendJson(res, 400, { error: 'Mot de passe faible : ' + perr });
+      const salt = crypto.randomBytes(12).toString('hex');
+      rec.salt = salt; rec.passHash = hashPassword(salt, b.password); out.password = b.password;
+    } else if (b.nouveauMdp) {
+      const pw = 'Klean-' + Math.floor(1000 + Math.random() * 9000) + '!';
+      const salt = crypto.randomBytes(12).toString('hex');
+      rec.salt = salt; rec.passHash = hashPassword(salt, pw); out.password = pw; out.passwordGenere = true;
+    }
+    saveDb();
+    auditLog('code_acces_remis', { type: kind, nom: rec.nom, tel: out.tel, par: act(req) });
+    emitAdmin('codes', '🎟️ Code d’accès remis par ' + act(req) + ' — ' + (kind === 'pro' ? 'pro' : 'client') + ' ' + rec.nom);
+    return sendJson(res, 200, out);
+  }
+
   /* --- Admin : dossiers de candidature --- */
   if (p === '/api/config') return sendJson(res, 200, {
     commission: (db.config && db.config.commission) || 25,
-    reachKm: (db.config && typeof db.config.reachKm === 'number') ? db.config.reachKm : 15,
+    reachKm: reachKm(),
+    gpsNationOn: gpsNationOn(),
     payDest: (db.config && db.config.hide) ? { hide: true } : ((db.config && db.config.payDest) || {}),
     hidePay: !!(db.config && db.config.payDest && db.config.payDest.hide),
     cities: db.cities || [],
@@ -1333,13 +1498,13 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const tel = String(b.tel || '').replace(/\D/g, '');
     const pin = String(b.pin || '').trim();
-    const ag = db.agents.find(a => String(a.tel1 || '').replace(/\D/g, '') === tel && a.claimPin && a.claimPin === pin && (a.status || 'approved') === 'approved');
+    const ag = db.agents.find(a => String(a.tel1 || '').replace(/\D/g, '') === tel && ((a.codeAcces && a.codeAcces === pin) || (a.claimPin && a.claimPin === pin)) && (a.status || 'approved') === 'approved');
     if (!ag) {
       loginTries.set(ip + '|claim', { n: rc.n + 1, t: rc.t || Date.now() });
       return sendJson(res, 401, { error: 'Numéro ou code incorrect — vérifiez avec le gestionnaire' });
     }
     loginTries.delete(ip + '|claim');
-    delete ag.claimPin; // 🔒 usage unique
+    if (ag.claimPin && ag.claimPin === pin) delete ag.claimPin; // 🔒 le code à usage unique s'efface, le code d'accès durable reste
     ag.claimedAt = nowISO();
     (ag.hist = ag.hist || []).push({ at: Date.now(), by: ag.nom, ev: '📱 Compte lié au téléphone du professionnel' });
     saveDb();
@@ -1349,7 +1514,9 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/agents/login' && req.method === 'POST') {
     const b = await readBody(req);
     const tel = String(b.tel || '').replace(/\D/g, '');
-    const ag = db.agents.find(a => String(a.tel1 || a.tel || '').replace(/\D/g, '') === tel && (a.status || 'approved') === 'approved' && !a.blocked);
+    const agTrouve = db.agents.find(a => String(a.tel1 || a.tel || '').replace(/\D/g, '') === tel && (a.status || 'approved') === 'approved');
+    if (agTrouve && agTrouve.blocked) return sendJson(res, 403, { error: 'Compte bloqué' + (agTrouve.blockReason ? ' — motif : ' + agTrouve.blockReason : '') + ' · Contactez Klean-Service', blocked: true });
+    const ag = (agTrouve && !agTrouve.blocked) ? agTrouve : null;
     if (!ag || !ag.passHash || hashPassword(ag.salt || '', b.password || '') !== ag.passHash)
       return sendJson(res, 401, { error: 'Téléphone ou mot de passe incorrect' });
     return sendJson(res, 200, { ok: true, agentId: ag.id, nom: ag.nom });
@@ -1410,13 +1577,34 @@ const server = http.createServer(async (req, res) => {
     if (isNaN(cc) || cc < 0 || cc > 50) return sendJson(res, 400, { error: 'Taux de commission entre 0 et 50 %' });
     db.config = db.config || {}; db.config.commission = Math.round(cc * 10) / 10; db.config.updatedAt = nowISO();
     if (b2.reachKm !== undefined && !isNaN(parseFloat(b2.reachKm))) {
-      db.config.reachKm = Math.max(1, Math.min(80, Math.round(parseFloat(b2.reachKm))));
+      db.config.reachKm = Math.max(1, Math.min(800, Math.round(parseFloat(b2.reachKm))));
       auditLog('rayon_regle', { nouveau: db.config.reachKm, par: act(req) });
+    }
+    if (b2.gpsNationOn !== undefined) {
+      db.config.gpsNationOn = !!b2.gpsNationOn;
+      auditLog('gps_nation', { on: db.config.gpsNationOn, km: db.config.reachKm, par: act(req) });
     }
     auditLog('commission_modifiee', { nouveau: db.config.commission, par: act(req) });
     saveDb();
-    emitAdmin('admin', `⚙️ Commission plateforme réglée à ${db.config.commission} %`);
-    return sendJson(res, 200, { ok: true, commission: db.config.commission });
+    emitAdmin('admin', `⚙️ Commission ${db.config.commission} % · rayon ${reachKm()} km · territoire ${gpsNationOn() ? 'ON' : 'off'}`);
+    return sendJson(res, 200, { ok: true, commission: db.config.commission, reachKm: reachKm(), gpsNationOn: gpsNationOn() });
+  }
+  if (p === '/api/admin/gps-nation' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    db.config = db.config || {};
+    if (b.reachKm !== undefined && !isNaN(parseFloat(b.reachKm))) {
+      db.config.reachKm = Math.max(1, Math.min(800, Math.round(parseFloat(b.reachKm))));
+    }
+    if (b.on !== undefined) db.config.gpsNationOn = !!b.on;
+    else db.config.gpsNationOn = true;
+    db.config.updatedAt = nowISO();
+    saveDb();
+    auditLog('gps_nation', { on: gpsNationOn(), km: reachKm(), par: act(req) });
+    emitAdmin('admin', gpsNationOn()
+      ? ('📡 GPS Côte d’Ivoire ACTIVÉ — rayon ' + reachKm() + ' km, tout le monde peut se croiser')
+      : '⚪ GPS territoire coupé');
+    return sendJson(res, 200, { ok: true, reachKm: reachKm(), gpsNationOn: gpsNationOn() });
   }
 
   /* --- 🔒 Pouvoirs du PDG : bloquer / débloquer / supprimer un professionnel --- */
@@ -1424,19 +1612,21 @@ const server = http.createServer(async (req, res) => {
   const aBlock = p.match(/^\/api\/admin\/agents\/(.+)\/block$/);
   if (aBlock && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
+    const bB = await readBody(req);
+    const motifP = String(bB.motif || bB.reason || '').trim().slice(0, 200);
     const ag = db.agents.find(a => a.id === aBlock[1]); if (!ag) return sendJson(res, 404, {});
-    ag.blocked = true; ag.blockedAt = nowISO(); ag.online = false; saveDb(); kickOut(ag.id);
-    (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'bloque' });
-    auditLog('pro_bloque', { pro: ag.nom, id: ag.id });
-    emitAdmin('admin', `🔒 ${ag.nom} bloqué — hors ligne, ne reçoit plus aucune demande`);
+    ag.blocked = true; ag.blockedAt = nowISO(); ag.online = false; if (motifP) ag.blockReason = motifP; saveDb(); kickOut(ag.id);
+    (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'bloque', motif: motifP });
+    auditLog('pro_bloque', { pro: ag.nom, id: ag.id, motif: motifP });
+    emitAdmin('admin', `🔒 ${ag.nom} bloqué${motifP ? ' — motif : ' + motifP : ''} — hors ligne, ne reçoit plus aucune demande`);
     console.log(`🔒 Professionnel bloqué : ${ag.nom}`);
-    return sendJson(res, 200, { ok: true });
+    return sendJson(res, 200, { ok: true, blockReason: ag.blockReason || '' });
   }
   const aUnblock = p.match(/^\/api\/admin\/agents\/(.+)\/unblock$/);
   if (aUnblock && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
     const ag = db.agents.find(a => a.id === aUnblock[1]); if (!ag) return sendJson(res, 404, {});
-    ag.blocked = false; delete ag.blockedAt; saveDb();
+    ag.blocked = false; delete ag.blockedAt; delete ag.blockReason; saveDb();
     (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'debloque' });
     auditLog('pro_debloque', { pro: ag.nom, id: ag.id });
     emitAdmin('admin', `✅ ${ag.nom} débloqué — à nouveau éligible`);
@@ -1449,6 +1639,7 @@ const server = http.createServer(async (req, res) => {
     const busy = db.missions.some(m => m.agentId === ag.id && ['accepted', 'enroute', 'arrive', 'encours'].includes(m.status));
     if (busy) return sendJson(res, 409, { error: 'Mission en cours : bloquez ce professionnel puis supprimez-le une fois la mission terminée' });
     kickOut(ag.id);
+    db.missions.forEach(m => { if (m.agentId === ag.id && ['accepted', 'enroute', 'arrive', 'encours'].includes(m.status)) { m.status = 'pending'; m.agentId = null; m.cancelReason = 'pro supprime'; } });
     trashPush('agent', ag);
     db.agents = db.agents.filter(a => a.id !== ag.id); saveDb();
     auditLog('pro_supprime', { pro: ag.nom, id: aDel[1] });
@@ -1460,23 +1651,26 @@ const server = http.createServer(async (req, res) => {
   const cBlock = p.match(/^\/api\/admin\/clients\/(.+)\/block$/);
   if (cBlock && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
+    const bC = await readBody(req);
+    const motifC = String(bC.motif || bC.reason || '').trim().slice(0, 200);
     const cl = db.clients.find(c => c.id === cBlock[1]); if (!cl) return sendJson(res, 404, {});
-    cl.blocked = true; cl.blockedAt = nowISO(); saveDb();
-    auditLog('client_bloque', { client: cl.nom, id: cl.id });
-    emitAdmin('admin', `🔒 Client ${cl.nom} bloqué — ne peut plus passer de demandes`);
-    return sendJson(res, 200, { ok: true });
+    cl.blocked = true; cl.blockedAt = nowISO(); if (motifC) cl.blockReason = motifC; saveDb();
+    auditLog('client_bloque', { client: cl.nom, id: cl.id, motif: motifC });
+    emitAdmin('admin', `🔒 Client ${cl.nom} bloqué${motifC ? ' — motif : ' + motifC : ''} — ne peut plus passer de demandes`);
+    return sendJson(res, 200, { ok: true, blockReason: cl.blockReason || '' });
   }
   const cUnblock = p.match(/^\/api\/admin\/clients\/(.+)\/unblock$/);
   if (cUnblock && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
     const cl = db.clients.find(c => c.id === cUnblock[1]); if (!cl) return sendJson(res, 404, {});
-    cl.blocked = false; delete cl.blockedAt; saveDb();
+    cl.blocked = false; delete cl.blockedAt; delete cl.blockReason; saveDb();
     auditLog('client_debloque', { client: cl.nom, id: cl.id });
     emitAdmin('admin', `✅ Client ${cl.nom} débloqué`);
     return sendJson(res, 200, { ok: true });
   }
   const cDel = p.match(/^\/api\/admin\/clients\/(.+)$/);
   if (cDel && req.method === 'DELETE') {
+    if (!pdgOnly(req, res)) return;
     const cl = db.clients.find(c => c.id === cDel[1]); if (!cl) return sendJson(res, 404, {});
     const busy = db.missions.some(m => m.clientId === cl.id && ['accepted', 'enroute', 'arrive', 'encours'].includes(m.status));
     if (busy) return sendJson(res, 409, { error: 'Mission en cours pour ce client : bloquez-le d’abord, supprimez-le après la fin' });
@@ -1670,13 +1864,19 @@ const server = http.createServer(async (req, res) => {
     if (!pw) { pw = 'Klean-' + Math.floor(1000 + Math.random() * 9000) + '!'; gen = true; }
     const perr = validPassword(pw);
     if (perr) return sendJson(res, 400, { error: 'Mot de passe faible : ' + perr });
+    /* 🎟️ Code d'accès (4 à 8 chiffres) : donné par le PDG ou tiré au hasard — connexion rapide par téléphone + code */
+    let code = String(b.pin || b.code || '').replace(/\D/g, '').slice(0, 8);
+    if (code && code.length < 4) return sendJson(res, 400, { error: 'Le code d’accès doit faire 4 à 8 chiffres' });
+    const codePris = c => [...db.clients.map(x => x.codeAcces), ...db.agents.map(x => x.codeAcces || x.claimPin)].filter(Boolean).map(String).includes(c);
+    if (!code) { do { code = String(Math.floor(100000 + Math.random() * 900000)); } while (codePris(code)); }
+    if (codePris(code)) return sendJson(res, 409, { error: 'Ce code est déjà utilisé par un autre compte — changez-en un autre' });
     const salt = crypto.randomBytes(12).toString('hex');
     const fid = fieldIdentity(req);
-    const cl = { id: uid('CL'), nom, tel, quartier: String(b.quartier || '').trim(), ville: String(b.ville || '').trim().slice(0, 60), mail: String(b.mail || '').trim().slice(0, 80), salt, passHash: hashPassword(salt, pw), createdAt: nowISO(), createdBy: act(req), createdById: actorId(req) || (fid && fid.id), createdByGestId: fid ? fid.gestId : (hqIdentity(req) && hqIdentity(req).role === 'gest' ? hqIdentity(req).id : null) };
+    const cl = { id: uid('CL'), nom, tel, quartier: String(b.quartier || '').trim(), ville: String(b.ville || '').trim().slice(0, 60), mail: String(b.mail || '').trim().slice(0, 80), salt, passHash: hashPassword(salt, pw), codeAcces: code, createdAt: nowISO(), createdBy: act(req), createdById: actorId(req) || (fid && fid.id), createdByGestId: fid ? fid.gestId : (hqIdentity(req) && hqIdentity(req).role === 'gest' ? hqIdentity(req).id : null) };
     db.clients.push(cl); saveDb();
     auditLog('client_cree_hq', { nom, tel, par: act(req) });
     emitAdmin('client', '👤 Compte client créé par ' + act(req) + ' : ' + nom + ' (' + tel + ')');
-    return sendJson(res, 201, { ok: true, id: cl.id, nom, tel, password: pw, passwordGenere: gen });
+    return sendJson(res, 201, { ok: true, id: cl.id, nom, tel, password: pw, passwordGenere: gen, pin: code, code });
   }
   if (p === '/api/admin/agents/create' && req.method === 'POST') {
     const b = await readBody(req);
@@ -1692,11 +1892,11 @@ const server = http.createServer(async (req, res) => {
     const na = { id: uid('AG'), nom: (prenom + ' ' + nom).trim(), prenom, tel1, tel: tel1, salt, passHash: hashPassword(salt, pw), quartier: String(b.quartier || '').trim(), ville: String(b.ville || '').trim().slice(0, 60), villeService: String(b.villeService || b.ville || '').trim().slice(0, 60), mail: String(b.mail || '').trim().slice(0, 80), adresse: String(b.adresse || '').trim(),
       naissance: '', experience: b.experience || 0, pieceType: '', pieceNum: '', tel2: '', urgenceNom: '', urgenceTel: '', ref1Nom: '', ref1Tel: '',
       services, niveau: '', photo: '', pushSubs: [], hist: [{ at: Date.now(), by: act(req), ev: '🏗️ Compte créé à la main par l’équipe — vérification immédiate' }],
-      status: 'approved', approvedAt: nowISO(), createdAt: nowISO(), createdBy: act(req), createdById: actorId(req), createdByGestId: fieldIdentity(req) ? fieldIdentity(req).gestId : ((hqIdentity(req)||{}).role==='gest' ? hqIdentity(req).id : null), claimPin: pin, online: false, pos: null, kind: 'pro' };
+      status: 'approved', approvedAt: nowISO(), createdAt: nowISO(), createdBy: act(req), createdById: actorId(req), createdByGestId: fieldIdentity(req) ? fieldIdentity(req).gestId : ((hqIdentity(req)||{}).role==='gest' ? hqIdentity(req).id : null), claimPin: pin, codeAcces: pin, online: false, pos: null, kind: 'pro' };
     db.agents.push(na); saveDb();
     auditLog('pro_cree_hq', { pro: na.nom, tel: tel1, par: act(req) });
     emitAdmin('agent', '🏗️ ' + act(req) + ' a créé le professionnel ' + na.nom + ' — code de liaison remis en main');
-    return sendJson(res, 201, { ok: true, id: na.id, nom: na.nom, tel: tel1, pin, password: pw });
+    return sendJson(res, 201, { ok: true, id: na.id, nom: na.nom, tel: tel1, pin, code: pin, password: pw });
   }
 
   const mRea = p.match(/^\/api\/admin\/missions\/(.+)\/reassign$/);
@@ -2458,9 +2658,60 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const rq = (db.accountRequests || []).find(x => x.id === b.id);
     if (!rq) return sendJson(res, 404, {});
-    rq.status = b.accept ? 'acceptee' : 'refusee'; rq.decidedAt = nowISO();
+    rq.status = b.accept ? 'acceptee' : 'refusee'; rq.decidedAt = nowISO(); rq.decidedBy = act(req);
+    let applique = false, detail = '';
+    if (b.accept && rq.targetId) {
+      const motifFinal = String(b.motif || rq.motif || ('Demande de ' + (rq.by || 'gestionnaire'))).slice(0, 200);
+      if (rq.role === 'client') {
+        const cl = db.clients.find(c => c.id === rq.targetId);
+        if (cl) {
+          if (rq.kind === 'block') {
+            cl.blocked = true; cl.blockedAt = nowISO(); cl.blockReason = motifFinal;
+            auditLog('client_bloque', { client: cl.nom, id: cl.id, motif: motifFinal, par: act(req) });
+            emitAdmin('admin', '🔒 ' + cl.nom + ' bloqué (demande de ' + rq.by + ') — motif : ' + motifFinal);
+          } else {
+            const busy = db.missions.some(m => m.clientId === cl.id && ['accepted', 'enroute', 'arrive', 'encours'].includes(m.status));
+            if (busy) { detail = 'Mission en cours : le client a été BLOQUÉ à la place. Supprimez-le après la fin.'; cl.blocked = true; cl.blockedAt = nowISO(); cl.blockReason = motifFinal; }
+            else {
+              db.missions.forEach(m => { if (m.clientId === cl.id && m.status === 'pending') { m.status = 'annulee'; m.cancelReason = 'compte supprime'; } });
+              trashPush('client', cl);
+              db.clients = db.clients.filter(c => c.id !== cl.id);
+              auditLog('client_supprime', { client: cl.nom, id: cl.id, par: act(req), sur: 'demande de ' + rq.by });
+              emitAdmin('admin', '🗑️ Client ' + cl.nom + ' supprimé (demande de ' + rq.by + ')');
+            }
+          }
+          applique = true;
+        }
+      } else {
+        const ag = db.agents.find(a => a.id === rq.targetId);
+        if (ag) {
+          if (rq.kind === 'block') {
+            ag.blocked = true; ag.blockedAt = nowISO(); ag.online = false; ag.blockReason = motifFinal;
+            (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'bloque', motif: motifFinal });
+            try { kickOut(ag.id); } catch (e) {}
+            auditLog('pro_bloque', { pro: ag.nom, id: ag.id, motif: motifFinal, par: act(req) });
+            emitAdmin('admin', '🔒 ' + ag.nom + ' bloqué (demande de ' + rq.by + ') — motif : ' + motifFinal);
+          } else {
+            const busy = db.missions.some(m => m.agentId === ag.id && ['accepted', 'enroute', 'arrive', 'encours'].includes(m.status));
+            if (busy) { detail = 'Mission en cours : le pro a été BLOQUÉ à la place. Supprimez-le après la fin.'; ag.blocked = true; ag.blockedAt = nowISO(); ag.online = false; ag.blockReason = motifFinal; try { kickOut(ag.id); } catch (e) {} }
+            else {
+              trashPush('agent', ag);
+              db.agents = db.agents.filter(a => a.id !== ag.id);
+              auditLog('pro_supprime', { pro: ag.nom, id: ag.id, par: act(req), sur: 'demande de ' + rq.by });
+              emitAdmin('admin', '🗑️ ' + ag.nom + ' supprimé (demande de ' + rq.by + ')');
+            }
+          }
+          applique = true;
+        }
+      }
+    }
     saveDb();
-    return sendJson(res, 200, { ok: true });
+    return sendJson(res, 200, { ok: true, applique, detail, kind: rq.kind, role: rq.role, nom: rq.nom });
+  }
+  if (p === '/api/admin/account-request/voir' && req.method === 'GET') {
+    if (!pdgOnly(req, res)) return;
+    const toutes = (db.accountRequests || []).slice().reverse();
+    return sendJson(res, 200, { ok: true, enAttente: toutes.filter(x => x.status === 'pending'), historique: toutes.filter(x => x.status !== 'pending').slice(0, 30) });
   }
 
   /* ─── Chat PDG ↔ gestionnaires ─── */
@@ -2556,18 +2807,55 @@ const server = http.createServer(async (req, res) => {
   /* ─── Corbeille / récupération ─── */
   if (p === '/api/admin/trash' && req.method === 'GET') {
     if (!pdgOnly(req, res)) return;
-    return sendJson(res, 200, db.trash || []);
+    const enrichi = (db.trash || []).map(t => {
+      let missions = 0;
+      if (t.kind === 'client') missions = db.missions.filter(m => m.clientId === t.data.id && m.status === 'annulee' && m.cancelReason === 'compte supprime').length;
+      else if (t.kind === 'agent') missions = db.missions.filter(m => m.agentId === t.data.id).length;
+      return { id: t.id, kind: t.kind, at: t.at, data: t.data, missions,
+        compte: { clients: db.clients.some(c => c.tel === t.data.tel), pros: db.agents.some(a => String(a.tel1 || a.tel || '').replace(/\D/g, '') === String(t.data.tel || t.data.tel1 || '').replace(/\D/g, '')) } };
+    });
+    return sendJson(res, 200, enrichi);
   }
   if (p === '/api/admin/trash/restore' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
     const b = await readBody(req);
     const t = (db.trash || []).find(x => x.id === b.id);
     if (!t) return sendJson(res, 404, {});
-    if (t.kind === 'client') db.clients.push(t.data);
-    else if (t.kind === 'agent') db.agents.push(t.data);
+    let ramenees = 0, compte = '';
+    if (t.kind === 'client') {
+      db.clients.push(t.data);
+      compte = t.data.nom;
+      /* ♻️ on ramène SES anciennes missions : celles annulées au moment de la suppression repartent en circulation */
+      for (const m of db.missions) {
+        if (m.clientId === t.data.id && m.status === 'annulee' && m.cancelReason === 'compte supprime') {
+          m.status = 'pending';
+          delete m.cancelReason;
+          m.hist = m.hist || [];
+          m.hist.push({ at: Date.now(), by: act(req), ev: '♻️ Compte restauré — mission remise en circulation' });
+          ramenees++;
+          try { broadcastNewMission(m); } catch (e) {}
+        }
+      }
+    } else if (t.kind === 'agent') {
+      db.agents.push(t.data);
+      compte = t.data.nom;
+      /* ♻️ on ramène aussi les missions que ce pro avait en cours avant sa suppression */
+      for (const m of db.missions) {
+        if (m.agentId === t.data.id && ['annulee'].includes(m.status) && m.cancelReason === 'pro supprime') {
+          m.status = 'pending'; m.agentId = null;
+          delete m.cancelReason;
+          m.hist = m.hist || [];
+          m.hist.push({ at: Date.now(), by: act(req), ev: '♻️ Professionnel restauré — mission remise en circulation' });
+          ramenees++;
+          try { broadcastNewMission(m); } catch (e) {}
+        }
+      }
+    } else if (t.kind === 'field') db.fieldAgents = [...(db.fieldAgents || []), t.data];
     db.trash = db.trash.filter(x => x.id !== t.id);
     saveDb();
-    return sendJson(res, 200, { ok: true });
+    auditLog('compte_restaure', { type: t.kind, nom: compte, missions: ramenees, par: act(req) });
+    if (t.kind !== 'field') emitAdmin('admin', `♻️ ${compte} restauré${ramenees ? ' — ' + ramenees + ' mission(s) remise(s) en circulation' : ''}`);
+    return sendJson(res, 200, { ok: true, missionsRamenees: ramenees, nom: compte });
   }
 
   if (p === '/api/stats') {
