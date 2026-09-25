@@ -109,6 +109,7 @@
 (function(){
   function go(){ var s=document.getElementById('hq-splash'); if(!s) return; s.classList.add('hide'); setTimeout(function(){ s.remove(); }, 500); }
   setTimeout(go, 3000);
+  document.getElementById('hq-splash').onclick = go;
 })();
 </script>
 <header>
@@ -277,6 +278,14 @@
     </div>
   </div>
 
+  <div class="panel" style="margin-bottom:14px" id="panel-quotes">
+    <h3>🛠️ Demandes sur mesure <span class="cnt" id="quotes-cnt">0</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;line-height:1.4">Compteur en direct. Cliquez une demande : <b>attribuer à un pro</b> ou <b>proposer un prix</b> au client.</p>
+      <div id="quotes-list"><div class="empty">Aucune demande sur mesure.</div></div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px" id="panel-field-inbox">
     <h3>🧭 Messages agents de terrain <span class="cnt" id="field-in-cnt">—</span></h3>
     <div class="body" style="padding:12px 14px">
@@ -356,7 +365,7 @@
       <small style="color:var(--muted);font-size:11.5px">GPS : seuls les pros dans ce rayon voient la demande en priorité</small>
     </div>
     <div style="padding:0 16px 14px">
-      <button type="button" onclick="openBulleMsg()" style="width:100%;background:rgba(21,201,138,.14);border:1.5px solid rgba(21,201,138,.4);color:var(--p);font-weight:900;padding:11px 12px;border-radius:12px;cursor:pointer;font-family:inherit">💬 Activer / désactiver les messages de la bulle verte</button>
+      <button type="button" onclick="openBulleMsg()" style="width:100%;background:rgba(21,201,138,.14);border:1.5px solid rgba(21,201,138,.4);color:var(--p);font-weight:900;padding:11px 12px;border-radius:12px;cursor:pointer;font-family:inherit">📞 Activer / désactiver Contactez Klean-Service</button>
     </div>
   </div>
 
@@ -380,8 +389,8 @@
       <button onclick="PEOPLE_FILTER='off';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">⚪ Hors ligne</button>
     </div>
     <div style="padding:10px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
-      <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="toggleAcctForm('client')">➕ Créer un compte client</button>
-      <button style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="toggleAcctForm('pro')">➕ Créer un compte pro</button>
+      <button type="button" style="position:relative;z-index:6;pointer-events:auto;background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="event.stopPropagation();toggleAcctForm('client')">➕ Créer un compte client</button>
+      <button type="button" style="position:relative;z-index:6;pointer-events:auto;background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11.5px;font-weight:800;padding:8px 12px;border-radius:9px;cursor:pointer;font-family:inherit" onclick="event.stopPropagation();toggleAcctForm('pro')">➕ Créer un compte pro</button>
     </div>
     <div id="acct-client" style="display:none;padding:10px 16px 0">
       <div style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px 12px">
@@ -410,8 +419,7 @@
           <input id="acp-ville" placeholder="🏙️ Ville (libre)" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
         </div>
         <input id="acp-mail" placeholder="✉️ E-mail (facultatif)" maxlength="60" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-                <select id="acp-service" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <option value="maison">🧹 Ménage maison</option><option value="bureaux">🏢 Bureaux</option><option value="canapes">🛋️ Canapés & tapis</option><option value="vitres">🪟 Vitres</option><option value="grand">🏰 Grand ménage</option><option value="plomberie">🔧 Plomberie</option><option value="electricite">💡 Électricité</option><option value="clim">❄️ Climatisation</option><option value="serrurerie">🔐 Serrurerie</option><option value="jardinage">�;background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <select id="acp-service" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
           <option value="maison">🧹 Ménage maison</option><option value="bureaux">🏢 Bureaux</option><option value="canapes">🛋️ Canapés & tapis</option><option value="vitres">🪟 Vitres</option><option value="grand">🏰 Grand ménage</option><option value="plomberie">🔧 Plomberie</option><option value="electricite">💡 Électricité</option><option value="clim">❄️ Climatisation</option><option value="serrurerie">🔐 Serrurerie</option><option value="jardinage">🌿 Jardinage</option><option value="lavageauto">🚗 Lavage auto</option><option value="bricolage">🛠️ Bricolage</option><option value="demen">📦 Déménagement</option><option value="cuisine">🍽️ Cuisinier</option><option value="cours">📚 Cours à domicile</option><option value="custom">✨ Demande sur mesure</option>
         </select>
         <div style="margin-top:10px;background:rgba(255,138,0,.12);border:1.5px dashed rgba(255,138,0,.5);border-radius:12px;padding:11px 12px">
@@ -583,7 +591,7 @@ async function loadAll(){
     if(cands) renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
     if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
-    loadTeam(); loadAnnonce(); loadQuizHQ(); if(!(document.activeElement && document.activeElement.id==='hqchat-in')) loadHqChat(); loadFields(); loadFieldInbox(); loadVillesHQ(); loadCatalogHQ(); if(ME && ME.role==='pdg') loadShield();
+    loadTeam(); loadAnnonce(); loadQuizHQ(); if(!(document.activeElement && document.activeElement.id==='hqchat-in')) loadHqChat(); loadFields(); loadFieldInbox(); loadQuotesHQ(); loadVillesHQ(); loadCatalogHQ(); if(ME && ME.role==='pdg') loadShield();
     if(!window._qzPoll){ window._qzPoll=setInterval(loadQuizHQ, 1000); }
     if(!window._livePoll){ window._livePoll=setInterval(paintAnnLive, 4000); paintAnnLive(); }
   }catch(e){
@@ -660,6 +668,7 @@ const HQ_GO = [
   ['panel-ca7','📈 CA 7 jours'],
   ['panel-team','👑 Équipe dirigeante'],
   ['panel-ann','📣 Affiche'],
+  ['panel-quotes','🛠️ Sur mesure'],
   ['panel-field-inbox','🧭 Messages terrain'],
   ['panel-support','💬 Support'],
   ['panel-cands','🛡️ Vérification pros'],
@@ -795,11 +804,16 @@ function genererCodePro(){
   if(a) a.value=pin; if(b) b.value=pw;
 }
 function toggleAcctForm(which){
+  const people = document.getElementById('people');
+  if(people) people.classList.remove('folded');
   const c = document.getElementById('acct-client'), p = document.getElementById('acct-pro');
-  const showC = which==='client' && c.style.display==='none';
-  const showP = which==='pro' && p.style.display==='none';
+  if(!c || !p){ alert('Formulaire introuvable — rechargez la page (Ctrl+F5)'); return; }
+  const showC = which==='client' && (c.style.display==='none' || !c.style.display);
+  const showP = which==='pro' && (p.style.display==='none' || !p.style.display);
   c.style.display = showC ? 'block' : 'none';
   p.style.display = showP ? 'block' : 'none';
+  const el = showC ? c : (showP ? p : null);
+  if(el) el.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 async function createClientHQ(){
   const nom=((document.getElementById('acc-nom')||{}).value||'').trim(), tel=((document.getElementById('acc-tel')||{}).value||'').trim();
@@ -882,6 +896,49 @@ function paintFieldMsgs(box, messages){
   }).join('')||'<div class="empty">Aucun message — écrivez-lui.</div>';
   box.scrollTop=box.scrollHeight;
 }
+async function loadQuotesHQ(){
+  try{
+    const d=await fetch('/api/admin/quotes',{cache:'no-store'}).then(r=>r.json());
+    const cnt=document.getElementById('quotes-cnt'); if(cnt) cnt.textContent=(d.open||0)+' ouverte(s) · '+(d.n||0);
+    const box=document.getElementById('quotes-list'); if(!box) return;
+    const list=d.list||[];
+    box.innerHTML=list.length? list.map(x=>{
+      const st=x.status||'';
+      return '<button type="button" onclick="openQuoteCard(\''+x.id+'\')" style="display:block;width:100%;text-align:left;padding:10px 8px;border:none;border-bottom:1px solid var(--line);background:transparent;color:inherit;font:inherit;cursor:pointer"><b>#'+x.n+' · '+(x.client||'?')+'</b> <span class="badge">'+st+'</span><br><small style="color:var(--muted)">'+(x.desc||'').slice(0,90)+' · '+(x.ville||'')+' · budget '+(x.budget||0)+' F'+(x.quotedPrix?(' · proposé '+x.quotedPrix+' F'):'')+'</small></button>';
+    }).join('') : '<div class="empty">Aucune demande sur mesure.</div>';
+  }catch(e){}
+}
+async function openQuoteCard(id){
+  const d=await fetch('/api/admin/quotes',{cache:'no-store'}).then(r=>r.json());
+  const x=(d.list||[]).find(q=>q.id===id); if(!x) return alert('Introuvable');
+  const ags=await fetch('/api/admin/inscrits').then(r=>r.json()).catch(()=>({agents:[]}));
+  const pros=(ags.agents||[]).filter(a=>!a.blocked && (a.status||'approved')==='approved');
+  let m=document.getElementById('quote-modal');
+  if(!m){ m=document.createElement('div'); m.id='quote-modal'; m.style.cssText='position:fixed;inset:0;z-index:96;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:16px'; m.onclick=function(e){ if(e.target===m) m.style.display='none'; }; document.body.appendChild(m); }
+  const photos=(x.photos||[]).map(p=>'<img src="'+p+'" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:10px;margin-right:6px">').join('');
+  m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;max-width:440px;width:100%;max-height:88vh;overflow:auto;padding:14px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><b style="flex:1">🛠️ #'+x.n+' · '+(x.client||'')+'</b><button type="button" onclick="document.getElementById(\'quote-modal\').style.display=\'none\'" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div><p style="font-size:13px;line-height:1.45">'+(x.desc||'')+'</p><div style="margin:8px 0">'+photos+'</div><small style="color:var(--muted)">'+ (x.ville||'')+' · '+(x.quartier||'')+' · '+(x.adresse||'')+' · tél '+(x.tel||'')+' · budget '+(x.budget||0)+' F</small><hr style="border:none;border-top:1px solid var(--line);margin:12px 0"><b style="font-size:13px">💰 Proposer un prix au client</b><div style="display:flex;gap:6px;margin:8px 0"><input id="q-prix" type="number" min="500" placeholder="FCFA" value="'+(x.quotedPrix||x.budget||'')+'" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"><button type="button" class="btn-main" style="flex:none" onclick="quotePrix(\''+x.id+'\')">Envoyer le prix</button></div><b style="font-size:13px">👑 Attribuer à un professionnel</b><select id="q-pro" style="width:100%;margin:8px 0;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit">'+pros.map(a=>'<option value="'+a.id+'">'+(a.nom||'')+' · '+(a.ville||'')+(a.online?' ●':'')+'</option>').join('')+'</select><button type="button" class="btn-main" style="width:100%" onclick="quoteAssign(\''+x.id+'\')">Attribuer maintenant</button></div>';
+  m.style.display='flex';
+}
+async function quotePrix(id){
+  const prix=parseInt((document.getElementById('q-prix')||{}).value,10);
+  if(!prix) return alert('Indiquez un prix');
+  const r=await fetch('/api/admin/quotes/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,prix})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert(d.error||'Impossible');
+  alert('💰 Prix proposé : '+prix.toLocaleString('fr-FR')+' F — le client doit accepter.');
+  document.getElementById('quote-modal').style.display='none'; loadQuotesHQ();
+}
+async function quoteAssign(id){
+  const agentId=(document.getElementById('q-pro')||{}).value;
+  const prix=parseInt((document.getElementById('q-prix')||{}).value,10)||0;
+  if(!agentId) return alert('Choisissez un professionnel');
+  const r=await fetch('/api/admin/quotes/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,agentId,prix})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert(d.error||'Impossible');
+  alert('👑 Mission attribuée.');
+  document.getElementById('quote-modal').style.display='none'; loadQuotesHQ();
+}
+if(!window._qPoll){ window._qPoll=setInterval(loadQuotesHQ, 4000); }
 async function loadFieldInbox(){
   try{
     const d=await fetch('/api/admin/field-chat/inbox',{cache:'no-store'}).then(r=>r.json());
@@ -906,7 +963,8 @@ async function openFieldThread(id, nom){
   let m=document.getElementById('field-thread-modal');
   if(!m){
     m=document.createElement('div'); m.id='field-thread-modal';
-    m.style.cssText='position:fixed;inset:0;z-index:94;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    m.style.cssText='position:fixed;inset:0;z-index:94;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:16px';
+    m.onclick=function(e){ if(e.target===m) closeFieldThread(); };
     document.body.appendChild(m);
   }
   m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:440px;width:100%;max-height:86vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><b style="flex:1" id="field-thread-title">🧭 '+nom+'</b><button type="button" onclick="closeFieldThread()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div><div id="field-thread-msgs" style="flex:1;min-height:200px;max-height:50vh;overflow:auto;margin-bottom:8px"></div><div style="display:flex;gap:6px"><input id="field-thread-in" maxlength="500" placeholder="Répondre à '+nom+'…" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendFieldThread();}"><button type="button" class="btn-main" style="flex:none" onclick="sendFieldThread()">Envoyer</button></div></div>';
@@ -947,7 +1005,7 @@ async function openVues(kind){
   let m=document.getElementById('vues-modal');
   if(!m){
     m=document.createElement('div'); m.id='vues-modal';
-    m.style.cssText='position:fixed;inset:0;z-index:96;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    m.style.cssText='position:fixed;inset:0;z-index:96;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:16px';
     document.body.appendChild(m);
   }
   const list=d.list||[];
@@ -1063,7 +1121,7 @@ function askDecompteWin(onOk){
   let m=document.getElementById('cd-win-modal');
   if(!m){
     m=document.createElement('div'); m.id='cd-win-modal';
-    m.style.cssText='position:fixed;inset:0;z-index:95;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    m.style.cssText='position:fixed;inset:0;z-index:95;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:16px';
     document.body.appendChild(m);
   }
   const def=(document.getElementById('qz-sec')||{}).value||'30';
@@ -1092,7 +1150,8 @@ function openWinChat(nom){
   let m=document.getElementById('win-chat-modal');
   if(!m){
     m=document.createElement('div'); m.id='win-chat-modal';
-    m.style.cssText='position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    m.style.cssText='position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:16px';
+    m.onclick=function(e){ if(e.target===m) closeWinChat(); };
     document.body.appendChild(m);
   }
   m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:420px;width:100%;max-height:86vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><b style="flex:1" id="win-chat-title">🏆 Gagnant</b><button type="button" onclick="viderWinChat()" title="Supprimer la conversation" style="background:#e5484d;border:none;color:#fff;border-radius:9px;padding:7px 12px;font-weight:900;cursor:pointer;font-family:inherit;font-size:14px">🗑 Supprimer</button><button type="button" onclick="closeWinChat()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div><div id="win-chat-msgs" style="flex:1;min-height:180px;max-height:46vh;overflow:auto;margin-bottom:8px"></div><div style="display:flex;gap:6px"><input id="win-chat-in" maxlength="400" placeholder="Écrire au gagnant…" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendWinChat();}"><button type="button" class="btn-main" style="flex:none" onclick="sendWinChat()">Envoyer</button></div></div>';
@@ -1508,10 +1567,10 @@ async function openBulleMsg(){
   let m=document.getElementById('bulle-msg-modal');
   if(!m){
     m=document.createElement('div'); m.id='bulle-msg-modal';
-    m.style.cssText='position:fixed;inset:0;z-index:95;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    m.style.cssText='position:fixed;inset:0;z-index:95;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:16px';
     document.body.appendChild(m);
   }
-  m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;max-width:380px;width:100%;padding:16px"><b style="display:block;margin-bottom:8px">💬 Bulle verte — messages</b><p style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.45">Si vous <b>désactivez</b>, plus personne n’envoie via la bulle 💬. Elle disparaît de l’accueil. Vous pouvez la réactiver ici.</p><div style="display:flex;flex-direction:column;gap:8px"><button type="button" class="btn-main" onclick="setBulleMsg(true)">✅ Activer les envois</button><button type="button" onclick="setBulleMsg(false)" style="background:rgba(255,107,107,.14);border:1.5px solid rgba(255,107,107,.45);color:var(--red);font-weight:900;padding:12px;border-radius:12px;cursor:pointer;font-family:inherit">⛔ Désactiver les envois</button><button type="button" onclick="document.getElementById(\'bulle-msg-modal\').style.display=\'none\'" style="background:var(--card2);border:1px solid var(--line);padding:10px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div></div>';
+  m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;max-width:380px;width:100%;padding:16px"><b style="display:block;margin-bottom:8px">📞 Contactez Klean-Service</b><p style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.45">Si vous <b>désactivez</b>, clients et pros ne peuvent plus écrire. Le bouton reste visible mais bloqué. Vous réactivez ici.</p><div style="display:flex;flex-direction:column;gap:8px"><button type="button" class="btn-main" onclick="setBulleMsg(true)">✅ Activer les échanges</button><button type="button" onclick="setBulleMsg(false)" style="background:rgba(255,107,107,.14);border:1.5px solid rgba(255,107,107,.45);color:var(--red);font-weight:900;padding:12px;border-radius:12px;cursor:pointer;font-family:inherit">⛔ Bloquer les échanges</button><button type="button" onclick="document.getElementById(\'bulle-msg-modal\').style.display=\'none\'" style="background:var(--card2);border:1px solid var(--line);padding:10px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div></div>';
   m.style.display='flex';
 }
 async function setBulleMsg(on){
@@ -1521,7 +1580,7 @@ async function setBulleMsg(on){
   alert(on?'✅ Bulle verte activée — les gens peuvent écrire.':'⛔ Bulle verte coupée — plus d’envoi.');
   const m=document.getElementById('bulle-msg-modal'); if(m) m.style.display='none';
 }
-function saveComm(){
+async function saveComm(){
   const v = parseFloat(document.getElementById('cfg-comm').value);
   if(isNaN(v) || v<0 || v>50) return alert('Entre 0 et 50 %');
   const reach = parseFloat(document.getElementById('cfg-reach') && document.getElementById('cfg-reach').value) || undefined;
@@ -1770,6 +1829,12 @@ async function savePayDest(){
   await fetch('/api/admin/paydest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wave, om:document.getElementById('pay-om').value, moov:document.getElementById('pay-moov').value, hide:document.getElementById('pay-hide').checked})});
   alert('✓ Numéros enregistrés');
 }
+document.addEventListener('keydown', function(e){
+  if(e.key!=='Escape') return;
+  ['quote-modal','field-thread-modal','vues-modal','win-chat-modal','cd-win-modal','bulle-msg-modal','quiz-who-modal','qz-modal'].forEach(function(id){
+    const el=document.getElementById(id); if(el) el.style.display='none';
+  });
+});
 loadAll();
 connectWS();
 setInterval(loadHqChat, 12000);
@@ -1779,7 +1844,7 @@ setInterval(loadAll, 12000); // secours
 /* 🗂️ HQ : volets pliables — le quotidien ouvert, le long refermé */
 .panel > h3{cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .panel > h3 .fold-ic{color:var(--muted);font-size:13px;flex:none;transition:transform .15s}
-.panel.folded > *:not(h3){display:none !important}
+.panel.folded > *:not(h3){display:revert}
 .panel{transition:box-shadow .15s}
 .panel > h3:hover{background:rgba(255,255,255,.02)}
 </style>
@@ -1793,7 +1858,7 @@ setInterval(loadAll, 12000); // secours
   function save(m){ try{ localStorage.setItem(STORE, JSON.stringify(m)); }catch(e){} }
   /* ouvert par défaut : le quotidien — fermé par défaut : tout ce qui est long/archivé */
   const FOLD_BY_DEFAULT = ['équipe dirigeante', "chiffre d'affaires", 'réglages', "journal d'audit", 'journal temps réel', 'professionnels', 'personnes inscrites'];
-  const OPEN_BY_DEFAULT = ['vérification', 'support', 'missions', 'affiche'];
+  const OPEN_BY_DEFAULT = ['vérification', 'support', 'missions', 'affiche', 'sur mesure', 'terrain', 'bouclier'];
   function isFoldByDefault(titre){
     const t = (titre || '').toLowerCase();
     if (OPEN_BY_DEFAULT.some(k => t.includes(k))) return false;
@@ -1804,6 +1869,8 @@ setInterval(loadAll, 12000); // secours
     return 'panel-' + i + '-' + (titre || '').toLowerCase().replace(/[^a-zàâéèêëâôûùç]+/gi, '-').slice(0, 30);
   }
   function refresh(){
+    document.querySelectorAll('.panel.folded').forEach(p => p.classList.remove('folded'));
+    return;
     const mem = load();
     document.querySelectorAll('.panel').forEach((p, i) => {
       const h3 = p.querySelector('h3');
@@ -1814,12 +1881,17 @@ setInterval(loadAll, 12000); // secours
         ic = document.createElement('span');
         ic.className = 'fold-ic';
         h3.appendChild(ic);
-        h3.addEventListener('click', () => {
+        ic.addEventListener('click', (ev) => {
+          ev.stopPropagation();
           const f = !p.classList.contains('folded');
           p.classList.toggle('folded', f);
           const m = load(); m[k] = f; save(m);
           ic.textContent = f ? '▸' : '▾';
           ic.style.transform = f ? 'rotate(-90deg)' : '';
+        });
+        h3.addEventListener('click', (ev) => {
+          if (ev.target.closest('button, a, input, select, label')) return;
+          ic.click();
         });
       }
       const folded = (k in mem) ? mem[k] : isFoldByDefault(h3.textContent || '');

@@ -1130,9 +1130,7 @@ function goClientAccount(){
   showView('view-account', btn, 'client'); renderAccount();
 }
 function openIn1s(fn){
-  if(window._kleanOpenWait) return;
-  window._kleanOpenWait=true;
-  setTimeout(function(){ window._kleanOpenWait=false; try{ fn(); }catch(e){} }, 1000);
+  try{ fn(); }catch(e){}
 }
 function showView(id, btn, navGroup){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
