@@ -34,7 +34,7 @@
   .modebar button{padding:11px 6px;border-radius:10px;font-weight:800;font-size:13.5px;color:var(--pd);background:#fff;border:1.5px solid rgba(194,65,12,.4);box-shadow:0 1px 4px rgba(0,0,0,.05)}
   .modebar button.on{background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-color:var(--pd);box-shadow:0 4px 12px rgba(194,65,12,.35)}
 
-  .view{display:none;min-height:100vh;padding-bottom:96px}
+  .view{display:none;min-height:100vh;padding-bottom:168px}
   .view.active{display:block}
   .hidden{display:none !important}
   .wrap{padding:16px}
@@ -718,8 +718,11 @@
   </div>
 </div>
 
-<div id="aff-bar" class="hidden" style="position:fixed;left:50%;transform:translateX(-50%);width:100%;max-width:480px;bottom:58px;z-index:44;overflow:hidden;white-space:nowrap;background:linear-gradient(90deg,#0a8f5c,#15c98a);color:#04130c;font-weight:900;font-size:17px;padding:11px 0;letter-spacing:.3px;box-shadow:0 -6px 18px rgba(10,143,92,.25)">
-  <div id="aff-track" style="display:inline-block;animation:kleanMarqueeLtr 56s linear infinite"></div>
+<div id="aff-bar" class="hidden" style="position:fixed;left:50%;transform:translateX(-50%);width:100%;max-width:480px;bottom:56px;z-index:44;display:flex;align-items:stretch;background:#0a0a0a;border-top:3px solid #00e676;box-shadow:0 -8px 24px rgba(0,0,0,.45)">
+  <div id="aff-live-tag" style="flex:none;display:flex;align-items:center;justify-content:center;padding:0 12px;background:#00c853;color:#04150c;font-weight:900;font-size:13px;letter-spacing:.8px">INFO</div>
+  <div style="flex:1;overflow:hidden;white-space:nowrap;min-width:0;padding:14px 0">
+    <div id="aff-track" style="display:inline-block;color:#00e676;font-weight:900;font-size:24px;letter-spacing:.6px;line-height:1.2;text-shadow:0 0 10px rgba(0,230,118,.45);animation:kleanMarqueeLtr 50s linear infinite"></div>
+  </div>
 </div>
 <!-- ═══════ NAVS ═══════ -->
 <div class="navbar show" id="nav-client">
@@ -2625,9 +2628,12 @@ function loadAffiche(){
     const a=d.annonce;
     const bar=document.getElementById('aff-bar'), tr=document.getElementById('aff-track');
     if(bar&&tr&&a.message){
+      const tag=document.getElementById('aff-live-tag');
+      const lab={alerte:'URGENT',quiz:'QUIZ',maj:'MAJ',info:'INFO'}[a.type]||'INFO';
+      if(tag) tag.textContent=lab;
       const ic = a.type==='alerte'?'🚨 ': a.type==='quiz'?'🏆 ': a.type==='maj'?'✨ ':'ℹ️ ';
-      const tx = ic + a.message + '            ';
-      tr.textContent = tx + tx;
+      const tx = ic + a.message + '        ·        ';
+      tr.textContent = tx + tx + tx;
       bar.classList.remove('hidden');
     }
     window._lastQuizA=a;
