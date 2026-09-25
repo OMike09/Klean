@@ -381,14 +381,11 @@
 
 </div>
 
-<div id="aff-bar" class="hidden" style="overflow:hidden;white-space:nowrap;background:linear-gradient(90deg,#ffb020,#ff8a00);color:#1a1204;font-weight:900;font-size:22px;padding:16px 0;margin:8px 12px 8px;border-radius:16px;letter-spacing:.4px;line-height:1.25">
-  <div id="aff-track" style="display:inline-block;animation:kleanMarqueeLtr 16s linear infinite"></div>
-</div>
 <div id="home-win-slot" style="display:none;margin:0 12px 8px;text-align:right"></div>
 <div id="aff-react" class="hidden" style="margin:-2px 12px 12px;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
 <div id="quiz-box" class="hidden" style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px 14px 12px;margin:0 12px 12px;position:relative;z-index:30"></div>
 <div id="ad-box" class="hidden" style="margin:0 12px 12px;border-radius:16px;padding:14px;background:linear-gradient(160deg,#1a1208,#2a1a0c);border:1.5px solid rgba(255,176,32,.35);color:#fff"></div>
-<style>@keyframes kleanMarqueeLtr{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}</style>
+<style>@keyframes kleanMarqueeLtr{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}</style>
 
 <!-- ══════════════════ CLIENT : ACCUEIL ══════════════════ -->
 <div class="view active" id="view-home">
@@ -721,6 +718,9 @@
   </div>
 </div>
 
+<div id="aff-bar" class="hidden" style="position:fixed;left:50%;transform:translateX(-50%);width:100%;max-width:480px;bottom:58px;z-index:44;overflow:hidden;white-space:nowrap;background:linear-gradient(90deg,#0a8f5c,#15c98a);color:#04130c;font-weight:900;font-size:17px;padding:11px 0;letter-spacing:.3px;box-shadow:0 -6px 18px rgba(10,143,92,.25)">
+  <div id="aff-track" style="display:inline-block;animation:kleanMarqueeLtr 56s linear infinite"></div>
+</div>
 <!-- ═══════ NAVS ═══════ -->
 <div class="navbar show" id="nav-client">
   <button class="nav-btn on" data-v="view-home" onclick="showView('view-home',this,'client')"><span class="ic">🏠</span><span>Accueil</span></button>
@@ -2626,8 +2626,8 @@ function loadAffiche(){
     const bar=document.getElementById('aff-bar'), tr=document.getElementById('aff-track');
     if(bar&&tr&&a.message){
       const ic = a.type==='alerte'?'🚨 ': a.type==='quiz'?'🏆 ': a.type==='maj'?'✨ ':'ℹ️ ';
-      const tx = ic + a.message + '     ·     ';
-      tr.textContent = tx+tx+tx+tx;
+      const tx = ic + a.message + '            ';
+      tr.textContent = tx + tx;
       bar.classList.remove('hidden');
     }
     window._lastQuizA=a;
