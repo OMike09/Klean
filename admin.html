@@ -228,6 +228,7 @@
         <div id="qz-winners" style="font-size:12px;margin-top:6px;color:var(--p)"></div>
       </div>
       <small id="ann-cur" style="display:block;margin-top:9px;color:var(--muted)">Aucune affiche en cours.</small>
+      <button type="button" onclick="openVues('annonce')" style="margin-top:8px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-family:inherit;width:100%">👁 Ordre des vu(s) — affiche</button>
       <button type="button" onclick="openQuizClicks()" style="margin-top:10px;width:100%;background:rgba(255,138,0,.16);border:1.5px solid rgba(255,138,0,.5);color:#b36b00;font-weight:900;padding:11px 12px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:13.5px">👁 Voir qui a répondu (noms + choix)</button>
       <div id="panel-ads" style="margin-top:14px;background:var(--card2);border-radius:12px;padding:12px">
         <b style="display:block;font-size:13px;margin-bottom:6px">📣 Promo produits d’entreprises (sous le quiz)</b>
@@ -262,6 +263,7 @@
         <button type="button" class="btn-main" style="width:100%" onclick="publierAd()">📣 Publier la promo produit</button>
         <button type="button" onclick="retirerAd()" style="width:100%;margin-top:6px;background:var(--card);border:1px solid var(--line);padding:9px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">✕ Retirer la pub</button>
         <small id="ad-cur" style="display:block;margin-top:8px;color:var(--muted)">Aucune pub produit.</small>
+        <button type="button" onclick="openVues('ad')" style="margin-top:8px;width:100%;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-family:inherit">👁 Ordre des vu(s) — publicité</button>
       </div>
       <div id="field-chat-hq" style="margin-top:12px;background:var(--card2);border-radius:12px;padding:10px">
         <b style="font-size:12.5px">💬 Fil agents de terrain</b>
@@ -870,6 +872,26 @@ async function sendFieldChat(){
   if(!id||!text) return alert('Choisissez un agent et écrivez');
   await fetch('/api/admin/field-chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,text})});
   document.getElementById('fc-txt').value=''; loadFieldChat();
+}
+function fmtHms(iso){
+  if(!iso) return '—';
+  const d=new Date(iso);
+  if(isNaN(d.getTime())) return String(iso);
+  const p=n=>String(n).padStart(2,'0');
+  return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+}
+async function openVues(kind){
+  const d=await fetch('/api/admin/vues?kind='+encodeURIComponent(kind||'annonce'),{cache:'no-store'}).then(r=>r.json()).catch(()=>({}));
+  let m=document.getElementById('vues-modal');
+  if(!m){
+    m=document.createElement('div'); m.id='vues-modal';
+    m.style.cssText='position:fixed;inset:0;z-index:96;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(m);
+  }
+  const list=d.list||[];
+  m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;max-width:440px;width:100%;max-height:86vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><b style="flex:1">👁 Vu(s) — du 1er au dernier</b><button type="button" onclick="document.getElementById(\'vues-modal\').style.display=\'none\'" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div><small style="color:var(--muted);margin-bottom:8px">'+(d.titre||'')+' · '+list.length+' vu(s)</small><div style="overflow:auto;flex:1">'+(list.length?list.map(x=>'<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)"><span style="width:28px;font-weight:900;color:var(--amber)">'+x.n+'</span><div style="flex:1"><b>'+(x.nom||x.who||'?')+'</b><br><small style="color:var(--muted)">'+fmtHms(x.at)+'</small></div></div>').join(''):'<div class="empty">Personne n’a encore vu.</div>')+'</div></div>';
+  m.style.display='flex';
+  m.onclick=function(e){ if(e.target===m) m.style.display='none'; };
 }
 async function loadAnnonce(){
   try{

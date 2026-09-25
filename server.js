@@ -531,6 +531,23 @@ function shieldLog(ip, kind, path, detail, score) {
   if (action !== 'veille') try { saveDb(); } catch (e) {}
   return rec;
 }
+function viewsOrdered(map) {
+  const rows = [];
+  Object.keys(map || {}).forEach(who => {
+    const v = map[who];
+    const at = typeof v === 'string' ? v : (v && v.at);
+    if (!at) return;
+    let nom = (typeof v === 'object' && v.nom) ? v.nom : '';
+    if (!nom) {
+      const cl = (db.clients || []).find(c => ('CL-' + (c.id || c.tel)) === who || c.id === who);
+      const ag = (db.agents || []).find(a => ('AG-' + (a.id || a.tel1 || a.tel)) === who || a.id === who);
+      nom = (cl && cl.nom) || (ag && ag.nom) || who;
+    }
+    rows.push({ who, nom, at });
+  });
+  rows.sort((a, b) => new Date(a.at) - new Date(b.at));
+  return rows.map((x, i) => Object.assign(x, { n: i + 1 }));
+}
 function shieldKickIp(ip) {
   for (const s of [...sockets]) {
     if (s.meta && s.meta.ip === ip) {
@@ -1146,9 +1163,10 @@ const server = http.createServer(async (req, res) => {
     let likes = 0, unlikes = 0;
     Object.values(reacts).forEach(v => { if (v === 1) likes++; else if (v === -1) unlikes++; });
     const whoV = String(url.searchParams.get('who') || '').slice(0, 80);
-    if (an && whoV && (an.type === 'info' || an.type === 'alerte' || an.type === 'maj')) {
+    const nomV = String(url.searchParams.get('nom') || '').slice(0, 40);
+    if (an && whoV && (an.type === 'info' || an.type === 'alerte' || an.type === 'maj' || an.type === 'quiz')) {
       an.views = an.views || {};
-      if (!an.views[whoV]) { an.views[whoV] = nowISO(); saveDb(); }
+      if (!an.views[whoV]) { an.views[whoV] = { at: nowISO(), nom: nomV || whoV }; saveDb(); }
     }
     const nViews = an && an.views ? Object.keys(an.views).length : 0;
     const pub = an ? Object.assign({}, an) : null;
@@ -1390,16 +1408,19 @@ const server = http.createServer(async (req, res) => {
     if (screen === 'client' && ad.hideClient) return sendJson(res, 200, { ad: null });
     if (screen === 'agent' && ad.hideAgent) return sendJson(res, 200, { ad: null });
     const whoV = String(url.searchParams.get('who') || '').slice(0, 80);
+    const nomV = String(url.searchParams.get('nom') || '').slice(0, 40);
     if (whoV) {
       ad.views = ad.views || {};
-      if (!ad.views[whoV]) { ad.views[whoV] = nowISO(); saveDb(); }
+      if (!ad.views[whoV]) { ad.views[whoV] = { at: nowISO(), nom: nomV || whoV }; saveDb(); }
     }
-    return sendJson(res, 200, { ad, views: Object.keys(ad.views || {}).length });
+    const adPub = Object.assign({}, ad);
+    delete adPub.views;
+    return sendJson(res, 200, { ad: adPub, views: Object.keys(ad.views || {}).length });
   }
   if (p === '/api/admin/ads' && req.method === 'GET') {
     if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
     const adA = db.ad || null;
-    return sendJson(res, 200, { ad: adA, views: adA && adA.views ? Object.keys(adA.views).length : 0 });
+    return sendJson(res, 200, { ad: adA ? Object.assign({}, adA, { views: undefined }) : null, views: adA && adA.views ? Object.keys(adA.views).length : 0 });
   }
   if (p === '/api/admin/ads' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
@@ -1429,6 +1450,18 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true });
   }
 
+  if (p === '/api/admin/vues' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const kind = String(url.searchParams.get('kind') || 'annonce');
+    if (kind === 'ad') {
+      const ad = db.ad || null;
+      const list = viewsOrdered(ad && ad.views);
+      return sendJson(res, 200, { ok: true, kind: 'ad', titre: ad ? ((ad.firm || '') + ' — ' + (ad.prod || '')) : 'Pub', list });
+    }
+    const an = db.annonce || null;
+    const list = viewsOrdered(an && an.views);
+    return sendJson(res, 200, { ok: true, kind: 'annonce', titre: an ? (an.message || an.type) : 'Affiche', type: an && an.type, list });
+  }
   if (p === '/api/admin/whoami' && req.method === 'GET') {
     const id = hqIdentity(req);
     return sendJson(res, 200, { role: id.role, nom: id.nom, gestFrozen: !!(db.config && db.config.gestFrozen) });

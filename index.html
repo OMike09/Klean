@@ -941,7 +941,7 @@ function setCity(id, silent){
   if(!silent) toast('📍 '+city.nom+((window._stats&&window._stats.agentsEnLigne!=null)?' — '+window._stats.agentsEnLigne+' professionnel(s) en ligne maintenant':''));
 }
 let _villeTarget=null;
-function cityInfo(){ openVilleFor(null); }
+function cityInfo(){ openIn1s(function(){ openVilleFor(null); }); }
 function openVilleFor(inputId){
   _villeTarget=inputId||null;
   const inp=document.getElementById('city-search'); if(inp) inp.value='';
@@ -1122,6 +1122,11 @@ function goClientAccount(){
   const btn = document.querySelector('#nav-client .nav-btn[data-v="view-account"]');
   showView('view-account', btn, 'client'); renderAccount();
 }
+function openIn1s(fn){
+  if(window._kleanOpenWait) return;
+  window._kleanOpenWait=true;
+  setTimeout(function(){ window._kleanOpenWait=false; try{ fn(); }catch(e){} }, 1000);
+}
 function showView(id, btn, navGroup){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   $('#'+id).classList.add('active');
@@ -1135,10 +1140,12 @@ function showView(id, btn, navGroup){
   if(id==='view-account') renderAccount();
 }
 function startBooking(){
-  if(mission && !['terminee','annulee'].includes(mission.status)) return toast('Une mission est déjà en cours 📍');
-  setMode('client');
-  showView('view-book', $('#nav-client .nav-btn:nth-child(2)'), 'client');
-  goStep(1);
+  openIn1s(function(){
+    if(mission && !['terminee','annulee'].includes(mission.status)) return toast('Une mission est déjà en cours 📍');
+    setMode('client');
+    showView('view-book', $('#nav-client .nav-btn:nth-child(2)'), 'client');
+    goStep(1);
+  });
 }
 function openTrack(btn){
   if(!mission || ['terminee','annulee'].includes(mission.status)) return toast('Aucune mission en cours — réservez d\'abord 🧹');
@@ -1219,26 +1226,45 @@ function renderSvcGrids(){
 const CSVC = {id:'custom', ic:'🛠️', nom:'Demande sur mesure', desc:'Vous décrivez, le professionnel évalue et propose un prix', base:0, cat:'custom', opts:[], descLabel:'📝 Décrivez précisément votre besoin *'};
 /* 🔍 Recherche de service depuis l'accueil (barre visible) */
 function goSearchServices(v){
-  const s = document.querySelector('#svc-search');
-  if(s) s.value = v || '';
-  startBooking(); goStep(1);
-  renderSvcGrids();
-  if(v && s) s.scrollIntoView({behavior:'smooth', block:'center'});
+  openIn1s(function(){
+    const s = document.querySelector('#svc-search');
+    if(s) s.value = v || '';
+    if(mission && !['terminee','annulee'].includes(mission.status)) return toast('Une mission est déjà en cours 📍');
+    setMode('client');
+    showView('view-book', $('#nav-client .nav-btn:nth-child(2)'), 'client');
+    goStep(1);
+    renderSvcGrids();
+    if(v && s) s.scrollIntoView({behavior:'smooth', block:'center'});
+  });
 }
 function pickCustom(){
-  if(!SERVICES.find(s=>s.id==='custom')) SERVICES.push(CSVC);
-  c.service='custom'; c.extras={};
-  renderSvcGrids(); renderStep2Meta(); renderExtras(); updatePriceBar(); startBooking(); goStep(2);
-  toast('📷 Décrivez + ajoutez des photos — les professionnels vous enverront un prix');
+  openIn1s(function(){
+    if(!SERVICES.find(s=>s.id==='custom')) SERVICES.push(CSVC);
+    c.service='custom'; c.extras={};
+    renderSvcGrids(); renderStep2Meta(); renderExtras(); updatePriceBar();
+    if(mission && !['terminee','annulee'].includes(mission.status)) return toast('Une mission est déjà en cours 📍');
+    setMode('client');
+    showView('view-book', $('#nav-client .nav-btn:nth-child(2)'), 'client');
+    goStep(2);
+    toast('📷 Décrivez + ajoutez des photos — les professionnels vous enverront un prix');
+  });
 }
 function normT(x){ return (x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 function pickSvc(id){
-  if(c.service!==id){ c.service=id; c.extras={}; }
-  renderSvcGrids(); renderStep2Meta(); renderExtras(); updatePriceBar();
+  openIn1s(function(){
+    if(c.service!==id){ c.service=id; c.extras={}; }
+    renderSvcGrids(); renderStep2Meta(); renderExtras(); updatePriceBar();
+  });
 }
 function quickSvc(id){
-  if(c.service!==id){ c.service=id; c.extras={}; }
-  renderSvcGrids(); renderStep2Meta(); renderExtras(); startBooking();
+  openIn1s(function(){
+    if(c.service!==id){ c.service=id; c.extras={}; }
+    renderSvcGrids(); renderStep2Meta(); renderExtras();
+    if(mission && !['terminee','annulee'].includes(mission.status)) return toast('Une mission est déjà en cours 📍');
+    setMode('client');
+    showView('view-book', $('#nav-client .nav-btn:nth-child(2)'), 'client');
+    goStep(1);
+  });
 }
 /* Étape 2 adaptée au service choisi */
 function renderStep2Meta(){
@@ -2588,8 +2614,8 @@ function quizMyPick(qid){
   return null;
 }
 function loadAffiche(){
-  const _who=(function(){ try{ return quizWho().accountId; }catch(e){ return ''; } })();
-  fetch('/api/annonce?screen='+(mode==='agent'?'agent':'client')+'&who='+encodeURIComponent(_who),{cache:'no-store'}).then(r=>r.json()).then(d=>{
+  const _w=(function(){ try{ return quizWho(); }catch(e){ return {accountId:'',nom:''}; } })();
+  fetch('/api/annonce?screen='+(mode==='agent'?'agent':'client')+'&who='+encodeURIComponent(_w.accountId||'')+'&nom='+encodeURIComponent(_w.nom||''),{cache:'no-store'}).then(r=>r.json()).then(d=>{
     if(!d || !d.annonce){
       const qb=document.getElementById('quiz-box'); if(qb){ qb.classList.add('hidden'); qb.innerHTML=''; }
       const bar=document.getElementById('aff-bar'); if(bar) bar.classList.add('hidden');
@@ -2657,7 +2683,8 @@ function paintAd(ad, views){
 }
 async function loadAd(){
   try{
-    const d=await fetch('/api/ads?screen='+(mode==='agent'?'agent':'client')+'&who='+encodeURIComponent(quizWho().accountId),{cache:'no-store'}).then(r=>r.json());
+    const _w=quizWho();
+    const d=await fetch('/api/ads?screen='+(mode==='agent'?'agent':'client')+'&who='+encodeURIComponent(_w.accountId||'')+'&nom='+encodeURIComponent(_w.nom||''),{cache:'no-store'}).then(r=>r.json());
     paintAd(d.ad||null, d.views||0);
   }catch(e){}
 }
