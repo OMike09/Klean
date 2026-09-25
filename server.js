@@ -1034,7 +1034,11 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === '/api/annonce') {
     if (typeof quizRevealIfDue === 'function') try { quizRevealIfDue(); } catch (e) {}
-    const a = db.annonce || null;
+    const screen = String(url.searchParams.get('screen') || '').toLowerCase();
+    const a0 = db.annonce || null;
+    if (a0 && ((screen === 'client' && a0.hideClient) || (screen === 'agent' && a0.hideAgent)))
+      return sendJson(res, 200, { ok: true, version: APP_VERSION, annonce: null, now: Date.now() });
+    const a = a0;
     if (a && a.type === 'quiz' && a.countdownEndsAt && !a.countdownRevealed && Date.now() >= new Date(a.countdownEndsAt).getTime()) {
       const n = Math.max(1, parseInt(a.pendingN, 10) || 1);
       const pool = (a.stagePool && a.stagePool.length) ? a.stagePool.slice() : (db.quizAnswers || []).filter(x => x.ok).map(x => x.nom);
@@ -1228,11 +1232,65 @@ const server = http.createServer(async (req, res) => {
     emitAdmin('annonce', '📣 Affiche publiée pour tous les utilisateurs');
     return sendJson(res, 200, { ok: true });
   }
-  if (p === '/api/admin/annonce' && req.method === 'DELETE') {
+  if ((p === '/api/admin/annonce' && req.method === 'DELETE') || (p === '/api/admin/annonce/retirer' && req.method === 'POST')) {
     if (!pdgOnly(req, res)) return;
-    db.annonce = null; saveDb();
-    auditLog('annonce_retiree', { par: act(req) });
-    emitAdmin('annonce', '📣 Affiche retirée');
+    const b = req.method === 'POST' ? await readBody(req) : {};
+    const scope = String(b.scope || 'all');
+    if (scope === 'client') {
+      if (db.annonce) db.annonce.hideClient = true;
+      auditLog('annonce_retiree', { par: act(req), scope: 'client' });
+    } else if (scope === 'agent') {
+      if (db.annonce) db.annonce.hideAgent = true;
+      auditLog('annonce_retiree', { par: act(req), scope: 'agent' });
+    } else if (scope === 'series') {
+      db.annonce = null; db.quizSeries = []; db.quizAnswers = [];
+      auditLog('annonce_retiree', { par: act(req), scope: 'series' });
+    } else {
+      db.annonce = null;
+      auditLog('annonce_retiree', { par: act(req), scope: 'all' });
+    }
+    if (db.annonce && db.annonce.hideClient && db.annonce.hideAgent) db.annonce = null;
+    saveDb();
+    emitAdmin('annonce', '📣 Affiche / quiz retiré (' + scope + ')');
+    return sendJson(res, 200, { ok: true, scope });
+  }
+  if (p === '/api/ads' && req.method === 'GET') {
+    const screen = String(url.searchParams.get('screen') || '').toLowerCase();
+    const ad = db.ad || null;
+    if (!ad || !ad.active) return sendJson(res, 200, { ad: null });
+    if (screen === 'client' && ad.hideClient) return sendJson(res, 200, { ad: null });
+    if (screen === 'agent' && ad.hideAgent) return sendJson(res, 200, { ad: null });
+    return sendJson(res, 200, { ad });
+  }
+  if (p === '/api/admin/ads' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    return sendJson(res, 200, { ad: db.ad || null });
+  }
+  if (p === '/api/admin/ads' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const kind = ['produit', 'promo', 'lancement', 'stock'].includes(b.kind) ? b.kind : 'produit';
+    const firm = String(b.firm || b.nom || '').trim().slice(0, 60);
+    const prod = String(b.prod || b.title || '').trim().slice(0, 80);
+    if (firm.length < 2) return sendJson(res, 400, { error: 'Nom de l’entreprise requis' });
+    if (prod.length < 2) return sendJson(res, 400, { error: 'Nom du produit requis' });
+    db.ad = {
+      active: true, kind, firm, prod,
+      cat: String(b.cat || 'autre').slice(0, 20),
+      text: String(b.text || '').trim().slice(0, 140),
+      prix: String(b.prix || '').trim().slice(0, 40),
+      old: String(b.old || '').trim().slice(0, 40),
+      off: String(b.off || '').trim().slice(0, 40),
+      tel: String(b.tel || '').replace(/\D/g, '').slice(0, 15),
+      hideClient: !b.clients, hideAgent: !b.pros,
+      at: nowISO(), par: act(req)
+    };
+    saveDb();
+    return sendJson(res, 200, { ok: true, ad: db.ad });
+  }
+  if (p === '/api/admin/ads' && req.method === 'DELETE') {
+    if (!pdgOnly(req, res)) return;
+    db.ad = null; saveDb();
     return sendJson(res, 200, { ok: true });
   }
 

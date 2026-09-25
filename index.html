@@ -385,6 +385,7 @@
   <div id="aff-track" style="display:inline-block;animation:kleanMarqueeLtr 16s linear infinite"></div>
 </div>
 <div id="quiz-box" class="hidden" style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px 14px 12px;margin:0 12px 12px;position:relative;z-index:30"></div>
+<div id="ad-box" class="hidden" style="margin:0 12px 12px;border-radius:16px;padding:14px;background:linear-gradient(160deg,#1a1208,#2a1a0c);border:1.5px solid rgba(255,176,32,.35);color:#fff"></div>
 <style>@keyframes kleanMarqueeLtr{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}</style>
 
 <!-- ══════════════════ CLIENT : ACCUEIL ══════════════════ -->
@@ -2543,10 +2544,11 @@ function paintQuiz(a){
   }
   const mine=quizMyPick(a.id);
   const key2=key+'|p'+(mine==null?'':mine)+'|'+(a.answerEndsAt||'');
-  if(_quizPaint===key2) return;
   const ch=(a.choices||[]).filter(Boolean);
   const locked=mine!=null;
-  const tAns=a.answerEndsAt?('<p style="font-weight:900;color:var(--amber);text-align:center">⏱ Répondez avant '+fmtCd(a.answerEndsAt).txt+'</p>'):'';
+  const leftAns=a.answerEndsAt?fmtCd(a.answerEndsAt):null;
+  const urg=leftAns && leftAns.left<=10;
+  const tAns=leftAns?('<div id="quiz-ans-cd" style="font-size:'+(urg?48:40)+'px;font-weight:900;letter-spacing:.06em;text-align:center;margin:8px 0;color:'+(urg?'#e5484d':'var(--amber)')+'">⏱ '+leftAns.txt+'</div><p style="text-align:center;font-size:13px;font-weight:800;color:'+(urg?'#e5484d':'var(--amber)')+'">Le temps descend — répondez maintenant !</p>'):'';
   const opts=ch.length ? ch.map((c,i)=>{
     const on=locked && Number(mine)===i;
     const bg=on?'#ff8a00':'#f3f6f5';
@@ -2554,6 +2556,11 @@ function paintQuiz(a){
     const bd=on?'#ff8a00':'#e4eae7';
     return '<button type="button" data-qi="'+i+'" onclick="sendQuiz('+i+')" '+(locked?'disabled':'')+' style="width:100%;text-align:left;margin-top:7px;padding:11px 12px;border-radius:12px;border:2px solid '+bd+';background:'+bg+';color:'+col+';font:inherit;font-weight:800;cursor:'+(locked?'default':'pointer')+'">'+(String.fromCharCode(65+i))+'. '+c+(on?'  ✓':'')+'</button>';
   }).join('') : '<p style="color:#e5484d;font-weight:800">Les choix n’ont pas été publiés. Le PDG doit republier le quiz avec A, B…</p>';
+  if(_quizPaint===key2){
+    const el=document.getElementById('quiz-ans-cd');
+    if(el && leftAns){ el.textContent='⏱ '+leftAns.txt; el.style.color=urg?'#e5484d':''; el.style.fontSize=(urg?48:40)+'px'; }
+    return;
+  }
   qb.innerHTML='<b style="font-size:15px">🏆 Quiz KLEAN</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p>'+tAns+opts+'<small id="quiz-ok" style="display:block;margin-top:8px;color:#6b7c73">'+(locked?'Réponse enregistrée — un seul clic.':'Touchez une seule fois.')+'</small>';
   qb.classList.remove('hidden'); _quizPaint=key2;
 }
@@ -2572,8 +2579,12 @@ function quizMyPick(qid){
   return null;
 }
 function loadAffiche(){
-  fetch('/api/annonce',{cache:'no-store'}).then(r=>r.json()).then(d=>{
-    if(!d || !d.annonce) return;
+  fetch('/api/annonce?screen='+(mode==='agent'?'agent':'client'),{cache:'no-store'}).then(r=>r.json()).then(d=>{
+    if(!d || !d.annonce){
+      const qb=document.getElementById('quiz-box'); if(qb){ qb.classList.add('hidden'); qb.innerHTML=''; }
+      const bar=document.getElementById('aff-bar'); if(bar) bar.classList.add('hidden');
+      return;
+    }
     const a=d.annonce;
     const bar=document.getElementById('aff-bar'), tr=document.getElementById('aff-track');
     if(bar&&tr&&a.message){
@@ -2582,11 +2593,32 @@ function loadAffiche(){
       tr.textContent = tx+tx+tx+tx;
       bar.classList.remove('hidden');
     }
+    window._lastQuizA=a;
     paintQuiz(a);
   }).catch(()=>{});
 }
 loadAffiche();
 setInterval(loadAffiche, 1000);
+setInterval(function(){ if(window._lastQuizA) paintQuiz(window._lastQuizA); }, 250);
+function paintAd(ad){
+  const box=document.getElementById('ad-box'); if(!box) return;
+  if(!ad){ box.classList.add('hidden'); box.innerHTML=''; return; }
+  const badge={produit:'🛒 Produit',promo:'🏷️ Promo',lancement:'✨ Nouveau',stock:'📦 Dispo'}[ad.kind]||'📣 Pub';
+  const prix=ad.prix?(ad.old?('<span style="text-decoration:line-through;opacity:.6;margin-right:8px">'+ad.old+'</span><b style="color:#ffb020">'+ad.prix+'</b>'):('<b style="color:#ffb020">'+ad.prix+'</b>')):'';
+  const off=ad.off?('<div style="margin-top:4px;font-weight:800;color:#ffb020">'+ad.off+'</div>'):'';
+  const tel=ad.tel||'';
+  const cta=tel?('<a href="https://wa.me/225'+tel.replace(/^225/,'')+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;background:#25d366;color:#fff;font-weight:900;text-decoration:none;padding:9px 14px;border-radius:10px">Commander</a>'):'';
+  box.innerHTML='<small style="opacity:.8;font-weight:800">PUB · '+badge+'</small><b style="display:block;font-size:16px;margin:4px 0 2px">'+(ad.prod||'')+'</b><small style="opacity:.85">'+(ad.firm||'')+'</small><p style="margin:8px 0 0;font-size:13px;line-height:1.4">'+(ad.text||'')+'</p>'+(prix?('<div style="margin-top:8px">'+prix+'</div>'):'')+off+cta;
+  box.classList.remove('hidden');
+}
+async function loadAd(){
+  try{
+    const d=await fetch('/api/ads?screen='+(mode==='agent'?'agent':'client'),{cache:'no-store'}).then(r=>r.json());
+    paintAd(d.ad||null);
+  }catch(e){}
+}
+loadAd();
+setInterval(loadAd, 20000);
 function markQuizOrange(i){
   const qb=document.getElementById('quiz-box'); if(!qb) return;
   qb.querySelectorAll('button[data-qi]').forEach(btn=>{

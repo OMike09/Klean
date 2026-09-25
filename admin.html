@@ -223,6 +223,40 @@
       </div>
       <small id="ann-cur" style="display:block;margin-top:9px;color:var(--muted)">Aucune affiche en cours.</small>
       <button type="button" onclick="openQuizClicks()" style="margin-top:10px;width:100%;background:rgba(255,138,0,.16);border:1.5px solid rgba(255,138,0,.5);color:#b36b00;font-weight:900;padding:11px 12px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:13.5px">👁 Voir qui a répondu (noms + choix)</button>
+      <div id="panel-ads" style="margin-top:14px;background:var(--card2);border-radius:12px;padding:12px">
+        <b style="display:block;font-size:13px;margin-bottom:6px">📣 Promo produits d’entreprises (sous le quiz)</b>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.4">Vous faites la pub d’un <b>produit</b> pour une entreprise. Les champs suivent le type d’annonce.</p>
+        <select id="ad-kind" onchange="syncAdFields()" style="width:100%;margin-bottom:7px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <option value="produit">🛒 Produit à vendre</option>
+          <option value="promo">🏷️ Promo / prix réduit</option>
+          <option value="lancement">✨ Nouveau produit / lancement</option>
+          <option value="stock">📦 Disponible maintenant</option>
+        </select>
+        <input id="ad-firm" maxlength="60" placeholder="Entreprise * (ex : Orange, Nestlé, une boutique)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <input id="ad-prod" maxlength="80" placeholder="Produit * (ex : Forfait 10 Go, lait Nido 400g)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <select id="ad-cat" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <option value="alim">🍚 Alimentaire / boisson</option>
+          <option value="telco">📱 Télécom / crédit</option>
+          <option value="mode">👕 Mode / beauté</option>
+          <option value="maison">🏠 Maison / électro</option>
+          <option value="banque">🏦 Banque / argent</option>
+          <option value="autre">📦 Autre</option>
+        </select>
+        <input id="ad-text" maxlength="140" placeholder="Phrase de vente (ex : Livré à Abidjan aujourd’hui)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <input id="ad-prix" placeholder="Prix (ex : 2 500 F)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <div id="ad-f-promo" style="display:none">
+          <input id="ad-old" placeholder="Ancien prix (barré)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="ad-off" placeholder="Réduction (ex : −20 % ou 1 acheté = 1 offert)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        </div>
+        <input id="ad-tel" placeholder="Tél / WhatsApp pour commander" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <label style="font-size:12px;font-weight:800"><input type="checkbox" id="ad-cli" checked> Clients</label>
+          <label style="font-size:12px;font-weight:800"><input type="checkbox" id="ad-pro" checked> Pros</label>
+        </div>
+        <button type="button" class="btn-main" style="width:100%" onclick="publierAd()">📣 Publier la promo produit</button>
+        <button type="button" onclick="retirerAd()" style="width:100%;margin-top:6px;background:var(--card);border:1px solid var(--line);padding:9px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">✕ Retirer la pub</button>
+        <small id="ad-cur" style="display:block;margin-top:8px;color:var(--muted)">Aucune pub produit.</small>
+      </div>
       <div id="field-chat-hq" style="margin-top:12px;background:var(--card2);border-radius:12px;padding:10px">
         <b style="font-size:12.5px">💬 Fil agents de terrain</b>
         <select id="fc-who" onchange="loadFieldChat()" style="width:100%;margin:6px 0;padding:8px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px"></select>
@@ -255,7 +289,7 @@
     <div class="body" style="padding:12px 14px">
       <div id="hqchat-msgs" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
       <div style="display:flex;gap:6px">
-        <input id="hqchat-in" placeholder="Écrire au PDG / au gestionnaire…" maxlength="400" style="flex:1;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+        <input id="hqchat-in" placeholder="Écrire au PDG / au gestionnaire…" maxlength="400" onkeydown="if(event.key==='Enter'){event.preventDefault();sendHqChat();}" style="flex:1;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
         <button class="btn-main" style="flex:none" onclick="sendHqChat()">Envoyer</button>
       </div>
     </div>
@@ -504,7 +538,7 @@ async function loadAll(){
       fetch('/api/config').then(r=>r.json()).catch(()=>({commission:25})),
       soft('/api/admin/audit')
     ]);
-    applyRole(); loadSupport();
+    applyRole(); if(!(document.activeElement && document.activeElement.id==='sup-input')) loadSupport();
     if(!ov || !(ov.agentsTotal || ov.clientsTotal)){
       try{
         const h = await fetch('/api/health',{cache:'no-store'}).then(r=>r.json());
@@ -519,7 +553,7 @@ async function loadAll(){
     if(cands) renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
     if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
-    loadTeam(); loadAnnonce(); loadQuizHQ(); loadHqChat(); loadFields(); loadVillesHQ(); loadCatalogHQ();
+    loadTeam(); loadAnnonce(); loadQuizHQ(); if(!(document.activeElement && document.activeElement.id==='hqchat-in')) loadHqChat(); loadFields(); loadVillesHQ(); loadCatalogHQ();
     if(!window._qzPoll){ window._qzPoll=setInterval(loadQuizHQ, 1000); }
   }catch(e){
     console.warn('HQ : une partie des données n’a pas chargé', e);
@@ -946,9 +980,18 @@ async function revelerQuiz(){
 }
 async function tirerQuiz(){ return lancerDecompte(); }
 async function retirerAnnonce(){
-  if(!confirm('Retirer l\'affiche actuelle ?')) return;
-  await fetch('/api/admin/annonce', {method:'DELETE'});
-  loadAnnonce();
+  const box=document.getElementById('retirer-modal');
+  if(box){ box.style.display='flex'; return; }
+  doRetirer('all');
+}
+function closeRetirer(){ const b=document.getElementById('retirer-modal'); if(b) b.style.display='none'; }
+async function doRetirer(scope){
+  closeRetirer();
+  const r=await fetch('/api/admin/annonce/retirer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert(d.error||'Impossible');
+  alert(scope==='client'?'✕ Retiré de l’écran CLIENTS':scope==='agent'?'✕ Retiré de l’écran PROFESSIONNELS':scope==='series'?'✕ Toute la série de quiz est effacée':'✕ Retiré partout');
+  loadAnnonce(); loadQuizHQ();
 }
 /* 🛡️ Matrice des rôles à l'écran : si connecté GESTIONNAIRE, tout ce qui est PDG disparaît */
 function openAffichePanel(){
@@ -1008,6 +1051,9 @@ async function loadSupport(){
 }
 function renderSupport(){
   const box = document.getElementById('sup-convs'); if(!box) return;
+  const typing = document.activeElement && document.activeElement.id==='sup-input';
+  const draft = typing ? document.activeElement.value : '';
+  const selStart = typing ? document.activeElement.selectionStart : null;
   const list = (SUPV && SUPV.conversations) || [];
   document.querySelector('#sup-cnt').textContent = list.length ? list.length+' conversation(s)' : '—';
   const mm = (SUPV && SUPV.messages) || [];
@@ -1020,7 +1066,7 @@ function renderSupport(){
         const vu = me && s.readUser ? ' · vu' : '';
         return `<div style="align-self:${me?'flex-end':'flex-start'};max-width:90%;background:${me?'rgba(21,201,138,.14)':'var(--card2)'};border:1px solid var(--line);border-radius:11px;padding:7px 10px;font-size:12.5px">${s.text}<small style="display:block;color:var(--muted);font-size:9.5px">${lab} · ${(s.at||'').slice(11,16)}${vu}</small></div>`;
       }).join('')||'—'}</div>
-      <div style="display:flex;gap:6px"><input id="sup-input" placeholder="Répondre sous ${c.nom}…" maxlength="400" style="flex:1;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px"><button class="btn-main" style="flex:none" onclick="supReply()">Envoyer</button></div>
+      <div style="display:flex;gap:6px"><input id="sup-input" placeholder="Répondre sous ${c.nom}…" maxlength="400" onkeydown="if(event.key==='Enter'){event.preventDefault();supReply();}" style="flex:1;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px"><button type="button" class="btn-main" style="flex:none" onclick="supReply()">Envoyer</button></div>
     </div>`;
     return `<div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--line)"><div class="agrow" style="cursor:pointer" onclick="supToggle('${c.role}','${c.uid}','${(c.nom||'').replace(/'/g,'')}')">
       <div class="avatar" style="background:${c.role==='pro'?'linear-gradient(135deg,#E85D04,#C2410C)':'linear-gradient(135deg,#5b8ab8,#2c567c)'}">${(c.nom||'?')[0].toUpperCase()}</div>
@@ -1031,6 +1077,10 @@ function renderSupport(){
       <span style="color:var(--muted);font-size:13px">${open?'▾':'▸'}</span>
     </div>${thread}</div>`;
   }).join('') || '<div class="empty">Aucun message encore.</div>';
+  if(typing){
+    const i=document.getElementById('sup-input');
+    if(i){ i.value=draft; i.focus(); try{ if(selStart!=null) i.setSelectionRange(selStart, selStart);}catch(e){} }
+  }
 }
 async function supToggle(role, uid, nom){
   if(SUP_OPEN && SUP_OPEN.role===role && SUP_OPEN.uid===uid){
@@ -1048,7 +1098,7 @@ async function supReply(){
   if(!r.ok) return alert('⚠️ '+(d.error||'Envoi impossible'));
   inp.value = ''; loadSupport();
 }
-setInterval(()=>{ if(document.getElementById('sup-cnt')) loadSupport(); }, 15000);
+setInterval(()=>{ if(document.getElementById('sup-cnt') && !(document.activeElement && document.activeElement.id==='sup-input')) loadSupport(); }, 15000);
 
 function pwOk(v){
   return v.length>=8 && /[A-Za-z]/.test(v) && /[0-9]/.test(v) && /[^A-Za-z0-9\s]/.test(v);
@@ -1357,6 +1407,7 @@ function scheduleRetry(){ clearTimeout(retry); retry = setTimeout(connectWS, 400
 
 async function loadHqChat(){
   try{
+    if(document.activeElement && document.activeElement.id==='hqchat-in') return;
     const d = await fetchJ('/api/admin/hq-chat');
     const box = document.getElementById('hqchat-msgs'); if(!box) return;
     const n = d.unread||0;
@@ -1380,7 +1431,38 @@ async function loadHqChat(){
 async function sendHqChat(){
   const inp=document.getElementById('hqchat-in'); const v=(inp.value||'').trim(); if(!v) return;
   const r=await fetch('/api/admin/hq-chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v})});
-  if(r.ok){ inp.value=''; loadHqChat(); }
+  if(r.ok){ inp.value=''; loadHqChat(); inp.focus(); }
+}
+function syncAdFields(){
+  const k=(document.getElementById('ad-kind')||{}).value||'produit';
+  const e=document.getElementById('ad-f-promo'); if(e) e.style.display = k==='promo'?'':'none';
+}
+async function publierAd(){
+  const kind=(document.getElementById('ad-kind')||{}).value||'produit';
+  const firm=((document.getElementById('ad-firm')||{}).value||'').trim();
+  const prod=((document.getElementById('ad-prod')||{}).value||'').trim();
+  if(firm.length<2) return alert('❌ Nom de l’entreprise requis');
+  if(prod.length<2) return alert('❌ Nom du produit requis');
+  const r=await fetch('/api/admin/ads',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    kind, firm, prod,
+    cat:((document.getElementById('ad-cat')||{}).value||'autre'),
+    text:((document.getElementById('ad-text')||{}).value||'').trim(),
+    prix:((document.getElementById('ad-prix')||{}).value||'').trim(),
+    old:((document.getElementById('ad-old')||{}).value||'').trim(),
+    off:((document.getElementById('ad-off')||{}).value||'').trim(),
+    tel:((document.getElementById('ad-tel')||{}).value||'').trim(),
+    clients: !!(document.getElementById('ad-cli')||{}).checked,
+    pros: !!(document.getElementById('ad-pro')||{}).checked
+  })});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Pub impossible'));
+  const c=document.getElementById('ad-cur'); if(c) c.textContent='📣 En ligne : '+firm+' — '+prod;
+  alert('📣 Promo produit publiée sous le quiz.');
+}
+async function retirerAd(){
+  await fetch('/api/admin/ads',{method:'DELETE'});
+  const c=document.getElementById('ad-cur'); if(c) c.textContent='Aucune pub.';
+  alert('✕ Pub retirée.');
 }
 async function loadPdgExtras(){
   ['panel-promo','panel-paydest','panel-trash'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display=''; });
@@ -1493,5 +1575,17 @@ setInterval(loadAll, 12000); // secours
 </div>
 
 <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/hq-sw.js');}</script>
+
+<div id="retirer-modal" style="display:none;position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:420px;width:100%;padding:16px 16px 18px">
+    <b style="display:block;font-size:16px;margin-bottom:8px">✕ Retirer le quiz / l’affiche</b>
+    <p style="font-size:12.5px;color:var(--muted);margin:0 0 12px;line-height:1.45">Choisissez l’écran. Chez les autres, ça reste.</p>
+    <button type="button" onclick="doRetirer('client')" style="width:100%;margin-bottom:7px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px;border-radius:12px;cursor:pointer;font-family:inherit">👤 Écran clients seulement</button>
+    <button type="button" onclick="doRetirer('agent')" style="width:100%;margin-bottom:7px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px;border-radius:12px;cursor:pointer;font-family:inherit">🧑‍💼 Écran professionnels seulement</button>
+    <button type="button" onclick="doRetirer('all')" style="width:100%;margin-bottom:7px;background:rgba(255,107,107,.14);border:1.5px solid rgba(255,107,107,.45);color:var(--red);font-weight:900;padding:11px;border-radius:12px;cursor:pointer;font-family:inherit">🌐 Tous les écrans (quiz actuel)</button>
+    <button type="button" onclick="doRetirer('series')" style="width:100%;margin-bottom:10px;background:rgba(255,107,107,.22);border:1.5px solid rgba(255,107,107,.5);color:var(--red);font-weight:900;padding:11px;border-radius:12px;cursor:pointer;font-family:inherit">🗑️ Tous les quiz de la série</button>
+    <button type="button" onclick="closeRetirer()" style="width:100%;background:var(--card2);border:1px solid var(--line);padding:10px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">Annuler</button>
+  </div>
+</div>
 </body>
 </html>
