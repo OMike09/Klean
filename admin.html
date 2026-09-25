@@ -449,6 +449,17 @@
     </div>
   </div>
 
+  <div class="panel" style="margin-bottom:14px" id="panel-shield">
+    <h3>🛡️ Bouclier anti-malveillance</h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Sondes, injections, flood. <b>Recaler</b> = bloquer l’IP (403). <b>Anéantir</b> = ban total + coupure WebSocket. <b>Gracier</b> = rétablir.</p>
+      <div id="sh-kpis" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;font-weight:800"></div>
+      <div id="sh-ips" style="max-height:220px;overflow:auto;margin-bottom:10px"></div>
+      <b style="font-size:12px">Journal</b>
+      <div id="sh-ev" style="max-height:220px;overflow:auto;margin-top:6px;font-size:12px"></div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px" id="panel-freeze">
     <h3>⛔ Coupure générale des écritures (PDG)</h3>
     <div class="body" style="padding:12px 14px">
@@ -559,7 +570,7 @@ async function loadAll(){
     if(cands) renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
     if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
-    loadTeam(); loadAnnonce(); loadQuizHQ(); if(!(document.activeElement && document.activeElement.id==='hqchat-in')) loadHqChat(); loadFields(); loadVillesHQ(); loadCatalogHQ();
+    loadTeam(); loadAnnonce(); loadQuizHQ(); if(!(document.activeElement && document.activeElement.id==='hqchat-in')) loadHqChat(); loadFields(); loadVillesHQ(); loadCatalogHQ(); if(ME && ME.role==='pdg') loadShield();
     if(!window._qzPoll){ window._qzPoll=setInterval(loadQuizHQ, 1000); }
     if(!window._livePoll){ window._livePoll=setInterval(paintAnnLive, 4000); paintAnnLive(); }
   }catch(e){
@@ -649,6 +660,7 @@ const HQ_GO = [
   ['panel-villes','🏙️ Villes'],
   ['panel-svc-create','🛠️ Créer un service'],
   ['panel-svc-browse','📂 Services & pros'],
+  ['panel-shield','🛡️ Bouclier'],
   ['panel-freeze','⛔ Coupure écritures']
 ];
 function searchHQ(){
@@ -1133,7 +1145,7 @@ function applyRole(){
   const pan=document.getElementById('panel-ann'); if(pan) pan.style.display='block';
   if(ME && ME.role !== 'pdg'){
     document.body.classList.add('role-gest');
-    ['panel-cfg','panel-audit','panel-ca7'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display='none'; });
+    ['panel-cfg','panel-audit','panel-ca7','panel-shield'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display='none'; });
     ['k-ca','k-comm','c-ca','c-comm','c-gains'].forEach(id=>{
       const el=document.getElementById(id); if(!el) return;
       const card=el.closest('.kpi') || el.closest('.chip') || el.parentElement;
@@ -1141,11 +1153,43 @@ function applyRole(){
     });
   }
 }
+async function loadShield(){
+  try{
+    const d=await fetch('/api/admin/shield',{cache:'no-store'}).then(r=>r.json());
+    if(!d || !d.ok) return;
+    const k=document.getElementById('sh-kpis');
+    if(k) k.innerHTML='<span style="background:var(--card2);padding:7px 10px;border-radius:10px">Journal '+ (d.nEvents||0)+'</span><span style="background:rgba(255,176,32,.14);color:var(--amber);padding:7px 10px;border-radius:10px">Recalé(s) '+(d.nBlocked||0)+'</span><span style="background:rgba(255,107,107,.16);color:var(--red);padding:7px 10px;border-radius:10px">Anéanti(s) '+(d.nAneanti||0)+'</span>';
+    const box=document.getElementById('sh-ips');
+    if(box){
+      box.innerHTML=(d.ips||[]).length ? d.ips.map(x=>{
+        const st=x.annihilated?'<span style="color:var(--red)">ANÉANTI</span>':(x.blocked?'<span style="color:var(--amber)">RECALÉ</span>':'veille');
+        const ip=String(x.ip||'').replace(/'/g,'');
+        return '<div style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap"><div style="flex:1;min-width:140px"><b>'+ip+'</b><br><small>score '+(x.score||0)+' · '+(x.hits||0)+' hits · '+(x.kind||'')+' · '+st+'</small></div>'
+          +'<button type="button" onclick="shieldAct(\'recaler\',\''+ip+'\')" style="background:rgba(255,176,32,.16);border:1px solid rgba(255,176,32,.4);color:var(--amber);font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit">Recaler</button>'
+          +'<button type="button" onclick="shieldAct(\'aneantir\',\''+ip+'\')" style="background:#e5484d;border:none;color:#fff;font-weight:900;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit">Anéantir</button>'
+          +'<button type="button" onclick="shieldAct(\'pardon\',\''+ip+'\')" style="background:rgba(21,201,138,.16);border:1px solid rgba(21,201,138,.4);color:var(--p);font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit">Gracier</button></div>';
+      }).join('') : '<div class="empty">Aucune IP signalée pour l’instant.</div>';
+    }
+    const ev=document.getElementById('sh-ev');
+    if(ev) ev.innerHTML=(d.events||[]).map(e=>'<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>'+(e.kind||'')+'</b> · '+(e.ip||'')+' · <span style="color:var(--muted)">'+(e.path||'')+'</span><br><small>'+(e.action||'')+' · '+(e.detail||'')+' · '+(e.at||'').slice(11,19)+'</small></div>').join('') || '<div class="empty">RAS</div>';
+  }catch(e){}
+}
+async function shieldAct(kind, ip){
+  const lab={recaler:'recaler (bloquer)',aneantir:'ANÉANTIR',pardon:'gracier'}[kind]||kind;
+  if(!confirm('🛡️ '+lab+' l’IP '+ip+' ?')) return;
+  const r=await fetch('/api/admin/shield/'+kind,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ip})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert(d.error||'Impossible');
+  loadShield();
+}
+if(!window._shPoll){ window._shPoll=setInterval(()=>{ const p=document.getElementById('panel-shield'); if(p && p.style.display!=='none' && ME && ME.role==='pdg') loadShield(); }, 8000); }
 async function loadTeam(){
   try{ ME = await fetchJ('/api/admin/whoami'); }catch(e){ ME = {role:'pdg', nom:'PDG'}; }
   document.querySelector('#team-gate').style.display = ME && ME.role==='pdg' ? 'none' : 'block';
   document.querySelector('#team-form').style.display = ME && ME.role==='pdg' ? 'block' : 'none';
   const frz=document.getElementById('panel-freeze'); if(frz) frz.style.display = (ME && ME.role==='pdg') ? '' : 'none';
+  const sh=document.getElementById('panel-shield'); if(sh) sh.style.display = (ME && ME.role==='pdg') ? '' : 'none';
+  if(ME && ME.role==='pdg') loadShield();
   const st=document.getElementById('frz-state');
   if(st && ME) st.textContent = ME.gestFrozen ? '⛔ Écritures actuellement coupées (tous)' : '✅ Écritures actuellement actives';
   if(ME && ME.role==='gest' && ME.gestFrozen){

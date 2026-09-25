@@ -492,8 +492,89 @@ function agentCompletion(ag) {
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.md': 'text/plain; charset=utf-8', '.ico': 'image/x-icon' };
 function sendJson(res, code, obj) {
   const b = JSON.stringify(obj);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+  res.writeHead(code, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'SAMEORIGIN',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'X-Klean-Shield': 'on'
+  });
   res.end(b);
+}
+function clientIp(req) {
+  const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  let ip = xf || (req.socket && req.socket.remoteAddress) || '?';
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+  return ip.slice(0, 64);
+}
+const _hitMap = new Map();
+const _SCAN = /(\.env|wp-admin|wp-login|phpmyadmin|xmlrpc|\.git|\/\.aws|\.htaccess|eval-stdin|phpunit|cgi-bin|actuator\/env|\/etc\/passwd)/i;
+const _INJECT = /(\.\.\/|\.\.\\|%00|<script|javascript:|union\s+select|drop\s+table|or\s+1=1|\$\{jndi|;os\.system|`)/i;
+function shieldEnsure() {
+  db.shield = db.shield || { events: [], ips: {} };
+  if (!Array.isArray(db.shield.events)) db.shield.events = [];
+  if (!db.shield.ips) db.shield.ips = {};
+}
+function shieldLog(ip, kind, path, detail, score) {
+  shieldEnsure();
+  const rec = db.shield.ips[ip] || { score: 0, hits: 0, blocked: false, annihilated: false, last: nowISO(), kind };
+  rec.hits += 1;
+  rec.score += score;
+  rec.last = nowISO();
+  rec.kind = kind;
+  let action = 'veille';
+  if (rec.annihilated) action = 'aneanti';
+  else if (rec.score >= 50) { rec.blocked = true; action = 'auto-recale'; }
+  db.shield.ips[ip] = rec;
+  db.shield.events.unshift({ id: uid('SH'), at: nowISO(), ip, kind, path: String(path || '').slice(0, 180), detail: String(detail || '').slice(0, 160), score: rec.score, action });
+  if (db.shield.events.length > 250) db.shield.events = db.shield.events.slice(0, 250);
+  if (action !== 'veille') try { saveDb(); } catch (e) {}
+  return rec;
+}
+function shieldKickIp(ip) {
+  for (const s of [...sockets]) {
+    if (s.meta && s.meta.ip === ip) {
+      try { s.end(); } catch (e) {}
+    }
+  }
+}
+function shieldGate(req, res, p) {
+  const ip = clientIp(req);
+  req._ip = ip;
+  shieldEnsure();
+  const rec = db.shield.ips[ip];
+  const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+  if (rec && rec.annihilated && !(hq && hq.role === 'pdg')) {
+    sendJson(res, 403, { error: 'Accès anéanti par le PDG' });
+    return true;
+  }
+  if (rec && rec.blocked && !(hq && hq.role === 'pdg')) {
+    sendJson(res, 403, { error: 'IP recalée par le bouclier KLEAN' });
+    return true;
+  }
+  if (_SCAN.test(p) || _SCAN.test(req.url || '')) {
+    shieldLog(ip, 'scan', p, 'sonde (cms/env/git)', 28);
+    sendJson(res, 404, { error: 'introuvable' });
+    return true;
+  }
+  if (_INJECT.test(req.url || '')) {
+    const r2 = shieldLog(ip, 'injection', p, 'charge dans l’URL', 22);
+    if (r2.blocked && !(hq && hq.role === 'pdg')) {
+      sendJson(res, 403, { error: 'IP recalée' });
+      return true;
+    }
+  }
+  const now = Date.now();
+  const h = _hitMap.get(ip) || { t: now, n: 0 };
+  if (now - h.t > 10000) { h.t = now; h.n = 0; }
+  h.n += 1;
+  _hitMap.set(ip, h);
+  if (h.n > 160) {
+    shieldLog(ip, 'flood', p, h.n + ' req / 10 s', 18);
+    sendJson(res, 429, { error: 'Trop de requêtes' });
+    return true;
+  }
+  return false;
 }
 function readBody(req) {
   return new Promise(r => {
@@ -517,6 +598,7 @@ function agentStats(ag) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
+  if (shieldGate(req, res, p)) return;
 
   /* --- API --- */
   if (p === '/api/health') return sendJson(res, 200, { ok: true, storage: pgClient ? 'postgres' : 'fichier', agentsEnLigne: onlineAgents().length, agentsTotal: db.agents.length, clientsTotal: db.clients.length, missions: db.missions.length, writeFrozen: writesFrozen(), live: liveHome() });
@@ -2039,6 +2121,65 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true, on: !!(db.winBubble2 && db.winBubble2.on) });
   }
 
+  if (p === '/api/admin/shield' && req.method === 'GET') {
+    if (!pdgOnly(req, res)) return;
+    shieldEnsure();
+    const ips = Object.keys(db.shield.ips).map(ip => Object.assign({ ip }, db.shield.ips[ip]));
+    ips.sort((a, b) => (b.score || 0) - (a.score || 0));
+    return sendJson(res, 200, {
+      ok: true,
+      events: db.shield.events.slice(0, 80),
+      ips: ips.slice(0, 80),
+      nBlocked: ips.filter(x => x.blocked && !x.annihilated).length,
+      nAneanti: ips.filter(x => x.annihilated).length,
+      nEvents: db.shield.events.length
+    });
+  }
+  if (p === '/api/admin/shield/recaler' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const ip = String(b.ip || '').slice(0, 64);
+    shieldEnsure();
+    if (!ip || !db.shield.ips[ip]) return sendJson(res, 404, { error: 'IP inconnue' });
+    db.shield.ips[ip].blocked = true;
+    db.shield.ips[ip].annihilated = false;
+    db.shield.ips[ip].last = nowISO();
+    shieldLog(ip, 'pdg-recale', '/hq', 'PDG a recalé', 0);
+    shieldKickIp(ip);
+    saveDb();
+    auditLog('shield_recale', { ip, par: 'PDG' });
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/admin/shield/aneantir' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const ip = String(b.ip || '').slice(0, 64);
+    shieldEnsure();
+    if (!ip) return sendJson(res, 400, { error: 'IP requise' });
+    const prev = db.shield.ips[ip] || { score: 0, hits: 0 };
+    db.shield.ips[ip] = Object.assign(prev, { blocked: true, annihilated: true, last: nowISO(), kind: 'pdg-aneanti' });
+    shieldLog(ip, 'pdg-aneanti', '/hq', 'PDG a anéanti', 0);
+    shieldKickIp(ip);
+    saveDb();
+    auditLog('shield_aneanti', { ip, par: 'PDG' });
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/admin/shield/pardon' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const ip = String(b.ip || '').slice(0, 64);
+    shieldEnsure();
+    if (!ip || !db.shield.ips[ip]) return sendJson(res, 404, { error: 'IP inconnue' });
+    db.shield.ips[ip].blocked = false;
+    db.shield.ips[ip].annihilated = false;
+    db.shield.ips[ip].score = 0;
+    db.shield.ips[ip].last = nowISO();
+    shieldLog(ip, 'pdg-pardon', '/hq', 'PDG a gracié', 0);
+    saveDb();
+    auditLog('shield_pardon', { ip, par: 'PDG' });
+    return sendJson(res, 200, { ok: true });
+  }
+
   if (p === '/api/field/login' && req.method === 'POST') {
     const b = await readBody(req);
     const tel = String(b.tel || '').replace(/\D/g, '');
@@ -2294,10 +2435,15 @@ const server = http.createServer(async (req, res) => {
 /* --- Upgrade WebSocket --- */
 server.on('upgrade', (req, sock) => {
   if (!req.url.startsWith('/ws')) { sock.end(); return; }
+  try {
+    const ip0 = clientIp(req);
+    const rec0 = db.shield && db.shield.ips && db.shield.ips[ip0];
+    if (rec0 && (rec0.annihilated || rec0.blocked)) { sock.end(); return; }
+  } catch (e) {}
   const key = req.headers['sec-websocket-key'];
   const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
   sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n');
-  sock.meta = { missions: new Set(), hqAuthed: (req.headers.cookie || '').includes('klean_hq=' + adminToken()) };
+  sock.meta = { missions: new Set(), ip: clientIp(req), hqAuthed: (req.headers.cookie || '').includes('klean_hq=' + adminToken()) };
   sockets.add(sock);
   sock.on('data', handleWsData(sock));
   const bye = () => {
