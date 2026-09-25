@@ -397,6 +397,14 @@
     </span>
     <b id="svc-city-name" style="font-size:15.5px;background:rgba(255,255,255,.2);padding:7px 13px;border-radius:99px;flex:none">Bouaké ▾</b>
   </button>
+  <button onclick="ouvrirRecherche()" style="width:100%;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;border-radius:16px;padding:12px 15px;margin:0 0 12px;box-shadow:0 4px 14px rgba(10,138,98,.28);text-align:left">
+    <span style="font-size:24px">🔎</span>
+    <span style="flex:1;min-width:0">
+      <b style="display:block;font-size:14.5px;line-height:1.3;letter-spacing:.2px">RECHERCHER UN PRO PRÈS DE MOI</b>
+      <small style="display:block;font-size:11px;opacity:.93;font-weight:600">GPS + métier + disponibilité — ou par numéro professionnel</small>
+    </span>
+    <b style="font-size:19px;flex:none">›</b>
+  </button>
   <div class="hero">
     <span class="phase-tag" id="hero-phase">🇨🇮 Actif à Bouaké</span>
     <h1>Tous vos services à domicile, un pro arrive chez vous 🛵</h1>
@@ -956,7 +964,7 @@ async function chargerProches(){
     const entete = '<p class="note" style="margin:0 0 8px">'+(d.libres||0)+' disponible(s) · '+(d.enLigne||0)+' pro(s) en ligne'
       + (quartier?(' · votre quartier : <b>'+quartier+'</b>'):'')
       + ' · '+(typeof c!=='undefined' && c.lat ? '<b>GPS actif</b> — classés du plus proche au plus loin' : 'activez « 📡 Me localiser » pour un classement au plus près')
-      + '</p>';
+      + '</p>' + (typeof rechBouton==='function' ? rechBouton() : '');
     if(!pros.length){
       box.innerHTML = '<div class="bkg">'+entete+'<p class="note" style="margin:0">Aucun professionnel pour ce métier à '+ville+' pour l’instant. Réservez : la demande part chez les pros du métier dès qu’ils se mettent en ligne.</p></div>';
       return;
@@ -2414,6 +2422,7 @@ function openProOrb(){
     '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#E85D04,#C2410C);color:#fff;font-weight:900;display:flex;align-items:center;justify-content:center">'+(nom[0]||'P').toUpperCase()+'</div><div style="flex:1"><b style="display:block">'+nom+'</b><small style="color:#6b7c73">'+(on?'🟢 En ligne — détectable':'⚪ Hors ligne')+'</small></div><button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove()" style="border:1px solid #e4eae7;background:#f3f6f5;border-radius:9px;padding:6px 9px;font-weight:800;cursor:pointer">✕</button></div>'+
     '<button type="button" onclick="goProView(\'profil\')" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #e4eae7;background:#fff;font:inherit;font-weight:800;margin-bottom:7px;cursor:pointer">👤 Voir mon profil</button>'+
     '<button type="button" onclick="goProView(\'dash\')" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #e4eae7;background:#fff;font:inherit;font-weight:800;margin-bottom:7px;cursor:pointer">📊 Tableau de bord</button>'+
+    '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); ouvrirVisibilite();" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #cdeee0;background:#f2fbf8;font:inherit;font-weight:900;margin-bottom:7px;cursor:pointer">🎫 Numéro pro · visibilité &amp; zone</button>'+
     '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); toggleOnline(); setTimeout(refreshProOrb,200);" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid '+(on?'#E85D04':'#ff8a00')+';background:'+(on?'#FFF4E8':'#fff4e5')+';font:inherit;font-weight:900;margin-bottom:7px;cursor:pointer">'+(on?'⚪ Passer hors ligne':'🟢 Passer en ligne (GPS + sonnerie)')+'</button>'+
     '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); agentLogout();" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #f5c6c7;background:#fff;color:#e5484d;font:inherit;font-weight:800;cursor:pointer">🚪 Se déconnecter</button>'+
     '<p style="font-size:11px;color:#6b7c73;margin:10px 0 0;line-height:1.4">GPS + sonnerie même en veille. Compte créé par PDG/gest : même rond après tél + code ou mot de passe.</p></div>';
@@ -2487,6 +2496,140 @@ async function saveProEditor(){
     refreshApplyStatus();
   }catch(e){ toast('📵 Réseau fragile — réessayez'); }
 }
+
+/* ═══════════ 🎫 MA VISIBILITÉ (pro) : numéro pro, contact, zone d'intervention ═══════════
+   Rien n'est publié sans son accord : ni numéro personnel, ni quartier exact. */
+function ouvrirVisibilite(){
+  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId') || '';
+  if(!id) return toast('🔗 Liez d’abord votre compte professionnel');
+  /* on demande au serveur l'état réel (source de vérité) */
+  const tk = jetonPro();
+  fetch('/api/agents/veille?agentId='+encodeURIComponent(id)+(tk?('&jeton='+encodeURIComponent(tk)):''), {cache:'no-store'})
+    .then(r=>r.ok?r.json():({})).catch(()=>({}))
+    .then(d=>peindreVisibilite(d||{}));
+}
+function peindreVisibilite(d){
+  const old = document.getElementById('visi'); if(old) old.remove();
+  const numPro = d.numPro || agent.numPro || '—';
+  const zoneKm = d.zoneKm || agent.zoneKm || 15;
+  const svcNom = (d.villeService || agent.villeService || agent.ville || '');
+  const ov = document.createElement('div');
+  ov.id = 'visi';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9850;display:flex;align-items:flex-end;justify-content:center';
+  ov.innerHTML = `
+  <div style="background:var(--card);width:100%;max-width:520px;border-top-left-radius:20px;border-top-right-radius:20px;padding:16px;max-height:88vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b>🔒 Ma visibilité &amp; ma zone</b>
+      <button onclick="document.getElementById('visi').remove()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:15px">✕</button>
+    </div>
+    <div style="background:#f2fbf8;border:1.5px solid #cdeee0;border-radius:13px;padding:11px 12px;margin-bottom:12px">
+      <small style="display:block;color:#41544c;font-weight:800;font-size:11.5px">VOTRE NUMÉRO PROFESSIONNEL KLEAN</small>
+      <div style="display:flex;align-items:center;gap:9px;margin-top:3px">
+        <b style="font-size:19px;letter-spacing:1px">${numPro}</b>
+        <button onclick="copyText('${numPro}','🎫 Numéro professionnel copié')" style="border:none;background:#0a8a62;color:#fff;font:inherit;font-weight:900;padding:6px 10px;border-radius:9px;cursor:pointer;font-size:11.5px">Copier</button>
+      </div>
+      <small style="color:#6b7c73;font-size:11.5px">Les clients peuvent le taper dans « Rechercher par numéro professionnel » pour trouver votre fiche. Votre numéro personnel n'est jamais donné à la place.</small>
+    </div>
+    <div class="inp-row"><label>📞 Numéro d'appel affiché aux clients (facultatif)</label>
+      <input class="inp" id="vi-telpro" type="tel" value="${d.telPro||agent.telPro||''}" placeholder="ex : 27 22 44 55 66 — laissez vide pour ne pas être appelé"></div>
+    <small style="display:block;color:#6b7c73;margin:-4px 0 10px;font-size:11.5px">Si vous le laissez vide, les clients vous contactent <b>dans l'application</b> (la demande arrive sur votre téléphone).</small>
+    <div style="background:var(--card2);border:1px solid var(--line);border-radius:13px;padding:11px 12px">
+      <b style="font-size:13px">Qui peut voir quoi ?</b>
+      <label style="display:flex;align-items:center;gap:9px;margin-top:9px;font-size:13px;font-weight:700">
+        <input type="checkbox" id="vi-publier" ${d.privacy&&d.privacy.publierTel?checked:''} style="width:19px;height:19px"> Afficher mon numéro d'appel aux clients
+      </label>
+      <label style="display:flex;align-items:center;gap:9px;margin-top:7px;font-size:13px;font-weight:700">
+        <input type="checkbox" id="vi-hideq" ${d.privacy&&d.privacy.hideQuartier?checked:''} style="width:19px;height:19px"> Masquer mon quartier exact (afficher « zone … »)
+      </label>
+      <label style="display:flex;align-items:center;gap:9px;margin-top:7px;font-size:13px;font-weight:700">
+        <input type="checkbox" id="vi-fiche" ${(!d.privacy||d.privacy.publieFiche!==false)?checked:''} style="width:19px;height:19px"> Ma fiche est visible dans la recherche
+      </label>
+    </div>
+    <div class="inp-row" style="margin-top:11px"><label>🚗 Zone d'intervention — km autour de ${svcNom||'votre ville de service'}</label>
+      <input class="inp" id="vi-zone" type="number" min="1" max="800" value="${zoneKm}"></div>
+    <label style="display:flex;align-items:center;gap:9px;margin-top:6px;font-size:13px;font-weight:700">
+      <input type="checkbox" id="vi-pause" ${d.pause?checked:''} style="width:19px;height:19px"> ⏸️ Faire une pause (je reste joignable mais je n'apparais plus disponible)
+    </label>
+    <div style="background:#fff9e6;border:1.5px solid #ffe6a3;border-radius:12px;padding:10px;margin-top:11px;font-size:11.5px;color:#8a6100;font-weight:700">
+      🔒 Klean n'affiche jamais votre position exacte ni votre adresse : les clients voient seulement une distance approximative ou une zone.
+    </div>
+    <button class="btn-main" style="width:100%;margin-top:12px;padding:12px" onclick="sauverVisibilite()">💾 Enregistrer</button>
+  </div>`;
+  document.body.appendChild(ov);
+}
+async function sauverVisibilite(){
+  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId') || '';
+  if(!id) return toast('🔗 Compte pro non lié');
+  const body = {
+    agentId: id,
+    telPro: ((document.getElementById('vi-telpro')||{}).value||'').replace(/\D/g,''),
+    privacy: {
+      publierTel: !!(document.getElementById('vi-publier')||{}).checked,
+      hideQuartier: !!(document.getElementById('vi-hideq')||{}).checked,
+      publieFiche: !!(document.getElementById('vi-fiche')||{}).checked
+    },
+    zone: { km: parseInt((document.getElementById('vi-zone')||{}).value,10) || 15 },
+    pause: !!(document.getElementById('vi-pause')||{}).checked
+  };
+  try{
+    const r = await fetch('/api/agents/me', { method:'PUT', headers: jetonProHeaders(), body: JSON.stringify(body) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ toast('⚠️ '+(d.error||'Enregistrement impossible')); return; }
+    agent.telPro = d.telPro || ''; agent.zoneKm = d.zoneKm || body.zone.km;
+    agent.numPro = d.numPro || agent.numPro; agent.privacy = d.privacy;
+    if(d.jeton){ agent.jeton = d.jeton; try{ localStorage.setItem('k2_agent_jeton', d.jeton); }catch(e){} }
+    saveAll();
+    const ov = document.getElementById('visi'); if(ov) ov.remove();
+    toast('✅ Enregistré — votre visibilité est à jour');
+  }catch(e){ toast('📵 Réseau fragile — réessayez'); }
+}
+/* bouton présent dans l'espace pro : on l'ajoute au menu du rond pro */
+function visibiliteBouton(){
+  return '<button onclick="ouvrirVisibilite()" style="width:100%;text-align:left;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font:inherit;font-weight:800;padding:12px;border-radius:12px;cursor:pointer;margin-top:8px">🎫 Numéro pro · visibilité &amp; zone</button>';
+}
+
+
+/* ═══════════ 🔒 JETON PERDU / PAS ENCORE REÇU ═══════════
+   Le serveur exige une preuve (jeton) pour accepter la position et l'état du pro.
+   Si ce téléphone ne l'a pas encore, on le redemande proprement avec le CODE D'ACCÈS
+   remis par l'équipe KLEAN (le même que pour lier le compte). */
+function recupererJeton(msg){
+  const old = document.getElementById('jeton-recov'); if(old) old.remove();
+  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId') || '';
+  const ov = document.createElement('div');
+  ov.id = 'jeton-recov';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9900;display:flex;align-items:center;justify-content:center;padding:18px';
+  ov.innerHTML = `
+  <div style="background:var(--card);width:100%;max-width:430px;border-radius:18px;padding:16px">
+    <b style="display:block;margin-bottom:6px">🔒 Sécurité du compte professionnel</b>
+    <p style="margin:0 0 10px;font-size:12.5px;color:var(--muted);line-height:1.5">${msg||'Ce téléphone doit confirmer votre identité pour envoyer votre position et recevoir des missions.'}</p>
+    <div class="inp-row"><label>📞 Votre numéro principal</label><input class="inp" id="jr-tel" type="tel" value="${(agent && (agent.tel||agent.tel1)) || ''}" placeholder="01 02 03 04 05"></div>
+    <div class="inp-row"><label>🎟️ Code d’accès (remis par KLEAN)</label><input class="inp" id="jr-pin" inputmode="numeric" maxlength="8" placeholder="••••••"></div>
+    <button class="btn-main" style="width:100%;padding:12px" onclick="validerJetonRecov()">🔓 Confirmer et continuer</button>
+    <button onclick="document.getElementById('jeton-recov').remove()" style="width:100%;margin-top:8px;background:var(--card2);border:1px solid var(--line);color:var(--muted);font:inherit;font-weight:800;padding:11px;border-radius:11px;cursor:pointer">Plus tard</button>
+    <small style="display:block;margin-top:9px;color:var(--muted);font-size:11.5px">Vous n'avez plus votre code ? Demandez-le au gestionnaire KLEAN (Contactez Klean-Service).</small>
+  </div>`;
+  document.body.appendChild(ov);
+}
+async function validerJetonRecov(){
+  const tel = ((document.getElementById('jr-tel')||{}).value||'').trim();
+  const pin = ((document.getElementById('jr-pin')||{}).value||'').trim();
+  if(tel.replace(/\D/g,'').length < 8 || pin.replace(/\D/g,'').length < 4) return toast('📞 Numéro + code d’accès (4 à 8 chiffres)');
+  try{
+    const r = await fetch('/api/agents/claim', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({tel, pin})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) return toast('⚠️ '+(d.error||'Code refusé'));
+    if(d.agentId){ NET.agentId = d.agentId; localStorage.setItem('k2_agentId', d.agentId); }
+    if(d.jeton){ agent.jeton = d.jeton; try{ localStorage.setItem('k2_agent_jeton', d.jeton); }catch(e){} }
+    if(d.numPro) agent.numPro = d.numPro;
+    agent.apply = {status:'approved', agentId: (d.agentId||NET.agentId), nom: d.nom || agent.nom};
+    saveAll();
+    const ov = document.getElementById('jeton-recov'); if(ov) ov.remove();
+    toast('✅ Appareil confirmé — GPS et missions réactivés');
+    if(typeof netAnnounceOnline === 'function' && agent.online) setTimeout(netAnnounceOnline, 400);
+  }catch(e){ toast('📵 Réseau fragile — réessayez'); }
+}
+
 function refreshApplyStatus(){
   if(typeof NET!=='undefined' && NET.on && agent.apply.agentId){
     fetch('/api/agents/'+agent.apply.agentId+'/status').then(r=>r.json()).then(d=>{
@@ -3293,5 +3436,354 @@ refreshStats();
 .city-row.soon{opacity:1!important}
 .city.soon{opacity:.9}
 </style>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   🔎 RECHERCHE INTELLIGENTE — mise en relation client ↔ pros (GPS)
+   ---------------------------------------------------------------------------
+   « Quel service recherchez-vous ? » → autorisation GPS → liste des pros
+   les plus proches (distance approximative, dispo) → « Voir le profil » /
+   « Contacter » → demande du service depuis la fiche. Plus une recherche
+   par NUMÉRO PROFESSIONNEL. Toutes les distances viennent du SERVEUR :
+   le GPS du téléphone n'est jamais cru sur parole (vérifié côté serveur).
+   ═══════════════════════════════════════════════════════════════════════════ */
+const RECH = { svc:'', lat:null, lng:null, source:'', exact:false, liste:[], fiche:null, num:'', etape:'svc', msgErr:'' };
+
+function rechEch(t){ return String(t==null?'':t).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function rechSvcNom(id){ const s=(typeof SERVICES!=='undefined'?SERVICES:[]).find(x=>x.id===id); return s?s.nom:(id||''); }
+function rechSvcIc(id){ const s=(typeof SERVICES!=='undefined'?SERVICES:[]).find(x=>x.id===id); return s?s.ic:'🛠️'; }
+function rechVille(){ try{ return (typeof cityName==='function' && c && c.city) ? cityName(c.city) : ''; }catch(e){ return ''; } }
+function rechQuartier(){ try{ return (c && c.quartier) || ''; }catch(e){ return ''; } }
+function rechBox(){ return document.getElementById('ecran-recherche'); }
+
+/* ── bouton d'entrée réutilisable (accueil + bloc « pros les plus proches ») ── */
+function rechBouton(){
+  return '<div style="margin:0 0 10px"><button onclick="ouvrirRecherche()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:12px 14px;border-radius:14px;box-shadow:0 4px 12px rgba(10,138,98,.25);font-size:14px">🔎 Rechercher un pro près de moi · GPS</button></div>';
+}
+
+/* ═══════════ OUVERTURE / FERMETURE ═══════════ */
+function ouvrirRecherche(){
+  const b = rechBox(); if(!b) return;
+  b.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+  RECH.etape = RECH.svc ? 'pos' : 'svc';
+  rechPeindre();
+}
+function rechFermer(){
+  const b = rechBox(); if(!b) return;
+  b.style.display = 'none';
+  document.body.style.overflow = '';
+}
+function rechPeindre(){
+  const b = rechBox(); if(!b) return;
+  const tete = '<div style="position:sticky;top:0;z-index:5;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:10px">'
+    + '<div style="flex:1;min-width:0"><b style="font-size:15.5px;display:block">🔎 Trouver un professionnel</b>'
+    + '<small style="opacity:.92;font-size:11.5px">'+(RECH.svc?('Service : '+rechEch(rechSvcNom(RECH.svc))):'Choisissez d’abord votre service')+'</small></div>'
+    + '<button onclick="rechFermer()" style="border:none;background:rgba(255,255,255,.22);color:#fff;font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">✕</button></div>';
+  let corps = '';
+  if(RECH.etape==='svc')      corps = rechVueSvc();
+  else if(RECH.etape==='pos') corps = rechVuePos();
+  else if(RECH.etape==='liste') corps = rechVueListe();
+  else if(RECH.etape==='num') corps = rechVueNum();
+  b.innerHTML = '<div style="position:fixed;inset:0;background:#f4f7f6;overflow-y:auto;-webkit-overflow-scrolling:touch">'+tete
+    + '<div style="max-width:640px;margin:0 auto;padding:14px">'+corps+'</div></div>';
+  try{ window.scrollTo(0,0); }catch(e){}
+}
+
+/* ═══════════ ÉTAPE 1 : QUEL SERVICE ? ═══════════ */
+function rechVueSvc(){
+  const svcs = (typeof SERVICES!=='undefined'?SERVICES:[]).filter(s=>s.id!=='custom');
+  const q = (RECH.q||'').toLowerCase();
+  const list = q ? svcs.filter(s=>normT(s.nom+' '+(s.desc||'')).includes(normT(q))) : svcs;
+  return '<div style="background:#fff;border-radius:16px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.05)">'
+    + '<h3 style="margin:0 0 4px;font-size:17px">Quel service recherchez-vous ?</h3>'
+    + '<p style="margin:0 0 12px;color:#6b7c73;font-size:12.5px">Nous classons les professionnels du <b>plus proche au plus loin</b>, en gardant seulement ceux qui font <b>exactement</b> ce service.</p>'
+    + '<input class="inp" id="rech-svc-q" placeholder="🔍 ménage, plomberie, climatisation, maths…" value="'+rechEch(RECH.q||'')+'" oninput="RECH.q=this.value;rechPeintCorps()" style="margin-bottom:12px" autocomplete="off">'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+    + list.map(s=>'<button onclick="rechSetSvc(\''+s.id+'\')" style="text-align:left;border:1.5px solid #e4eae7;background:#fff;border-radius:13px;padding:10px 11px;cursor:pointer;font:inherit">'
+      + '<b style="display:block;font-size:13.5px">'+s.ic+' '+rechEch(s.nom)+'</b><small style="color:#6b7c73;font-size:11px">'+rechEch(s.desc||'')+'</small></button>').join('')
+    + '</div>'
+    + (list.length?'':'<p class="note" style="margin:8px 0 0">Aucun service ne correspond — essayez un autre mot.</p>')
+    + '<div style="margin-top:14px;padding-top:12px;border-top:1.5px dashed #e4eae7">'
+    + '<button onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;border:1.5px solid #0a8a62;background:#f2fbf8;color:#0a8a62;font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer">🎫 Rechercher par numéro professionnel</button>'
+    + '</div></div>';
+}
+function rechPeintCorps(){
+  const b = rechBox(); if(!b) return;
+  const corps = RECH.etape==='svc' ? rechVueSvc() : (RECH.etape==='num' ? rechVueNum() : (RECH.etape==='liste' ? rechVueListe() : rechVuePos()));
+  const z = b.querySelector('div[style*="max-width:640px"]'); if(z) z.innerHTML = corps;
+  const q = document.getElementById('rech-svc-q'); if(q) try{ q.focus(); }catch(e){}
+}
+
+/* ═══════════ ÉTAPE 2 : AUTORISATION GPS ═══════════ */
+function rechSetSvc(id){
+  RECH.svc = id; RECH.etape = 'pos'; RECH.msgErr = '';
+  rechPeindre();
+}
+function rechVuePos(){
+  const gpsOk = (typeof navigator!=='undefined' && navigator.geolocation);
+  return '<div style="background:#fff;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,.05)">'
+    + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:30px">'+rechSvcIc(RECH.svc)+'</span>'
+    + '<div><b style="display:block;font-size:16px">'+rechEch(rechSvcNom(RECH.svc))+'</b>'
+    + '<small style="color:#6b7c73">Ville : <b>'+rechEch(rechVille()||'—')+'</b>'+(rechQuartier()?(' · quartier '+rechEch(rechQuartier())):'')+'</small></div></div>'
+    + (RECH.msgErr ? ('<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:12px;padding:11px 12px;font-size:13px;font-weight:700;margin-bottom:12px">'+RECH.msgErr+'</div>') : '')
+    + '<p style="margin:0 0 12px;font-size:13.5px;color:#33433c">Pour vous montrer les professionnels <b>les plus proches</b>, Klean a besoin de votre position. '
+    + 'Elle sert <b>uniquement</b> au calcul de la distance : votre adresse exacte n’est <b>jamais</b> affichée, et les pros ne voient qu’une distance approximative.</p>'
+    + (gpsOk
+      ? '<button onclick="rechLocaliser()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:14px;border-radius:14px;font-size:15px">📍 Autoriser ma position et chercher</button>'
+      : '<div style="background:#fff9e6;border:1.5px solid #ffe6a3;border-radius:12px;padding:11px;font-size:13px;font-weight:700;color:#8a6100">📵 Ce téléphone ne fournit pas de position (GPS indisponible). Utilisez la recherche par ville ou par numéro professionnel.</div>')
+    + '<button onclick="rechChercher(false)" style="width:100%;margin-top:9px;border:1.5px solid #d8e2dd;background:#fff;color:#33433c;font:inherit;font-weight:800;padding:12px;border-radius:13px;cursor:pointer;font-size:13.5px">🏙️ Chercher sans GPS (par ville et quartier)</button>'
+    + '<div style="margin-top:14px;padding-top:12px;border-top:1.5px dashed #e4eae7">'
+    + '<button onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;border:1.5px solid #0a8a62;background:#f2fbf8;color:#0a8a62;font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer">🎫 Rechercher par numéro professionnel</button></div>'
+    + '<button onclick="RECH.etape=\'svc\';rechPeindre()" style="width:100%;margin-top:9px;border:none;background:transparent;color:#6b7c73;font:inherit;font-weight:800;padding:8px;cursor:pointer;font-size:12.5px">← Changer de service</button>'
+    + '</div>';
+}
+function rechLocaliser(){
+  if(!navigator.geolocation){ RECH.msgErr='📵 GPS indisponible sur ce téléphone.'; return rechPeindre(); }
+  RECH.msgErr = '<span style="color:#0a8a62">📡 Recherche de votre position…</span>';
+  rechPeindre();
+  navigator.geolocation.getCurrentPosition(
+    p=>{ RECH.lat = p.coords.latitude; RECH.lng = p.coords.longitude; RECH.acc = Math.round(p.coords.accuracy||0); rechChercher(true); },
+    err=>{
+      /* cas demandés : refus, GPS désactivé, pas de signal */
+      if(err && err.code === 1) RECH.msgErr = '🚫 Vous avez refusé l’accès à votre position. Vous pouvez réessayer (autorisez Klean dans les réglages du navigateur) ou chercher par ville/quartier.';
+      else if(err && err.code === 2) RECH.msgErr = '📵 GPS désactivé ou injoignable. Activez la localisation du téléphone, ou cherchez par ville/quartier.';
+      else RECH.msgErr = '⏱️ Le GPS n’a pas répondu à temps. Réessayez ou cherchez par ville/quartier.';
+      rechPeindre();
+    },
+    { enableHighAccuracy:true, timeout:12000, maximumAge:60000 }
+  );
+}
+
+/* ═══════════ ÉTAPE 3 : LA LISTE ═══════════ */
+async function rechChercher(avecGps){
+  RECH.etape = 'liste'; RECH.busy = true;
+  rechPeindre();
+  const q = 'service='+encodeURIComponent(RECH.svc)
+    + '&ville='+encodeURIComponent(rechVille())
+    + '&quartier='+encodeURIComponent(rechQuartier())
+    + (avecGps && RECH.lat!=null ? ('&lat='+RECH.lat+'&lng='+RECH.lng+'&acc='+(RECH.acc||0)) : '');
+  const headers = {};
+  try{ if(typeof client!=='undefined' && client && client.token) headers['X-Client-Token'] = client.token; }catch(e){}
+  try{
+    const r = await fetch('/api/recherche?'+q, { headers, cache:'no-store' });
+    const d = await r.json().catch(()=>({}));
+    RECH.busy = false;
+    if(r.status === 429){ RECH.msgErr = '⏳ Trop de recherches d’affilée — attendez une minute puis réessayez.'; RECH.liste = []; }
+    else if(!r.ok || d.error){ RECH.msgErr = '⚠️ '+(d.error||'Recherche impossible pour le moment'); RECH.liste = []; }
+    else { RECH.liste = d.pros||[]; RECH.source = d.posSource||''; RECH.exact = !!d.exact; RECH.enLigne = d.enLigne||0; RECH.libres = d.libres||0; RECH.msgErr=''; }
+  }catch(e){ RECH.busy=false; RECH.liste=[]; RECH.msgErr='📡 Serveur injoignable — vérifiez votre connexion.'; }
+  rechPeindre();
+}
+function rechVueListe(){
+  const src = RECH.source;
+  const posTxt = src==='gps' ? '<b style="color:#0a8a62">📡 Votre position GPS</b>'
+    : (src==='zone' ? '📍 Position approximative (zone)' : (src==='ville' ? '🏙️ Position approximative (ville)' : '—'));
+  let h = '<div style="background:#fff;border-radius:16px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.05);margin-bottom:12px">'
+    + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:15px">'+rechSvcIc(RECH.svc)+' '+rechEch(rechSvcNom(RECH.svc))+'</b>'
+    + '<span style="margin-left:auto;font-size:11px;font-weight:900;background:#eef4ff;color:#2f6fd0;padding:4px 9px;border-radius:99px">'+(RECH.libres||0)+' disponible(s)</span>'
+    + '<span style="font-size:11px;font-weight:900;background:#f4f6f5;color:#6b7c73;padding:4px 9px;border-radius:99px">'+(RECH.enLigne||0)+' en ligne</span></div>'
+    + '<small style="display:block;margin-top:7px;color:#6b7c73;font-size:11.5px">Classés du plus proche au plus loin · '+posTxt+' · distance approximative, jamais votre adresse exacte</small>'
+    + '<div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">'
+    + (RECH.exact ? '<button onclick="rechChercher(false)" style="flex:1;min-width:130px;border:1.5px solid #d8e2dd;background:#fff;font:inherit;font-weight:800;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">🏙️ Sans GPS (ville)</button>'
+                 : '<button onclick="rechLocaliser()" style="flex:1;min-width:130px;border:none;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;font:inherit;font-weight:900;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">📍 Utiliser mon GPS</button>')
+    + '<button onclick="rechChercher('+(RECH.exact?'true':'false')+')" style="flex:1;min-width:110px;border:1.5px solid #d8e2dd;background:#fff;font:inherit;font-weight:800;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">🔄 Actualiser</button>'
+    + '<button onclick="RECH.etape=\'svc\';rechPeindre()" style="border:1.5px solid #d8e2dd;background:#fff;font:inherit;font-weight:800;padding:10px 12px;border-radius:11px;cursor:pointer;font-size:12.5px">🔁 Changer de service</button>'
+    + '</div></div>';
+  if(RECH.busy){
+    return h + '<div style="background:#fff;border-radius:16px;padding:22px;text-align:center;color:#6b7c73;font-weight:700">📡 Recherche des pros du métier autour de vous…</div>';
+  }
+  if(RECH.msgErr){
+    h += '<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:13px;padding:12px;font-size:13px;font-weight:700;margin-bottom:12px">'+RECH.msgErr+'</div>';
+  }
+  if(!RECH.liste.length && !RECH.msgErr){
+    /* cas demandé : aucun pro proche */
+    return h + '<div style="background:#fff;border-radius:16px;padding:16px;text-align:center">'
+      + '<div style="font-size:34px">🔍</div><b style="display:block;margin:6px 0">Aucun professionnel '+rechEch(rechSvcNom(RECH.svc)).toLowerCase()+' disponible autour de vous pour l’instant</b>'
+      + '<p style="color:#6b7c73;font-size:12.5px;margin:0 0 12px">Vous pouvez réserver quand même : votre demande partira chez les pros du métier dès qu’ils se mettent en ligne. Ou cherchez un pro par son numéro professionnel.</p>'
+      + '<button onclick="rechChercher(false)" style="width:100%;border:1.5px solid #0a8a62;background:#f2fbf8;color:#0a8a62;font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer;margin-bottom:8px">🏙️ Chercher dans toute la ville</button>'
+      + '<button onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;border:1.5px solid #d8e2dd;background:#fff;color:#33433c;font:inherit;font-weight:800;padding:11px;border-radius:12px;cursor:pointer">🎫 Rechercher par numéro professionnel</button>'
+      + '</div>';
+  }
+  h += RECH.liste.map((p,i)=>{
+    const dist = p.distTxt ? ('<span style="font-weight:900;color:#2f6fd0">'+(p.distApprox?'≈ ':'')+rechEch(p.distTxt)+'</span>')
+      : (p.zoneTxt ? ('<span style="font-weight:900;color:#6b7c73">'+rechEch(p.zoneTxt)+'</span>') : '<span style="color:#6b7c73;font-weight:700">zone inconnue</span>');
+    const dispoBg = p.dispo==='libre' ? '#e6fbf3' : (p.dispo==='occupe' ? '#fff5e6' : '#f4f6f5');
+    const dispoFg = p.dispo==='libre' ? '#0a8a62' : (p.dispo==='occupe' ? '#b36b00' : '#6b7c73');
+    return '<div style="background:#fff;border:1.5px solid '+(p.dispo==='libre'?'#d9f0e7':'#e4eae7')+';border-radius:15px;padding:11px 12px;margin-bottom:9px">'
+      + '<div style="display:flex;align-items:flex-start;gap:10px">'
+      + '<span style="flex:none;width:26px;height:26px;border-radius:50%;background:#0a8a62;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px">'+(i+1)+'</span>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap"><b style="font-size:14.5px">'+rechEch(p.nom||'Pro')+'</b>'
+      + (p.numPro?('<span style="font-size:10.5px;font-weight:900;background:#f0f3f1;color:#5b6b63;padding:3px 7px;border-radius:99px">🎫 '+rechEch(p.numPro)+'</span>'):'')
+      + '<span style="font-size:10.5px;font-weight:900;background:'+dispoBg+';color:'+dispoFg+';padding:3px 8px;border-radius:99px">'+(p.dispo==='libre'?'🟢 ':p.dispo==='occupe'?'🟠 ':p.dispo==='pause'?'⏸️ ':'⚪ ')+rechEch(p.dispoTxt||'—')+'</span>'
+      + (p.note?('<span style="font-size:10.5px;font-weight:900;color:#b58900">★ '+p.note+'</span>'):'')+'</div>'
+      + '<div style="margin-top:3px;font-size:12.5px">'+dist+(p.pourquoi?(' <span style="color:#6b7c73">· '+rechEch(p.pourquoi)+'</span>'):'')+'</div>'
+      + '<div style="font-size:11.5px;color:#6b7c73;margin-top:2px">'+rechEch(p.ville||'')+(p.zoneAff?' · '+rechEch(p.zoneAff):'')+(p.missionsDone?(' · '+p.missionsDone+' mission(s)'):'')+'</div>'
+      + '</div></div>'
+      + '<div style="display:flex;gap:8px;margin-top:9px">'
+      + '<button onclick="rechFiche(\''+p.id+'\',\''+RECH.svc+'\')" style="flex:1;border:1.5px solid #0a8a62;background:#f2fbf8;color:#0a8a62;font:inherit;font-weight:900;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">👤 Voir le profil</button>'
+      + '<button onclick="rechFiche(\''+p.id+'\',\''+RECH.svc+'\',true)" style="flex:1;border:none;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;font:inherit;font-weight:900;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">💬 Contacter</button>'
+      + '</div></div>';
+  }).join('');
+  h += '<div style="background:#fff;border-radius:13px;padding:11px 12px;color:#6b7c73;font-size:11.5px">🔒 Les distances sont calculées et vérifiées <b>par le serveur Klean</b> : personne ne peut se déclarer plus proche qu’il ne l’est. Aucun numéro personnel n’est publié sans autorisation du pro.</div>';
+  return h;
+}
+
+/* ═══════════ RECHERCHE PAR NUMÉRO PROFESSIONNEL ═══════════ */
+function rechVueNum(){
+  return '<div style="background:#fff;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,.05)">'
+    + '<h3 style="margin:0 0 4px;font-size:16.5px">🎫 Rechercher par numéro professionnel</h3>'
+    + '<p style="margin:0 0 12px;color:#6b7c73;font-size:12.5px">Saisissez le numéro professionnel Klean du pro (il commence par <b>KP-</b>, ex. <b>KP-123456</b>). Seules ses informations publiques s’affichent.</p>'
+    + '<input class="inp" id="rech-num" placeholder="KP-123456" value="'+rechEch(RECH.num||'')+'" oninput="RECH.num=this.value.toUpperCase()" style="margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;font-weight:900" autocomplete="off">'
+    + '<button onclick="rechParNum()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:13px;border-radius:13px;font-size:14.5px">🔎 Afficher ce professionnel</button>'
+    + (RECH.numErr?('<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:12px;padding:11px;font-size:12.5px;font-weight:700;margin-top:11px">'+RECH.numErr+'</div>'):'')
+    + '<div style="margin-top:13px;padding-top:12px;border-top:1.5px dashed #e4eae7;font-size:11.5px;color:#6b7c73">Un numéro professionnel ne donne accès à <b>aucune</b> information privée : ni téléphone personnel, ni adresse, ni position exacte.</div>'
+    + '<button onclick="RECH.etape=\'svc\';rechPeindre()" style="width:100%;margin-top:11px;border:1.5px solid #d8e2dd;background:#fff;color:#33433c;font:inherit;font-weight:800;padding:11px;border-radius:12px;cursor:pointer;font-size:12.5px">← Rechercher par service et proximité</button>'
+    + '</div>';
+}
+async function rechParNum(){
+  const num = String(RECH.num||'').replace(/\s/g,'').toUpperCase();
+  RECH.numErr = '';
+  if(!num) return rechPeindre();
+  RECH.numErr = '<span style="color:#0a8a62">🔎 Recherche du numéro '+rechEch(num)+'…</span>';
+  rechPeindre();
+  const d = await rechChargeFiche('num='+encodeURIComponent(num));
+  if(d.ok){
+    RECH.fiche = d.pro; RECH.ficheSvc = (d.pro.services||[])[0] || RECH.svc;
+    RECH.numErr = '';
+    rechPeindre();
+    rechPeindreFiche(true);
+    return;
+  }
+  RECH.numErr = (d.error || 'Ce numéro professionnel ne correspond à aucun professionnel actif.');
+  rechPeindre();
+}
+
+/* ═══════════ LA FICHE PRO (voir le profil + contacter) ═══════════ */
+async function rechChargeFiche(qs){
+  try{
+    const extra = '&ville='+encodeURIComponent(rechVille())
+      + (RECH.lat!=null ? ('&lat='+RECH.lat+'&lng='+RECH.lng) : '');
+    const r = await fetch('/api/pros/fiche?'+qs+extra, { cache:'no-store' });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok) return { ok:false, error: d.error || 'Fiche indisponible', code: d.code };
+    return d;
+  }catch(e){ return { ok:false, error:'📡 Serveur injoignable — réessayez' }; }
+}
+async function rechFiche(id, svc, contact){
+  RECH.fiche = null; RECH.ficheSvc = svc || RECH.svc;
+  rechPeindreFiche(false, true);
+  const d = await rechChargeFiche('id='+encodeURIComponent(id));
+  if(!d.ok){
+    rechPeindreFiche(false, false, d.error || 'Fiche indisponible');
+    return;
+  }
+  RECH.fiche = d.pro; RECH.ficheSvc = (svc||RECH.svc) || (d.pro.services||[])[0] || '';
+  rechPeindreFiche(!!contact, false);
+}
+function rechPeindreFiche(contact, chargement, err){
+  let m = document.getElementById('fiche-pro');
+  if(!m){ m = document.createElement('div'); m.id = 'fiche-pro'; document.body.appendChild(m); }
+  m.style.display = 'block';
+  const p = RECH.fiche;
+  if(chargement){
+    m.innerHTML = '<div onclick="rechFermerFiche()" style="position:fixed;inset:0;background:rgba(12,32,26,.55);z-index:10000"></div>'
+      + '<div style="position:fixed;left:0;right:0;bottom:0;z-index:10001;background:#fff;border-radius:20px 20px 0 0;padding:22px;max-width:640px;margin:0 auto;text-align:center;font-weight:800;color:#6b7c73">👤 Chargement du profil…</div>';
+    return;
+  }
+  if(!p){
+    m.innerHTML = '<div onclick="rechFermerFiche()" style="position:fixed;inset:0;background:rgba(12,32,26,.55);z-index:10000"></div>'
+      + '<div style="position:fixed;left:0;right:0;bottom:0;z-index:10001;background:#fff;border-radius:20px 20px 0 0;padding:20px;max-width:640px;margin:0 auto">'
+      + '<b style="display:block;margin-bottom:8px">⚠️ Profil indisponible</b>'
+      + '<p style="color:#b03a1a;font-size:13px;font-weight:700">'+rechEch(err||'Ce professionnel n’est pas disponible.')+'</p>'
+      + '<button onclick="rechFermerFiche()" style="width:100%;border:none;background:#f4f6f5;color:#33433c;font:inherit;font-weight:900;padding:12px;border-radius:12px;cursor:pointer">Fermer</button></div>';
+    return;
+  }
+  const distTxt = p.distTxt ? ((p.distApprox?'≈ ':'')+p.distTxt+' de vous') : (p.zoneTxt || 'zone non précisée');
+  const tel = String(p.tel||'').replace(/\D/g,'');
+  const svcNoms = (p.services||[]).map(s=>rechSvcIc(s)+' '+rechSvcNom(s)).join(' · ');
+  const dispoBg = p.dispo==='libre' ? '#e6fbf3' : (p.dispo==='occupe' ? '#fff5e6' : '#f4f6f5');
+  const dispoFg = p.dispo==='libre' ? '#0a8a62' : (p.dispo==='occupe' ? '#b36b00' : '#6b7c73');
+  let h = '<div onclick="rechFermerFiche()" style="position:fixed;inset:0;background:rgba(12,32,26,.55);z-index:10000"></div>'
+    + '<div style="position:fixed;left:0;right:0;bottom:0;z-index:10001;background:#fff;border-radius:20px 20px 0 0;max-width:640px;margin:0 auto;max-height:92vh;overflow-y:auto">'
+    + '<div style="background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:16px;border-radius:20px 20px 0 0">'
+    + '<div style="display:flex;align-items:center;gap:12px">'
+    + (p.photo ? '<img src="'+p.photo+'" style="width:54px;height:54px;border-radius:50%;object-fit:cover;border:2.5px solid rgba(255,255,255,.6)">'
+               : '<span style="width:54px;height:54px;border-radius:50%;background:rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-size:24px">👤</span>')
+    + '<div style="flex:1;min-width:0"><b style="display:block;font-size:17px">'+rechEch(p.nom||'Professionnel')+'</b>'
+    + '<small style="opacity:.95">'+(p.numPro?('🎫 '+rechEch(p.numPro)+' · '):'')+'⭐ '+p.note+'/5 · '+p.missionsDone+' mission(s)</small></div>'
+    + '<button onclick="rechFermerFiche()" style="border:none;background:rgba(255,255,255,.22);color:#fff;font:inherit;font-weight:900;padding:8px 11px;border-radius:10px;cursor:pointer">✕</button></div>'
+    + '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:11px">'
+    + '<span style="font-size:11px;font-weight:900;background:'+dispoBg+';color:'+dispoFg+';padding:4px 9px;border-radius:99px">'+(p.dispo==='libre'?'🟢 ':p.dispo==='occupe'?'🟠 ':p.dispo==='pause'?'⏸️ ':'⚪ ')+rechEch(p.dispoTxt)+'</span>'
+    + '<span style="font-size:11px;font-weight:900;background:rgba(255,255,255,.22);color:#fff;padding:4px 9px;border-radius:99px">📍 '+rechEch(distTxt)+'</span>'
+    + '</div></div>';
+  h += '<div style="padding:15px">'
+    + '<div style="background:#f7faf9;border-radius:13px;padding:11px 12px;font-size:12.5px;color:#33433c;line-height:1.65">'
+    + '<div>🚗 <b>Zone d’intervention :</b> '+p.zoneKm+' km autour de '+rechEch(p.ville||'—')+(p.villesZone&&p.villesZone.length?(' (+'+rechEch(p.villesZone.slice(0,4).join(', '))+')'):'')+'</div>'
+    + (p.zoneAff?('<div>📍 <b>Secteur :</b> '+rechEch(p.zoneAff)+' <small style="color:#6b7c73">(approximatif — adresse exacte non communiquée)</small></div>'):'')
+    + '<div>🛠️ <b>Métiers :</b> '+rechEch(svcNoms||'—')+'</div>'
+    + (p.membreDepuis?('<div>📅 <b>Sur Klean depuis :</b> '+rechEch(p.membreDepuis)+'</div>'):'')
+    + '</div>';
+  if(contact){
+    h += '<div style="margin-top:12px;background:#f2fbf8;border:1.5px solid #cdeee0;border-radius:13px;padding:12px">'
+      + '<b style="display:block;font-size:14px;margin-bottom:4px">💬 Contacter '+rechEch(p.nom||'ce pro')+'</b>'
+      + '<small style="color:#41544c;font-size:12px">La façon la plus fiable : envoyez-lui la demande dans Klean, elle arrive sur son téléphone'+(p.dispo==='libre'?' immédiatement':' dès qu’il se libère')+'.</small></div>';
+  }
+  h += '<button onclick="rechDemander()" style="width:100%;margin-top:12px;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:14px;border-radius:14px;font-size:15px">🛎️ Demander le service'+(RECH.ficheSvc?(' · '+rechEch(rechSvcNom(RECH.ficheSvc))):'')+'</button>';
+  if(tel && p.appelDirect){
+    h += '<div style="display:flex;gap:8px;margin-top:9px">'
+      + '<a href="tel:+225'+tel.replace(/^225/,'')+'" style="flex:1;text-align:center;background:#ff8a00;color:#1a1204;font-weight:900;padding:13px;border-radius:13px;text-decoration:none;font-size:14px">📞 Appeler</a>'
+      + '<a href="https://wa.me/225'+tel.replace(/^225/,'')+'?text='+encodeURIComponent('Bonjour '+p.nom+', je vous contacte depuis KLEAN.'+(RECH.ficheSvc?(' J’ai besoin de '+rechSvcNom(RECH.ficheSvc)+'.'):''))+'" target="_blank" rel="noopener" style="flex:1;text-align:center;background:#25d366;color:#06301b;font-weight:900;padding:13px;border-radius:13px;text-decoration:none;font-size:14px">💬 WhatsApp</a></div>'
+      + '<div style="margin-top:8px;font-size:11.5px;color:#6b7c73;text-align:center">Numéro <b>'+(p.typeNum==='professionnel'?'professionnel':'')+'</b> '+rechEch(tel)+' — affiché avec l’accord du pro</div>';
+  } else {
+    h += '<div style="margin-top:9px;font-size:11.5px;color:#6b7c73;text-align:center">🔒 Ce professionnel a choisi d’être contacté <b>dans l’application</b> : aucune communication de numéro personnel.</div>';
+  }
+  h += '<button onclick="rechFermerFiche()" style="width:100%;margin-top:10px;border:none;background:#f4f6f5;color:#33433c;font:inherit;font-weight:900;padding:12px;border-radius:12px;cursor:pointer">Fermer</button>'
+    + '</div></div>';
+  m.innerHTML = h;
+}
+function rechFermerFiche(){ const m = document.getElementById('fiche-pro'); if(m) m.style.display='none'; }
+
+/* ═══════════ DEMANDER LE SERVICE DEPUIS LA FICHE ═══════════ */
+function rechDemander(){
+  const p = RECH.fiche; if(!p) return;
+  const svc = RECH.ficheSvc || RECH.svc || (p.services||[])[0];
+  try{
+    c.service = svc; c.extras = {};
+    c.cible = { id:p.id, nom:p.nom, numPro:p.numPro };
+  }catch(e){}
+  rechFermerFiche(); rechFermer();
+  try{
+    if(!SERVICES.find(s=>s.id===svc)) SERVICES.push({id:svc, ic:'🛠️', nom:svc, desc:'Service demandé', base:7000, cat:'home'});
+    renderSvcGrids(); renderStep2Meta(); renderExtras(); updatePriceBar();
+    setMode('client');
+    showView('view-book', document.querySelector('#nav-client .nav-btn:nth-child(2)'), 'client');
+    goStep(1);
+  }catch(e){}
+  rechBandeauCible();
+  toast('🎯 Demande destinée à '+p.nom+' — complétez et validez');
+}
+/* bandeau visible dans l'écran de réservation tant que le pro est choisi */
+function rechBandeauCible(){
+  let bar = document.getElementById('cible-bar');
+  const p = (typeof c!=='undefined' && c.cible) ? c.cible : null;
+  if(!bar){ bar = document.createElement('div'); bar.id='cible-bar'; const v=document.getElementById('view-book'); if(v) v.insertBefore(bar, v.firstChild); }
+  if(!p){ bar.innerHTML=''; bar.style.display='none'; return; }
+  bar.style.display='block';
+  bar.innerHTML = '<div style="display:flex;align-items:center;gap:9px;background:#eefaf5;border:1.5px solid #cdeee0;border-radius:13px;padding:10px 12px;margin:0 0 10px">'
+    + '<span style="font-size:19px">🎯</span><div style="flex:1;min-width:0;font-size:12.5px;color:#25513f">Demande destinée à <b>'+rechEch(p.nom||'ce pro')+'</b>'
+    + (p.numPro?(' <small style="color:#6b7c73">'+rechEch(p.numPro)+'</small>'):'')
+    + '<br><small style="color:#6b7c73">Il reçoit la demande en premier. S’il ne répond pas en 25 s, elle part chez les autres pros du métier.</small></div>'
+    + '<button onclick="rechAnnulerCible()" style="border:none;background:#fff;color:#8a2b12;font:inherit;font-weight:900;padding:7px 10px;border-radius:9px;cursor:pointer">Retirer</button></div>';
+}
+function rechAnnulerCible(){
+  try{ delete c.cible; }catch(e){}
+  rechBandeauCible();
+  toast('Demande ouverte à tous les pros du métier');
+}
+
+</script>
+<div id="ecran-recherche" style="display:none"></div>
+<div id="fiche-pro" style="display:none"></div>
 </body>
 </html>

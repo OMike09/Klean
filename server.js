@@ -272,10 +272,11 @@ function vapidKeys() {
 }
 /* Envoie la notification « poche » à tous les agents validés ayant activé les alertes.
    Le web push arrive MÊME application fermée / écran éteint (Android) — c'est là sa force. */
-async function pushNewMissionToAgents(m, svcNom) {
+async function pushNewMissionToAgents(m, svcNom, onlyIds) {
   if (!webpush || !vapidKeys()) return;
   const payload = JSON.stringify({ title: '🔔 Nouvelle demande KLEAN', body: svcNom + ' · ' + (m.quartier || '') + ' · ' + (m.prixTotal || 0).toLocaleString('fr-FR') + ' F — touchez pour accepter', url: '/?mode=agent', missionId: m.id });
-  const targets = db.agents.filter(ag => (ag.status || 'approved') === 'approved' && !ag.blocked && (ag.stayOnline || ag.online) && Array.isArray(ag.pushSubs) && ag.pushSubs.length && (!m.service || agentHasService(ag, m.service)));
+  const only = Array.isArray(onlyIds) && onlyIds.length ? new Set(onlyIds) : null;
+  const targets = db.agents.filter(ag => (ag.status || 'approved') === 'approved' && !ag.blocked && (ag.stayOnline || ag.online) && Array.isArray(ag.pushSubs) && ag.pushSubs.length && (!m.service || agentHasService(ag, m.service)) && (!only || only.has(ag.id)));
   let dirty = false;
   for (const ag of targets) {
     for (const sub of [...ag.pushSubs]) {
@@ -342,6 +343,12 @@ function routeWsMessage(sock, msg) {
     case 'agent_online': {
       const ag = db.agents.find(a => a.id === (sock.meta.agentId || msg.agentId));
       if (!ag) { wsSend(sock, { type: 'agent_denied', reason: 'apply' }); break; }
+      /* 🔒 le compte doit prouver son jeton — sauf première fois (le serveur lui en donne un) */
+      if (ag.jeton && String(msg.jeton || '') !== ag.jeton) {
+        wsSend(sock, { type: 'agent_denied', reason: 'jeton' });
+        console.log('⛔ Connexion pro refusée (jeton invalide) : ' + (ag.nom || ag.id));
+        break;
+      }
       if (ag.status === 'pending') { wsSend(sock, { type: 'agent_pending' }); break; }
       if (ag.blocked) { wsSend(sock, { type: 'agent_denied', reason: 'blocked' }); break; }
       if (ag.status === 'rejected') { wsSend(sock, { type: 'agent_denied', reason: 'rejected' }); break; }
@@ -369,6 +376,7 @@ function routeWsMessage(sock, msg) {
       break;
     case 'agent_pos': {   // 📡 position GPS — le pro reste actif partout où il va
       const ag = db.agents.find(a => a.id === (sock.meta.agentId || msg.agentId));
+      if (ag && ag.jeton && String(msg.jeton || '') !== ag.jeton) { ag.posRejets = (ag.posRejets || 0) + 1; break; }
       if (ag && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
         /* 🔒 on n'accepte que des points plausibles en Côte d'Ivoire, et jamais un saut impossible (> 120 km/h) */
         if (posPlausible(ag, msg.lat, msg.lng)) {
@@ -390,6 +398,7 @@ function routeWsMessage(sock, msg) {
 function publicMissionForAgent(m) {
   // on ne diffuse PAS le téléphone du client avant acceptation
   const { tel, ...clientSafe } = m.client;
+  const cibleChamp = { cible: m.cible || null };   // 🎯 demande adressée à UN pro précis
   return {
     id: m.id, service: m.service, pieces: m.pieces, depth: m.depth,
     quartier: m.quartier, time: m.time, date: m.date,
@@ -398,8 +407,27 @@ function publicMissionForAgent(m) {
     clientNom: m.client.nom,
     desc: m.desc || '',                   // 📝 description/matière précisée par le client
     photos: Array.isArray(m.photos) ? m.photos : [],
-    budget: m.budget || 0
+    budget: m.budget || 0,
+    cible: m.cible || null,               // 🎯 le client a demandé CE pro précisément
+    cibleNom: m.cibleNom || ''
   };
+}
+/* 🎯 Notifie UNIQUEMENT le pro visé : « le client vous a choisi » */
+function broadcastMissionCiblee(m) {
+  const sock = [...sockets].find(x => x.meta && x.meta.agentId === m.cible);
+  const ag = db.agents.find(a => a.id === m.cible);
+  if (sock) {
+    wsSend(sock, { type: 'mission_request', mission: Object.assign(publicMissionForAgent(m), { pourVous: true }) });
+    if (ag) { ag.demandes = (ag.demandes || 0) + 1; ag.lastDemandAt = nowISO(); }
+    console.log('🎯 Demande ' + m.id + ' envoyée au pro choisi : ' + (ag ? ag.nom : m.cible));
+  } else {
+    console.log('🎯 Pro choisi hors ligne pour ' + m.id + ' — notification poche + élargissement');
+  }
+  if (ag && Array.isArray(ag.pushSubs) && ag.pushSubs.length) {
+    pushNewMissionToAgents(m, (SVC_NAMES[m.service] || m.service) || '', [ag.id]).catch(() => {});
+  }
+  emitAdmin('mission', '🎯 ' + m.id + ' — ' + (m.client.nom || '') + ' a demandé directement ' + (ag ? ag.nom : (m.cibleNom || 'un pro'))
+    + ' · ' + (SVC_NAMES[m.service] || m.service) + ' · ' + (m.prixTotal || 0).toLocaleString('fr-FR') + ' F');
 }
 function emitToMission(m, obj) {
   const list = subsOf(m.id);
@@ -753,6 +781,20 @@ function publicMatchCard(ag, m, online) {
 }
 function broadcastNewMission(m) {
   const exc = m.exclAg || [];
+  /* 🎯 demande ciblée : d'abord le pro choisi, puis (s'il ne répond pas) toutes les villes */
+  if (m.cible && m.matchScope !== 'all') {
+    broadcastMissionCiblee(m);
+    setTimeout(() => {
+      const live = db.missions.find(x => x.id === m.id);
+      if (!live || live.status !== 'pending') return;
+      live.matchScope = 'all'; live.exclAg = [...new Set([...(live.exclAg || []), live.cible])];
+      live.cibleElargiAt = nowISO();
+      saveDb();
+      broadcastNewMission(live);
+      emitAdmin('mission', '🌍 ' + live.id + ' — le pro choisi n’a pas répondu en 25 s : élargi à tous les pros (métier ' + (SVC_NAMES[live.service] || live.service) + ')');
+    }, 25000);
+    return;
+  }
   const base = publicMissionForAgent(m);
   const targets = missionTargets(m);
   let sent = 0;
@@ -963,6 +1005,9 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/agents/veille' && req.method === 'GET') {
     const ag = db.agents.find(a => a.id === String(url.searchParams.get('agentId') || ''));
     if (!ag) return sendJson(res, 404, { error: 'pro introuvable' });
+    const jtV = agentJetonOk(req, ag, { jeton: url.searchParams.get('jeton') });   // 🔒 veille de SON téléphone
+    if (!jtV.ok) return sendJson(res, 401, { error: 'Jeton du professionnel requis', code: 'jeton' });
+    if (jtV.nouveau) saveDb();
     const gpsAge = agentHasGps(ag) ? Math.round((Date.now() - posAtMs(ag.pos)) / 1000) : null;
     const lastAge = ag.lastSeen ? Math.round((Date.now() - Date.parse(ag.lastSeen)) / 1000) : null;
     return sendJson(res, 200, {
@@ -1168,6 +1213,16 @@ const server = http.createServer(async (req, res) => {
       status: 'pending', agentId: null, createdAt: nowISO(), finishedAt: null, note: 0,
       matchScope: 'all'
     };
+    /* 🎯 demande d'un pro précis (choisi dans la liste ou trouvé par son numéro professionnel) */
+    const veutCible = b.agentCible || b.cible || b.cibleId || b.numPro;
+    if (veutCible) {
+      const key = String(typeof veutCible === 'object' ? (veutCible.id || veutCible.numPro || '') : veutCible).trim();
+      const agC = db.agents.find(a => a.id === key) || db.agents.find(a => String(a.numPro || '').toUpperCase() === key.toUpperCase());
+      if (!agC || agC.blocked || (agC.status || 'approved') !== 'approved') return sendJson(res, 404, { error: 'Ce professionnel n’est plus disponible — choisissez-en un autre' });
+      if (b.service && b.service !== 'custom' && !agentHasService(agC, b.service)) return sendJson(res, 409, { error: 'Ce professionnel ne fait pas ce service' });
+      m.cible = agC.id; m.cibleNom = agC.nom; m.matchScope = 'cible';
+      ensureNumPro(agC);
+    }
     const cli = findClientByToken(req);   // 👤 mission rattachée au compte client
     if (!cli) return sendJson(res, 401, { error: 'Inscription requise : créez votre compte client gratuit pour réserver' });
     if (cli.blocked) return sendJson(res, 403, { error: 'Compte bloqué' + (cli.blockReason ? ' — motif : ' + cli.blockReason : '') + ' · Contactez Klean-Service', blocked: true });

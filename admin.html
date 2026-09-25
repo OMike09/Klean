@@ -486,6 +486,33 @@
     </div>
   </div>
 
+  <div class="panel" style="margin-bottom:14px" id="panel-match">
+    <h3>🎯 Mise en relation GPS <span class="cnt" id="mt-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Réglages du moteur qui classe les pros autour d’un client (proximité GPS = critère majeur). Les distances sont calculées <b>par le serveur</b> — le GPS envoyé n’est jamais cru sans vérification.</p>
+      <div id="mt-form" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <label style="font-size:11.5px;font-weight:800">Fraîcheur GPS (min)<input id="mt-distttl" type="number" min="1" max="240" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Position en « zone » (min)<input id="mt-zonettl" type="number" min="5" max="1440" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Recherches / min / client<input id="mt-maxrech" type="number" min="3" max="200" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Flou distance (m)<input id="mt-jitter" type="number" min="0" max="2000" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Zone d’intervention (km)<input id="mt-rayon" type="number" min="1" max="800" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Fiche pro publique<select id="mt-fiche" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"><option value="1">Oui (recommandé)</option><option value="0">Non</option></select></label>
+      </div>
+      <button class="btn-main" style="width:100%;margin-top:9px" onclick="saveMatchCfg()">💾 Enregistrer ces réglages</button>
+      <small id="mt-state" style="display:block;margin-top:7px;font-weight:800;color:var(--amber)">État : —</small>
+      <hr style="border:none;border-top:1.5px dashed var(--line);margin:13px 0">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;line-height:1.45"><b>Tester le classement</b> : choisissez un métier et (facultatif) des coordonnées, je vous montre l’ordre exact que verrait le client.</p>
+      <input id="mt-svc" placeholder="Service (ex : maison)" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      <div style="display:flex;gap:7px;margin-top:7px">
+        <input id="mt-ville" placeholder="Ville (ex : Bouaké)" style="flex:1;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+        <input id="mt-lat" placeholder="lat" style="width:82px;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+        <input id="mt-lng" placeholder="lng" style="width:82px;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+      </div>
+      <button type="button" onclick="testerMatch()" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#4aa3ff,#1f6fd0);border:none;color:#fff;font-weight:900;padding:11px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:13px">🔎 Voir le classement</button>
+      <div id="mt-out" style="margin-top:10px;max-height:260px;overflow:auto;font-size:12.5px"></div>
+    </div>
+  </div>
+
 <script>
 const SVC = {maison:'🏠',bureaux:'🏢',canapes:'🛋️',vitres:'🪟',demenagement:'🧼',sdb:'🚿',grand:'🧹'};
 const SVC_N = {maison:'Maison',bureaux:'Bureaux',canapes:'Canapés',vitres:'Vitres',demenagement:'Après dém.',sdb:'SDB',grand:'Grand ménage',plomberie:'Plomberie',electricite:'Électricité',clim:'Climatisation',serrurerie:'Serrurerie',electro:'Électroménager',jardinage:'Jardinage',lavageauto:'Lavage auto',bricolage:'Bricolage',demen:'Déménagement',cuisine:'Cuisinier',cours:'📚 Cours ou formation à domicile',canal:'📡 Canal+ domicile',evenement:'🎉 Après événement',entretien:'🗓️ Entretien régulier',placement:'👥 Placement',custom:'🛠️ Demande sur mesure'};
@@ -735,6 +762,55 @@ function fermerFenetreVilles(){
   if(w) w.style.display='none';
   document.body.style.overflow='';
 }
+
+/* ═══════════ 🎯 MISE EN RELATION : réglages PDG + test du classement ═══════════ */
+async function chargerMatchCfg(){
+  try{
+    const d = await fetchJ('/api/admin/match-config');
+    const m = d.match || {};
+    document.getElementById('mt-distttl').value = m.distTtlMin;
+    document.getElementById('mt-zonettl').value = m.zoneTtlMin;
+    document.getElementById('mt-maxrech').value = m.maxRecherchesMin;
+    document.getElementById('mt-jitter').value  = m.jitterM;
+    document.getElementById('mt-rayon').value   = m.rayonDefautKm;
+    document.getElementById('mt-fiche').value   = m.ficheOuverte ? '1' : '0';
+    document.getElementById('mt-cnt').textContent = m.rayonDefautKm + ' km · GPS ' + m.distTtlMin + ' min';
+    document.getElementById('mt-state').textContent = 'État : réglages chargés ✓';
+  }catch(e){ document.getElementById('mt-state').textContent = 'État : chargement impossible'; }
+}
+async function saveMatchCfg(){
+  const val = id => parseInt(document.getElementById(id).value, 10);
+  const body = {distTtlMin:val('mt-distttl'), zoneTtlMin:val('mt-zonettl'), maxRecherchesMin:val('mt-maxrech'),
+    jitterM:val('mt-jitter'), rayonDefautKm:val('mt-rayon'), ficheOuverte:document.getElementById('mt-fiche').value==='1'};
+  try{
+    const r = await fetch('/api/admin/match-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'refusé');
+    document.getElementById('mt-cnt').textContent = d.match.rayonDefautKm + ' km · GPS ' + d.match.distTtlMin + ' min';
+    document.getElementById('mt-state').textContent = 'État : ✅ enregistré — appliqué immédiatement à tous les téléphones';
+  }catch(e){ document.getElementById('mt-state').textContent = 'État : ⚠️ ' + (e.message||'échec'); }
+}
+async function testerMatch(){
+  const svc = (document.getElementById('mt-svc').value||'').trim();
+  const ville = (document.getElementById('mt-ville').value||'').trim();
+  const lat = parseFloat(document.getElementById('mt-lat').value), lng = parseFloat(document.getElementById('mt-lng').value);
+  const out = document.getElementById('mt-out');
+  if(!svc){ out.innerHTML = '<b style="color:var(--amber)">Choisissez un service (ex. maison)</b>'; return; }
+  out.innerHTML = '<b>Recherche…</b>';
+  try{
+    const q = 'service='+encodeURIComponent(svc)+(ville?('&ville='+encodeURIComponent(ville)):'')+((isFinite(lat)&&isFinite(lng))?('&lat='+lat+'&lng='+lng):'');
+    const d = await fetch('/api/recherche?'+q,{cache:'no-store'}).then(r=>r.json());
+    if(d.error){ out.innerHTML = '<b style="color:var(--red)">'+d.error+'</b>'; return; }
+    out.innerHTML = '<div style="margin-bottom:6px"><b>'+d.n+' pro(s)</b> · '+d.libres+' libre(s) · '+d.enLigne+' en ligne · position : <b>'+d.posSource+'</b></div>'
+      + (d.pros||[]).map((p,i)=>{
+          const dist = p.distTxt ? ('📡 '+p.distTxt) : (p.zoneTxt||'zone ?');
+          return '<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:6px">'
+            + '<b>'+(i+1)+'. '+p.nom+'</b> — '+dist+' — '+p.dispoTxt
+            + '<br><small style="color:var(--muted)">'+p.numPro+' · '+(p.pourquoi||'')+' · '+p.ville+(p.zoneAff?(' · '+p.zoneAff):'')+'</small></div>';
+        }).join('')
+      + (d.n?'' : '<b style="color:var(--amber)">Aucun pro pour ce métier dans cette zone.</b>');
+  }catch(e){ out.innerHTML = '<b style="color:var(--red)">Serveur injoignable</b>'; }
+}
 async function chargerVillesHQ(){
   const box=document.getElementById('wv-list');
   const st=document.getElementById('wv-state');
@@ -804,6 +880,7 @@ async function creerVilleHQ(){
   chargerVillesHQ();
   alert('🏙️ Ville « '+d.city.nom+' » créée — elle s’affiche chez clients et pros.');
   loadVillesHQ();
+  try{ chargerMatchCfg(); }catch(e){}
 }
 async function loadVillesHQ(){
   try{

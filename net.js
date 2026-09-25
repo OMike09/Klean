@@ -175,7 +175,11 @@ async function netLaunchSearch(){
   };
   bookings.unshift({...mission}); saveAll();
   showView('view-search', document.querySelector('#nav-client .nav-btn:nth-child(3)'), 'client');
-  document.querySelector('#search-msg').textContent = '📡 Demande envoyée dans votre ville — GPS d’abord, sinon numéros pour appeler…';
+  const _cible = (c && c.cible) ? c.cible : null;
+  document.querySelector('#search-msg').textContent = _cible
+    ? ('🎯 Demande envoyée d’abord à ' + (_cible.nom||'votre pro') + ' — s’il ne répond pas en 25 s, elle part chez les autres pros du métier…')
+    : '📡 Demande envoyée dans votre ville — GPS d’abord, sinon numéros pour appeler…';
+  try{ delete c.cible; if(typeof rechBandeauCible==='function') rechBandeauCible(); }catch(e){}
   wsSend({type:'subscribe_mission', missionId: mission.id});
   startMatchBoard(mission.id, typeof cityName==='function'? cityName(c.city): (c.city||''));
   clearTimeout(NET.searchTimeout);
@@ -395,6 +399,14 @@ function routeNet(msg){
       if(!agent.online || !agent.nom) break;
       if(incomingReq || activeMission) break;
       netShowRequest(msg.mission);
+      /* 🎯 le client a demandé CE pro précisément depuis sa fiche */
+      if(msg.mission && msg.mission.pourVous){
+        toast('⭐ Le client vous a choisi directement — répondez vite !');
+        try{
+          const sub = document.querySelector('#req-sub');
+          if(sub) sub.innerHTML = '<b style="color:#0a8a62">⭐ Demande directe — ce client vous a choisi</b><br>' + sub.innerHTML;
+        }catch(e){}
+      }
       break;
 
     case 'mission_taken':              // → AGENT : un autre agent a pris la demande
@@ -511,8 +523,17 @@ function startProStayAlive(){
       jeton: (agent && agent.jeton) || localStorage.getItem('k2_agent_jeton') || ''};
     if(NET.pos){ body.lat=NET.pos.lat; body.lng=NET.pos.lng; body.acc=NET.pos.acc; }
     fetch('/api/agents/heartbeat',{method:'POST',headers:Object.assign({'Content-Type':'application/json'}, (body.jeton?{'X-Agent-Token':body.jeton}:{})),body:JSON.stringify(body)})
-      .then(r=>r.ok?r.json():null).then(d=>{
+      .then(r=>r.ok?r.json():r.json().then(e=>({erreurHTTP:r.status, ...e})).catch(()=>({erreurHTTP:r.status})))
+      .then(d=>{
         if(!d) return;
+        /* 🔒 jeton refusé : ce téléphone doit confirmer son code d'accès (une seule fois) */
+        if(d.code === 'jeton' || d.erreurHTTP === 401){
+          if(!NET._jetonAlerte || (Date.now() - NET._jetonAlerte) > 120000){
+            NET._jetonAlerte = Date.now();
+            if(typeof recupererJeton === 'function') recupererJeton('Ce téléphone doit confirmer votre identité une fois pour envoyer votre position et recevoir les missions.');
+          }
+          return;
+        }
         if(d.jeton && agent){ agent.jeton = d.jeton; try{ localStorage.setItem('k2_agent_jeton', d.jeton); }catch(e){} }
         if(d.numPro && agent && !agent.numPro) agent.numPro = d.numPro;
         if(d.posRefusee){
