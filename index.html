@@ -679,6 +679,14 @@
       <div class="inp-row"><label>👤 Nom complet</label><input class="inp" id="prof-nom" placeholder="Votre nom"></div>
       <div class="inp-row"><label>📍 Quartier principal</label><select class="inp" id="prof-quartier"></select></div>
       <div class="inp-row"><label>📞 Téléphone</label><div class="phone-wrap"><span class="prefix">+225</span><input type="tel" id="prof-tel" placeholder="07 00 00 00 00"></div></div>
+      <div class="inp-row"><label>🏠 Ville où vous habitez</label><input class="inp" id="prof-ville" placeholder="ex : Bouaké"></div>
+      <div style="background:var(--pl);border:1.5px solid rgba(194,65,12,.35);border-radius:14px;padding:12px;margin:10px 0 12px">
+        <b style="display:block;font-size:14px;margin-bottom:6px">🛠️ Ville de service</b>
+        <p class="note" style="margin:0 0 8px">La ville où vous pouvez travailler — <b>la même que le client</b> pour vous croiser (GPS ou appel).</p>
+        <button type="button" class="btn-line" style="width:100%;margin-bottom:8px;font-weight:800" onclick="openVilleFor('prof-ville-svc')">🔍 Choisir la ville de service (A→Z)</button>
+        <select class="inp" id="prof-ville-svc" onchange="document.getElementById('prof-ville-svc2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— ville où je rends service —</option></select>
+        <div class="inp-row" id="prof-ville-svc2-row" style="display:none;margin-top:8px"><label>✏️ Autre ville</label><input class="inp" id="prof-ville-svc2" maxlength="40" placeholder="Ex : Séguéla…"></div>
+      </div>
       <button class="btn-main" style="width:100%;flex:none" onclick="saveProfile()">💾 Enregistrer</button>
       <button class="btn-line" style="width:100%;margin-top:10px" onclick="openKleanService()">📞 Contactez Klean-Service</button>
     </div>
@@ -1778,6 +1786,8 @@ function renderAgentGate(){
     </div>
     <div class="inp-row"><label>🏙️ Ville de résidence * — où vous vivez ?</label><button type="button" class="btn-line" style="width:100%;margin-bottom:8px;font-weight:800" onclick="openVilleFor('ap-ville')">🔍 Chercher / choisir une ville (A→Z)</button><select class="inp" id="ap-ville" onchange="document.getElementById('ap-ville2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— choisir votre ville —</option>${cityOptionsHTML()}<option value="__autre">✏️ Ma ville n'est pas dans la liste — je l'écris</option></select></div>
     <div class="inp-row" id="ap-ville2-row" style="display:none"><label>✏️ Écrivez le nom de votre ville</label><input class="inp" id="ap-ville2" maxlength="40" placeholder="Ex : Séguéla…"></div>
+    <div class="inp-row" style="background:var(--pl);border:1.5px solid rgba(194,65,12,.3);border-radius:14px;padding:12px"><label>🛠️ Ville de service * — où vous travaillez (identique au client pour vous croiser)</label><button type="button" class="btn-line" style="width:100%;margin-bottom:8px;font-weight:800" onclick="openVilleFor('ap-ville-svc')">🔍 Choisir la ville de service</button><select class="inp" id="ap-ville-svc" onchange="document.getElementById('ap-ville-svc2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— même liste que les clients —</option>${cityOptionsHTML()}<option value="__autre">✏️ Autre ville</option></select></div>
+    <div class="inp-row" id="ap-ville-svc2-row" style="display:none"><label>✏️ Ville de service</label><input class="inp" id="ap-ville-svc2" maxlength="40"></div>
     <div class="inp-row"><label>✉️ E-mail <small style="font-weight:400;color:var(--muted)">(optionnel)</small></label><input class="inp" id="ap-mail" type="email" maxlength="60" placeholder="ex : nom@gmail.com"></div>
     <div class="two">
       <div class="inp-row"><label>📞 Tél. principal *</label><input class="inp" id="ap-tel1" type="tel" placeholder="01 02 03 04 05"></div>
@@ -1930,7 +1940,9 @@ async function submitApplication(){
     nom: V_AP('ap-nom'), prenom: V_AP('ap-prenom'), naissance: V_AP('ap-naissance'),
     tel1: V_AP('ap-tel1').replace(/\D/g,''), tel2: V_AP('ap-tel2').replace(/\D/g,''),
     quartier: V_AP('ap-quartier'), adresse: V_AP('ap-adresse'),
-    ville: (V_AP('ap-ville')==='__autre' ? V_AP('ap-ville2') : V_AP('ap-ville')).trim(), mail: V_AP('ap-mail'),
+    ville: (V_AP('ap-ville')==='__autre' ? V_AP('ap-ville2') : V_AP('ap-ville')).trim(),
+    villeService: (V_AP('ap-ville-svc')==='__autre' ? V_AP('ap-ville-svc2') : V_AP('ap-ville-svc')).trim() || (V_AP('ap-ville')==='__autre' ? V_AP('ap-ville2') : V_AP('ap-ville')).trim(),
+    mail: V_AP('ap-mail'),
     pieceType: V_AP('ap-piecetype'), pieceNum: V_AP('ap-piecenum'), piecePhoto: window._piecePhoto || '',
     photo: window._agentAvatar || '',
     urgenceNom: V_AP('ap-urgencenom'), urgenceTel: V_AP('ap-urgencetel'),
@@ -2447,15 +2459,36 @@ function renderAgentHist(){
 }
 function fillProfile(){
   $('#prof-nom').value = agent.nom; $('#prof-quartier').value = agent.quartier; $('#prof-tel').value = agent.tel;
+  const pv=document.getElementById('prof-ville'); if(pv) pv.value = agent.ville || '';
+  const sel=document.getElementById('prof-ville-svc');
+  if(sel && !sel.dataset.ready){
+    sel.innerHTML = '<option value="">— ville où je rends service —</option>'+(typeof cityOptionsHTML==='function'?cityOptionsHTML():'')+'<option value="__autre">✏️ Autre ville</option>';
+    sel.dataset.ready='1';
+  }
+  const vs = agent.villeService || agent.ville || '';
+  if(sel && vs){
+    const opts=[...sel.options].map(o=>o.value);
+    if(opts.includes(vs)) sel.value=vs;
+    else { sel.value='__autre'; const r=document.getElementById('prof-ville-svc2-row'); if(r) r.style.display='block'; const i=document.getElementById('prof-ville-svc2'); if(i) i.value=vs; }
+  }
   $('#prof-avatar').textContent = (agent.nom||'A')[0].toUpperCase();
   $('#prof-name').textContent = agent.nom || 'Nouvel agent';
-  $('#prof-sub').textContent = 'Professionnel KLEAN · '+agent.quartier+' · '+(agent.missionsDone)+' mission(s)';
+  $('#prof-sub').textContent = 'Professionnel KLEAN · '+(agent.villeService||agent.ville||agent.quartier||'')+' · '+(agent.missionsDone||0)+' mission(s)';
 }
 function saveProfile(){
   agent.nom = $('#prof-nom').value.trim() || agent.nom;
   agent.quartier = $('#prof-quartier').value;
   agent.tel = $('#prof-tel').value.trim();
-  saveAll(); fillProfile(); toast('✓ Profil enregistré');
+  const pv=document.getElementById('prof-ville'); if(pv) agent.ville = pv.value.trim();
+  const sel=document.getElementById('prof-ville-svc');
+  let vs = sel ? sel.value : '';
+  if(vs==='__autre') vs = ((document.getElementById('prof-ville-svc2')||{}).value||'').trim();
+  if(vs) agent.villeService = vs;
+  saveAll(); fillProfile(); toast('✓ Ville de service enregistrée — les clients de cette ville vous voient');
+  try{
+    const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
+    if(id) fetch('/api/agents/me',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({agentId:id, nom:agent.nom, quartier:agent.quartier, tel:agent.tel, ville:agent.ville, villeService:agent.villeService})}).catch(()=>{});
+  }catch(e){}
 }
 
 /* ══════════ UTILS ══════════ */

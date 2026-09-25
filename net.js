@@ -98,7 +98,10 @@ async function netLaunchSearch(){
   c.tel = document.querySelector('#inp-tel').value.trim();
   const _bd = document.querySelector('#bk-desc');
   c.desc = (_bd ? _bd.value : '').trim().slice(0,280);
+  c.photos = (window._customPhotos || []).slice(0, 3);
+  if(document.querySelector('#inp-budget')) c.budget = parseInt((document.querySelector('#inp-budget').value||'').replace(/\D/g,'')) || 0;
   if(c.service==='cours' && !c.desc) return toast('📖 Précisez la matière ou le domaine du coach');
+  if(c.service==='custom' && (!c.desc || c.desc.length < 8)) return toast('📝 Décrivez votre besoin en quelques mots');
   if(!c.nom) return toast('Indiquez votre nom 👤');
   if(c.tel.replace(/\D/g,'').length < 8) return toast('Numéro invalide 📞');
 
@@ -122,9 +125,10 @@ async function netLaunchSearch(){
     if(typeof client!=='undefined' && client && client.token) headers['X-Client-Token'] = client.token;
     const r = await fetch('/api/missions', {
       method:'POST', headers,
-      body: JSON.stringify({...c, prixTotal:p.total, deviceId:NET.deviceId, ville: (typeof cityName==='function'? cityName(c.city): (c.city||'')), cityNom: (typeof cityName==='function'? cityName(c.city): (c.city||''))})
+      body: JSON.stringify({...c, prixTotal:p.total, quote: c.service==='custom', photos: c.photos||[], deviceId:NET.deviceId, ville: (typeof cityName==='function'? cityName(c.city): (c.city||'')), cityNom: (typeof cityName==='function'? cityName(c.city): (c.city||''))})
     });
-    created = await r.json();
+    created = await r.json().catch(()=>({}));
+    if(!r.ok) return toast('⚠️ '+(created.error||'Demande refusée'));
   }catch(e){ return toast('Serveur injoignable — réessayez'); }
 
   mission = {
@@ -340,6 +344,16 @@ function routeNet(msg){
       localStorage.setItem('k2_agentId', msg.agentId);
       break;
 
+    case 'quote_offer':
+      if(mission && mission.id===msg.missionId){
+        const ok=confirm('💰 KLEAN propose '+Number(msg.prix||0).toLocaleString('fr-FR')+' F pour votre demande sur mesure. Accepter ?');
+        fetch('/api/missions/quote-reply',{method:'POST',headers:Object.assign({'Content-Type':'application/json'}, (typeof client!=='undefined'&&client&&client.token)?{'X-Client-Token':client.token}:{}), body:JSON.stringify({id:msg.missionId, accept:!!ok})}).then(r=>r.json()).then(d=>{
+          if(ok && d.ok) toast('✅ Prix accepté — recherche d’un pro…');
+          else toast('Demande annulée');
+        }).catch(()=>{});
+      } else toast('💰 Nouveau prix proposé pour une demande sur mesure');
+      break;
+
     case 'mission_request':            // → AGENT : nouvelle demande
       if(!agent.online || !agent.nom) break;
       if(incomingReq || activeMission) break;
@@ -424,7 +438,7 @@ async function netEnsureAgentRegistered(){
 }
 function netAnnounceOnline(){
   netStartPosWatch();
-  wsSend({type:'agent_online', agentId:NET.agentId, nom:agent.nom, quartier:agent.quartier, tel:agent.tel, ville: agent.ville || (typeof cityName==='function'?cityName(typeof c!=='undefined'&&c.city): '') || ''});
+  wsSend({type:'agent_online', agentId:NET.agentId, nom:agent.nom, quartier:agent.quartier, tel:agent.tel, ville: agent.ville || (typeof cityName==='function'?cityName(typeof c!=='undefined'&&c.city): '') || '', villeService: agent.villeService || agent.ville || ''});
 }
 async function netQuickOnboard(){
   const nom = document.querySelector('#ob-nom').value.trim();
@@ -442,7 +456,7 @@ function startProStayAlive(){
   if(NET._hb) return;
   const beat=()=>{
     if(!agent || !agent.online || !NET.agentId) return;
-    const body={agentId:NET.agentId, stayOnline:true};
+    const body={agentId:NET.agentId, stayOnline:true, villeService: (agent && (agent.villeService||agent.ville)) || ''};
     if(NET.pos){ body.lat=NET.pos.lat; body.lng=NET.pos.lng; }
     fetch('/api/agents/heartbeat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(()=>{});
     if(NET.on) netAnnounceOnline();
@@ -618,7 +632,6 @@ function viewMissionPhoto(i){
    → bandeau discret en haut de l'app + mémoire pour ne pas repousser deux fois la même annonce
    → bandeau « MISE À JOUR » affiché automatiquement quand le serveur change de version       */
 function renderAnnonceBanner(a) {
-  /* Plus de carte INFO KLEAN en haut : la bande TV du bas s’en charge. */
   const el = document.getElementById('ann-bar');
   if (el) el.remove();
   return;
@@ -698,37 +711,32 @@ function supBuild() {
   if (_supBuild) return; _supBuild = true;
   const css = document.createElement('style');
   css.textContent = `
-#sup-fab{position:fixed;right:14px;bottom:96px;z-index:9600;width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,#15c98a,#0a8f60);border:none;color:#04130c;font-size:22px;box-shadow:0 8px 22px rgba(21,201,138,.35);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:bottom .25s ease}
-#sup-fab .bdg{position:absolute;top:-3px;right:-3px;background:#ff6b6b;color:#fff;font-size:10px;font-weight:900;min-width:18px;height:18px;border-radius:9px;display:none;align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--card)}
+#sup-fab{display:none !important}
 #sup-pane{position:fixed;left:0;right:0;bottom:0;z-index:9700;max-width:520px;margin:0 auto;background:var(--card);border-top-left-radius:20px;border-top-right-radius:20px;box-shadow:0 -14px 44px rgba(0,0,0,.5);padding:14px 14px 0;display:none;flex-direction:column;max-height:72vh}
 #sup-msgs2{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:7px;padding:4px 2px;min-height:170px}
 .sup-b{max-width:82%;border-radius:12px;padding:8px 11px;font-size:13.5px;line-height:1.42;word-break:break-word}
 .sup-b small{display:block;margin-top:3px;font-size:9.5px;color:var(--muted)}`;
   document.head.appendChild(css);
-  const fab = document.createElement('button');
-  fab.id = 'sup-fab'; fab.innerHTML = '💬<span class="bdg" id="sup-bdg"></span>';
-  fab.onclick = function () { supOpen(); };
-  document.body.appendChild(fab);
+  const oldFab = document.getElementById('sup-fab'); if (oldFab) oldFab.remove();
   const pane = document.createElement('div');
   pane.id = 'sup-pane';
   pane.innerHTML =
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px">' +
-    '<div><b style="font-size:15px">💬 Support KLEAN</b><div style="font-size:11px;color:var(--muted)">Le gestionnaire vous lit — réponse habituelle : <10 min</div></div>' +
+    '<div><b style="font-size:15px">Contactez Klean-Service</b><div style="font-size:11px;color:var(--muted)">Échange direct avec l’équipe KLEAN</div></div>' +
     '<button onclick="supClose()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:15px">✕</button></div>' +
     '<div id="sup-msgs2"></div>' +
     '<div style="display:flex;gap:7px;padding:10px 0 12px">' +
     '<input id="sup-in" maxlength="400" placeholder="Écrivez votre message…" style="flex:1;padding:12px;border-radius:12px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:13.5px">' +
     '<button onclick="supSend()" style="background:var(--p);border:none;color:#04130c;font-weight:900;padding:0 16px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:14px">➤</button></div>';
   document.body.appendChild(pane);
-  supRefreshBadge();
-  placeSupFab();
+  const oldFab2 = document.getElementById('sup-fab'); if (oldFab2) oldFab2.remove();
   setInterval(supRefreshBadge, 30000);
-  setInterval(placeSupFab, 2000);
 }
 function placeSupFab(){
-  const fab=document.getElementById('sup-fab'); if(!fab) return;
-  if(window._supChatOff){ fab.style.display='none'; return; }
-  fab.style.display='flex';
+  const fab=document.getElementById('sup-fab'); if(fab) fab.remove();
+  return;
+  if(window._supChatOff){ if(fab) fab.style.display='none'; return; }
+  if(!fab) return;
   const bar=document.getElementById('aff-bar');
   const on=bar && !bar.classList.contains('hidden') && bar.style.display!=='none';
   fab.style.bottom = on ? 'calc(138px + env(safe-area-inset-bottom, 0px))' : '96px';
@@ -758,6 +766,7 @@ function supRender(list) {
   box.scrollTop = box.scrollHeight;
 }
 function supOpen() {
+  if (window._supChatOff) { toast('⛔ Contactez Klean-Service est désactivé par le PDG'); return; }
   supBuild();
   document.getElementById('sup-pane').style.display = 'flex';
   supLoad();
@@ -797,4 +806,5 @@ async function supSend() {
   supLoad();
 }
 window.supSend = supSend;
-window.addEventListener('load', supBuild);
+window.openKleanService = function(){ try{ supOpen(); }catch(e){} };
+window.addEventListener('load', function(){ try{ supBuild(); const f=document.getElementById('sup-fab'); if(f) f.remove(); }catch(e){} });

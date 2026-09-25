@@ -288,37 +288,34 @@ async function pushNewMissionToAgents(m, svcNom) {
 
 function onlineAgents() { return [...sockets].filter(s => s.meta && s.meta.role === 'agent' && s.meta.online); }
 function onlineAgentIds() { return new Set(onlineAgents().map(s => s.meta && s.meta.agentId).filter(Boolean)); }
-function lastSeenFresh(iso) {
+function lastSeenFresh(iso, ms) {
   if (!iso) return false;
   const t = Date.parse(iso);
-  return Number.isFinite(t) && (Date.now() - t) < 120000;
+  return Number.isFinite(t) && (Date.now() - t) < (ms || 120000);
 }
-function presenceHits(cands, role) {
+function presenceHits(ids) {
   prunePresence();
-  const keys = new Set((cands || []).filter(Boolean).map(x => String(x)));
+  const keys = new Set((ids || []).filter(Boolean).map(x => String(x)));
+  if (!keys.size) return false;
   for (const [k, v] of presence) {
-    if (!v) continue;
     if (keys.has(String(k))) return true;
-    if (v.id && keys.has(String(v.id))) return true;
-    if (v.tel && keys.has(String(v.tel))) return true;
-    if (role && v.role === role && v.nom && keys.has(String(v.nom))) return true;
+    if (v && v.id && keys.has(String(v.id))) return true;
   }
   return false;
 }
 function agentIsOnline(a) {
   if (!a || a.blocked) return false;
   if (onlineAgentIds().has(a.id)) return true;
-  if ([...sockets].some(s => s.meta && s.meta.agentId === a.id)) return true;
-  if (presenceHits([a.id, 'AG-' + a.id, a.tel, a.tel1, a.nom, 'AG-' + (a.tel || ''), 'AG-' + (a.nom || '')], 'agent')) return true;
-  if ((a.online || a.stayOnline) && lastSeenFresh(a.lastSeen)) return true;
+  if ([...sockets].some(s => s.meta && s.meta.role === 'agent' && s.meta.online && s.meta.agentId === a.id)) return true;
+  if (presenceHits([a.id, 'AG-' + a.id])) return true;
+  /* poche / écran éteint : le heartbeat + stayOnline gardent le pro visible ~30 min */
+  if (a.stayOnline && lastSeenFresh(a.lastSeen, 30 * 60 * 1000)) return true;
   return false;
 }
 function clientIsOnline(c) {
   if (!c || c.blocked) return false;
   if ([...sockets].some(s => s.meta && s.meta.clientId === c.id)) return true;
-  if (presenceHits([c.id, 'CL-' + c.id, c.tel, c.nom, 'CL-' + (c.tel || ''), 'CL-' + (c.nom || '')], 'client')) return true;
-  if (c.online && lastSeenFresh(c.lastSeen)) return true;
-  return false;
+  return presenceHits([c.id, 'CL-' + c.id]);
 }
 function subsOf(missionId) { return [...sockets].filter(s => s.meta && s.meta.missions && s.meta.missions.has(missionId)); }
 function adminSockets() { return [...sockets].filter(s => s.meta && s.meta.role === 'admin'); }
@@ -349,6 +346,7 @@ function routeWsMessage(sock, msg) {
       if (ag.status === 'rejected') { wsSend(sock, { type: 'agent_denied', reason: 'rejected' }); break; }
       ag.nom = msg.nom || ag.nom; ag.quartier = msg.quartier || ag.quartier; ag.tel = msg.tel || ag.tel;
       if (msg.ville) ag.ville = String(msg.ville).slice(0, 60);
+      if (msg.villeService) ag.villeService = String(msg.villeService).slice(0, 60);
       ag.mobile = true;
       ag.online = true; ag.stayOnline = true; ag.lastSeen = nowISO();
       sock.meta.role = 'agent'; sock.meta.online = true; sock.meta.agentId = ag.id;
@@ -411,7 +409,7 @@ function normVille(s) {
   return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 }
 function villeOfAgent(ag) {
-  return normVille(ag.villeIci || ag.villeService || ag.ville || '');
+  return normVille(ag.villeService || ag.ville || ag.villeIci || '');
 }
 const CI_GPS = [
   ['Bouaké', 7.693, -5.030], ['Abidjan', 5.345, -4.024], ['Yamoussoukro', 6.821, -5.277],
@@ -485,7 +483,7 @@ function publicMatchCard(ag, m, online) {
     services: Array.isArray(ag.services) ? ag.services : [],
     online: !!online, hasGps: r.gps, distKm: r.dist, mode: r.mode, ring: r.ring, sameCity: r.same,
     tel,
-    telAffiche: !r.gps || !online
+    telAffiche: !r.gps || r.same || !online
   };
 }
 function broadcastNewMission(m) {
@@ -658,14 +656,40 @@ const server = http.createServer(async (req, res) => {
     try {
       if (b.role === 'agent' && b.id) {
         const ag = db.agents.find(a => a.id === b.id);
-        if (ag) { ag.lastSeen = nowISO(); if (!ag.blocked) ag.online = true; }
+        if (ag) ag.lastSeen = nowISO();
       }
       if (b.role === 'client' && b.id) {
         const cl = db.clients.find(x => x.id === b.id);
-        if (cl) { cl.lastSeen = nowISO(); if (!cl.blocked) cl.online = true; }
+        if (cl) cl.lastSeen = nowISO();
       }
     } catch (e) {}
     return sendJson(res, 200, { ok: true, live: liveHome() });
+  }
+  if (p === '/api/agents/heartbeat' && req.method === 'POST') {
+    const b = await readBody(req);
+    const ag = db.agents.find(a => a.id === b.agentId);
+    if (!ag || ag.blocked) return sendJson(res, 404, { error: 'pro introuvable' });
+    ag.stayOnline = true;
+    ag.lastSeen = nowISO();
+    if (typeof b.lat === 'number' && typeof b.lng === 'number' && !isNaN(b.lat)) {
+      ag.pos = { lat: b.lat, lng: b.lng, at: Date.now() };
+      ag.villeIci = nearestVille(b.lat, b.lng);
+    }
+    if (b.villeService) ag.villeService = String(b.villeService).slice(0, 60);
+    saveDb();
+    return sendJson(res, 200, { ok: true, online: true, stayOnline: true });
+  }
+  if (p === '/api/agents/me' && req.method === 'PUT') {
+    const b = await readBody(req);
+    const ag = db.agents.find(a => a.id === b.agentId);
+    if (!ag) return sendJson(res, 404, { error: 'pro introuvable' });
+    if (b.nom && String(b.nom).trim().length >= 2) ag.nom = String(b.nom).trim().slice(0, 80);
+    if (b.quartier !== undefined) ag.quartier = String(b.quartier).slice(0, 60);
+    if (b.tel) ag.tel = ag.tel1 = String(b.tel).replace(/\D/g, '').slice(0, 16);
+    if (b.ville !== undefined) ag.ville = String(b.ville).slice(0, 60);
+    if (b.villeService !== undefined) ag.villeService = String(b.villeService).slice(0, 60);
+    saveDb();
+    return sendJson(res, 200, { ok: true, villeService: ag.villeService || ag.ville || '' });
   }
 
   const meth = (req.method || 'GET').toUpperCase();
@@ -690,13 +714,13 @@ const server = http.createServer(async (req, res) => {
     if (typeof m.lng !== 'number' || isNaN(m.lng)) m.lng = null;
     const onIds = onlineAgentIds();
     const svc = String(url.searchParams.get('service') || (mLive && mLive.service) || '');
-    const cards = (db.agents || []).filter(a => !a.blocked && (a.status || 'approved') === 'approved').map(a => publicMatchCard(a, m, agentIsOnline(a)));
-    cards.sort((a, b) => (Number(!b.online) - Number(!a.online)) || (a.ring - b.ring) || ((a.distKm || 99) - (b.distKm || 99)));
+    const cards = (db.agents || []).filter(a => !a.blocked && (a.status || 'approved') === 'approved' && agentIsOnline(a)).map(a => publicMatchCard(a, m, true));
+    cards.sort((a, b) => (a.ring - b.ring) || ((a.distKm || 99) - (b.distKm || 99)));
     const same = cards.filter(x => x.sameCity);
     const other = cards.filter(x => !x.sameCity);
     return sendJson(res, 200, {
       ok: true, ville, scope: m.matchScope || 'city',
-      nOnline: onIds.size, nSame: same.length, nOther: other.length,
+      nOnline: cards.length, nSame: same.length, nOther: other.length,
       sameCity: same.slice(0, 40), otherCities: other.slice(0, 40), service: svc
     });
   }
@@ -992,7 +1016,7 @@ const server = http.createServer(async (req, res) => {
       nom: (b.prenom.trim() + ' ' + b.nom.trim()).trim(), nomFamille: b.nom.trim(), prenom: b.prenom.trim(),
       naissance: b.naissance, tel: tel1, tel1, tel2: String(b.tel2 || '').replace(/\D/g, ''),
       quartier: b.quartier, adresse: b.adresse,
-      ville: String(b.ville || '').slice(0, 60), mail: String(b.mail || '').slice(0, 80),
+      ville: String(b.ville || '').slice(0, 60), villeService: String(b.villeService || b.ville || '').slice(0, 60), mail: String(b.mail || '').slice(0, 80),
       pieceType: b.pieceType, pieceNum: b.pieceNum,
       piecePhoto: typeof b.piecePhoto === 'string' && b.piecePhoto.length < 900000 ? b.piecePhoto : '',
       urgenceNom: b.urgenceNom.trim(), urgenceTel: String(b.urgenceTel).replace(/\D/g, ''),
@@ -1665,7 +1689,7 @@ const server = http.createServer(async (req, res) => {
     const pw = String(b.password || '') || ('Klean-' + Math.floor(1000 + Math.random() * 9000) + '!');
     const salt = crypto.randomBytes(12).toString('hex');
     const services = Array.isArray(b.services) && b.services.length ? b.services : [b.service || 'maison'];
-    const na = { id: uid('AG'), nom: (prenom + ' ' + nom).trim(), prenom, tel1, tel: tel1, salt, passHash: hashPassword(salt, pw), quartier: String(b.quartier || '').trim(), ville: String(b.ville || '').trim().slice(0, 60), mail: String(b.mail || '').trim().slice(0, 80), adresse: String(b.adresse || '').trim(),
+    const na = { id: uid('AG'), nom: (prenom + ' ' + nom).trim(), prenom, tel1, tel: tel1, salt, passHash: hashPassword(salt, pw), quartier: String(b.quartier || '').trim(), ville: String(b.ville || '').trim().slice(0, 60), villeService: String(b.villeService || b.ville || '').trim().slice(0, 60), mail: String(b.mail || '').trim().slice(0, 80), adresse: String(b.adresse || '').trim(),
       naissance: '', experience: b.experience || 0, pieceType: '', pieceNum: '', tel2: '', urgenceNom: '', urgenceTel: '', ref1Nom: '', ref1Tel: '',
       services, niveau: '', photo: '', pushSubs: [], hist: [{ at: Date.now(), by: act(req), ev: '🏗️ Compte créé à la main par l’équipe — vérification immédiate' }],
       status: 'approved', approvedAt: nowISO(), createdAt: nowISO(), createdBy: act(req), createdById: actorId(req), createdByGestId: fieldIdentity(req) ? fieldIdentity(req).gestId : ((hqIdentity(req)||{}).role==='gest' ? hqIdentity(req).id : null), claimPin: pin, online: false, pos: null, kind: 'pro' };
@@ -2626,7 +2650,10 @@ server.on('upgrade', (req, sock) => {
     sockets.delete(sock);
     if (sock.meta && sock.meta.agentId) {
       const ag = db.agents.find(a => a.id === sock.meta.agentId);
-      if (ag && ![...sockets].some(s => s.meta && s.meta.agentId === ag.id)) { if (!ag.stayOnline) { ag.online = false; saveDb(); } }
+      if (ag && ![...sockets].some(s => s.meta && s.meta.agentId === ag.id)) {
+        if (ag.stayOnline) { ag.lastSeen = ag.lastSeen || nowISO(); }
+        else { ag.online = false; saveDb(); }
+      }
     }
     if (sock.meta && sock.meta.clientId) {
       const cl = db.clients.find(c => c.id === sock.meta.clientId);

@@ -416,7 +416,8 @@
           <input id="acp-nom" placeholder="Nom *" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
           <input id="acp-tel" placeholder="📞 Tél. principal *" maxlength="16" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
           <input id="acp-quartier" placeholder="📍 Quartier" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <input id="acp-ville" placeholder="🏙️ Ville (libre)" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="acp-ville" placeholder="🏙️ Ville d'habitation" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="acp-ville-svc" placeholder="🛠️ Ville de service (comme le client)" maxlength="40" style="padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
         </div>
         <input id="acp-mail" placeholder="✉️ E-mail (facultatif)" maxlength="60" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
         <select id="acp-service" style="margin-top:8px;width:100%;padding:10px 11px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
@@ -831,12 +832,13 @@ async function createProHQ(){
   const prenom=((document.getElementById('acp-prenom')||{}).value||'').trim(), nom=((document.getElementById('acp-nom')||{}).value||'').trim();
   const tel=((document.getElementById('acp-tel')||{}).value||'').trim(), quartier=((document.getElementById('acp-quartier')||{}).value||'').trim();
   const ville=((document.getElementById('acp-ville')||{}).value||'').trim(), mail=((document.getElementById('acp-mail')||{}).value||'').trim();
+  const villeService=((document.getElementById('acp-ville-svc')||{}).value||ville).trim();
   const service=(document.getElementById('acp-service')||{}).value||'maison';
   if(prenom.length<2||nom.length<2||tel.replace(/\D/g,'').length<8) return alert('❌ Prénom + nom + téléphone requis');
   if(!(document.getElementById('acp-pin')||{}).value) genererCodePro();
   const pin=((document.getElementById('acp-pin')||{}).value||'').trim();
   const password=((document.getElementById('acp-pw')||{}).value||'').trim();
-  const r=await fetch('/api/admin/agents/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,prenom,tel,quartier,ville,mail,service,pin,password})});
+  const r=await fetch('/api/admin/agents/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,prenom,tel,quartier,ville,villeService,mail,service,pin,password})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok) return alert('⚠️ '+(d.error||'Création impossible'));
   const box=document.getElementById('acp-result');
