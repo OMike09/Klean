@@ -1073,9 +1073,17 @@ const server = http.createServer(async (req, res) => {
     const reacts = (an && an.reacts) || {};
     let likes = 0, unlikes = 0;
     Object.values(reacts).forEach(v => { if (v === 1) likes++; else if (v === -1) unlikes++; });
+    const whoV = String(url.searchParams.get('who') || '').slice(0, 80);
+    if (an && whoV && (an.type === 'info' || an.type === 'alerte' || an.type === 'maj')) {
+      an.views = an.views || {};
+      if (!an.views[whoV]) { an.views[whoV] = nowISO(); saveDb(); }
+    }
+    const nViews = an && an.views ? Object.keys(an.views).length : 0;
+    const pub = an ? Object.assign({}, an) : null;
+    if (pub) delete pub.views;
     return sendJson(res, 200, {
-      ok: true, version: APP_VERSION, annonce: an, now: Date.now(),
-      live: liveHome(), likes, unlikes
+      ok: true, version: APP_VERSION, annonce: pub, now: Date.now(),
+      live: liveHome(), likes, unlikes, views: nViews
     });
   }
   if (p === '/api/annonce/react' && req.method === 'POST') {
@@ -1309,11 +1317,17 @@ const server = http.createServer(async (req, res) => {
     if (!ad || !ad.active) return sendJson(res, 200, { ad: null });
     if (screen === 'client' && ad.hideClient) return sendJson(res, 200, { ad: null });
     if (screen === 'agent' && ad.hideAgent) return sendJson(res, 200, { ad: null });
-    return sendJson(res, 200, { ad });
+    const whoV = String(url.searchParams.get('who') || '').slice(0, 80);
+    if (whoV) {
+      ad.views = ad.views || {};
+      if (!ad.views[whoV]) { ad.views[whoV] = nowISO(); saveDb(); }
+    }
+    return sendJson(res, 200, { ad, views: Object.keys(ad.views || {}).length });
   }
   if (p === '/api/admin/ads' && req.method === 'GET') {
     if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
-    return sendJson(res, 200, { ad: db.ad || null });
+    const adA = db.ad || null;
+    return sendJson(res, 200, { ad: adA, views: adA && adA.views ? Object.keys(adA.views).length : 0 });
   }
   if (p === '/api/admin/ads' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
@@ -1712,8 +1726,20 @@ const server = http.createServer(async (req, res) => {
     a.rounds = a.rounds || [];
     a.rounds.push({ at: nowISO(), n, winners, seconds: a.countdownSeconds || 0 });
     a.stagePool = winners;
+    db.quizChat = db.quizChat || [];
+    const nWin = (winners || []).length;
+    db.quizChat.push({
+      id: uid('QC'), from: 'pdg', nom: 'PDG', at: nowISO(),
+      text: nWin <= 1 ? 'Félicitation ! Vous etes le gagnant. Ecrivez moi.' : 'Félicitation ! Vous etes un gagnant. Ecrivez moi.'
+    });
     saveDb();
     return a;
+  }
+  function pruneWinShow() {
+    if (db.winShow && db.winShow.until && Date.now() > new Date(db.winShow.until).getTime()) {
+      db.winShow = null;
+      saveDb();
+    }
   }
 
   function missionDoneClient(id) {
@@ -1891,7 +1917,7 @@ const server = http.createServer(async (req, res) => {
     db.annonce.winnerWho = String(b.who || '').slice(0, 80);
     db.annonce.pickedByPdg = true;
     db.quizChat = db.quizChat || [];
-    db.quizChat.push({ id: uid('QC'), from: 'pdg', nom: 'PDG', text: '🏆 Vous êtes le gagnant ! Écrivez-moi ici.', at: nowISO() });
+    db.quizChat.push({ id: uid('QC'), from: 'pdg', nom: 'PDG', text: 'Félicitation ! Vous etes le gagnant. Ecrivez moi.', at: nowISO() });
     db.annonce.rounds = db.annonce.rounds || [];
     db.annonce.rounds.push({ at: nowISO(), n: 1, winners: [nom], seconds: 0, by: 'PDG' });
     saveDb();
@@ -1935,6 +1961,7 @@ const server = http.createServer(async (req, res) => {
       winner: !!(a && a.winners && a.winners.length),
       winners: (a && a.winners) || [],
       you: isWin,
+      bubble2: !!(db.winBubble2 && db.winBubble2.on),
       messages: (db.quizChat || []).slice(-80)
     });
   }
@@ -1963,7 +1990,52 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === '/api/admin/quiz/chat' && req.method === 'GET') {
     if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
-    return sendJson(res, 200, { messages: (db.quizChat || []).slice(-80), winners: (db.annonce && db.annonce.winners) || [] });
+    return sendJson(res, 200, { messages: (db.quizChat || []).slice(-80), winners: (db.annonce && db.annonce.winners) || [], pendingPhoto: !!(db.winPhotoPending && db.winPhotoPending.photo), bubble2: !!(db.winBubble2 && db.winBubble2.on) });
+  }
+  if (p === '/api/quiz/win-photo' && req.method === 'POST') {
+    const b = await readBody(req);
+    const photo = typeof b.photo === 'string' ? b.photo.slice(0, 350000) : '';
+    if (!photo.startsWith('data:image')) return sendJson(res, 400, { error: 'Photo invalide' });
+    const who = String(b.who || '').slice(0, 80);
+    const nom = String(b.nom || 'Gagnant').slice(0, 40);
+    const a = db.annonce;
+    if (!a || !a.winners || !a.winners.length) return sendJson(res, 403, { error: 'Pas de gagnant' });
+    db.winPhotoPending = { photo, nom, who, at: nowISO() };
+    saveDb();
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/win-show' && req.method === 'GET') {
+    pruneWinShow();
+    const s = db.winShow;
+    if (!s) return sendJson(res, 200, { show: null, bubble2: !!(db.winBubble2 && db.winBubble2.on) });
+    return sendJson(res, 200, { show: { nom: s.nom, photo: s.photo, until: s.until }, bubble2: !!(db.winBubble2 && db.winBubble2.on) });
+  }
+  if (p === '/api/admin/win-photo/publish' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const sec = Math.max(10, Math.min(86400, parseInt(b.seconds, 10) || 60));
+    const pend = db.winPhotoPending;
+    if (!pend || !pend.photo) return sendJson(res, 400, { error: 'Aucune photo envoyée par le gagnant' });
+    db.winShow = { photo: pend.photo, nom: pend.nom, until: new Date(Date.now() + sec * 1000).toISOString() };
+    db.winBubble2 = { on: true, at: nowISO() };
+    db.winPhotoPending = { nom: pend.nom, who: pend.who, at: pend.at };
+    saveDb();
+    return sendJson(res, 200, { ok: true, until: db.winShow.until, seconds: sec });
+  }
+  if (p === '/api/admin/quiz/chat/clear' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    db.quizChat = [];
+    db.winBubble2 = { on: false, at: nowISO() };
+    saveDb();
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/admin/win-bubble2' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    db.winBubble2 = { on: !!b.on, at: nowISO() };
+    if (!b.on) { db.winShow = null; }
+    saveDb();
+    return sendJson(res, 200, { ok: true, on: !!(db.winBubble2 && db.winBubble2.on) });
   }
 
   if (p === '/api/field/login' && req.method === 'POST') {

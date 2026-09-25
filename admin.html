@@ -220,6 +220,9 @@
           <button type="button" onclick="designerGagnant()" style="background:rgba(74,163,255,.14);border:1px solid rgba(74,163,255,.4);color:var(--blue);font-weight:900;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit">👑 Désigner le gagnant (PDG)</button>
           <button type="button" onclick="tirageFinalSerie()" style="background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.4);color:var(--red);font-weight:900;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit">🎲 Point final + tirage hasard</button>
           <button type="button" onclick="relancerMemeQuiz()" style="background:rgba(74,163,255,.16);border:1.5px solid rgba(74,163,255,.45);color:var(--blue);font-weight:900;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit">🔁 Relancer le même quiz</button>
+          <label style="font-size:11px;font-weight:800">Photo gagnant (sec) <input id="win-photo-sec" type="number" min="10" max="86400" value="120" style="width:72px;padding:7px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></label>
+          <button type="button" onclick="publierPhotoGagnant()" style="background:rgba(255,176,32,.18);border:1px solid rgba(255,176,32,.45);color:var(--amber);font-weight:900;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit">📸 Publier la photo sur l’accueil</button>
+          <button type="button" onclick="viderWinChat()" style="background:#e5484d;border:none;color:#fff;font-weight:900;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit">🗑 Supprimer la conversation</button>
         </div>
         <div id="qz-cd" style="font-size:22px;font-weight:900;letter-spacing:.04em;margin-top:8px;color:var(--amber)"></div>
         <div id="qz-winners" style="font-size:12px;margin-top:6px;color:var(--p)"></div>
@@ -862,7 +865,7 @@ async function loadAnnonce(){
     const el = document.getElementById('ann-cur');
     if(!el) return;
     el.innerHTML = d && d.annonce
-      ? ('Affiche en cours : <b>'+( {maj:'✨ Mise à jour', info:'ℹ️ Information', alerte:'🚨 Urgent', quiz:'🏆 Quiz'} [d.annonce.type] || 'Info')+'</b> — « '+d.annonce.message+' » <br><span style="color:#8aa79a">👍 '+(d.likes||0)+' · 👎 '+(d.unlikes||0)+(d.live?' · 🟢 accueil '+(d.live.home||0):'')+' — publiée le '+(d.annonce.at||'').slice(0,10)+' par '+(d.annonce.par||'—')+'</span>')
+      ? ('Affiche en cours : <b>'+( {maj:'✨ Mise à jour', info:'ℹ️ Information', alerte:'🚨 Urgent', quiz:'🏆 Quiz'} [d.annonce.type] || 'Info')+'</b> — « '+d.annonce.message+' » <br><span style="color:#8aa79a">👍 '+(d.likes||0)+' · 👎 '+(d.unlikes||0)+((d.annonce.type==='info'||d.annonce.type==='alerte'||d.annonce.type==='maj')?' · Vu(s) : '+(d.views||0):'')+(d.live?' · Participants KLEAN '+(d.live.home||0):'')+' — publiée le '+(d.annonce.at||'').slice(0,10)+' par '+(d.annonce.par||'—')+'</span>')
       : ('Aucune affiche en cours. <span style="color:#8aa79a">Version serveur : '+(d && d.version || '…')+'</span>');
     if(d && d.annonce && d.annonce.type==='quiz'){
       const qz=document.getElementById('ann-quiz'); if(qz) qz.style.display='block';
@@ -870,6 +873,11 @@ async function loadAnnonce(){
     }
   }catch(e){}
   paintAnnLive();
+  try{
+    const ad=await fetch('/api/admin/ads',{cache:'no-store'}).then(r=>r.json());
+    const c=document.getElementById('ad-cur');
+    if(c && ad && ad.ad) c.textContent='📣 En ligne : '+(ad.ad.firm||'')+' — '+(ad.ad.prod||'')+' · Vu(s) : '+(ad.views||0);
+  }catch(e){}
 }
 async function paintAnnLive(){
   try{
@@ -968,11 +976,11 @@ function openWinChat(nom){
   if(!m){
     m=document.createElement('div'); m.id='win-chat-modal';
     m.style.cssText='position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
-    m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:420px;width:100%;max-height:86vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><b style="flex:1" id="win-chat-title">🏆 Gagnant</b><button type="button" onclick="closeWinChat()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div><div id="win-chat-msgs" style="flex:1;min-height:180px;max-height:46vh;overflow:auto;margin-bottom:8px"></div><div style="display:flex;gap:6px"><input id="win-chat-in" maxlength="400" placeholder="Écrire au gagnant…" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendWinChat();}"><button type="button" class="btn-main" style="flex:none" onclick="sendWinChat()">Envoyer</button></div></div>';
     document.body.appendChild(m);
   }
+  m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:420px;width:100%;max-height:86vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><b style="flex:1" id="win-chat-title">🏆 Gagnant</b><button type="button" onclick="viderWinChat()" title="Supprimer la conversation" style="background:#e5484d;border:none;color:#fff;border-radius:9px;padding:7px 12px;font-weight:900;cursor:pointer;font-family:inherit;font-size:14px">🗑 Supprimer</button><button type="button" onclick="closeWinChat()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div><div id="win-chat-msgs" style="flex:1;min-height:180px;max-height:46vh;overflow:auto;margin-bottom:8px"></div><div style="display:flex;gap:6px"><input id="win-chat-in" maxlength="400" placeholder="Écrire au gagnant…" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendWinChat();}"><button type="button" class="btn-main" style="flex:none" onclick="sendWinChat()">Envoyer</button></div></div>';
   m.style.display='flex';
-  const t=document.getElementById('win-chat-title'); if(t) t.textContent='🏆 '+nom;
+  const t=document.getElementById('win-chat-title'); if(t) t.textContent='🏆 '+(nom||'Gagnant');
   loadWinChat();
 }
 function closeWinChat(){ const m=document.getElementById('win-chat-modal'); if(m) m.style.display='none'; }
@@ -1003,6 +1011,22 @@ function tickQuizCd(ends, revealed){
     if(!left){ clearInterval(_qzTick); _qzTick=null; setTimeout(loadQuizHQ, 400); }
   };
   run(); _qzTick=setInterval(run, 250);
+}
+async function publierPhotoGagnant(){
+  const seconds=parseInt((document.getElementById('win-photo-sec')||{}).value,10)||120;
+  const r=await fetch('/api/admin/win-photo/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seconds})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Le gagnant n’a pas encore envoyé de photo'));
+  alert('📸 Photo publiée sur l’accueil pendant '+seconds+' s. Elle sera ensuite effacée de la base.');
+}
+async function supprimerBulle2(){
+  await viderWinChat();
+}
+async function viderWinChat(){
+  if(!confirm('🗑 Supprimer toute la conversation avec le gagnant ? La bulle disparaît chez lui.')) return;
+  await fetch('/api/admin/quiz/chat/clear',{method:'POST'});
+  loadWinChat();
+  alert('Conversation supprimée.');
 }
 async function relancerMemeQuiz(){
   if(!confirm('🔁 Relancer LE MÊME quiz ? Les réponses actuelles sont archivées, tout le monde peut rejouer (nouveau chrono).')) return;

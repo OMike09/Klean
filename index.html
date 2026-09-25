@@ -384,6 +384,7 @@
 <div id="aff-bar" class="hidden" style="overflow:hidden;white-space:nowrap;background:linear-gradient(90deg,#ffb020,#ff8a00);color:#1a1204;font-weight:900;font-size:22px;padding:16px 0;margin:8px 12px 8px;border-radius:16px;letter-spacing:.4px;line-height:1.25">
   <div id="aff-track" style="display:inline-block;animation:kleanMarqueeLtr 16s linear infinite"></div>
 </div>
+<div id="home-win-slot" style="display:none;margin:0 12px 8px;text-align:right"></div>
 <div id="aff-react" class="hidden" style="margin:-2px 12px 12px;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
 <div id="quiz-box" class="hidden" style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px 14px 12px;margin:0 12px 12px;position:relative;z-index:30"></div>
 <div id="ad-box" class="hidden" style="margin:0 12px 12px;border-radius:16px;padding:14px;background:linear-gradient(160deg,#1a1208,#2a1a0c);border:1.5px solid rgba(255,176,32,.35);color:#fff"></div>
@@ -2586,7 +2587,8 @@ function quizMyPick(qid){
   return null;
 }
 function loadAffiche(){
-  fetch('/api/annonce?screen='+(mode==='agent'?'agent':'client'),{cache:'no-store'}).then(r=>r.json()).then(d=>{
+  const _who=(function(){ try{ return quizWho().accountId; }catch(e){ return ''; } })();
+  fetch('/api/annonce?screen='+(mode==='agent'?'agent':'client')+'&who='+encodeURIComponent(_who),{cache:'no-store'}).then(r=>r.json()).then(d=>{
     if(!d || !d.annonce){
       const qb=document.getElementById('quiz-box'); if(qb){ qb.classList.add('hidden'); qb.innerHTML=''; }
       const bar=document.getElementById('aff-bar'); if(bar) bar.classList.add('hidden');
@@ -2622,7 +2624,7 @@ function paintAffReact(d){
   const mine=(function(){ try{ return JSON.parse(localStorage.getItem('k2_aff_vote')||'0'); }catch(e){ return 0; } })();
   const nHome=L.home||0;
   box.innerHTML =
-    '<span style="font-size:12.5px;font-weight:800;color:var(--pd);flex:1">🟢 '+nHome+' compte'+(nHome>1?'s':'')+' en ligne sur l’accueil</span>'+
+    '<span style="font-size:12.5px;font-weight:800;color:var(--pd);flex:1">'+(d.annonce && (d.annonce.type==='info'||d.annonce.type==='alerte') ? ('Vu(s) : '+(d.views||0)) : ('Participants KLEAN : '+nHome))+'</span>'+
     '<button type="button" onclick="voteAffiche(1)" style="border:1.5px solid '+(mine===1?'var(--p)':'var(--line)')+';background:'+(mine===1?'var(--pl)':'#fff')+';color:var(--pd);font-weight:900;padding:7px 11px;border-radius:99px;cursor:pointer;font-family:inherit">👍 '+likes+'</button>'+
     '<button type="button" onclick="voteAffiche(-1)" style="border:1.5px solid '+(mine===-1?'#e5484d':'var(--line)')+';background:'+(mine===-1?'#fde8e8':'#fff')+';color:#c0392b;font-weight:900;padding:7px 11px;border-radius:99px;cursor:pointer;font-family:inherit">👎 '+unlikes+'</button>';
   box.classList.remove('hidden');
@@ -2640,21 +2642,22 @@ async function voteAffiche(vote){
 loadAffiche();
 setInterval(loadAffiche, 1000);
 setInterval(function(){ if(window._lastQuizA) paintQuiz(window._lastQuizA); }, 250);
-function paintAd(ad){
+function paintAd(ad, views){
   const box=document.getElementById('ad-box'); if(!box) return;
   if(!ad){ box.classList.add('hidden'); box.innerHTML=''; return; }
+  window._adViews=views||0;
   const badge={produit:'🛒 Produit',promo:'🏷️ Promo',lancement:'✨ Nouveau',stock:'📦 Dispo'}[ad.kind]||'📣 Pub';
   const prix=ad.prix?(ad.old?('<span style="text-decoration:line-through;opacity:.6;margin-right:8px">'+ad.old+'</span><b style="color:#ffb020">'+ad.prix+'</b>'):('<b style="color:#ffb020">'+ad.prix+'</b>')):'';
   const off=ad.off?('<div style="margin-top:4px;font-weight:800;color:#ffb020">'+ad.off+'</div>'):'';
   const tel=ad.tel||'';
   const cta=tel?('<a href="https://wa.me/225'+tel.replace(/^225/,'')+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;background:#25d366;color:#fff;font-weight:900;text-decoration:none;padding:9px 14px;border-radius:10px">Commander</a>'):'';
-  box.innerHTML='<small style="opacity:.8;font-weight:800">PUB · '+badge+'</small><b style="display:block;font-size:16px;margin:4px 0 2px">'+(ad.prod||'')+'</b><small style="opacity:.85">'+(ad.firm||'')+'</small><p style="margin:8px 0 0;font-size:13px;line-height:1.4">'+(ad.text||'')+'</p>'+(prix?('<div style="margin-top:8px">'+prix+'</div>'):'')+off+cta;
+  box.innerHTML='<small style="opacity:.8;font-weight:800">PUB · '+badge+' · Vu(s) : '+(views||window._adViews||0)+'</small><b style="display:block;font-size:16px;margin:4px 0 2px">'+(ad.prod||'')+'</b><small style="opacity:.85">'+(ad.firm||'')+'</small><p style="margin:8px 0 0;font-size:13px;line-height:1.4">'+(ad.text||'')+'</p>'+(prix?('<div style="margin-top:8px">'+prix+'</div>'):'')+off+cta;
   box.classList.remove('hidden');
 }
 async function loadAd(){
   try{
-    const d=await fetch('/api/ads?screen='+(mode==='agent'?'agent':'client'),{cache:'no-store'}).then(r=>r.json());
-    paintAd(d.ad||null);
+    const d=await fetch('/api/ads?screen='+(mode==='agent'?'agent':'client')+'&who='+encodeURIComponent(quizWho().accountId),{cache:'no-store'}).then(r=>r.json());
+    paintAd(d.ad||null, d.views||0);
   }catch(e){}
 }
 loadAd();
@@ -2668,29 +2671,46 @@ function pingPresence(){
 pingPresence();
 setInterval(pingPresence, 20000);
 function bounceHomeBubble(){
+  const slot=document.getElementById('home-win-slot');
+  if(!slot) return;
   let b=document.getElementById('home-win-bubble');
   if(!b){
     b=document.createElement('button'); b.id='home-win-bubble'; b.type='button';
-    b.style.cssText='position:fixed;right:14px;bottom:92px;z-index:95;width:64px;height:64px;border-radius:50%;border:none;background:linear-gradient(135deg,#ff8a00,#e85d04);color:#fff;font-weight:900;font-size:22px;box-shadow:0 8px 24px rgba(232,93,4,.5);cursor:pointer;animation:kleanBounce 0.7s ease-in-out infinite';
+    b.style.cssText='width:52px;height:52px;border-radius:50%;border:none;background:linear-gradient(135deg,#ff8a00,#e85d04);color:#fff;font-weight:900;font-size:20px;box-shadow:0 6px 16px rgba(232,93,4,.35);cursor:pointer';
     b.textContent='🏆';
+    b.title='Message du PDG';
     b.onclick=openHomeWinChat;
-    document.body.appendChild(b);
-    if(!document.getElementById('klean-bounce-css')){
-      const s=document.createElement('style'); s.id='klean-bounce-css';
-      s.textContent='@keyframes kleanBounce{0%,100%{transform:translateY(0) scale(1)}40%{transform:translateY(-14px) scale(1.08)}70%{transform:translateY(-4px) scale(.96)}}';
-      document.head.appendChild(s);
-    }
+    slot.appendChild(b);
   }
-  b.style.display='block';
+  slot.style.display='block';
+  b.style.display='inline-block';
 }
-function hideHomeBubble(){ const b=document.getElementById('home-win-bubble'); if(b) b.style.display='none'; }
+function hideHomeBubble(){
+  const slot=document.getElementById('home-win-slot');
+  if(slot) slot.style.display='none';
+  const b=document.getElementById('home-win-bubble'); if(b) b.style.display='none';
+  const b2=document.getElementById('home-win-bubble2'); if(b2) b2.remove();
+}
+function paintWinShowBanner(show){
+  let el=document.getElementById('win-show-banner');
+  if(!show || !show.photo){ if(el) el.remove(); return; }
+  if(!el){
+    el=document.createElement('div'); el.id='win-show-banner';
+    el.style.cssText='position:fixed;left:12px;right:12px;top:72px;z-index:90;background:#fff;border:2px solid #ffb020;border-radius:16px;padding:10px;display:flex;gap:10px;align-items:center;box-shadow:0 10px 28px rgba(0,0,0,.18)';
+    document.body.appendChild(el);
+  }
+  el.innerHTML='<img src="'+show.photo+'" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:12px"><div style="flex:1"><b>Félicitations !</b><div style="font-size:13px">'+(show.nom||'Gagnant')+'</div></div>';
+}
 async function pollWinBubble(){
   try{
     const w=quizWho();
     const d=await fetch('/api/quiz/chat?who='+encodeURIComponent(w.accountId),{cache:'no-store'}).then(r=>r.json());
-    if(d && d.winner && d.messages && d.messages.length) bounceHomeBubble();
+    const hasPdg=(d.messages||[]).some(m=>m.from==='pdg');
+    if(d && d.winner && d.you && hasPdg) bounceHomeBubble();
     else hideHomeBubble();
     if(window._homeWinOpen) paintHomeWin(d);
+    const s=await fetch('/api/win-show',{cache:'no-store'}).then(r=>r.json());
+    paintWinShowBanner(s && s.show);
   }catch(e){}
 }
 setInterval(pollWinBubble, 4000);
@@ -2700,7 +2720,7 @@ function openHomeWinChat(){
   if(!m){
     m=document.createElement('div'); m.id='home-win-modal';
     m.style.cssText='position:fixed;inset:0;z-index:96;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;padding:12px';
-    m.innerHTML='<div style="background:#fff;border-radius:18px 18px 8px 8px;width:100%;max-width:480px;max-height:70vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="flex:1">🏆 Message du PDG</b><button type="button" onclick="closeHomeWin()" style="border:1px solid #ddd;background:#f3f3f3;border-radius:9px;padding:6px 10px;font-weight:800">Fermer</button></div><div id="home-win-msgs" style="flex:1;min-height:140px;overflow:auto;margin-bottom:8px"></div><div style="display:flex;gap:6px"><input id="home-win-in" placeholder="Répondre au PDG…" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid #ddd;font:inherit" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendHomeWin();}"><button type="button" onclick="sendHomeWin()" style="background:#E85D04;color:#fff;border:none;border-radius:10px;padding:10px 12px;font-weight:900">Envoyer</button></div></div>';
+    m.innerHTML='<div style="background:#fff;border-radius:18px 18px 8px 8px;width:100%;max-width:480px;max-height:70vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="flex:1">🏆 Message du PDG</b><button type="button" onclick="closeHomeWin()" style="border:1px solid #ddd;background:#f3f3f3;border-radius:9px;padding:6px 10px;font-weight:800">Fermer</button></div><div id="home-win-msgs" style="flex:1;min-height:140px;overflow:auto;margin-bottom:8px"></div><div style="display:flex;gap:6px;flex-wrap:wrap"><input id="home-win-in" placeholder="Répondre au PDG…" style="flex:1;min-width:120px;padding:10px;border-radius:10px;border:1.5px solid #ddd;font:inherit" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendHomeWin();}"><button type="button" onclick="sendHomeWin()" style="background:#E85D04;color:#fff;border:none;border-radius:10px;padding:10px 12px;font-weight:900">Envoyer</button><button type="button" onclick="document.getElementById(\'home-win-gal\').click()" style="background:#fff4e5;border:1.5px solid #ffb020;color:#9a5b00;border-radius:10px;padding:10px 12px;font-weight:900">📷 Galerie</button><input type="file" id="home-win-gal" accept="image/*" style="display:none" onchange="sendWinGallery(this)"></div></div>';
     m.onclick=function(e){ if(e.target===m) closeHomeWin(); };
     document.body.appendChild(m);
   }
@@ -2709,8 +2729,24 @@ function openHomeWinChat(){
 function closeHomeWin(){ const m=document.getElementById('home-win-modal'); if(m) m.style.display='none'; window._homeWinOpen=false; }
 function paintHomeWin(d){
   const box=document.getElementById('home-win-msgs'); if(!box||!d) return;
-  box.innerHTML=(d.messages||[]).map(m=>'<div style="margin:6px 0;text-align:'+(m.from==='pdg'?'left':'right')+'"><span style="display:inline-block;max-width:86%;background:'+(m.from==='pdg'?'#fff4e5':'#e7f7f1')+';border-radius:11px;padding:7px 10px;font-size:13px">'+(m.text||'')+'<small style="display:block;opacity:.7">'+(m.nom||'')+'</small></span></div>').join('');
+  box.innerHTML=(d.messages||[]).map(m=>{
+    const img=(m.photo?'<img src="'+m.photo+'" alt="" style="max-width:180px;border-radius:10px;display:block;margin-top:4px">':'');
+    return '<div style="margin:6px 0;text-align:'+(m.from==='pdg'?'left':'right')+'"><span style="display:inline-block;max-width:86%;background:'+(m.from==='pdg'?'#fff4e5':'#e7f7f1')+';border-radius:11px;padding:7px 10px;font-size:13px">'+(m.text||'')+img+'<small style="display:block;opacity:.7">'+(m.nom||'')+'</small></span></div>';
+  }).join('');
   box.scrollTop=box.scrollHeight;
+}
+async function sendWinGallery(inp){
+  const f=inp && inp.files && inp.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=async function(){
+    const photo=String(r.result||'');
+    const w=quizWho();
+    await fetch('/api/quiz/win-photo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({photo, nom:w.nom, who:w.accountId})});
+    await fetch('/api/quiz/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:'📷 Photo envoyée (galerie)', nom:w.nom, who:w.accountId})});
+    inp.value='';
+    pollWinBubble();
+  };
+  r.readAsDataURL(f);
 }
 async function sendHomeWin(){
   const inp=document.getElementById('home-win-in'); const v=(inp&&inp.value||'').trim(); if(!v) return;
