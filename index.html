@@ -2524,7 +2524,8 @@ function paintQuiz(a){
     const {txt,left}=fmtCd(a.countdownEndsAt);
     const n=a.pendingN||1;
     if(_quizPaint!==key){
-      qb.innerHTML='<b style="font-size:15px">🏆 Quiz KLEAN</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p><div id="quiz-cd" style="font-size:42px;font-weight:900;letter-spacing:.06em;text-align:center;margin:10px 0;color:var(--amber)">⏱ '+txt+'</div><p style="text-align:center;font-size:13px;font-weight:800">Tirage de '+n+' gagnant'+(n>1?'s':'')+' — suivez le décompte</p>';
+      const susp=n>1?'Les gagnants sont…':'Le gagnant est…';
+      qb.innerHTML='<b style="font-size:15px">🏆 Quiz KLEAN</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p><div id="quiz-cd" style="font-size:42px;font-weight:900;letter-spacing:.06em;text-align:center;margin:10px 0;color:var(--amber)">⏱ '+txt+'</div><p id="quiz-suspense" style="text-align:center;font-size:18px;font-weight:900;color:var(--pd);margin:8px 0 4px">'+susp+'</p><p style="text-align:center;font-size:12px;font-weight:700;opacity:.75">Suspense — le PDG donne le résultat à 0</p>';
       qb.classList.remove('hidden');
       _quizPaint=key;
     } else {
@@ -2534,8 +2535,8 @@ function paintQuiz(a){
   }
   if(shown){
     if(_quizPaint===key) return;
-    const lab=a.winners.length===1?'🏆 Gagnant : ':'🏆 Encore en lice : ';
-    qb.innerHTML='<b style="font-size:15px">🏆 Quiz KLEAN</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p><p style="font-size:16px;font-weight:900;color:var(--p);text-align:center;margin:10px 0">'+lab+a.winners.join(', ')+'</p>';
+    const lab=a.winners.length===1?'Le gagnant est ':'Les gagnants sont ';
+    qb.innerHTML='<b style="font-size:15px">🏆 Quiz KLEAN</b><p style="margin:8px 0 4px;font-size:14px;font-weight:700">'+a.question+'</p><p style="font-size:18px;font-weight:900;color:var(--p);text-align:center;margin:10px 0">'+lab+a.winners.join(', ')+' !</p>';
     qb.classList.remove('hidden'); _quizPaint=key; return;
   }
   if(a.closed){
@@ -2676,14 +2677,39 @@ function bounceHomeBubble(){
   let b=document.getElementById('home-win-bubble');
   if(!b){
     b=document.createElement('button'); b.id='home-win-bubble'; b.type='button';
-    b.style.cssText='width:52px;height:52px;border-radius:50%;border:none;background:linear-gradient(135deg,#ff8a00,#e85d04);color:#fff;font-weight:900;font-size:20px;box-shadow:0 6px 16px rgba(232,93,4,.35);cursor:pointer';
+    b.style.cssText='width:56px;height:56px;border-radius:50%;border:none;background:linear-gradient(135deg,#ff8a00,#e85d04);color:#fff;font-weight:900;font-size:22px;box-shadow:0 6px 16px rgba(232,93,4,.35);cursor:pointer;animation:kleanBounce 0.7s ease-in-out infinite';
     b.textContent='🏆';
-    b.title='Message du PDG';
+    b.title='Vous avez gagné !';
     b.onclick=openHomeWinChat;
     slot.appendChild(b);
+    if(!document.getElementById('klean-bounce-css')){
+      const s=document.createElement('style'); s.id='klean-bounce-css';
+      s.textContent='@keyframes kleanBounce{0%,100%{transform:translateY(0) scale(1)}40%{transform:translateY(-12px) scale(1.08)}70%{transform:translateY(-3px) scale(.96)}}';
+      document.head.appendChild(s);
+    }
   }
   slot.style.display='block';
   b.style.display='inline-block';
+  pingWinnerAlert();
+}
+function pingWinnerAlert(){
+  if(window._winAlerted) return;
+  window._winAlerted=true;
+  try{ if(navigator.vibrate) navigator.vibrate([220,90,220,90,450,120,220]); }catch(e){}
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
+    const ctx=new AC();
+    [0,0.22,0.44,0.7].forEach((t,i)=>{
+      const o=ctx.createOscillator(), g=ctx.createGain();
+      o.type='sine'; o.frequency.value=760+i*160;
+      o.connect(g); g.connect(ctx.destination);
+      const t0=ctx.currentTime+t;
+      g.gain.setValueAtTime(0.0001,t0);
+      g.gain.exponentialRampToValueAtTime(0.16,t0+0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001,t0+0.2);
+      o.start(t0); o.stop(t0+0.22);
+    });
+  }catch(e){}
 }
 function hideHomeBubble(){
   const slot=document.getElementById('home-win-slot');

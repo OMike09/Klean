@@ -1059,16 +1059,6 @@ const server = http.createServer(async (req, res) => {
     const a0 = db.annonce || null;
     if (a0 && ((screen === 'client' && a0.hideClient) || (screen === 'agent' && a0.hideAgent)))
       return sendJson(res, 200, { ok: true, version: APP_VERSION, annonce: null, now: Date.now() });
-    const a = a0;
-    if (a && a.type === 'quiz' && a.countdownEndsAt && !a.countdownRevealed && Date.now() >= new Date(a.countdownEndsAt).getTime()) {
-      const n = Math.max(1, parseInt(a.pendingN, 10) || 1);
-      const pool = (a.stagePool && a.stagePool.length) ? a.stagePool.slice() : (db.quizAnswers || []).filter(x => x.ok).map(x => x.nom);
-      const copy = pool.slice();
-      for (let i = copy.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = copy[i]; copy[i] = copy[j]; copy[j] = t; }
-      a.countdownRevealed = true; a.closed = true; a.winners = copy.slice(0, Math.min(n, copy.length));
-      a.rounds = a.rounds || []; a.rounds.push({ at: nowISO(), n, winners: a.winners, seconds: a.countdownSeconds || 0 });
-      a.stagePool = a.winners; saveDb();
-    }
     const an = db.annonce || null;
     const reacts = (an && an.reacts) || {};
     let likes = 0, unlikes = 0;
@@ -1080,7 +1070,7 @@ const server = http.createServer(async (req, res) => {
     }
     const nViews = an && an.views ? Object.keys(an.views).length : 0;
     const pub = an ? Object.assign({}, an) : null;
-    if (pub) delete pub.views;
+    if (pub) { delete pub.views; delete pub.pendingWinners; delete pub.winnerWho; }
     return sendJson(res, 200, {
       ok: true, version: APP_VERSION, annonce: pub, now: Date.now(),
       live: liveHome(), likes, unlikes, views: nViews
@@ -1719,13 +1709,16 @@ const server = http.createServer(async (req, res) => {
     if (Date.now() < new Date(a.countdownEndsAt).getTime()) return a;
     const n = Math.max(1, parseInt(a.pendingN, 10) || 1);
     const pool = (a.stagePool && a.stagePool.length) ? a.stagePool.slice() : (db.quizAnswers || []).filter(x => x.ok).map(x => x.nom);
-    const winners = shuffleCopy(pool).slice(0, Math.min(n, pool.length));
+    const winners = (a.pendingWinners && a.pendingWinners.length)
+      ? a.pendingWinners.slice(0, n)
+      : shuffleCopy(pool).slice(0, Math.min(n, pool.length));
     a.countdownRevealed = true;
     a.closed = true;
     a.winners = winners;
     a.rounds = a.rounds || [];
     a.rounds.push({ at: nowISO(), n, winners, seconds: a.countdownSeconds || 0 });
     a.stagePool = winners;
+    a.pendingWinners = null;
     db.quizChat = db.quizChat || [];
     const nWin = (winners || []).length;
     db.quizChat.push({
@@ -1911,18 +1904,26 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const nom = String(b.nom || '').trim().slice(0, 60);
     if (nom.length < 2) return sendJson(res, 400, { error: 'Nom du gagnant requis' });
+    const seconds = Math.max(0, Math.min(3600, parseInt(b.seconds, 10) || 0));
     db.annonce.closed = true;
-    db.annonce.countdownRevealed = true;
-    db.annonce.winners = [nom];
     db.annonce.winnerWho = String(b.who || '').slice(0, 80);
     db.annonce.pickedByPdg = true;
-    db.quizChat = db.quizChat || [];
-    db.quizChat.push({ id: uid('QC'), from: 'pdg', nom: 'PDG', text: 'Félicitation ! Vous etes le gagnant. Ecrivez moi.', at: nowISO() });
-    db.annonce.rounds = db.annonce.rounds || [];
-    db.annonce.rounds.push({ at: nowISO(), n: 1, winners: [nom], seconds: 0, by: 'PDG' });
-    saveDb();
+    db.annonce.pendingN = 1;
+    db.annonce.pendingWinners = [nom];
+    db.annonce.countdownSeconds = seconds;
+    if (seconds >= 5) {
+      db.annonce.countdownEndsAt = new Date(Date.now() + seconds * 1000).toISOString();
+      db.annonce.countdownRevealed = false;
+      db.annonce.winners = [];
+      saveDb();
+      auditLog('quiz_gagnant_pdg', { nom, par: 'PDG', seconds });
+      return sendJson(res, 200, { ok: true, pending: true, seconds, nom });
+    }
+    db.annonce.countdownEndsAt = new Date().toISOString();
+    db.annonce.countdownRevealed = false;
+    quizRevealIfDue();
     auditLog('quiz_gagnant_pdg', { nom, par: 'PDG' });
-    return sendJson(res, 200, { ok: true, winners: [nom] });
+    return sendJson(res, 200, { ok: true, winners: db.annonce.winners || [nom] });
   }
   if (p === '/api/admin/quiz/final' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;

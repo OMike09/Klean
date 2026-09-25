@@ -963,13 +963,34 @@ async function openQuizClicks(){
       : '<div class="empty">Personne n’a encore cliqué. Scrollez ici dès qu’ils répondent.</div>';
   }
 }
+function askDecompteWin(onOk){
+  let m=document.getElementById('cd-win-modal');
+  if(!m){
+    m=document.createElement('div'); m.id='cd-win-modal';
+    m.style.cssText='position:fixed;inset:0;z-index:95;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(m);
+  }
+  const def=(document.getElementById('qz-sec')||{}).value||'30';
+  m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;max-width:360px;width:100%;padding:16px"><b style="display:block;margin-bottom:8px">⏱ Décompte avant d’afficher le gagnant</b><p style="font-size:13px;color:var(--muted);margin:0 0 10px;line-height:1.4">Tout le monde verra « Le gagnant est… » jusqu’à la fin. Ensuite le nom s’affiche.</p><label style="font-size:12px;font-weight:800">Secondes <input id="cd-win-sec" type="number" min="5" max="3600" value="'+def+'" style="width:100%;margin-top:4px;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></label><div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn-main" style="flex:1" onclick="confirmDecompteWin()">Lancer le décompte</button><button type="button" onclick="document.getElementById(\'cd-win-modal\').style.display=\'none\'" style="flex:1;background:var(--card2);border:1px solid var(--line);border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">Annuler</button></div></div>';
+  window._cdWinCb=onOk;
+  m.style.display='flex';
+}
+function confirmDecompteWin(){
+  const sec=Math.max(5, parseInt((document.getElementById('cd-win-sec')||{}).value,10)||30);
+  const m=document.getElementById('cd-win-modal'); if(m) m.style.display='none';
+  const cb=window._cdWinCb; window._cdWinCb=null;
+  if(cb) cb(sec);
+}
 async function clickQuizPerson(nom, who){
-  if(!confirm('👑 Désigner « '+nom+' » comme gagnant et lui écrire ?')) return;
-  const r=await fetch('/api/admin/quiz/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom, who})});
-  const d=await r.json().catch(()=>({}));
-  if(!r.ok) return alert(d.error||'Impossible');
-  closeQuizClicks();
-  openWinChat(nom);
+  if(!confirm('👑 Désigner « '+nom+' » comme gagnant ?')) return;
+  askDecompteWin(async function(seconds){
+    const r=await fetch('/api/admin/quiz/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom, who, seconds})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) return alert(d.error||'Impossible');
+    closeQuizClicks();
+    alert('⏱ Décompte '+seconds+' s — le nom s’affiche à la fin.');
+    loadQuizHQ();
+  });
 }
 function openWinChat(nom){
   let m=document.getElementById('win-chat-modal');
@@ -1056,11 +1077,13 @@ async function lancerDecompte(){
 async function designerGagnant(){
   const nom=prompt('👑 Nom du gagnant choisi par le PDG :');
   if(!nom) return;
-  const r=await fetch('/api/admin/quiz/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom:nom.trim()})});
-  const d=await r.json().catch(()=>({}));
-  if(!r.ok) return alert(d.error||'Impossible');
-  alert('👑 Gagnant désigné : '+(d.winners||[]).join(', '));
-  loadQuizHQ();
+  askDecompteWin(async function(seconds){
+    const r=await fetch('/api/admin/quiz/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom:nom.trim(), seconds})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) return alert(d.error||'Impossible');
+    alert('⏱ Décompte '+seconds+' s lancé. Le nom s’affiche à la fin.');
+    loadQuizHQ();
+  });
 }
 async function tirageFinalSerie(){
   const n=parseInt((document.getElementById('qz-nwin')||{}).value,10)||1;
@@ -1073,10 +1096,14 @@ async function tirageFinalSerie(){
   loadQuizHQ();
 }
 async function revelerQuiz(){
-  const r=await fetch('/api/admin/quiz/reveal',{method:'POST'}); const d=await r.json().catch(()=>({}));
-  if(!r.ok) return alert(d.error||'Impossible');
-  alert('🏆 Affiché : '+((d.winners||[]).join(', ')||'—'));
-  loadQuizHQ();
+  askDecompteWin(async function(seconds){
+    const n=parseInt((document.getElementById('qz-nwin')||{}).value,10)||1;
+    const r=await fetch('/api/admin/quiz/countdown',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({n,seconds})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) return alert(d.error||'Impossible');
+    alert('⏱ Décompte '+seconds+' s — suspense jusqu’au résultat.');
+    loadQuizHQ();
+  });
 }
 async function tirerQuiz(){ return lancerDecompte(); }
 async function retirerAnnonce(){
