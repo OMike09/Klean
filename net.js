@@ -618,8 +618,12 @@ function viewMissionPhoto(i){
    → bandeau discret en haut de l'app + mémoire pour ne pas repousser deux fois la même annonce
    → bandeau « MISE À JOUR » affiché automatiquement quand le serveur change de version       */
 function renderAnnonceBanner(a) {
-  let el = document.getElementById('ann-bar');
-  if (!a) { if (el) el.remove(); return; }
+  /* Plus de carte INFO KLEAN en haut : la bande TV du bas s’en charge. */
+  const el = document.getElementById('ann-bar');
+  if (el) el.remove();
+  return;
+  let _dead = document.getElementById('ann-bar');
+  if (!a) { if (_dead) _dead.remove(); return; }
   if (!el) {
     el = document.createElement('div');
     el.id = 'ann-bar';
@@ -668,7 +672,14 @@ async function checkAnnonce() {
     if (!d.annonce) renderAnnonceBanner(null);
   } catch (e) { /* silencieux : hivernage ou démo locale */ }
 }
-window.addEventListener('load', function () { checkAnnonce(); setInterval(checkAnnonce, 60000); });
+window.addEventListener('load', function () { checkAnnonce(); setInterval(checkAnnonce, 60000); syncSupFlag(); setInterval(syncSupFlag, 20000); });
+async function syncSupFlag(){
+  try{
+    const d=await fetch('/api/config',{cache:'no-store'}).then(r=>r.json());
+    window._supChatOff = d.supportChat===false;
+    placeSupFab();
+  }catch(e){}
+}
 
 
 /* ═══════════════════ 💬 SUPPORT INTERNE (client & pro ↔ équipe) ═══════════════════
@@ -687,7 +698,7 @@ function supBuild() {
   if (_supBuild) return; _supBuild = true;
   const css = document.createElement('style');
   css.textContent = `
-#sup-fab{position:fixed;right:14px;bottom:96px;z-index:9600;width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,#15c98a,#0a8f60);border:none;color:#04130c;font-size:22px;box-shadow:0 8px 22px rgba(21,201,138,.35);cursor:pointer;display:flex;align-items:center;justify-content:center}
+#sup-fab{position:fixed;right:14px;bottom:96px;z-index:9600;width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,#15c98a,#0a8f60);border:none;color:#04130c;font-size:22px;box-shadow:0 8px 22px rgba(21,201,138,.35);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:bottom .25s ease}
 #sup-fab .bdg{position:absolute;top:-3px;right:-3px;background:#ff6b6b;color:#fff;font-size:10px;font-weight:900;min-width:18px;height:18px;border-radius:9px;display:none;align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--card)}
 #sup-pane{position:fixed;left:0;right:0;bottom:0;z-index:9700;max-width:520px;margin:0 auto;background:var(--card);border-top-left-radius:20px;border-top-right-radius:20px;box-shadow:0 -14px 44px rgba(0,0,0,.5);padding:14px 14px 0;display:none;flex-direction:column;max-height:72vh}
 #sup-msgs2{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:7px;padding:4px 2px;min-height:170px}
@@ -710,7 +721,17 @@ function supBuild() {
     '<button onclick="supSend()" style="background:var(--p);border:none;color:#04130c;font-weight:900;padding:0 16px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:14px">➤</button></div>';
   document.body.appendChild(pane);
   supRefreshBadge();
+  placeSupFab();
   setInterval(supRefreshBadge, 30000);
+  setInterval(placeSupFab, 2000);
+}
+function placeSupFab(){
+  const fab=document.getElementById('sup-fab'); if(!fab) return;
+  if(window._supChatOff){ fab.style.display='none'; return; }
+  fab.style.display='flex';
+  const bar=document.getElementById('aff-bar');
+  const on=bar && !bar.classList.contains('hidden') && bar.style.display!=='none';
+  fab.style.bottom = on ? 'calc(138px + env(safe-area-inset-bottom, 0px))' : '96px';
 }
 async function supRefreshBadge() {
   const id = supId(); if (!id) return;

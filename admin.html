@@ -277,6 +277,14 @@
     </div>
   </div>
 
+  <div class="panel" style="margin-bottom:14px" id="panel-field-inbox">
+    <h3>🧭 Messages agents de terrain <span class="cnt" id="field-in-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;line-height:1.4">Ils vous écrivent ici. Touchez un nom pour ouvrir le fil et <b>répondre</b>.</p>
+      <div id="field-inbox"><div class="empty">Aucun message pour l’instant.</div></div>
+    </div>
+  </div>
+
   <!-- 💬 Support interne — conversations clients & pros (gestionnaire inclus) -->
   <div class="panel" style="margin-bottom:14px" id="panel-support">
     <h3>💬 Support & messages <span class="cnt" id="sup-cnt">—</span></h3>
@@ -346,6 +354,9 @@
       <input id="cfg-reach" type="number" min="1" max="80" step="1" style="width:76px;background:var(--card2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:9px 11px;font-size:14px;font-family:inherit;text-align:center;font-weight:800">
       <span style="font-weight:900">km</span>
       <small style="color:var(--muted);font-size:11.5px">GPS : seuls les pros dans ce rayon voient la demande en priorité</small>
+    </div>
+    <div style="padding:0 16px 14px">
+      <button type="button" onclick="openBulleMsg()" style="width:100%;background:rgba(21,201,138,.14);border:1.5px solid rgba(21,201,138,.4);color:var(--p);font-weight:900;padding:11px 12px;border-radius:12px;cursor:pointer;font-family:inherit">💬 Activer / désactiver les messages de la bulle verte</button>
     </div>
   </div>
 
@@ -572,7 +583,7 @@ async function loadAll(){
     if(cands) renderCands(cands);
     PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
     if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
-    loadTeam(); loadAnnonce(); loadQuizHQ(); if(!(document.activeElement && document.activeElement.id==='hqchat-in')) loadHqChat(); loadFields(); loadVillesHQ(); loadCatalogHQ(); if(ME && ME.role==='pdg') loadShield();
+    loadTeam(); loadAnnonce(); loadQuizHQ(); if(!(document.activeElement && document.activeElement.id==='hqchat-in')) loadHqChat(); loadFields(); loadFieldInbox(); loadVillesHQ(); loadCatalogHQ(); if(ME && ME.role==='pdg') loadShield();
     if(!window._qzPoll){ window._qzPoll=setInterval(loadQuizHQ, 1000); }
     if(!window._livePoll){ window._livePoll=setInterval(paintAnnLive, 4000); paintAnnLive(); }
   }catch(e){
@@ -649,6 +660,7 @@ const HQ_GO = [
   ['panel-ca7','📈 CA 7 jours'],
   ['panel-team','👑 Équipe dirigeante'],
   ['panel-ann','📣 Affiche'],
+  ['panel-field-inbox','🧭 Messages terrain'],
   ['panel-support','💬 Support'],
   ['panel-cands','🛡️ Vérification pros'],
   ['panel-hqchat','🟠 Fil PDG'],
@@ -860,19 +872,69 @@ async function fieldAct(id, act){
   await fetch('/api/admin/field/'+id+'/'+act,{method:'POST'});
   loadFields();
 }
+function paintFieldMsgs(box, messages){
+  if(!box) return;
+  box.innerHTML=(messages||[]).map(m=>{
+    const mine=m.from==='hq';
+    const who=mine?(m.par||'PDG'):(m.gestNom||'Terrain');
+    const t=(m.at||'').slice(11,19);
+    return '<div style="margin:6px 0;text-align:'+(mine?'right':'left')+'"><span style="display:inline-block;max-width:86%;background:'+(mine?'rgba(232,93,4,.18)':'var(--card2)')+';border-radius:11px;padding:7px 10px;font-size:13px">'+(m.text||'')+'<small style="display:block;opacity:.7">'+who+' · '+t+'</small></span></div>';
+  }).join('')||'<div class="empty">Aucun message — écrivez-lui.</div>';
+  box.scrollTop=box.scrollHeight;
+}
+async function loadFieldInbox(){
+  try{
+    const d=await fetch('/api/admin/field-chat/inbox',{cache:'no-store'}).then(r=>r.json());
+    const cnt=document.getElementById('field-in-cnt');
+    if(cnt) cnt.textContent=(d.unread? (d.unread+' non lu(s)') : '0');
+    const box=document.getElementById('field-inbox'); if(!box) return;
+    const th=d.threads||[];
+    box.innerHTML=th.length? th.map(x=>{
+      const badge=x.unread?('<span style="background:#e5484d;color:#fff;font-size:10px;font-weight:900;padding:3px 8px;border-radius:99px">'+x.unread+'</span>'):'';
+      const preview=(x.lastText||'Pas encore de message').slice(0,80);
+      const t=(x.lastAt||'').slice(11,19);
+      return '<button type="button" onclick="openFieldThread(\''+x.id+'\',\''+String(x.nom||'').replace(/'/g,'')+'\')" style="display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:10px 8px;border:none;border-bottom:1px solid var(--line);background:transparent;color:inherit;font:inherit;cursor:pointer"><div style="flex:1"><b>'+x.nom+'</b> '+badge+'<br><small style="color:var(--muted)">'+(x.lastFrom==='field'?'Lui : ':'Vous : ')+preview+(t?' · '+t:'')+'</small></div><span style="font-weight:900;color:var(--p)">💬</span></button>';
+    }).join('') : '<div class="empty">Aucun agent de terrain. Créez-en un, puis il pourra vous écrire.</div>';
+    if(window._fieldThreadId && document.getElementById('field-thread-modal') && document.getElementById('field-thread-modal').style.display==='flex'){
+      loadFieldChat();
+    }
+  }catch(e){}
+}
+async function openFieldThread(id, nom){
+  window._fieldThreadId=id;
+  const sel=document.getElementById('fc-who'); if(sel) sel.value=id;
+  let m=document.getElementById('field-thread-modal');
+  if(!m){
+    m=document.createElement('div'); m.id='field-thread-modal';
+    m.style.cssText='position:fixed;inset:0;z-index:94;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(m);
+  }
+  m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:18px;max-width:440px;width:100%;max-height:86vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><b style="flex:1" id="field-thread-title">🧭 '+nom+'</b><button type="button" onclick="closeFieldThread()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div><div id="field-thread-msgs" style="flex:1;min-height:200px;max-height:50vh;overflow:auto;margin-bottom:8px"></div><div style="display:flex;gap:6px"><input id="field-thread-in" maxlength="500" placeholder="Répondre à '+nom+'…" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendFieldThread();}"><button type="button" class="btn-main" style="flex:none" onclick="sendFieldThread()">Envoyer</button></div></div>';
+  m.style.display='flex';
+  fetch('/api/admin/field-chat/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}).catch(()=>{});
+  loadFieldChat();
+}
+function closeFieldThread(){ const m=document.getElementById('field-thread-modal'); if(m) m.style.display='none'; window._fieldThreadId=null; }
 async function loadFieldChat(){
-  const id=(document.getElementById('fc-who')||{}).value; if(!id) return;
-  const r=await fetch('/api/admin/field-chat?id='+encodeURIComponent(id)); if(!r.ok) return;
+  const id=window._fieldThreadId || (document.getElementById('fc-who')||{}).value; if(!id) return;
+  const r=await fetch('/api/admin/field-chat?id='+encodeURIComponent(id),{cache:'no-store'}); if(!r.ok) return;
   const d=await r.json();
-  const box=document.getElementById('fc-msgs'); if(!box) return;
-  box.innerHTML=(d.messages||[]).map(m=>'<div style="margin:4px 0"><b>'+(m.from==='hq'?(m.par||'HQ'):'terrain')+'</b> — '+m.text+'</div>').join('')||'<span style="color:var(--muted)">Aucun message</span>';
+  paintFieldMsgs(document.getElementById('fc-msgs'), d.messages);
+  paintFieldMsgs(document.getElementById('field-thread-msgs'), d.messages);
+}
+async function sendFieldThread(){
+  const id=window._fieldThreadId; const inp=document.getElementById('field-thread-in');
+  const text=(inp&&inp.value||'').trim(); if(!id||!text) return;
+  await fetch('/api/admin/field-chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,text})});
+  if(inp) inp.value=''; loadFieldChat(); loadFieldInbox();
 }
 async function sendFieldChat(){
   const id=(document.getElementById('fc-who')||{}).value, text=((document.getElementById('fc-txt')||{}).value||'').trim();
   if(!id||!text) return alert('Choisissez un agent et écrivez');
   await fetch('/api/admin/field-chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,text})});
-  document.getElementById('fc-txt').value=''; loadFieldChat();
+  document.getElementById('fc-txt').value=''; loadFieldChat(); loadFieldInbox();
 }
+if(!window._fcPoll){ window._fcPoll=setInterval(loadFieldInbox, 4000); }
 function fmtHms(iso){
   if(!iso) return '—';
   const d=new Date(iso);
@@ -1442,7 +1504,24 @@ function renderConfig(cfg){
   const el = document.getElementById('cfg-comm'); if(el) el.value = c;
   const er = document.getElementById('cfg-reach'); if(er) er.value = (cfg && cfg.reachKm) || 15;
 }
-async function saveComm(){
+async function openBulleMsg(){
+  let m=document.getElementById('bulle-msg-modal');
+  if(!m){
+    m=document.createElement('div'); m.id='bulle-msg-modal';
+    m.style.cssText='position:fixed;inset:0;z-index:95;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(m);
+  }
+  m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;max-width:380px;width:100%;padding:16px"><b style="display:block;margin-bottom:8px">💬 Bulle verte — messages</b><p style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.45">Si vous <b>désactivez</b>, plus personne n’envoie via la bulle 💬. Elle disparaît de l’accueil. Vous pouvez la réactiver ici.</p><div style="display:flex;flex-direction:column;gap:8px"><button type="button" class="btn-main" onclick="setBulleMsg(true)">✅ Activer les envois</button><button type="button" onclick="setBulleMsg(false)" style="background:rgba(255,107,107,.14);border:1.5px solid rgba(255,107,107,.45);color:var(--red);font-weight:900;padding:12px;border-radius:12px;cursor:pointer;font-family:inherit">⛔ Désactiver les envois</button><button type="button" onclick="document.getElementById(\'bulle-msg-modal\').style.display=\'none\'" style="background:var(--card2);border:1px solid var(--line);padding:10px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div></div>';
+  m.style.display='flex';
+}
+async function setBulleMsg(on){
+  const r=await fetch('/api/admin/support-chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert(d.error||'Impossible');
+  alert(on?'✅ Bulle verte activée — les gens peuvent écrire.':'⛔ Bulle verte coupée — plus d’envoi.');
+  const m=document.getElementById('bulle-msg-modal'); if(m) m.style.display='none';
+}
+function saveComm(){
   const v = parseFloat(document.getElementById('cfg-comm').value);
   if(isNaN(v) || v<0 || v>50) return alert('Entre 0 et 50 %');
   const reach = parseFloat(document.getElementById('cfg-reach') && document.getElementById('cfg-reach').value) || undefined;

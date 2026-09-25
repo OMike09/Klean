@@ -1104,7 +1104,8 @@ const server = http.createServer(async (req, res) => {
     payDest: (db.config && db.config.hide) ? { hide: true } : ((db.config && db.config.payDest) || {}),
     hidePay: !!(db.config && db.config.payDest && db.config.payDest.hide),
     cities: db.cities || [],
-    services: db.catalog || []
+    services: db.catalog || [],
+    supportChat: db.config && db.config.supportChat === false ? false : true
   });
   if (p === '/api/cities' && req.method === 'GET') return sendJson(res, 200, { ok: true, cities: db.cities || [] });
   if (p === '/api/admin/cities' && req.method === 'POST') {
@@ -1230,7 +1231,18 @@ const server = http.createServer(async (req, res) => {
     if (aid) { const ag = db.agents.find(a => a.id === aid && (a.status || 'approved') === 'approved'); if (ag) return { role: 'pro', id: ag.id, nom: ag.nom }; }
     return null;
   }
+  if (p === '/api/admin/support-chat' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    db.config = db.config || {};
+    db.config.supportChat = b.on !== false;
+    saveDb();
+    auditLog('support_chat_toggle', { on: db.config.supportChat, par: 'PDG' });
+    return sendJson(res, 200, { ok: true, on: db.config.supportChat });
+  }
   if (p === '/api/support/send' && req.method === 'POST') {
+    if (db.config && db.config.supportChat === false)
+      return sendJson(res, 403, { error: 'Messages de la bulle désactivés par le PDG' });
     const b = await readBody(req);
     const who = supportIdent(req, b);
     if (!who) return sendJson(res, 401, { error: 'Identifiez-vous d’abord (inscription ou connexion)' });
@@ -1789,13 +1801,36 @@ const server = http.createServer(async (req, res) => {
     saveDb();
     return sendJson(res, 200, { ok: true });
   }
+  if (p === '/api/admin/field-chat/inbox' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const reads = db.hqFieldRead || {};
+    const list = (db.fieldAgents || []).filter(f => isPdg(req) || ownsRecord(req, f)).map(f => {
+      const msgs = (db.fieldChat || []).filter(m => m.fieldId === f.id);
+      const last = msgs[msgs.length - 1] || null;
+      const lastRead = reads[f.id] ? new Date(reads[f.id]).getTime() : 0;
+      const unread = msgs.filter(m => m.from === 'field' && new Date(m.at).getTime() > lastRead).length;
+      return { id: f.id, nom: f.nom, tel: f.tel, lastText: last ? last.text : '', lastAt: last ? last.at : '', lastFrom: last ? last.from : '', unread, n: msgs.length };
+    });
+    list.sort((a, b) => (b.lastAt || '').localeCompare(a.lastAt || ''));
+    return sendJson(res, 200, { threads: list, unread: list.reduce((s, x) => s + (x.unread || 0), 0) });
+  }
   if (p === '/api/admin/field-chat' && req.method === 'GET') {
     const fid = String(url.searchParams.get('id') || '');
     const f = (db.fieldAgents || []).find(x => x.id === fid);
     if (!f) return sendJson(res, 404, {});
     if (!isPdg(req) && !ownsRecord(req, f)) return sendJson(res, 403, {});
     const messages = (db.fieldChat || []).filter(m => m.fieldId === fid).slice(-200);
-    return sendJson(res, 200, { messages });
+    return sendJson(res, 200, { messages, nom: f.nom });
+  }
+  if (p === '/api/admin/field-chat/read' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, {});
+    const b = await readBody(req);
+    const fid = String(b.id || '');
+    if (!fid) return sendJson(res, 400, {});
+    db.hqFieldRead = db.hqFieldRead || {};
+    db.hqFieldRead[fid] = nowISO();
+    saveDb();
+    return sendJson(res, 200, { ok: true });
   }
   if (p === '/api/admin/field-chat' && req.method === 'POST') {
     const b = await readBody(req);

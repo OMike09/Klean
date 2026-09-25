@@ -2637,6 +2637,7 @@ function loadAffiche(){
       bar.classList.remove('hidden');
       bar.style.display='flex';
     }
+    try{ if(typeof placeSupFab==='function') placeSupFab(); }catch(e){}
     window._lastQuizA=a;
     window._lastAfficheMeta=d;
     paintQuiz(a);
