@@ -382,7 +382,7 @@
 </div>
 
 <div id="home-win-slot" style="display:none;margin:0 12px 8px;text-align:right"></div>
-<div id="aff-react" class="hidden" style="margin:-2px 12px 12px;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
+<div id="aff-react" class="hidden"></div>
 <div id="quiz-box" class="hidden" style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px 14px 12px;margin:0 12px 12px;position:relative;z-index:30"></div>
 <div id="ad-box" class="hidden" style="margin:0 12px 12px;border-radius:16px;padding:14px;background:linear-gradient(160deg,#1a1208,#2a1a0c);border:1.5px solid rgba(255,176,32,.35);color:#fff"></div>
 <style>@keyframes kleanMarqueeLtr{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}</style>
@@ -718,10 +718,10 @@
   </div>
 </div>
 
-<div id="aff-bar" class="hidden" style="position:fixed;left:50%;transform:translateX(-50%);width:100%;max-width:480px;bottom:56px;z-index:44;display:flex;align-items:stretch;background:#0a0a0a;border-top:3px solid #00e676;box-shadow:0 -8px 24px rgba(0,0,0,.45)">
-  <div id="aff-live-tag" style="flex:none;display:flex;align-items:center;justify-content:center;padding:0 12px;background:#00c853;color:#04150c;font-weight:900;font-size:13px;letter-spacing:.8px">INFO</div>
-  <div style="flex:1;overflow:hidden;white-space:nowrap;min-width:0;padding:14px 0">
-    <div id="aff-track" style="display:inline-block;color:#00e676;font-weight:900;font-size:24px;letter-spacing:.6px;line-height:1.2;text-shadow:0 0 10px rgba(0,230,118,.45);animation:kleanMarqueeLtr 50s linear infinite"></div>
+<div id="aff-bar" class="hidden" style="position:fixed;left:0;right:0;margin:0 auto;width:100%;max-width:480px;bottom:calc(72px + env(safe-area-inset-bottom, 0px));z-index:48;height:56px;display:flex;align-items:stretch;background:#0a0a0a;border-top:4px solid #00e676;box-shadow:0 -10px 28px rgba(0,0,0,.5)">
+  <div id="aff-live-tag" style="flex:none;display:flex;align-items:center;justify-content:center;padding:0 14px;background:#00c853;color:#04150c;font-weight:900;font-size:14px;letter-spacing:.8px">INFO</div>
+  <div style="flex:1;overflow:hidden;white-space:nowrap;min-width:0;height:56px;display:flex;align-items:center">
+    <div id="aff-track" style="display:inline-block;color:#00e676;font-weight:900;font-size:22px;letter-spacing:.5px;line-height:1.2;text-shadow:0 0 12px rgba(0,230,118,.5);animation:kleanMarqueeLtr 50s linear infinite"></div>
   </div>
 </div>
 <!-- ═══════ NAVS ═══════ -->
@@ -2621,7 +2621,7 @@ function loadAffiche(){
   fetch('/api/annonce?screen='+(mode==='agent'?'agent':'client')+'&who='+encodeURIComponent(_w.accountId||'')+'&nom='+encodeURIComponent(_w.nom||''),{cache:'no-store'}).then(r=>r.json()).then(d=>{
     if(!d || !d.annonce){
       const qb=document.getElementById('quiz-box'); if(qb){ qb.classList.add('hidden'); qb.innerHTML=''; }
-      const bar=document.getElementById('aff-bar'); if(bar) bar.classList.add('hidden');
+      const bar=document.getElementById('aff-bar'); if(bar){ bar.classList.add('hidden'); bar.style.display='none'; }
       const rx=document.getElementById('aff-react'); if(rx) rx.classList.add('hidden');
       return;
     }
@@ -2635,6 +2635,7 @@ function loadAffiche(){
       const tx = ic + a.message + '        ·        ';
       tr.textContent = tx + tx + tx;
       bar.classList.remove('hidden');
+      bar.style.display='flex';
     }
     window._lastQuizA=a;
     window._lastAfficheMeta=d;
@@ -2651,16 +2652,8 @@ function loadAffiche(){
   }).catch(()=>{});
 }
 function paintAffReact(d){
-  const box=document.getElementById('aff-react'); if(!box||!d||!d.annonce) return;
-  const L=d.live||{};
-  const likes=d.likes||0, unlikes=d.unlikes||0;
-  const mine=(function(){ try{ return JSON.parse(localStorage.getItem('k2_aff_vote')||'0'); }catch(e){ return 0; } })();
-  const nHome=L.home||0;
-  box.innerHTML =
-    '<span style="font-size:12.5px;font-weight:800;color:var(--pd);flex:1">'+(d.annonce && (d.annonce.type==='info'||d.annonce.type==='alerte') ? ('Vu(s) : '+(d.views||0)) : ('Participants KLEAN : '+nHome))+'</span>'+
-    '<button type="button" onclick="voteAffiche(1)" style="border:1.5px solid '+(mine===1?'var(--p)':'var(--line)')+';background:'+(mine===1?'var(--pl)':'#fff')+';color:var(--pd);font-weight:900;padding:7px 11px;border-radius:99px;cursor:pointer;font-family:inherit">👍 '+likes+'</button>'+
-    '<button type="button" onclick="voteAffiche(-1)" style="border:1.5px solid '+(mine===-1?'#e5484d':'var(--line)')+';background:'+(mine===-1?'#fde8e8':'#fff')+';color:#c0392b;font-weight:900;padding:7px 11px;border-radius:99px;cursor:pointer;font-family:inherit">👎 '+unlikes+'</button>';
-  box.classList.remove('hidden');
+  const box=document.getElementById('aff-react');
+  if(box){ box.classList.add('hidden'); box.innerHTML=''; }
 }
 async function voteAffiche(vote){
   const w=quizWho();
