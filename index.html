@@ -384,6 +384,7 @@
 <div id="aff-bar" class="hidden" style="overflow:hidden;white-space:nowrap;background:linear-gradient(90deg,#ffb020,#ff8a00);color:#1a1204;font-weight:900;font-size:22px;padding:16px 0;margin:8px 12px 8px;border-radius:16px;letter-spacing:.4px;line-height:1.25">
   <div id="aff-track" style="display:inline-block;animation:kleanMarqueeLtr 16s linear infinite"></div>
 </div>
+<div id="aff-react" class="hidden" style="margin:-2px 12px 12px;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
 <div id="quiz-box" class="hidden" style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px 14px 12px;margin:0 12px 12px;position:relative;z-index:30"></div>
 <div id="ad-box" class="hidden" style="margin:0 12px 12px;border-radius:16px;padding:14px;background:linear-gradient(160deg,#1a1208,#2a1a0c);border:1.5px solid rgba(255,176,32,.35);color:#fff"></div>
 <style>@keyframes kleanMarqueeLtr{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}</style>
@@ -2583,6 +2584,7 @@ function loadAffiche(){
     if(!d || !d.annonce){
       const qb=document.getElementById('quiz-box'); if(qb){ qb.classList.add('hidden'); qb.innerHTML=''; }
       const bar=document.getElementById('aff-bar'); if(bar) bar.classList.add('hidden');
+      const rx=document.getElementById('aff-react'); if(rx) rx.classList.add('hidden');
       return;
     }
     const a=d.annonce;
@@ -2594,8 +2596,32 @@ function loadAffiche(){
       bar.classList.remove('hidden');
     }
     window._lastQuizA=a;
+    window._lastAfficheMeta=d;
     paintQuiz(a);
+    paintAffReact(d);
   }).catch(()=>{});
+}
+function paintAffReact(d){
+  const box=document.getElementById('aff-react'); if(!box||!d||!d.annonce) return;
+  const L=d.live||{};
+  const likes=d.likes||0, unlikes=d.unlikes||0;
+  const mine=(function(){ try{ return JSON.parse(localStorage.getItem('k2_aff_vote')||'0'); }catch(e){ return 0; } })();
+  const nHome=L.home||0;
+  box.innerHTML =
+    '<span style="font-size:12.5px;font-weight:800;color:var(--pd);flex:1">🟢 '+nHome+' compte'+(nHome>1?'s':'')+' en ligne sur l’accueil</span>'+
+    '<button type="button" onclick="voteAffiche(1)" style="border:1.5px solid '+(mine===1?'var(--p)':'var(--line)')+';background:'+(mine===1?'var(--pl)':'#fff')+';color:var(--pd);font-weight:900;padding:7px 11px;border-radius:99px;cursor:pointer;font-family:inherit">👍 '+likes+'</button>'+
+    '<button type="button" onclick="voteAffiche(-1)" style="border:1.5px solid '+(mine===-1?'#e5484d':'var(--line)')+';background:'+(mine===-1?'#fde8e8':'#fff')+';color:#c0392b;font-weight:900;padding:7px 11px;border-radius:99px;cursor:pointer;font-family:inherit">👎 '+unlikes+'</button>';
+  box.classList.remove('hidden');
+}
+async function voteAffiche(vote){
+  const w=quizWho();
+  let cur=0; try{ cur=JSON.parse(localStorage.getItem('k2_aff_vote')||'0'); }catch(e){}
+  if(cur===vote) vote=0;
+  const r=await fetch('/api/annonce/react',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vote, who:w.accountId})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return toast(d.error||'Vote impossible');
+  localStorage.setItem('k2_aff_vote', String(d.mine||0));
+  if(window._lastAfficheMeta){ window._lastAfficheMeta.likes=d.likes; window._lastAfficheMeta.unlikes=d.unlikes; paintAffReact(window._lastAfficheMeta); }
 }
 loadAffiche();
 setInterval(loadAffiche, 1000);

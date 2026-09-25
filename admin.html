@@ -219,6 +219,7 @@
           <button type="button" onclick="stopQuiz()" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-weight:800;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit">⏹ Fermer les réponses</button>
           <button type="button" onclick="designerGagnant()" style="background:rgba(74,163,255,.14);border:1px solid rgba(74,163,255,.4);color:var(--blue);font-weight:900;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit">👑 Désigner le gagnant (PDG)</button>
           <button type="button" onclick="tirageFinalSerie()" style="background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.4);color:var(--red);font-weight:900;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit">🎲 Point final + tirage hasard</button>
+          <button type="button" onclick="relancerMemeQuiz()" style="background:rgba(74,163,255,.16);border:1.5px solid rgba(74,163,255,.45);color:var(--blue);font-weight:900;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit">🔁 Relancer le même quiz</button>
         </div>
         <div id="qz-cd" style="font-size:22px;font-weight:900;letter-spacing:.04em;margin-top:8px;color:var(--amber)"></div>
         <div id="qz-winners" style="font-size:12px;margin-top:6px;color:var(--p)"></div>
@@ -861,7 +862,7 @@ async function loadAnnonce(){
     const el = document.getElementById('ann-cur');
     if(!el) return;
     el.innerHTML = d && d.annonce
-      ? ('Affiche en cours : <b>'+( {maj:'✨ Mise à jour', info:'ℹ️ Information', alerte:'🚨 Urgent', quiz:'🏆 Quiz'} [d.annonce.type] || 'Info')+'</b> — « '+d.annonce.message+' » <br><span style="color:#8aa79a">publiée le '+(d.annonce.at||'').slice(0,10)+' par '+(d.annonce.par||'—')+' — version serveur '+(d.version||'')+'</span>')
+      ? ('Affiche en cours : <b>'+( {maj:'✨ Mise à jour', info:'ℹ️ Information', alerte:'🚨 Urgent', quiz:'🏆 Quiz'} [d.annonce.type] || 'Info')+'</b> — « '+d.annonce.message+' » <br><span style="color:#8aa79a">👍 '+(d.likes||0)+' · 👎 '+(d.unlikes||0)+(d.live?' · 🟢 accueil '+(d.live.home||0):'')+' — publiée le '+(d.annonce.at||'').slice(0,10)+' par '+(d.annonce.par||'—')+'</span>')
       : ('Aucune affiche en cours. <span style="color:#8aa79a">Version serveur : '+(d && d.version || '…')+'</span>');
     if(d && d.annonce && d.annonce.type==='quiz'){
       const qz=document.getElementById('ann-quiz'); if(qz) qz.style.display='block';
@@ -989,6 +990,16 @@ function tickQuizCd(ends, revealed){
     if(!left){ clearInterval(_qzTick); _qzTick=null; setTimeout(loadQuizHQ, 400); }
   };
   run(); _qzTick=setInterval(run, 250);
+}
+async function relancerMemeQuiz(){
+  if(!confirm('🔁 Relancer LE MÊME quiz ? Les réponses actuelles sont archivées, tout le monde peut rejouer (nouveau chrono).')) return;
+  const answerSeconds=parseInt((document.getElementById('qz-ans-sec')||{}).value,10)||0;
+  const r=await fetch('/api/admin/quiz/relaunch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answerSeconds})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+  const L=d.live||{};
+  alert('🔁 Quiz relancé : « '+(d.question||'')+' »\\n🟢 Accueil : '+(L.home||0)+' personne(s).');
+  loadAnnonce(); loadQuizHQ();
 }
 async function stopQuiz(){
   const r=await fetch('/api/admin/quiz/stop',{method:'POST'}); const d=await r.json().catch(()=>({}));

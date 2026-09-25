@@ -202,6 +202,21 @@ const nowISO = () => new Date().toISOString();
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const sockets = new Set();           // tous les sockets connectés
 const supRateMap = new Map();      // 🛡️ digestif anti-spam du support
+const presence = new Map();        // who -> { at, screen, role, nom }
+function prunePresence() {
+  const cut = Date.now() - 45000;
+  for (const [k, v] of presence) if (!v || v.at < cut) presence.delete(k);
+}
+function liveHome() {
+  prunePresence();
+  const rows = [...presence.values()];
+  return {
+    home: rows.filter(x => x.screen === 'home').length,
+    n: rows.length,
+    clients: rows.filter(x => x.role === 'client').length,
+    agents: rows.filter(x => x.role === 'agent').length
+  };
+}
 function wsSend(sock, obj) {
   if (sock.destroyed) return;
   const data = Buffer.from(JSON.stringify(obj));
@@ -504,10 +519,16 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
 
   /* --- API --- */
-  if (p === '/api/health') return sendJson(res, 200, { ok: true, storage: pgClient ? 'postgres' : 'fichier', agentsEnLigne: onlineAgents().length, agentsTotal: db.agents.length, clientsTotal: db.clients.length, missions: db.missions.length, writeFrozen: writesFrozen() });
+  if (p === '/api/health') return sendJson(res, 200, { ok: true, storage: pgClient ? 'postgres' : 'fichier', agentsEnLigne: onlineAgents().length, agentsTotal: db.agents.length, clientsTotal: db.clients.length, missions: db.missions.length, writeFrozen: writesFrozen(), live: liveHome() });
+  if (p === '/api/presence' && req.method === 'POST') {
+    const b = await readBody(req);
+    const who = String(b.who || b.accountId || ('anon-' + (req.socket.remoteAddress || ''))).slice(0, 80);
+    presence.set(who, { at: Date.now(), screen: String(b.screen || 'home').slice(0, 20), role: String(b.role || 'client').slice(0, 12), nom: String(b.nom || '').slice(0, 40) });
+    return sendJson(res, 200, { ok: true, live: liveHome() });
+  }
 
   const meth = (req.method || 'GET').toUpperCase();
-  const freezeAllow = ['/api/admin/login', '/api/admin/setup', '/api/admin/logout', '/api/admin/password', '/api/admin/gest-freeze'];
+  const freezeAllow = ['/api/admin/login', '/api/admin/setup', '/api/admin/logout', '/api/admin/password', '/api/admin/gest-freeze', '/api/presence', '/api/quiz/chat', '/api/annonce/react'];
   if (writesFrozen() && !['GET', 'HEAD', 'OPTIONS'].includes(meth) && !freezeAllow.includes(p)) {
     const id = hqIdentity(req);
     if (!(id && id.role === 'pdg' && p.startsWith('/api/admin')))
@@ -1048,7 +1069,29 @@ const server = http.createServer(async (req, res) => {
       a.rounds = a.rounds || []; a.rounds.push({ at: nowISO(), n, winners: a.winners, seconds: a.countdownSeconds || 0 });
       a.stagePool = a.winners; saveDb();
     }
-    return sendJson(res, 200, { ok: true, version: APP_VERSION, annonce: db.annonce || null, now: Date.now() });
+    const an = db.annonce || null;
+    const reacts = (an && an.reacts) || {};
+    let likes = 0, unlikes = 0;
+    Object.values(reacts).forEach(v => { if (v === 1) likes++; else if (v === -1) unlikes++; });
+    return sendJson(res, 200, {
+      ok: true, version: APP_VERSION, annonce: an, now: Date.now(),
+      live: liveHome(), likes, unlikes
+    });
+  }
+  if (p === '/api/annonce/react' && req.method === 'POST') {
+    const b = await readBody(req);
+    if (!db.annonce) return sendJson(res, 400, { error: 'Aucune affiche' });
+    const who = String(b.who || b.accountId || ('anon-' + (req.socket.remoteAddress || ''))).slice(0, 80);
+    let vote = parseInt(b.vote, 10);
+    if (vote !== 1 && vote !== -1) vote = 0;
+    db.annonce.reacts = db.annonce.reacts || {};
+    if (db.annonce.reacts[who] === vote || vote === 0) delete db.annonce.reacts[who];
+    else db.annonce.reacts[who] = vote;
+    saveDb();
+    const reacts = db.annonce.reacts;
+    let likes = 0, unlikes = 0;
+    Object.values(reacts).forEach(v => { if (v === 1) likes++; else if (v === -1) unlikes++; });
+    return sendJson(res, 200, { ok: true, mine: db.annonce.reacts[who] || 0, likes, unlikes });
   }
 
   /* --- 🤝 Liaison d'un compte pro créé à la main par l'équipe (code à usage unique) --- */
@@ -1227,6 +1270,7 @@ const server = http.createServer(async (req, res) => {
       answerSeconds,
       answerEndsAt: answerSeconds ? new Date(Date.now() + answerSeconds * 1000).toISOString() : null };
     db.quizAnswers = [];
+    if (type === 'quiz') db.lastQuiz = { message: msg, question: db.annonce.question, choices: db.annonce.choices, good: db.annonce.good, answerSeconds };
     saveDb();
     auditLog('annonce_publiee', { type, par: act(req) });
     emitAdmin('annonce', '📣 Affiche publiée pour tous les utilisateurs');
@@ -1696,12 +1740,41 @@ const server = http.createServer(async (req, res) => {
       active: !!(a && a.type === 'quiz'), closed: !!(a && a.closed),
       question: a && a.question, nTotal: ans.length, nOk: goods.length,
       goods: goods.map(x => x.nom),
-      clicks: ans.map(x => ({ nom: x.nom, choice: letters[x.choice] || '?', at: x.at })),
+      clicks: ans.map(x => ({ nom: x.nom, who: x.who, choice: letters[x.choice] || '?', at: x.at, ok: !!x.ok })),
+      live: liveHome(),
       winners: (a && a.winners) || [],
       countdownEndsAt: a && a.countdownEndsAt, countdownRevealed: !!(a && a.countdownRevealed),
       pendingN: a && a.pendingN, rounds: (a && a.rounds) || [], stagePool: (a && a.stagePool) || [],
       answerEndsAt: a && a.answerEndsAt, series: (db.quizSeries || []).length
     });
+  }
+  if (p === '/api/admin/quiz/relaunch' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const src = (db.annonce && db.annonce.type === 'quiz') ? db.annonce : db.lastQuiz;
+    if (!src || !(src.choices || []).length) return sendJson(res, 400, { error: 'Aucun quiz à relancer — publiez-en un d’abord' });
+    const b = await readBody(req).catch(() => ({}));
+    if (db.annonce && db.annonce.type === 'quiz') {
+      db.quizSeries = db.quizSeries || [];
+      db.quizSeries.push({ question: db.annonce.question || db.annonce.message, goods: (db.quizAnswers || []).filter(x => x.ok).map(x => x.nom), at: nowISO() });
+    }
+    const answerSeconds = Math.max(0, Math.min(7200, parseInt(b.answerSeconds != null ? b.answerSeconds : src.answerSeconds, 10) || 0));
+    const msg = src.message || src.question || 'Quiz';
+    db.annonce = {
+      id: uid('AN'), message: msg, type: 'quiz', at: nowISO(), par: act(req),
+      question: src.question || msg,
+      choices: (src.choices || []).slice(0, 4),
+      good: src.good || 0,
+      closed: false, winners: [], hideClient: false, hideAgent: false,
+      answerSeconds,
+      answerEndsAt: answerSeconds ? new Date(Date.now() + answerSeconds * 1000).toISOString() : null
+    };
+    db.quizAnswers = [];
+    db.quizChat = [];
+    db.lastQuiz = { message: msg, question: db.annonce.question, choices: db.annonce.choices, good: db.annonce.good, answerSeconds };
+    saveDb();
+    auditLog('quiz_relance', { par: act(req) });
+    emitAdmin('annonce', '🔁 Même quiz relancé');
+    return sendJson(res, 200, { ok: true, question: db.annonce.question, live: liveHome() });
   }
   if (p === '/api/admin/quiz/stop' && req.method === 'POST') {
     if (!db.annonce || db.annonce.type !== 'quiz') return sendJson(res, 400, { error: 'Pas de quiz' });
@@ -1754,7 +1827,10 @@ const server = http.createServer(async (req, res) => {
     db.annonce.closed = true;
     db.annonce.countdownRevealed = true;
     db.annonce.winners = [nom];
+    db.annonce.winnerWho = String(b.who || '').slice(0, 80);
     db.annonce.pickedByPdg = true;
+    db.quizChat = db.quizChat || [];
+    db.quizChat.push({ id: uid('QC'), from: 'pdg', nom: 'PDG', text: '🏆 Vous êtes le gagnant ! Écrivez-moi ici.', at: nowISO() });
     db.annonce.rounds = db.annonce.rounds || [];
     db.annonce.rounds.push({ at: nowISO(), n: 1, winners: [nom], seconds: 0, by: 'PDG' });
     saveDb();
@@ -1785,6 +1861,48 @@ const server = http.createServer(async (req, res) => {
     a.finalDraw = true;
     saveDb();
     return sendJson(res, 200, { ok: true, pool: pool.length, n: a.pendingN, seconds, countdownEndsAt: a.countdownEndsAt });
+  }
+  if (p === '/api/admin/live' && req.method === 'GET') {
+    return sendJson(res, 200, liveHome());
+  }
+  if (p === '/api/quiz/chat' && req.method === 'GET') {
+    const who = String(url.searchParams.get('who') || '').slice(0, 80);
+    const a = db.annonce;
+    const isWin = a && a.winners && a.winners.length && (a.winnerWho ? a.winnerWho === who : true);
+    return sendJson(res, 200, {
+      ok: true,
+      winner: !!(a && a.winners && a.winners.length),
+      winners: (a && a.winners) || [],
+      you: isWin,
+      messages: (db.quizChat || []).slice(-80)
+    });
+  }
+  if (p === '/api/quiz/chat' && req.method === 'POST') {
+    const b = await readBody(req);
+    const text = String(b.text || '').trim().slice(0, 400);
+    if (text.length < 1) return sendJson(res, 400, { error: 'Message vide' });
+    const nom = String(b.nom || 'Gagnant').slice(0, 40);
+    const who = String(b.who || b.accountId || '').slice(0, 80);
+    const a = db.annonce;
+    if (!a || !a.winners || !a.winners.length) return sendJson(res, 403, { error: 'Pas de gagnant en cours' });
+    db.quizChat = db.quizChat || [];
+    db.quizChat.push({ id: uid('QC'), from: 'user', nom, who, text, at: nowISO() });
+    saveDb();
+    return sendJson(res, 200, { ok: true });
+  }
+  if (p === '/api/admin/quiz/chat' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const text = String(b.text || '').trim().slice(0, 400);
+    if (!text) return sendJson(res, 400, { error: 'Message vide' });
+    db.quizChat = db.quizChat || [];
+    db.quizChat.push({ id: uid('QC'), from: 'pdg', nom: 'PDG', text, at: nowISO() });
+    saveDb();
+    return sendJson(res, 200, { ok: true, messages: db.quizChat.slice(-80) });
+  }
+  if (p === '/api/admin/quiz/chat' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    return sendJson(res, 200, { messages: (db.quizChat || []).slice(-80), winners: (db.annonce && db.annonce.winners) || [] });
   }
 
   if (p === '/api/field/login' && req.method === 'POST') {
