@@ -370,9 +370,16 @@ function routeWsMessage(sock, msg) {
     case 'agent_pos': {   // 📡 position GPS — le pro reste actif partout où il va
       const ag = db.agents.find(a => a.id === (sock.meta.agentId || msg.agentId));
       if (ag && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
-        ag.pos = { lat: msg.lat, lng: msg.lng, at: nowISO() };
-        ag.villeIci = nearestVille(msg.lat, msg.lng);
-        ag.lastSeen = nowISO();
+        /* 🔒 on n'accepte que des points plausibles en Côte d'Ivoire, et jamais un saut impossible (> 120 km/h) */
+        if (posPlausible(ag, msg.lat, msg.lng)) {
+          ag.pos = { lat: msg.lat, lng: msg.lng, at: Date.now(), src: 'ws', acc: typeof msg.acc === 'number' ? Math.round(msg.acc) : null };
+          ag.villeIci = nearestVille(msg.lat, msg.lng);
+          ag.lastSeen = nowISO();
+          ag.posRejets = 0;
+        } else {
+          ag.posRejets = (ag.posRejets || 0) + 1;
+          if (ag.posRejets === 5) console.log('⚠️ Positions GPS rejetées (impossibles) : ' + ag.nom);
+        }
       }
       break;
     }
@@ -446,6 +453,255 @@ function gpsNationOn() {
 function agentHasGps(ag) {
   return !!(ag && ag.pos && typeof ag.pos.lat === 'number' && typeof ag.pos.lng === 'number');
 }
+/* ───────── ⚙️ Réglages de la mise en relation (modifiables par le PDG) ───────── */
+function matchCfg() {
+  db.config = db.config || {};
+  db.config.match = db.config.match || {};
+  const m = db.config.match;
+  if (typeof m.distTtlMin !== 'number') m.distTtlMin = 10;      // position « fraîche » → distance exacte
+  if (typeof m.zoneTtlMin !== 'number') m.zoneTtlMin = 45;      // au-delà : on retombe sur la zone (ville/quartier)
+  if (typeof m.maxRecherchesMin !== 'number') m.maxRecherchesMin = 20;
+  if (typeof m.jitterM !== 'number') m.jitterM = 100;           // gigue anti-triangulation
+  if (typeof m.rayonDefautKm !== 'number') m.rayonDefautKm = 15; // zone d'intervention par défaut
+  if (typeof m.ficheOuverte !== 'boolean') m.ficheOuverte = true;
+  return m;
+}
+/* 🔢 Horodatage d'une position : accepte nombre (ms) OU texte ISO (corrige l'anomalie A1) */
+function posAtMs(pos) {
+  if (!pos) return 0;
+  const a = pos.at;
+  if (typeof a === 'number' && isFinite(a)) return a;
+  if (typeof a === 'string') { const t = Date.parse(a); if (Number.isFinite(t)) return t; }
+  return 0;
+}
+function posAgeMin(ag) {
+  const t = posAtMs(ag && ag.pos);
+  return t ? (Date.now() - t) / 60000 : Infinity;
+}
+function posFreshGps(ag) { return agentHasGps(ag) && posAgeMin(ag) <= matchCfg().distTtlMin; }
+function posUsable(ag) { return agentHasGps(ag) && posAgeMin(ag) <= matchCfg().zoneTtlMin; }
+/* 🌍 la Côte d'Ivoire : on refuse tout point hors du pays (position falsifiée ou bug) */
+function validCILatLng(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat > 4.2 && lat < 10.9 && lng > -8.8 && lng < -2.3;
+}
+function coordsOfVille(nom) {
+  const n = normVille(nom);
+  if (!n) return null;
+  for (const row of CI_GPS) if (normVille(row[0]) === n) return { lat: row[1], lng: row[2] };
+  return null;
+}
+/* 📏 Format français demandé : « 500 m », « 1,2 km », « 12 km » */
+function fmtDist(km) {
+  if (km == null || !isFinite(km)) return '';
+  if (km < 1) return Math.max(50, Math.round(km * 1000 / 50) * 50) + ' m';
+  if (km < 10) return (Math.round(km * 10) / 10).toFixed(1).replace('.', ',') + ' km';
+  return Math.round(km) + ' km';
+}
+/* 🔒 Anti-triangulation : gigue ±100 m puis arrondi par paliers (50 m / 100 m / 500 m) */
+function distPalier(km) {
+  const j = (matchCfg().jitterM || 0) / 1000;
+  let d = km + (Math.random() * 2 - 1) * j;
+  if (d < 0.05) d = 0.05;
+  if (d < 1) d = Math.round(d * 1000 / 50) * 50 / 1000;
+  else if (d < 5) d = Math.round(d * 1000 / 100) * 100 / 1000;
+  else d = Math.round(d * 2) / 2;
+  return Math.round(d * 1000) / 1000;
+}
+/* 🎫 Numéro professionnel unique (KP-482913) — public par nature */
+function ensureNumPro(ag) {
+  if (ag.numPro) return ag.numPro;
+  const pris = new Set((db.agents || []).map(a => a.numPro).filter(Boolean));
+  let n = '';
+  do { n = 'KP-' + String(Math.floor(100000 + Math.random() * 900000)); } while (pris.has(n));
+  ag.numPro = n;
+  ag.numProAt = nowISO();
+  return n;
+}
+/* 🚗 Zone d'intervention du pro (km autour de sa ville de service) */
+function zoneOfAgent(ag) {
+  const z = (ag && ag.zone) || {};
+  const km = (typeof z.km === 'number' && z.km > 0) ? Math.min(800, z.km) : matchCfg().rayonDefautKm;
+  const villes = Array.isArray(z.villes) ? z.villes.filter(Boolean).slice(0, 20) : [];
+  return { km, villes };
+}
+function agentDansZone(ag, distKm, memeVille, memeQuartier, villeClient) {
+  if (memeQuartier) return true;                                  // même quartier : toujours accepté
+  if (memeVille) return true;                                     // sa ville de service
+  const z = zoneOfAgent(ag);
+  if (villeClient && z.villes.some(v => normVille(v) === normVille(villeClient))) return true;
+  if (distKm != null) return distKm <= z.km;                       // zone d'intervention en km
+  return false;                                                    // ni ville ni distance vérifiable → exclu
+}
+/* 🟢 Disponibilité : libre / en mission / en pause / hors ligne */
+function agentDispo(ag) {
+  if (!agentIsOnline(ag)) return 'hors';
+  if (ag.pause) return 'pause';
+  const busy = db.missions.some(m => m.agentId === ag.id && ['accepted', 'enroute', 'arrive', 'encours'].includes(m.status));
+  return busy ? 'occupe' : 'libre';
+}
+function dispoTxt(d) {
+  return d === 'libre' ? 'Disponible' : d === 'occupe' ? 'En mission' : d === 'pause' ? 'En pause' : 'Hors ligne';
+}
+/* 🎫 Jeton pro : preuve que la position vient bien de SON téléphone (corrige l'anomalie A3) */
+function issueAgentJeton(ag) {
+  if (!ag.jeton) ag.jeton = crypto.randomBytes(16).toString('hex');
+  return ag.jeton;
+}
+function agentJetonOk(req, ag, body) {
+  const h = (req.headers && (req.headers['x-agent-token'] || req.headers['X-Agent-Token'])) || '';
+  const tok = String(h || (body && body.jeton) || '').trim();
+  if (!ag.jeton) { issueAgentJeton(ag); return { ok: true, nouveau: true, legacy: true }; }
+  if (tok && tok === ag.jeton) return { ok: true, legacy: false };
+  return { ok: false, nouveau: false, legacy: false };
+}
+/* 🧮 Statistiques du pro mises en cache (corrige l'anomalie A6 : plus de O(pros × missions)) */
+function agentStatsCached(ag) {
+  if (ag.stats && ag.stats._at && (Date.now() - ag.stats._at) < 120000) return ag.stats;
+  const st = agentStats(ag);
+  st._at = Date.now();
+  ag.stats = st;
+  return st;
+}
+function invaliderStats(agId) {
+  const ag = db.agents.find(a => a.id === agId);
+  if (ag) delete ag.stats;
+}
+/* ⚙️ Réglages d'un point de contact public (privacy) */
+function privacyOf(ag) {
+  const p = (ag && ag.privacy) || {};
+  return {
+    publierTel: p.publierTel !== false,        // afficher un numéro d'appel (pro si renseigné, sinon personnel)
+    hideQuartier: !!p.hideQuartier,            // n'afficher qu'une zone, pas le quartier exact
+    publieFiche: p.publieFiche !== false       // fiche consultable
+  };
+}
+/* 📇 Carte publique d'un pro : uniquement les informations autorisées (jamais lat/lng, jamais d'adresse) */
+function fichePublique(ag, o) {
+  o = o || {};
+  const p = privacyOf(ag);
+  const z = zoneOfAgent(ag);
+  const dispo = agentDispo(ag);
+  const st = agentStatsCached(ag);
+  const tel = String(ag.telPro || ag.tel1 || ag.tel || '').replace(/\D/g, '');
+  const telVisible = p.publierTel && !!tel;
+  return {
+    id: ag.id, nom: ag.nom,
+    numPro: ensureNumPro(ag),
+    photo: ag.photo || '',
+    ville: ag.villeService || ag.ville || ag.villeIci || '',
+    zoneAff: p.hideQuartier ? ('zone ' + (ag.quartier || ag.villeService || ag.ville || '')) : (ag.quartier || ''),
+    quartier: p.hideQuartier ? '' : (ag.quartier || ''),
+    services: Array.isArray(ag.services) ? ag.services.slice(0, 12) : [],
+    online: agentIsOnline(ag), dispo, dispoTxt: dispoTxt(dispo),
+    zoneKm: z.km, villesZone: z.villes,
+    note: Math.round((st.rating || 5) * 10) / 10,
+    missionsDone: st.missionsDone || 0,
+    membreDepuis: (ag.createdAt || '').slice(0, 7),
+    tel: telVisible ? tel : '', typeNum: (ag.telPro ? 'professionnel' : 'personnel'),
+    appelDirect: telVisible && dispo !== 'hors',
+    ficheOuverte: p.publieFiche
+  };
+}
+/* ═══════════ 🔎 LE MOTEUR : recherche intelligente (proximité + service + dispo + zone) ═══════════
+   Proximité GPS = critère MAJEUR, mais jamais de pro hors métier, hors zone ou compte inactif. */
+function recherchePro(o) {
+  o = o || {};
+  const cfg = matchCfg();
+  const villeN = normVille(o.ville || '');
+  const svc = String(o.service || '').trim();
+  const qN = String(o.quartier || '').trim().toLowerCase();
+  /* position du client : GPS vérifié, sinon le centre de sa ville (approx., on le dit au client) */
+  let cPos = null, cSrc = 'aucune';
+  if (validCILatLng(o.lat, o.lng)) { cPos = { lat: o.lat, lng: o.lng }; cSrc = 'gps'; }
+  else { const v = coordsOfVille(o.ville); if (v) { cPos = v; cSrc = 'ville'; } }
+
+  const liste = [];
+  for (const ag of (db.agents || [])) {
+    if (!ag || ag.blocked || (ag.status || 'approved') !== 'approved') continue;   // statut actif uniquement
+    if (svc && svc !== 'custom' && !agentHasService(ag, svc)) continue;            // filtre dur : le métier demandé
+    const online = agentIsOnline(ag);
+    if (!online && !o.inclureHorsLigne) continue;                                   // dispo d'abord
+    const dispo = agentDispo(ag);
+    const memeVille = !!(villeN && villeOfAgent(ag) === villeN);
+    const memeQuartier = !!(qN && String(ag.quartier || '').trim().toLowerCase() === qN);
+
+    /* distance : GPS frais du pro si possible, sinon sa ville de service */
+    let dist = null, distSource = 'aucune';
+    const gpsFrais = posFreshGps(ag);
+    const base = gpsFrais ? { lat: ag.pos.lat, lng: ag.pos.lng } : coordsOfVille(ag.villeService || ag.ville);
+    if (cPos && base) {
+      dist = haversineKm(cPos.lat, cPos.lng, base.lat, base.lng);
+      distSource = gpsFrais ? 'gps' : (ag.pos && posUsable(ag) ? 'zone' : 'ville');
+    }
+    if (!agentDansZone(ag, dist, memeVille, memeQuartier, o.ville)) continue;        // hors zone → exclu
+
+    /* score : plus petit = meilleur */
+    let score = (dist != null ? dist : 60);
+    if (!memeVille) score += 25;
+    if (memeQuartier) score -= 4;
+    if (dispo === 'occupe') score += 60;
+    if (dispo === 'pause') score += 90;
+    if (distSource !== 'gps') score += 8;
+
+    const card = fichePublique(ag, o);
+    /* 📏 distance affichée UNIQUEMENT si le GPS du pro est frais — sinon on donne une ZONE (jamais une fausse précision) */
+    if (distSource === 'gps' && dist != null) {
+      card.distKm = distPalier(dist);
+      card.distTxt = fmtDist(card.distKm);
+    } else {
+      card.distKm = null;
+      card.distTxt = '';
+      card.zoneTxt = memeQuartier ? ('zone ' + (ag.quartier || '')) : ('zone ' + (ag.villeService || ag.ville || ag.villeIci || ''));
+    }
+    card.distSource = distSource;                 // gps | zone | ville | aucune
+    card.distApprox = distSource !== 'gps';
+    card.memeVille = memeVille; card.memeQuartier = memeQuartier;
+    card.pourquoi = memeQuartier ? 'même quartier que vous'
+      : (distSource === 'gps' ? ('à ' + card.distTxt + ' de vous (GPS)')
+        : (memeVille ? ('même ville — ' + (ag.villeService || ag.ville || '') + ' (position ancienne)')
+          : ('zone d’intervention ' + zoneOfAgent(ag).km + ' km')));
+    card._score = score; card._note = card.note; card._done = card.missionsDone;
+    card._seen = posAtMs(ag.pos) || (Date.parse(ag.lastSeen || '') || 0);
+    liste.push(card);
+  }
+  /* égalités : dispo, puis note, puis missions réalisées, puis contact le plus récent, puis ordre alphabétique (résultat stable) */
+  liste.sort((a, b) => (a._score - b._score) || (b._note - a._note) || (b._done - a._done) || (b._seen - a._seen) || String(a.nom).localeCompare(String(b.nom)));
+  const limit = Math.max(1, Math.min(100, o.limit || 40));
+  const fin = liste.slice(0, limit).map(c => { delete c._score; delete c._note; delete c._done; delete c._seen; return c; });
+  return {
+    ok: true, service: svc, ville: o.ville || '', quartier: o.quartier || '',
+    posSource: cSrc, exact: cSrc === 'gps',
+    n: fin.length, enLigne: fin.filter(x => x.online).length, libres: fin.filter(x => x.dispo === 'libre').length,
+    pros: fin, cfg: { distTtlMin: cfg.distTtlMin, zoneTtlMin: cfg.zoneTtlMin, rayonDefautKm: cfg.rayonDefautKm }
+  };
+}
+/* 🔒 Plausibilité d'une position : pays, bornes, et vitesse impossible depuis la dernière position connue.
+   On ne fait jamais confiance au GPS envoyé : c'est ici que la position est acceptée ou jetée. */
+function posPlausible(ag, lat, lng) {
+  if (!validCILatLng(lat, lng)) return false;
+  const t = posAtMs(ag && ag.pos);
+  if (t && agentHasGps(ag)) {
+    const dtH = (Date.now() - t) / 3600000;
+    if (dtH > 0.0008) {                       // ~3 secondes minimum entre deux points
+      const d = haversineKm(ag.pos.lat, ag.pos.lng, lat, lng);
+      if ((d / dtH) > 120) return false;      // > 120 km/h → position rejetée
+    }
+  }
+  return true;
+}
+
+/* 🚦 Plafond d'appels par compte / par IP (anti-abus du moteur) */
+const rechercheHits = new Map();
+function recherchePlafond(cle, max) {
+  const now = Date.now();
+  const r = rechercheHits.get(cle) || { n: 0, t: now };
+  if (now - r.t > 60000) { r.n = 0; r.t = now; }
+  r.n++;
+  rechercheHits.set(cle, r);
+  if (rechercheHits.size > 5000) rechercheHits.clear();
+  return r.n <= max;
+}
+
 function rankPro(m, ag) {
   const same = !!(m.villeN && villeOfAgent(ag) && m.villeN === villeOfAgent(ag));
   const gps = agentHasGps(ag);
@@ -680,25 +936,34 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const ag = db.agents.find(a => a.id === b.agentId);
     if (!ag || ag.blocked) return sendJson(res, 404, { error: 'pro introuvable' });
+    /* 🎫 jeton : la position doit venir du téléphone du pro, pas d'un inconnu qui connaîtrait son identifiant */
+    const jt = agentJetonOk(req, ag, b);
+    if (!jt.ok) return sendJson(res, 401, { error: 'Jeton du professionnel requis', code: 'jeton' });
     ag.stayOnline = true;
     ag.lastSeen = nowISO();
+    let posRefusee = false;
     if (typeof b.lat === 'number' && typeof b.lng === 'number' && !isNaN(b.lat)) {
-      ag.pos = { lat: b.lat, lng: b.lng, at: Date.now() };
-      ag.villeIci = nearestVille(b.lat, b.lng);
+      if (posPlausible(ag, b.lat, b.lng)) {
+        ag.pos = { lat: b.lat, lng: b.lng, at: Date.now(), src: 'heartbeat', acc: typeof b.acc === 'number' ? Math.round(b.acc) : null };
+        ag.villeIci = nearestVille(b.lat, b.lng);
+      } else posRefusee = true;
     }
     if (b.villeService) ag.villeService = String(b.villeService).slice(0, 60);
     ag.hbCount = (ag.hbCount || 0) + 1;
+    ensureNumPro(ag);
     saveDb();
     return sendJson(res, 200, {
       ok: true, online: true, stayOnline: true, reachKm: reachKm(), gpsNationOn: gpsNationOn(),
-      lastSeen: ag.lastSeen, demandes: ag.demandes || 0, hb: ag.hbCount
+      lastSeen: ag.lastSeen, demandes: ag.demandes || 0, hb: ag.hbCount,
+      posRefusee, numPro: ag.numPro, jeton: jt.nouveau ? ag.jeton : undefined,
+      zoneKm: zoneOfAgent(ag).km, dispo: agentDispo(ag)
     });
   }
   /* 🛰️ POSTE DE VEILLE — le pro voit que la connexion tient vraiment (son, GPS, contact serveur) */
   if (p === '/api/agents/veille' && req.method === 'GET') {
     const ag = db.agents.find(a => a.id === String(url.searchParams.get('agentId') || ''));
     if (!ag) return sendJson(res, 404, { error: 'pro introuvable' });
-    const gpsAge = agentHasGps(ag) ? Math.round((Date.now() - (ag.pos.at || 0)) / 1000) : null;
+    const gpsAge = agentHasGps(ag) ? Math.round((Date.now() - posAtMs(ag.pos)) / 1000) : null;
     const lastAge = ag.lastSeen ? Math.round((Date.now() - Date.parse(ag.lastSeen)) / 1000) : null;
     return sendJson(res, 200, {
       ok: true, online: agentIsOnline(ag), stayOnline: !!ag.stayOnline,
@@ -708,20 +973,42 @@ const server = http.createServer(async (req, res) => {
       demandes: ag.demandes || 0, hb: ag.hbCount || 0,
       villeService: ag.villeService || '', ville: ag.ville || '',
       services: Array.isArray(ag.services) ? ag.services : [],
-      reachKm: reachKm(), gpsNationOn: gpsNationOn(), now: Date.now()
+      reachKm: reachKm(), gpsNationOn: gpsNationOn(), now: Date.now(),
+      numPro: ensureNumPro(ag), zoneKm: zoneOfAgent(ag).km, dispo: agentDispo(ag), dispoTxt: dispoTxt(agentDispo(ag)),
+      gpsFrais: posFreshGps(ag), posAgeMin: isFinite(posAgeMin(ag)) ? Math.round(posAgeMin(ag)) : null
     });
   }
   if (p === '/api/agents/me' && req.method === 'PUT') {
     const b = await readBody(req);
     const ag = db.agents.find(a => a.id === b.agentId);
     if (!ag) return sendJson(res, 404, { error: 'pro introuvable' });
+    const jtMe = agentJetonOk(req, ag, b);
+    if (!jtMe.ok) return sendJson(res, 401, { error: 'Jeton du professionnel requis', code: 'jeton' });
+    if (b.telPro !== undefined) ag.telPro = String(b.telPro).replace(/\D/g, '').slice(0, 16);
+    if (b.privacy && typeof b.privacy === 'object') {
+      ag.privacy = ag.privacy || {};
+      if (b.privacy.publierTel !== undefined) ag.privacy.publierTel = !!b.privacy.publierTel;
+      if (b.privacy.hideQuartier !== undefined) ag.privacy.hideQuartier = !!b.privacy.hideQuartier;
+      if (b.privacy.publieFiche !== undefined) ag.privacy.publieFiche = !!b.privacy.publieFiche;
+    }
+    if (b.zone && typeof b.zone === 'object') {
+      ag.zone = ag.zone || {};
+      if (!isNaN(parseInt(b.zone.km, 10))) ag.zone.km = Math.max(1, Math.min(800, parseInt(b.zone.km, 10)));
+      if (Array.isArray(b.zone.villes)) ag.zone.villes = b.zone.villes.map(v => String(v).slice(0, 60)).filter(Boolean).slice(0, 20);
+    }
+    if (b.pause !== undefined) ag.pause = !!b.pause;
     if (b.nom && String(b.nom).trim().length >= 2) ag.nom = String(b.nom).trim().slice(0, 80);
     if (b.quartier !== undefined) ag.quartier = String(b.quartier).slice(0, 60);
     if (b.tel) ag.tel = ag.tel1 = String(b.tel).replace(/\D/g, '').slice(0, 16);
     if (b.ville !== undefined) ag.ville = String(b.ville).slice(0, 60);
     if (b.villeService !== undefined) ag.villeService = String(b.villeService).slice(0, 60);
+    ensureNumPro(ag);
     saveDb();
-    return sendJson(res, 200, { ok: true, villeService: ag.villeService || ag.ville || '' });
+    return sendJson(res, 200, {
+      ok: true, villeService: ag.villeService || ag.ville || '', numPro: ag.numPro,
+      zoneKm: zoneOfAgent(ag).km, privacy: privacyOf(ag), telPro: ag.telPro || '', pause: !!ag.pause,
+      jeton: jtMe.nouveau ? ag.jeton : undefined
+    });
   }
 
   const meth = (req.method || 'GET').toUpperCase();
@@ -757,45 +1044,94 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  /* 📞 LE PLUS PROCHE — le client voit qui peut venir : même quartier, GPS le plus proche, puis même ville */
-  if (p === '/api/pros/proches' && req.method === 'GET') {
-    const qN = String(url.searchParams.get('quartier') || '').trim().toLowerCase();
-    const vN = normVille(url.searchParams.get('ville') || '');
-    const svc = String(url.searchParams.get('service') || '').trim();
+  /* 🔎 RECHERCHE INTELLIGENTE — proximité GPS + service + disponibilité + zone d'intervention */
+  if (p === '/api/recherche' && req.method === 'GET') {
+    const cfg = matchCfg();
+    const cli = findClientByToken(req);
+    const ip = req.socket.remoteAddress || '?';
+    const cle = (cli && cli.id) || ip;
+    if (!recherchePlafond('r:' + cle, cfg.maxRecherchesMin))
+      return sendJson(res, 429, { error: 'Trop de recherches en une minute — patientez un instant', code: 'plafond' });
+    const service = String(url.searchParams.get('service') || '').slice(0, 40);
+    const ville = String(url.searchParams.get('ville') || (cli && cli.ville) || '').slice(0, 60);
+    const quartier = String(url.searchParams.get('quartier') || (cli && cli.quartier) || '').slice(0, 60);
     const lat = parseFloat(url.searchParams.get('lat'));
     const lng = parseFloat(url.searchParams.get('lng'));
-    const cli = findClientByToken(req);
-    if (!vN && cli && cli.ville) {} // le client connecté garde sa ville si rien n'est passé
-    const myLat = Number.isFinite(lat) ? lat : null, myLng = Number.isFinite(lng) ? lng : null;
-    const onIds = onlineAgentIds();
-    const m = { villeN: vN, lat: myLat, lng: myLng };
-    const list = (db.agents || [])
-      .filter(a => !a.blocked && (a.status || 'approved') === 'approved')
-      .filter(a => agentHasService(a, svc))
-      .map(a => {
-        const card = publicMatchCard(a, m, agentIsOnline(a));
-        const qPro = String(a.quartier || '').trim().toLowerCase();
-        const memeQuartier = !!(qN && qPro && qPro === qN);
-        let score = 90;
-        let why = 'autre ville';
-        if (memeQuartier) { score = 1; why = 'même quartier que vous'; }
-        else if (card.hasGps && card.distKm != null) { score = 10 + Math.min(60, card.distKm); why = 'à ' + card.distKm + ' km de vous (GPS)'; }
-        else if (card.sameCity) { score = 75; why = 'même ville (' + (a.villeService || a.ville || '') + ')'; }
-        if (!card.online) score += 100;              // les pros en ligne d'abord
-        card.memeQuartier = memeQuartier;
-        card.pourquoi = why;
-        card.score = score;
-        /* le numéro s'affiche si : pas de GPS, ou même ville, ou le pro est HORS du rayon (trop loin → on peut toujours l'appeler) */
-        const tropLoin = (card.hasGps && card.distKm != null && card.distKm > reachKm());
-        card.tel = (card.telAffiche || tropLoin) ? card.tel : '';
-        return card;
-      })
-      .sort((a, b) => a.score - b.score)
-      .slice(0, 40);
-    return sendJson(res, 200, {
-      ok: true, quartier: qN, ville: vN, service: svc, n: list.length,
-      enLigne: list.filter(x => x.online).length, pros: list
+    const resu = recherchePro({
+      service, ville, quartier,
+      lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
+      inclureHorsLigne: url.searchParams.get('horsLigne') === '1',
+      limit: parseInt(url.searchParams.get('limit'), 10) || 40
     });
+    resu.quartier = resu.quartier || quartier;
+    resu.client = cli ? { id: cli.id, nom: cli.nom } : null;
+    return sendJson(res, 200, resu);
+  }
+
+  /* 👤 FICHE PUBLIQUE d'un professionnel — seulement ses informations autorisées */
+  if (p === '/api/pros/fiche' && req.method === 'GET') {
+    const cfg = matchCfg();
+    const ip = req.socket.remoteAddress || '?';
+    if (!recherchePlafond('f:' + ip, 60)) return sendJson(res, 429, { error: 'Trop de consultations — patientez un instant' });
+    if (!cfg.ficheOuverte) return sendJson(res, 403, { error: 'La consultation des fiches est momentanément fermée' });
+    const id = String(url.searchParams.get('id') || '').trim();
+    const num = String(url.searchParams.get('num') || '').trim();
+    let ag = null;
+    if (id) ag = db.agents.find(a => a.id === id);
+    if (!ag && num) ag = db.agents.find(a => a.numPro && a.numPro.toLowerCase() === num.toLowerCase());
+    /* même réponse pour « inconnu » et « compte inactif » : rien à apprendre en balayant les numéros */
+    const introuvable = () => {
+      shieldLog(ip, 'fiche-inconnue', '/api/pros/fiche', num || id, 2);
+      return sendJson(res, 404, { error: 'Ce numéro professionnel ne correspond à aucun professionnel actif', code: 'inconnu' });
+    };
+    if (!ag) return introuvable();
+    if (ag.blocked || (ag.status || 'approved') !== 'approved') return introuvable();
+    const pv = privacyOf(ag);
+    if (!pv.publieFiche) return sendJson(res, 403, { error: 'Ce professionnel ne rend pas sa fiche publique', code: 'prive' });
+    const cli = findClientByToken(req);
+    const lat = parseFloat(url.searchParams.get('lat')), lng = parseFloat(url.searchParams.get('lng'));
+    const ville = String(url.searchParams.get('ville') || (cli && cli.ville) || '').slice(0, 60);
+    const quartier = String(url.searchParams.get('quartier') || (cli && cli.quartier) || '').slice(0, 60);
+    /* la fiche passe par le MÊME moteur : zone d'intervention et fraîcheur du GPS sont respectées */
+    const via = recherchePro({
+      ville, quartier, service: '',
+      lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
+      inclureHorsLigne: true, limit: 100
+    });
+    let card = (via.pros || []).find(x => x.id === ag.id);
+    if (!card) card = fichePublique(ag, {});      // pro hors zone : fiche consultable mais marquée comme telle
+    else card.horsZone = false;
+    if (!via.pros.some(x => x.id === ag.id)) card.horsZone = true;
+    /* dernières réalisations : uniquement le métier, la zone générale et la date — jamais de nom de client */
+    card.recent = db.missions.filter(m => m.agentId === ag.id && m.status === 'terminee')
+      .slice(-4).reverse().map(m => ({ service: SVC_NAMES[m.service] || m.service, quand: (m.finishedAt || m.createdAt || '').slice(0, 10) }));
+    return sendJson(res, 200, { ok: true, pro: card });
+  }
+
+  /* 📞 LE PLUS PROCHE — le client voit qui peut venir : même quartier, GPS le plus proche, puis même ville */
+  if (p === '/api/pros/proches' && req.method === 'GET') {
+    const cfg = matchCfg();
+    const cli = findClientByToken(req);
+    const ip = req.socket.remoteAddress || '?';
+    if (!recherchePlafond('p:' + ((cli && cli.id) || ip), cfg.maxRecherchesMin * 2))
+      return sendJson(res, 429, { error: 'Trop de recherches — patientez un instant' });
+    const service = String(url.searchParams.get('service') || '').slice(0, 40);
+    const ville = String(url.searchParams.get('ville') || (cli && cli.ville) || '').slice(0, 60);
+    const quartier = String(url.searchParams.get('quartier') || (cli && cli.quartier) || '').slice(0, 60);
+    const lat = parseFloat(url.searchParams.get('lat')), lng = parseFloat(url.searchParams.get('lng'));
+    const resu = recherchePro({
+      service, ville, quartier,
+      lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
+      inclureHorsLigne: url.searchParams.get('horsLigne') === '1',
+      limit: parseInt(url.searchParams.get('limit'), 10) || 12
+    });
+    /* compatibilité avec l'écran existant : on garde ses champs, mais alimentés par le moteur */
+    resu.pros = resu.pros.map(p => Object.assign(p, {
+      hasGps: p.distSource === 'gps', distKm: p.distKm, distance: p.distTxt,
+      pourquoi: p.pourquoi, memeQuartier: p.memeQuartier,
+      tel: p.tel, telAffiche: p.appelDirect
+    }));
+    return sendJson(res, 200, resu);
   }
 
   if (p === '/api/pros/peers' && req.method === 'GET') {
@@ -852,7 +1188,7 @@ const server = http.createServer(async (req, res) => {
     if (!ag) return sendJson(res, 404, { error: 'agent inconnu' });
     if (m.status !== 'pending') return sendJson(res, 409, { error: 'déjà prise', status: m.status });
     if ((m.exclAg || []).includes(ag.id)) return sendJson(res, 409, { error: 'Cette mission vous a été retirée — le gestionnaire l’a réattribuée' });
-    m.status = 'accepted'; m.agentId = ag.id; saveDb();
+    m.status = 'accepted'; m.agentId = ag.id; invaliderStats(ag.id); saveDb();
     // informer les autres agents que la mission est prise
     broadcast(onlineAgents().filter(s => s.meta.agentId !== ag.id), { type: 'mission_taken', missionId: m.id });
     emitToMission(m, { type: 'mission_update', status: 'accepted', missionId: m.id,
@@ -869,7 +1205,7 @@ const server = http.createServer(async (req, res) => {
     const m = db.missions.find(x => x.id === mStatus[1]);
     if (!m || m.agentId !== agentId) return sendJson(res, 404, { error: 'mission introuvable' });
     m.status = status;
-    if (status === 'terminee') { m.finishedAt = nowISO(); if (note) m.note = note; }
+    if (status === 'terminee') { m.finishedAt = nowISO(); if (note) m.note = note; invaliderStats(agentId); }
     saveDb();
     emitToMission(m, { type: 'mission_update', status, missionId: m.id });
     console.log('➡️  ' + m.id + ' : ' + status);
@@ -1338,7 +1674,7 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/admin/agents') {
     const onA = onlineAgentIds();
-    return sendJson(res, 200, db.agents.map(a => ({ id: a.id, nom: a.nom, quartier: a.quartier, ville: a.ville || '', mail: a.mail || '', online: agentIsOnline(a), status: a.status || 'approved', blocked: !!a.blocked, ...agentStats(a) })));
+    return sendJson(res, 200, db.agents.map(a => ({ id: a.id, nom: a.nom, quartier: a.quartier, ville: a.ville || '', mail: a.mail || '', online: agentIsOnline(a), status: a.status || 'approved', blocked: !!a.blocked, ...agentStatsCached(a) })));
   }
 
   if (p === '/api/admin/inscrits') {
@@ -1349,7 +1685,7 @@ const server = http.createServer(async (req, res) => {
       const paiements = ms.filter(m => m.status === 'terminee').map(m => ({ id: m.id, montant: m.prixTotal, at: m.finishedAt || m.createdAt, service: m.service }));
       return { id: c.id, nom: c.nom, tel: c.tel, quartier: c.quartier || '', ville: c.ville || '', createdAt: c.createdAt, photo: !!c.photo, missions: ms.length, depense, blocked: !!c.blocked, createdBy: c.createdBy || '', createdById: c.createdById || '', online: clientIsOnline(c), paiements };
     });
-    const agents = db.agents.filter(mine).map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', quartier: a.quartier || '', ville: a.ville || '', villeService: a.villeService || a.ville || '', mail: a.mail || '', status: a.status || 'approved', online: agentIsOnline(a), niveau: a.niveau || '', services: a.services || [], kind: a.kind || 'pro', createdAt: a.createdAt, photo: !!a.photo, blocked: !!a.blocked, createdBy: a.createdBy || '', createdById: a.createdById || '', ...agentStats(a) }));
+    const agents = db.agents.filter(mine).map(a => ({ id: a.id, nom: a.nom, tel: a.tel || a.tel1 || '', quartier: a.quartier || '', ville: a.ville || '', villeService: a.villeService || a.ville || '', mail: a.mail || '', status: a.status || 'approved', online: agentIsOnline(a), dispo: agentDispo(a), numPro: a.numPro || '', niveau: a.niveau || '', services: a.services || [], kind: a.kind || 'pro', createdAt: a.createdAt, photo: !!a.photo, blocked: !!a.blocked, createdBy: a.createdBy || '', createdById: a.createdById || '', ...agentStatsCached(a) }));
     return sendJson(res, 200, { clients: clients.slice().reverse(), agents: agents.slice().reverse(), canModerate: isPdg(req) });
   }
 
@@ -1407,6 +1743,26 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  /* --- ⚙️ Réglages du moteur de mise en relation (PDG) --- */
+  if (p === '/api/admin/match-config' && req.method === 'GET') {
+    const cfg = matchCfg();
+    saveDb();
+    return sendJson(res, 200, { ok: true, match: cfg });
+  }
+  if (p === '/api/admin/match-config' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const cfg = matchCfg();
+    const n = (k, min, max) => { const v = parseInt(b[k], 10); if (!isNaN(v)) cfg[k] = Math.max(min, Math.min(max, v)); };
+    n('distTtlMin', 1, 120); n('zoneTtlMin', 5, 720); n('maxRecherchesMin', 5, 600);
+    n('jitterM', 0, 2000); n('rayonDefautKm', 1, 800);
+    if (b.ficheOuverte !== undefined) cfg.ficheOuverte = !!b.ficheOuverte;
+    saveDb();
+    auditLog('match_config', Object.assign({ par: act(req) }, cfg));
+    emitAdmin('admin', '⚙️ Mise en relation : TTL ' + cfg.distTtlMin + ' min · zone ' + cfg.rayonDefautKm + ' km · plafond ' + cfg.maxRecherchesMin + '/min');
+    return sendJson(res, 200, { ok: true, match: cfg });
+  }
+
   /* --- 🎟️ Codes d'accès : liste + remise d'un nouveau code (PDG / gestionnaires) --- */
   if (p === '/api/admin/acces' && req.method === 'GET') {
     const clients = db.clients.map(c => {
@@ -1423,7 +1779,7 @@ const server = http.createServer(async (req, res) => {
         hasGps: agentHasGps(a), gpsAge: agentHasGps(a) ? Math.round((Date.now() - (a.pos.at || 0)) / 1000) : null,
         sonnerie: (Array.isArray(a.pushSubs) ? a.pushSubs.length : 0), lastSeen: a.lastSeen || '', demandes: a.demandes || 0,
         missions: ms.length, terminees: ms.filter(m => m.status === 'terminee').length, annulees: ms.filter(m => m.status === 'annulee').length,
-        note: Math.round(((agentStats(a) || {}).rating || a.rating || 5) * 10) / 10,
+        note: Math.round(((agentStatsCached(a) || {}).rating || a.rating || 5) * 10) / 10,
         derniere: (ms.slice().sort((x, y) => String(y.createdAt || '').localeCompare(String(x.createdAt || '')))[0] || {}).createdAt || '' };
     });
     return sendJson(res, 200, { ok: true, clients, pros });
@@ -1616,10 +1972,13 @@ const server = http.createServer(async (req, res) => {
     loginTries.delete(ip + '|claim');
     if (ag.claimPin && ag.claimPin === pin) delete ag.claimPin; // 🔒 le code à usage unique s'efface, le code d'accès durable reste
     ag.claimedAt = nowISO();
+    if (!ag.zone) ag.zone = { km: matchCfg().rayonDefautKm, villes: [] };
+    ensureNumPro(ag);
+    const jetonLiaison = issueAgentJeton(ag);
     (ag.hist = ag.hist || []).push({ at: Date.now(), by: ag.nom, ev: '📱 Compte lié au téléphone du professionnel' });
     saveDb();
-    auditLog('pro_lie', { pro: ag.nom, tel });
-    return sendJson(res, 200, { ok: true, agentId: ag.id, nom: ag.nom });
+    auditLog('pro_lie', { pro: ag.nom, tel, numPro: ag.numPro });
+    return sendJson(res, 200, { ok: true, agentId: ag.id, nom: ag.nom, numPro: ag.numPro, jeton: jetonLiaison, zoneKm: zoneOfAgent(ag).km });
   }
   if (p === '/api/agents/login' && req.method === 'POST') {
     const b = await readBody(req);
@@ -1629,7 +1988,11 @@ const server = http.createServer(async (req, res) => {
     const ag = (agTrouve && !agTrouve.blocked) ? agTrouve : null;
     if (!ag || !ag.passHash || hashPassword(ag.salt || '', b.password || '') !== ag.passHash)
       return sendJson(res, 401, { error: 'Téléphone ou mot de passe incorrect' });
-    return sendJson(res, 200, { ok: true, agentId: ag.id, nom: ag.nom });
+    ensureNumPro(ag);
+    if (!ag.zone) ag.zone = { km: matchCfg().rayonDefautKm, villes: [] };
+    const jetonL = issueAgentJeton(ag);
+    saveDb();
+    return sendJson(res, 200, { ok: true, agentId: ag.id, nom: ag.nom, numPro: ag.numPro, jeton: jetonL, zoneKm: zoneOfAgent(ag).km });
   }
 
   /* --- 💬 Support interne : utilisateur (client OU pro) ↔ équipe KLEAN --- */
@@ -2003,10 +2366,14 @@ const server = http.createServer(async (req, res) => {
       naissance: '', experience: b.experience || 0, pieceType: '', pieceNum: '', tel2: '', urgenceNom: '', urgenceTel: '', ref1Nom: '', ref1Tel: '',
       services, niveau: '', photo: '', pushSubs: [], hist: [{ at: Date.now(), by: act(req), ev: '🏗️ Compte créé à la main par l’équipe — vérification immédiate' }],
       status: 'approved', approvedAt: nowISO(), createdAt: nowISO(), createdBy: act(req), createdById: actorId(req), createdByGestId: fieldIdentity(req) ? fieldIdentity(req).gestId : ((hqIdentity(req)||{}).role==='gest' ? hqIdentity(req).id : null), claimPin: pin, codeAcces: pin, online: false, pos: null, kind: 'pro' };
-    db.agents.push(na); saveDb();
-    auditLog('pro_cree_hq', { pro: na.nom, tel: tel1, par: act(req) });
-    emitAdmin('agent', '🏗️ ' + act(req) + ' a créé le professionnel ' + na.nom + ' — code de liaison remis en main');
-    return sendJson(res, 201, { ok: true, id: na.id, nom: na.nom, tel: tel1, pin, code: pin, password: pw });
+    na.zone = na.zone || { km: matchCfg().rayonDefautKm, villes: [] };
+    db.agents.push(na);
+    ensureNumPro(na);
+    const jetonPro = issueAgentJeton(na);
+    saveDb();
+    auditLog('pro_cree_hq', { pro: na.nom, tel: tel1, numPro: na.numPro, par: act(req) });
+    emitAdmin('agent', '🏗️ ' + act(req) + ' a créé le professionnel ' + na.nom + ' (' + na.numPro + ') — code de liaison remis en main');
+    return sendJson(res, 201, { ok: true, id: na.id, nom: na.nom, tel: tel1, pin, code: pin, password: pw, numPro: na.numPro, jeton: jetonPro });
   }
 
   const mRea = p.match(/^\/api\/admin\/missions\/(.+)\/reassign$/);
@@ -2020,6 +2387,7 @@ const server = http.createServer(async (req, res) => {
     m.exclAg = [...new Set([...(m.exclAg || []), oldId].filter(Boolean))];
     m.hist = m.hist || [];
     m.hist.push({ at: Date.now(), by: act(req), ev: '⤴ Réattribution d’urgence (ancien : ' + (oldAg ? oldAg.nom : oldId) + ') — ' + String(b.reason || 'motif non précisé').slice(0, 120) });
+    if (oldId) invaliderStats(oldId);
     m.agentId = null; m.status = 'pending'; delete m.acceptedAt;
     saveDb();
     // nouvelle diffusion (sauf à l'ancien)
@@ -2980,8 +3348,9 @@ const server = http.createServer(async (req, res) => {
        (un pro compte si sa ville d'inscription correspond, ou, sans ville, si son quartier appartient à la ville choisie) */
     const qList = String(url.searchParams.get('quartiers') || '').split(',').map(q => q.trim().toLowerCase()).filter(Boolean);
     const actifs = db.agents.filter(a =>
-      (a.status || 'approved') === 'approved' &&
-      (String(a.ville || '').trim().toLowerCase() === villeN ||
+      (a.status || 'approved') === 'approved' && !a.blocked &&
+      (normVille(a.villeService || a.ville) === normVille(villeN) ||
+       normVille(a.villeIci) === normVille(villeN) ||
        (!String(a.ville || '').trim() && a.quartier && qList.includes(String(a.quartier).trim().toLowerCase())))
     );
     return sendJson(res, 200, {

@@ -953,7 +953,7 @@ async function chargerProches(){
     if(typeof client!=='undefined' && client && client.token) headers['X-Client-Token'] = client.token;
     const d = await fetch('/api/pros/proches?'+q,{headers, cache:'no-store'}).then(r=>r.json());
     const pros = (d.pros||[]);
-    const entete = '<p class="note" style="margin:0 0 8px">'+(d.enLigne||0)+' pro(s) en ligne'
+    const entete = '<p class="note" style="margin:0 0 8px">'+(d.libres||0)+' disponible(s) · '+(d.enLigne||0)+' pro(s) en ligne'
       + (quartier?(' · votre quartier : <b>'+quartier+'</b>'):'')
       + ' · '+(typeof c!=='undefined' && c.lat ? '<b>GPS actif</b> — classés du plus proche au plus loin' : 'activez « 📡 Me localiser » pour un classement au plus près')
       + '</p>';
@@ -961,19 +961,28 @@ async function chargerProches(){
       box.innerHTML = '<div class="bkg">'+entete+'<p class="note" style="margin:0">Aucun professionnel pour ce métier à '+ville+' pour l’instant. Réservez : la demande part chez les pros du métier dès qu’ils se mettent en ligne.</p></div>';
       return;
     }
-    const badge = p => p.memeQuartier ? '<span style="background:#e6fbf3;color:#0a8a62;font-size:10.5px;font-weight:900;padding:3px 8px;border-radius:99px">🏘️ MÊME QUARTIER</span>'
-      : (p.hasGps && p.distKm!=null ? '<span style="background:#eef4ff;color:#2f6fd0;font-size:10.5px;font-weight:900;padding:3px 8px;border-radius:99px">📡 '+p.distKm+' km</span>'
-      : '<span style="background:#f4f6f5;color:#6b7c73;font-size:10.5px;font-weight:900;padding:3px 8px;border-radius:99px">🏙️ MÊME VILLE</span>');
+    const badge = p => {
+      const d = p.distTxt || p.distance || '';
+      if(d) return '<span style="background:#eef4ff;color:#2f6fd0;font-size:10.5px;font-weight:900;padding:3px 8px;border-radius:99px">'+(p.distApprox?'≈ ':'📡 ')+d+'</span>';
+      if(p.memeQuartier) return '<span style="background:#e6fbf3;color:#0a8a62;font-size:10.5px;font-weight:900;padding:3px 8px;border-radius:99px">🏘️ MÊME QUARTIER</span>';
+      return '<span style="background:#f4f6f5;color:#6b7c73;font-size:10.5px;font-weight:900;padding:3px 8px;border-radius:99px">🏙️ MÊME VILLE</span>';
+    };
+    const badgeDispo = p => p.dispo==='libre'
+      ? '<span style="background:#e6fbf3;color:#0a8a62;font-size:10.5px;font-weight:900;padding:3px 8px;border-radius:99px">🟢 Disponible</span>'
+      : (p.dispo==='occupe' ? '<span style="background:#fff5e6;color:#b36b00;font-size:10.5px;font-weight:900;padding:3px 8px;border-radius:99px">🟠 En mission</span>'
+      : (p.dispo==='pause' ? '<span style="background:#f4f6f5;color:#6b7c73;font-size:10.5px;font-weight:900;padding:3px 8px;border-radius:99px">⏸️ En pause</span>'
+      : '<span style="background:#f4f6f5;color:#6b7c73;font-size:10.5px;font-weight:900;padding:3px 8px;border-radius:99px">⚪ Hors ligne</span>'));
     box.innerHTML = '<div class="bkg" style="padding:12px 14px">'+entete
       + pros.slice(0,8).map(p=>{
           const tel = (p.tel||'').replace(/\D/g,'');
-          const call = tel ? ('<a href="tel:+225'+tel.replace(/^225/,'')+'" style="display:inline-block;margin:6px 6px 0 0;background:#ff8a00;color:#1a1204;font-weight:900;padding:9px 13px;border-radius:10px;text-decoration:none;font-size:13px">📞 Appeler</a>'
+          const call = (p.appelDirect && tel) ? ('<a href="tel:+225'+tel.replace(/^225/,'')+'" style="display:inline-block;margin:6px 6px 0 0;background:#ff8a00;color:#1a1204;font-weight:900;padding:9px 13px;border-radius:10px;text-decoration:none;font-size:13px">📞 Appeler</a>'
             + '<a href="https://wa.me/225'+tel.replace(/^225/,'')+'?text='+encodeURIComponent('Bonjour '+p.nom+', je vous contacte depuis KLEAN — j’ai besoin de '+(SERVICES.find(x=>x.id===svc)||{}).nom+' à '+quartier+'.')+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;background:#25d366;color:#06301b;font-weight:900;padding:9px 13px;border-radius:10px;text-decoration:none;font-size:13px">💬 WhatsApp</a>')
-            : '<span style="font-size:11.5px;color:#0a8a62;font-weight:800">📡 GPS actif — réservez, il reçoit la demande tout de suite</span>';
+            : (p.dispo==='libre' ? '<span style="font-size:11.5px;color:#0a8a62;font-weight:800">📡 Disponible — réservez, il reçoit la demande tout de suite</span>'
+               : '<span style="font-size:11.5px;color:#b36b00;font-weight:800">🟠 '+(p.dispoTxt||'Indisponible')+' — réservez, il verra la demande à sa libération</span>');
           return '<div style="border:1.5px solid #e4eae7;border-radius:14px;padding:10px 12px;margin-bottom:8px">'
             + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:14px">'+(p.nom||'Pro')+'</b>'
-            + (p.online?'<span style="color:#0da678;font-size:11px;font-weight:900">● en ligne</span>':'<span style="color:#6b7c73;font-size:11px">hors ligne</span>')
-            + '<span style="margin-left:auto">'+badge(p)+'</span></div>'
+            + (p.numPro?('<span style="color:#6b7c73;font-size:11px;font-weight:800">'+p.numPro+'</span>'):'')
+            + '<span style="margin-left:auto">'+badgeDispo(p)+'</span>'+badge(p)+'</div>'
             + '<small style="color:#6b7c73">'+(p.ville||'')+(p.quartier?(' · '+p.quartier):'')+(p.services&&p.services.length?(' · '+p.services.slice(0,2).join(', ')):'')+'</small>'
             + '<div><small style="display:block;margin-top:4px;color:#0a8a62;font-weight:800">'+p.pourquoi+'</small>'+call+'</div>'
             + '</div>';
@@ -1087,6 +1096,16 @@ function pickCity(id){
   }
   setCity(id); closeCityModal();
 }
+/* ═══════════ 🎫 JETONS (sécurité) — la position et le profil du pro ne partent qu'avec sa preuve ═══════════ */
+function jetonPro(){
+  try{ return (agent && agent.jeton) || localStorage.getItem('k2_agent_jeton') || ''; }catch(e){ return ''; }
+}
+function jetonProHeaders(){
+  const h = {'Content-Type':'application/json'};
+  const t = jetonPro();
+  if(t) h['X-Agent-Token'] = t;
+  return h;
+}
 /* ═══════════ 🛠️ VILLE DE SERVICE DU PRO (fenêtre) — la même liste que l'accueil ═══════════ */
 function villesPourPro(){ return citiesAZ(); }
 function ouvrirChoixVilleService(){
@@ -1140,7 +1159,7 @@ async function choisirVilleService(nom){
   try{
     const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
     if(id){
-      await fetch('/api/agents/me',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({agentId:id, villeService:nom, ville: agent.ville||nom})});
+      await fetch('/api/agents/me',{method:'PUT',headers:jetonProHeaders(),body:JSON.stringify({agentId:id, villeService:nom, ville: agent.ville||nom})});
       if(typeof netAnnounceOnline==='function' && agent.online && agent.apply && agent.apply.status==='approved') netAnnounceOnline();
     }
   }catch(e){}
@@ -1985,6 +2004,9 @@ function renderVeille(){
     + '<div>'+gpsTxt+'</div>'
     + '<div>'+sonTxt+'</div>'
     + '<div>📥 Demandes reçues depuis ce téléphone : <b>'+(VEILLE.demandes||0)+'</b></div>'
+    + (VEILLE.numPro?('<div>🎫 Numéro professionnel : <b>'+VEILLE.numPro+'</b> <small style="color:#9fb5aa">— les clients peuvent le taper pour trouver votre fiche</small></div>'):'')
+    + (VEILLE.zoneKm?('<div>🚗 Zone d’intervention : <b>'+VEILLE.zoneKm+' km</b> autour de '+(agent.villeService||agent.ville||'votre ville de service')+'</div>'):'')
+    + (VEILLE.dispoTxt?('<div>🟢 Statut : <b>'+VEILLE.dispoTxt+'</b></div>'):'')
     + '</div>'
     + '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">'
     + '<button type="button" onclick="activerGpsVeille()" style="flex:1;min-width:120px;background:'+(gps?'rgba(13,166,120,.2)':'#E85D04')+';border:1.5px solid '+(gps?'rgba(13,166,120,.5)':'transparent')+';color:'+(gps?'#5ff0b8':'#fff')+';font-weight:900;padding:11px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:12px">'+(gps?'🔄 Actualiser mon GPS':'📡 Activer mon GPS')+'</button>'
@@ -2000,9 +2022,12 @@ async function verifierVeille(silencieux){
   const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
   if(!id) return;
   try{
-    const d = await fetch('/api/agents/veille?agentId='+encodeURIComponent(id),{cache:'no-store'}).then(r=>r.json());
+    const tk = jetonPro();
+    const d = await fetch('/api/agents/veille?agentId='+encodeURIComponent(id)+(tk?('&jeton='+encodeURIComponent(tk)):''),{cache:'no-store'}).then(r=>r.json());
     if(d && d.ok){
-      VEILLE = { ok:true, online:!!d.online, gps:d.gps||null, sonnerie:d.sonnerie||0, demandes:d.demandes||0, lastSeenAge:d.lastSeenAge, hb:d.hb||0, at:Date.now(), err:'' };
+      VEILLE = { ok:true, online:!!d.online, gps:d.gps||null, sonnerie:d.sonnerie||0, demandes:d.demandes||0, lastSeenAge:d.lastSeenAge, hb:d.hb||0, at:Date.now(), err:'',
+        numPro:d.numPro||'', zoneKm:d.zoneKm||null, dispo:d.dispo||'', dispoTxt:d.dispoTxt||'', gpsFrais:!!d.gpsFrais, posAgeMin:d.posAgeMin };
+      if(d.numPro && !agent.numPro) agent.numPro = d.numPro;
       if(d.gps && typeof NET!=='undefined' && NET.pos && !NET.pos.lat) NET.pos = {lat:d.gps.lat, lng:d.gps.lng};
       renderVeille();
       return d;
@@ -2057,12 +2082,15 @@ async function claimAgentAccount(){
     if(!r.ok){ toast('⚠️ ' + (d.error || 'Liaison impossible')); return; }
     localStorage.setItem('k2_agentId', d.agentId);
     if(typeof NET !== 'undefined') NET.agentId = d.agentId;
+    if(d.jeton){ agent.jeton = d.jeton; try{ localStorage.setItem('k2_agent_jeton', d.jeton); }catch(e){} }
+    if(d.numPro) agent.numPro = d.numPro;
+    if(d.zoneKm) agent.zoneKm = d.zoneKm;
     agent.nom = d.nom || agent.nom;
     agent.tel = tel;
     agent.apply = {status:'approved', agentId:d.agentId, nom:d.nom||agent.nom};
     saveAll();
     refreshProOrb();
-    toast('🎉 Compte lié — touchez le rond en haut pour profil / en ligne');
+    toast('🎉 Compte lié'+(d.numPro?(' — votre numéro professionnel : '+d.numPro):'')+' — touchez le rond en haut pour profil / en ligne');
     setTimeout(()=>{ setMode('agent'); showView('view-agent', document.querySelector('#nav-agent .nav-btn'), 'agent'); }, 400);
   }catch(e){ toast('📵 Réseau fragile — réessayez'); }
 }
@@ -2846,7 +2874,7 @@ function saveProfile(){
   saveAll(); fillProfile(); toast('✓ Profil enregistré');
   try{
     const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
-    if(id) fetch('/api/agents/me',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({agentId:id, nom:agent.nom, quartier:agent.quartier, tel:agent.tel, ville:agent.ville, villeService:agent.villeService})}).catch(()=>{});
+    if(id) fetch('/api/agents/me',{method:'PUT',headers:jetonProHeaders(),body:JSON.stringify({agentId:id, nom:agent.nom, quartier:agent.quartier, tel:agent.tel, ville:agent.ville, villeService:agent.villeService})}).catch(()=>{});
   }catch(e){}
 }
 

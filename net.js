@@ -26,8 +26,9 @@ function netStartPosWatch(){
   if(!navigator.geolocation || NET.posWatch) return;
   NET.posWatch = true;
   navigator.geolocation.watchPosition(pos=>{
-    NET.pos = {lat: pos.coords.latitude, lng: pos.coords.longitude};
-    if(agent && agent.online && NET.on) wsSend({type:'agent_pos', agentId:NET.agentId, lat:NET.pos.lat, lng:NET.pos.lng});
+    NET.pos = {lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Math.round(pos.coords.accuracy||0)};
+    if(agent && agent.online && NET.on)
+      wsSend({type:'agent_pos', agentId:NET.agentId, jeton: (agent.jeton||localStorage.getItem('k2_agent_jeton')||''), lat:NET.pos.lat, lng:NET.pos.lng, acc:NET.pos.acc});
   }, ()=>{}, {enableHighAccuracy:true, maximumAge:15000});
 }
 
@@ -99,8 +100,9 @@ function veilleAutoRepare(){
     if(!NET.on){ try{ connectWS(); }catch(e){} }
     else { netAnnounceOnline(); }
     if(typeof VEILLE==='object' && VEILLE && VEILLE.ok && VEILLE.lastSeenAge != null && VEILLE.lastSeenAge > 70){
-      try{ fetch('/api/agents/heartbeat',{method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(Object.assign({agentId:NET.agentId, stayOnline:true, villeService:(agent.villeService||agent.ville||'')}, (NET.pos?{lat:NET.pos.lat,lng:NET.pos.lng}:{})))}).catch(()=>{}); }catch(e){}
+      const tk = (agent && agent.jeton) || localStorage.getItem('k2_agent_jeton') || '';
+      try{ fetch('/api/agents/heartbeat',{method:'POST',headers:Object.assign({'Content-Type':'application/json'}, (tk?{'X-Agent-Token':tk}:{})),
+        body: JSON.stringify(Object.assign({agentId:NET.agentId, stayOnline:true, jeton:tk, villeService:(agent.villeService||agent.ville||'')}, (NET.pos?{lat:NET.pos.lat,lng:NET.pos.lng,acc:NET.pos.acc}:{})))}).catch(()=>{}); }catch(e){}
       try{ toast('🛰️ Veille relancée — le serveur vous retrouve'); }catch(e){}
     }
     if(!NET.pos){ try{ netStartPosWatch(); }catch(e){} }
@@ -196,7 +198,7 @@ function startMatchBoard(missionId, ville, scope){
       const row=(list, title)=>{
         if(!list||!list.length) return '';
         return '<b style="display:block;margin:10px 0 6px;font-size:13px">'+title+'</b>'+list.map(p=>{
-          const km = p.hasGps && p.distKm!=null ? ('📡 '+p.distKm+' km') : '📞 Pas de GPS';
+          const km = (p.distTxt || (p.distKm!=null ? (p.distApprox?'≈ ':'📡 ')+p.distKm+' km' : '')) || '📞 Pas de GPS';
           const tel = p.telAffiche && p.tel ? ('<a href="tel:+225'+p.tel.replace(/^225/,'')+'" style="display:inline-block;margin-top:6px;background:#ff8a00;color:#1a1204;font-weight:900;padding:8px 12px;border-radius:10px;text-decoration:none">📞 Appeler '+p.tel+'</a>') : '<span style="font-size:11px;color:#6b7c73">En attente d’acceptation GPS</span>';
           return '<div style="background:#fff;border:1.5px solid #e4eae7;border-radius:14px;padding:10px 12px;margin-bottom:8px"><b>'+(p.nom||'Pro')+'</b> '+(p.online?'<span style="color:#0da678;font-size:11px;font-weight:800">● en ligne</span>':'<span style="color:#6b7c73;font-size:11px">hors ligne</span>')+'<br><small>'+(p.ville||'')+(p.quartier?' · '+p.quartier:'')+' · '+km+'</small><div>'+tel+'</div></div>';
         }).join('');
@@ -208,7 +210,7 @@ function startMatchBoard(missionId, ville, scope){
   NET.matchIv = setInterval(paint, 4000);
 }
 function matchCardHTML(p){
-  const km = p.hasGps && p.distKm!=null ? ('📡 '+p.distKm+' km') : '📞 Sans GPS';
+  const km = (p.distTxt || (p.distKm!=null ? ((p.distApprox?'≈ ':'📡 ')+p.distKm+' km') : '')) || '📞 Sans GPS';
   const tel = (p.tel||'').replace(/\D/g,'');
   const call = (p.telAffiche && tel)
     ? ('<a href="tel:+225'+tel.replace(/^225/,'')+'" style="display:inline-block;margin:6px 6px 0 0;background:#ff8a00;color:#1a1204;font-weight:900;padding:8px 12px;border-radius:10px;text-decoration:none">📞 '+tel+'</a>'
@@ -505,9 +507,19 @@ function startProStayAlive(){
   if(NET._hb) return;
   const beat=()=>{
     if(!agent || !agent.online || !NET.agentId) return;
-    const body={agentId:NET.agentId, stayOnline:true, villeService: (agent && (agent.villeService||agent.ville)) || ''};
-    if(NET.pos){ body.lat=NET.pos.lat; body.lng=NET.pos.lng; }
-    fetch('/api/agents/heartbeat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(()=>{});
+    const body={agentId:NET.agentId, stayOnline:true, villeService: (agent && (agent.villeService||agent.ville)) || '',
+      jeton: (agent && agent.jeton) || localStorage.getItem('k2_agent_jeton') || ''};
+    if(NET.pos){ body.lat=NET.pos.lat; body.lng=NET.pos.lng; body.acc=NET.pos.acc; }
+    fetch('/api/agents/heartbeat',{method:'POST',headers:Object.assign({'Content-Type':'application/json'}, (body.jeton?{'X-Agent-Token':body.jeton}:{})),body:JSON.stringify(body)})
+      .then(r=>r.ok?r.json():null).then(d=>{
+        if(!d) return;
+        if(d.jeton && agent){ agent.jeton = d.jeton; try{ localStorage.setItem('k2_agent_jeton', d.jeton); }catch(e){} }
+        if(d.numPro && agent && !agent.numPro) agent.numPro = d.numPro;
+        if(d.posRefusee){
+          NET._posRefus = (NET._posRefus||0)+1;
+          if(NET._posRefus === 3) toast('📡 Position refusée par le serveur — vérifiez votre GPS');
+        }
+      }).catch(()=>{});
     if(NET.on) netAnnounceOnline();
   };
   NET._hb=setInterval(beat, 20000);
