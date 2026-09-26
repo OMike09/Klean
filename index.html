@@ -792,6 +792,12 @@
 <div class="toast" id="toast"></div>
 
 <script>
+/* 💳 Moyens de paiement : déclarés ICI car init() les lit immédiatement.
+   ⚠️ Un « var » placé dans un bloc <script> PLUS BAS n'existe pas encore à ce moment :
+   sa lecture faisait échouer tout le bloc principal — donc les AFFICHES
+   (info · pub · quiz · urgence) ne sortaient plus. Ne jamais déplacer plus bas. */
+var MOYENS_PAY = null, PAY_SUIVI = null, PAY_IV = null, PAY_IC = null;
+
 /* ════════════════════════════════════════════════════════════
    ⚙️ CONFIGURATION — MODIFIEZ ICI
    ════════════════════════════════════════════════════════════ */
@@ -1589,9 +1595,11 @@ function renderQuartiers(){
 }
 function paysListe(){
   /* 💳 liste pilotée par le TABLEAU DE BORD du PDG (repli sur les numéros connus si le serveur est muet) */
-  if(MOYENS_PAY && MOYENS_PAY.length){
+  const MP = (typeof MOYENS_PAY !== 'undefined' && MOYENS_PAY) ? MOYENS_PAY : null;   // 🛡️ jamais d'erreur si le cache n'est pas encore prêt
+  const IC = (typeof PAY_IC !== 'undefined' && PAY_IC) || {};
+  if(MP && MP.length){
     const cols = {orange:'#FF7900', moov:'#0072BC', mtn:'#FFCC00', wave:'#1DC4F2', autre:'#6b7c73'};
-    const blocs = MOYENS_PAY.map(m=>({id:m.id, nom:m.libelle, sub:'📱 '+m.numeroAffiche+(m.principal?' · principal':''), bg:cols[m.operateur]||'#6b7c73', txt:PAY_IC[m.operateur]||'💳'}));
+    const blocs = MP.map(m=>({id:m.id, nom:m.libelle, sub:'📱 '+m.numeroAffiche+(m.principal?' · principal':''), bg:cols[m.operateur]||'#6b7c73', txt:IC[m.operateur]||'💳'}));
     blocs.push({id:'cash', nom:'Espèces', sub:'Remise au pro à la fin', bg:'#27ae60', txt:'💵'});
     return blocs;
   }
@@ -1830,7 +1838,8 @@ function renderPayRate(){
     payBlock = `<p>Remettez <b>${fmt(mission.prix.total)}</b> en espèces à ${mission.agent.nom} 🤝</p>`;
   }
   /* 💳 paiement en ligne : référence unique + vérification par Klean (jamais de succès automatique) */
-  const blocEnLigne = (MOYENS_PAY && MOYENS_PAY.length)
+    const _MP = (typeof MOYENS_PAY !== 'undefined' && MOYENS_PAY) ? MOYENS_PAY : [];      // 🛡️ idem
+  const blocEnLigne = (_MP.length)
     ? `<div style="border-top:1px dashed var(--line);margin:12px 0;padding-top:12px">
         <b style="font-size:14px">💳 Ou payez en ligne (safe)</b>
         <p class="note" style="margin:5px 0 8px">Klean vous donne un <b>numéro</b> et une <b>référence unique</b>. Vous payez dans votre application Mobile Money, puis vous appuyez sur « J'ai payé ». Le statut reste <b>« En attente »</b> jusqu'à vérification de la réception — jamais de validation automatique.</p>
@@ -3094,6 +3103,7 @@ function fallbackCopy(txt, done){
   }catch(e){}
 })();
 (function init(){
+ try{   /* 🛡️ le démarrage ne doit JAMAIS empêcher le reste du script de tourner */
   c.quartier = currentQuartiers()[0];
   setTimeout(demarrerProches, 1500);
   renderSvcGrids(); renderExtras(); renderTimes(); renderPays();
@@ -3126,6 +3136,7 @@ function fallbackCopy(txt, done){
   if('serviceWorker' in navigator && location.protocol.startsWith('http')){
     navigator.serviceWorker.register('/sw.js').catch(()=>{});
   }
+ }catch(e){ try{ console.warn("Klean : démarrage partiel —", e && e.message); }catch(_){} }
 })();
 
 /* ══════════ PWA — installation ══════════ */
@@ -3148,14 +3159,16 @@ function showInstallFab(){
 }
 // iPhone : Safari ne déclenche pas beforeinstallprompt → astuce affichée une seule fois
 (function iosInstallTip(){
+  try{   /* 🛡️ certains navigateurs anciens n'ont pas matchMedia : on ne casse jamais le script pour ça */
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  const standalone = (window.matchMedia ? window.matchMedia('(display-mode: standalone)').matches : false) || navigator.standalone;
   if(ios && !standalone && !localStorage.getItem('k2_ios_tip')){
     setTimeout(() => {
       localStorage.setItem('k2_ios_tip', '1');
       toast('📲 iPhone : touchez « Partager » ⬆ puis « Sur l\'écran d\'accueil » pour installer KLEAN comme une app');
     }, 9000);
   }
+  }catch(e){}
 })();
 let _quizPaint='';
 function fmtCd(ends){
@@ -3296,6 +3309,7 @@ async function voteAffiche(vote){
 loadAffiche();
 setInterval(loadAffiche, 1000);
 setInterval(function(){ if(window._lastQuizA) paintQuiz(window._lastQuizA); }, 250);
+window.__affOK = 1;   // 🛡️ affiches branchées (info · pub · quiz · urgence)
 function paintAd(ad, views){
   const box=document.getElementById('ad-box'); if(!box) return;
   if(!ad){ box.classList.add('hidden'); box.innerHTML=''; return; }
@@ -3317,6 +3331,7 @@ async function loadAd(){
 }
 loadAd();
 setInterval(loadAd, 20000);
+window.__affOK = 1;   // 🛡️ publicité branchée
 function pingPresence(){
   try{
     const w=quizWho();
@@ -4594,5 +4609,32 @@ async function mesPaiementsPro(){
 </script>
 <div id="ecran-recherche" style="display:none"></div>
 <div id="fiche-pro" style="display:none"></div>
+
+<!-- 🛡️ FILET DE SÉCURITÉ DES AFFICHES — les affiches (info · pub · quiz · urgence) sont
+     indépendantes du reste de l'application : même si un autre script échoue, elles sortent. -->
+<script>
+(function(){
+  function affiches(){
+    if(window.__affOK) return;                       /* tout est déjà branché : rien à faire */
+    try{
+      if(typeof loadAffiche === 'function'){
+        loadAffiche();
+        if(!window.__affT){ window.__affT = 1; setInterval(loadAffiche, 1000); }
+        if(typeof paintQuiz === 'function' && !window.__quizT){ window.__quizT = 1; setInterval(function(){ if(window._lastQuizA) paintQuiz(window._lastQuizA); }, 250); }
+      }
+    }catch(e){ console.warn('Klean : affiche non affichée —', e && e.message); }
+    try{
+      if(typeof loadAd === 'function'){
+        loadAd();
+        if(!window.__adT){ window.__adT = 1; setInterval(loadAd, 20000); }
+      }
+    }catch(e){ console.warn('Klean : publicité non affichée —', e && e.message); }
+  }
+  setTimeout(affiches, 1500);
+  setTimeout(affiches, 4000);
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', affiches, {once:true});
+  else affiches();
+})();
+</script>
 </body>
 </html>
