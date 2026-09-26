@@ -554,7 +554,7 @@
   <div class="panel" style="margin-bottom:14px" id="panel-match">
     <h3>🎯 Mise en relation GPS <span class="cnt" id="mt-cnt">—</span></h3>
     <div class="body" style="padding:12px 14px">
-      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Réglages du moteur qui classe les pros autour d’un client (proximité GPS = critère majeur). Les distances sont calculées <b>par le serveur</b> — le GPS envoyé n’est jamais cru sans vérification.</p>
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Réglages du moteur qui classe les pros autour d’un client (une seule recherche : le client écrit ce qu’il veut, le serveur comprend). Les distances sont calculées <b>par le serveur</b> — le GPS envoyé n’est jamais cru sans vérification. Classement sur 7 critères : distance, disponibilité, métier, tarif indicatif, évaluations, nombre de prestations, pro vérifié.</p>
       <div id="mt-form" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <label style="font-size:11.5px;font-weight:800">Fraîcheur GPS (min)<input id="mt-distttl" type="number" min="1" max="240" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
         <label style="font-size:11.5px;font-weight:800">Position en « zone » (min)<input id="mt-zonettl" type="number" min="5" max="1440" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
@@ -562,6 +562,18 @@
         <label style="font-size:11.5px;font-weight:800">Flou distance (m)<input id="mt-jitter" type="number" min="0" max="2000" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
         <label style="font-size:11.5px;font-weight:800">Zone d’intervention (km)<input id="mt-rayon" type="number" min="1" max="800" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
         <label style="font-size:11.5px;font-weight:800">Fiche pro publique<select id="mt-fiche" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"><option value="1">Oui (recommandé)</option><option value="0">Non</option></select></label>
+      </div>
+      <hr style="border:none;border-top:1.5px dashed var(--line);margin:13px 0">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;line-height:1.45"><b>⚖️ Ce qui compte dans le classement</b> — 0 = critère ignoré, 1 = normal, 2 = prioritaire. Tout est appliqué immédiatement, sans redéploiement.</p>
+      <div id="mt-poids" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <label style="font-size:11.5px;font-weight:800">Distance<input id="mt-w-distance" type="number" min="0" max="2" step="0.5" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Disponibilité<input id="mt-w-dispo" type="number" min="0" max="2" step="0.5" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Évaluations (note, avis)<input id="mt-w-note" type="number" min="0" max="2" step="0.5" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Nombre de prestations<input id="mt-w-missions" type="number" min="0" max="2" step="0.5" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Pro vérifié<input id="mt-w-verif" type="number" min="0" max="2" step="0.5" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Tarif indicatif<input id="mt-w-prix" type="number" min="0" max="2" step="0.5" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Même quartier / ville<input id="mt-w-zone" type="number" min="0" max="2" step="0.5" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Compétences déclarées<input id="mt-w-competences" type="number" min="0" max="2" step="0.5" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
       </div>
       <button class="btn-main" style="width:100%;margin-top:9px" onclick="saveMatchCfg()">💾 Enregistrer ces réglages</button>
       <small id="mt-state" style="display:block;margin-top:7px;font-weight:800;color:var(--amber)">État : —</small>
@@ -1075,14 +1087,23 @@ async function chargerMatchCfg(){
     document.getElementById('mt-jitter').value  = m.jitterM;
     document.getElementById('mt-rayon').value   = m.rayonDefautKm;
     document.getElementById('mt-fiche').value   = m.ficheOuverte ? '1' : '0';
+    const p = m.poids || {};
+    ['distance','dispo','note','missions','verif','prix','zone','competences'].forEach(k=>{
+      const el = document.getElementById('mt-w-'+k); if(el) el.value = (p[k]!==undefined?p[k]:1);
+    });
     document.getElementById('mt-cnt').textContent = m.rayonDefautKm + ' km · GPS ' + m.distTtlMin + ' min';
     document.getElementById('mt-state').textContent = 'État : réglages chargés ✓';
   }catch(e){ document.getElementById('mt-state').textContent = 'État : chargement impossible'; }
 }
 async function saveMatchCfg(){
   const val = id => parseInt(document.getElementById(id).value, 10);
+  const poids = {};
+  ['distance','dispo','note','missions','verif','prix','zone','competences'].forEach(k=>{
+    const el = document.getElementById('mt-w-'+k); if(el) poids[k] = parseFloat(el.value);
+  });
   const body = {distTtlMin:val('mt-distttl'), zoneTtlMin:val('mt-zonettl'), maxRecherchesMin:val('mt-maxrech'),
-    jitterM:val('mt-jitter'), rayonDefautKm:val('mt-rayon'), ficheOuverte:document.getElementById('mt-fiche').value==='1'};
+    jitterM:val('mt-jitter'), rayonDefautKm:val('mt-rayon'), ficheOuverte:document.getElementById('mt-fiche').value==='1',
+    poids};
   try{
     const r = await fetch('/api/admin/match-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d = await r.json();

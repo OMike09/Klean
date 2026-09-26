@@ -436,6 +436,190 @@ function emitToMission(m, obj) {
   broadcast(list, obj);
 }
 const SVC_NAMES = { maison:'Ménage maison', bureaux:'Bureaux', canapes:'Canapés & tapis', vitres:'Vitres', grand:'Grand ménage', plomberie:'Plomberie', electricite:'Électricité', clim:'Climatisation', serrurerie:'Serrurerie', electro:'Électroménager', jardinage:'Jardinage', lavageauto:'Lavage auto', bricolage:'Bricolage', demen:'Déménagement', cuisine:'Cuisinier à domicile', cours:'Cours ou formation à domicile', canal:'Canal+ à domicile', evenement:'Après événement', entretien:'Entretien régulier', placement:'Placement de personnel', custom:'Demande sur mesure' };
+/* ═══════════ 📚 CATALOGUE DE RECHERCHE UNIFIÉ ═══════════
+   Une seule porte d'entrée : le client écrit ce dont il a besoin en français
+   (« cours à domicile », « fuite d'eau », « ménage »). Chaque métier porte ses
+   mots-clés (synonymes, abréviations, fautes courantes) et son prix indicatif.
+   C'est LE SERVEUR qui comprend et classe : le téléphone ne décide de rien. */
+const SVC_CAT = [
+  {id:'maison',       nom:'Nettoyage maison',            ic:'🏠', base:7000,  mots:'menage menagere menage a domicile nettoyage maison appartement villa studio chambre salon balayage serpilliere propre nettoyer repassage linge lessive'},
+  {id:'bureaux',      nom:'Nettoyage bureaux',           ic:'🏢', base:15000, mots:'bureaux bureau commerce agence societe entreprise open space boutique magasin'},
+  {id:'canapes',      nom:'Canapés & fauteuils',         ic:'🛋️', base:6000,  mots:'canape canapes fauteuil fauteuils tapis moquette salon injection extraction detachage tache'},
+  {id:'vitres',       nom:'Vitres & baies',              ic:'🪟', base:4500,  mots:'vitre vitres baie baies fenetre fenetres carreaux vitrine glace'},
+  {id:'demenagement', nom:'Après déménagement',          ic:'🧼', base:15000, mots:'apres demenagement emmenagement etat des lieux chantier fin de bail maison vide'},
+  {id:'sdb',          nom:'Salles de bains',             ic:'🚿', base:5500,  mots:'salle de bain salle de bains sdb douche baignoire joints faillance faience tartre detartrage wc toilettes lavabo'},
+  {id:'grand',        nom:'Grand ménage',                ic:'🧹', base:16000, mots:'grand menage menage complet fond en comble remise a neuf nettoyage complet grande maison'},
+  {id:'plomberie',    nom:'Plomberie',                   ic:'🔧', base:6000,  mots:'plomberie plombier fuite fuites robinet robinets wc chasse canalisation bouchee debouchage deboucher chauffe eau chauffe-eau tuyau tuyaux evier lavabo pression eau'},
+  {id:'electricite',  nom:'Électricité',                 ic:'💡', base:6000,  mots:'electricite electricien courant panne prise prises interrupteur interrupteurs tableau electrique disjoncteur plafonnier ventilateur plafond court circuit court-circuit cable cablage luminaire ampoule lumiere'},
+  {id:'clim',         nom:'Climatisation',               ic:'❄️', base:10000, mots:'clim climatisation climatiseur climatiseurs split gaz recharge freon froid fraicheur froid installation climat entretien climat clim ne fait plus de froid'},
+  {id:'serrurerie',   nom:'Serrurerie',                  ic:'🔑', base:5000,  mots:'serrurerie serrurier serrure portes cle cles cylindre verrou ouverture de porte cadenas porte fermee'},
+  {id:'electro',      nom:'Électroménager',              ic:'🔌', base:5000,  mots:'electromenager frigo refrigerateur congelo congelateur machine a laver lave linge four cuisiniere micro ondes vaisselle lave vaisselle appareil menager'},
+  {id:'jardinage',    nom:'Jardinage',                   ic:'🌿', base:7000,  mots:'jardinage jardin jardinier pelouse gazon tonte tondre haie haies taille desherbage arbre arbres plantes fleurs cour'},
+  {id:'lavageauto',   nom:'Lavage auto à domicile',      ic:'🚗', base:4000,  mots:'lavage auto voiture vehicule vehicules car wash nettoyage voiture suv 4x4 moto cire'},
+  {id:'bricolage',    nom:'Bricolage & montage',         ic:'🪛', base:6000,  mots:'bricolage bricoleur montage meuble meubles etagere etageres fixation tv tringle rideaux perceuse petits travaux vis'},
+  {id:'demen',        nom:'Déménagement & portage',      ic:'📦', base:30000, mots:'demenagement demenageur portage porteur porteurs transport cartons emballage camion demenager chargement'},
+  {id:'cuisine',      nom:'Cuisinier à domicile',        ic:'🍳', base:10000, mots:'cuisinier cuisiniere cuisine repas plats traiteur patisserie patissier dessert chef repas de fete'},
+  {id:'evenement',    nom:'Après événement',             ic:'🎉', base:12000, mots:'evenement fete mariage reception ceremonie bapteme anniversaire apres fete salle de fete'},
+  {id:'entretien',    nom:'Entretien régulier',          ic:'🗓️', base:6000,  mots:'entretien regulier abonnement chaque semaine mensuel periodique contrat menage recurrent tous les jours'},
+  {id:'placement',    nom:'Placement de personnel',      ic:'👥', base:15000, mots:'placement personnel nounou garde enfant garde d enfant gardien vigile aide menagere employe recrutement domestique nourrice'},
+  {id:'cours',        nom:'Cours ou formation à domicile', ic:'📚', base:15000, mots:'cours soutien scolaire formation professeur prof repetiteur eleve eleves mathematiques maths physique chimie svt francais anglais espagnol philosophie philo histoire geographie lecture ecriture primaire college lycee bac instituteur institutrice coach coaching informatique bureautique langue langues musique piano guitare devoirs'},
+  {id:'canal',        nom:'Canal+ domicile',             ic:'📡', base:5000,  mots:'canal canal+ decodeur parabole satellite tv television antenne installation tv abonnement chaines'},
+];
+const SVC_MOTS_IDX = SVC_CAT.map(c => ({ id: c.id, set: new Set(c.mots.split(' ')) }));
+function svcCat(id) { return SVC_CAT.find(x => x.id === id) || null; }
+function svcNomP(id) { const c = svcCat(id); return c ? c.nom : (SVC_NAMES[id] || id); }
+function svcBaseP(id) { const c = svcCat(id); return c ? c.base : null; }
+
+/* 🔤 Normalisation française : accents, ponctuation, majuscules */
+function normFr(t) {
+  return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+/* 📍 LIEU DE PRESTATION — « le service se fait ici, pas forcément là où je suis ».
+   Le client écrit « Yamoussoukro », « Koko, Bouaké » ou « Cocody » : on résout côté serveur
+   sur les villes de Côte d'Ivoire et les quartiers connus (ceux du dashboard HQ). */
+function villesConnues() {
+  const out = CI_GPS.map(r => ({ nom: r[0], lat: r[1], lng: r[2], quartiers: [] }));
+  for (const c of (db.cities || [])) {
+    const nom = String((c && c.nom) || '').trim();
+    if (!nom) continue;
+    const qs = Array.isArray(c.quartiers) ? c.quartiers.map(x => String(x).trim()).filter(Boolean).slice(0, 80) : [];
+    const ex = out.find(v => normVille(v.nom) === normVille(nom));
+    if (ex) { if (qs.length) ex.quartiers = qs; continue; }
+    const g = coordsOfVille(nom);
+    if (g) out.push({ nom, lat: g.lat, lng: g.lng, quartiers: qs });
+  }
+  return out;
+}
+function resoudreLieu(txt, hintVille, hintQuartier) {
+  const n = normVille(txt);
+  const villes = villesConnues();
+  const parVille = (v, q, precis) => ({ ok: true, ville: v.nom, quartier: q || '', lat: v.lat, lng: v.lng,
+    precis: !!precis, texte: (q ? (q + ', ') : '') + v.nom });
+  if (n) {
+    /* 1) le texte EST une ville */
+    for (const v of villes) if (normVille(v.nom) === n) return parVille(v, '', true);
+    /* 2) le texte contient un quartier connu */
+    const motsN = new Set(n.split(' ').filter(Boolean));
+    for (const v of villes) {
+      for (const q of (v.quartiers || [])) {
+        const nq = normVille(q);
+        if (!nq) continue;
+        if (nq === n || motsN.has(nq) || (nq.indexOf(' ') > 0 && n.indexOf(nq) >= 0)) return parVille(v, q, false);
+      }
+    }
+    /* 3) le texte ressemble à « quartier, ville » dont la ville est connue */
+    for (const v of villes) if (n.indexOf(normVille(v.nom)) >= 0 && normVille(v.nom).length > 3)
+      return parVille(v, String(txt).split(/[,;]/)[0].trim(), false);
+  }
+  /* 4) indice de ville fourni par le client (il a choisi dans la liste) */
+  if (hintVille) {
+    const v = villes.find(x => normVille(x.nom) === normVille(hintVille));
+    if (v) return parVille(v, String(hintQuartier || '').trim(), false);
+  }
+  return { ok: false, texte: String(txt || '') };
+}
+
+/* 🎫 Un code pro s'écrit KP-123456, KP123456, kp 123 456… ou juste 123456 */
+function codeKpDe(q) {
+  const raw = String(q || '').toUpperCase().replace(/[\s._\-]/g, '');
+  let m = raw.match(/^KP0*(\d{3,6})$/);
+  if (m) return 'KP-' + String(parseInt(m[1], 10)).padStart(6, '0');
+  if (/^\d{6}$/.test(raw)) return 'KP-' + raw;
+  return '';
+}
+/* 📊 Spécificité des mots-clés : un mot présent dans beaucoup de métiers
+   (« domicile », « maison ») pèse moins qu'un mot précis (« fuite », « parabole »). */
+const SVC_MOT_NB = {};
+for (const c of SVC_CAT) for (const kw of c.mots.split(' ')) SVC_MOT_NB[kw] = (SVC_MOT_NB[kw] || 0) + 1;
+function poidsMot(kw) { return 3 / (SVC_MOT_NB[kw] || 1); }
+/* Mots vides : ils ne disent rien du métier voulu */
+const FR_VIDES = new Set(('je j ai mon ma mes ton ta tes son sa ses le la les un une des du de d au aux a et ou pour en sur dans avec '
+  + 'chez moi toi nous vous ils elles il elle faire fait faire faire besoin veux voudrais voudrai souhaite cherche trouver trouver '
+  + 'svp stp merci urgemment urgent vite aujourd hui demain soir matin semaine mois annonce puis aussi bien bon bien tres peu plus '
+  + 'quelqu un quelque chose nouveau nouvelle svp aide aider aidez moi meme').split(' '));
+
+/* 🧠 COMPRÉHENSION : « cours à domicile » → métier « cours ».
+   Score = mots du NOM du métier retrouvés dans la demande (+ le nom entier = très fort)
+         + mots-clés spécifiques. Union bornée à 3 métiers, avec un seuil de pertinence. */
+function resoudreRecherche(q) {
+  const brut = String(q || '').trim();
+  const kp = codeKpDe(brut);
+  if (kp) return { type: 'kp', code: kp, compris: 'Code professionnel ' + kp };
+  const n = normFr(brut);
+  if (!n) return { type: 'vide', ids: [], compris: '' };
+  const mots = [...new Set(n.split(' ').filter(w => w.length > 2 && !FR_VIDES.has(w)))];
+  if (!mots.length) return { type: 'inconnu', ids: [], compris: '', suggestions: [] };
+  const notes = [];
+  for (const c of SVC_CAT) {
+    const idx = SVC_MOTS_IDX.find(x => x.id === c.id);
+    const nomN = normFr(c.nom);
+    const nomMots = new Set(nomN.split(' ').filter(w => w.length > 2 && !FR_VIDES.has(w)));
+    let sc = 0, nbNom = 0;
+    for (const w of mots) if (nomMots.has(w)) nbNom++;
+    sc += nbNom * 2;
+    if (nbNom >= 2) sc += 6;                                  // « cours » + « domicile » → très fort
+    /* « dé-menage-ment » ne doit pas être pris pour « ménage » : on compare des mots entiers */
+    if (n.length > 3) {
+      try { if (new RegExp('(^| )' + n.split(' ').join(' +') + '( |$)').test(nomN)) sc += 8; } catch (e) {}
+    }
+    for (const w of mots) if (idx.set.has(w)) sc += poidsMot(w);   // mot-clé déclaré par le métier
+    if (sc > 0.01) notes.push({ id: c.id, sc: Math.round(sc * 100) / 100 });
+  }
+  notes.sort((a, b) => b.sc - a.sc);
+  if (!notes.length) return { type: 'inconnu', ids: [], compris: '', suggestions: [] };
+  const top = notes[0].sc;
+  /* un mot seul (« ménage ») est large par nature : on garde les 3 meilleurs ;
+     une phrase précise est filtrée par un seuil de pertinence */
+  const seuil = mots.length <= 1 ? 0.5 : Math.max(1, top * 0.5);
+  const garde = notes.filter(x => x.sc >= seuil).slice(0, 3);
+  if (!garde.length) return { type: 'inconnu', ids: [], compris: '', suggestions: notes.slice(0, 4).map(x => x.id) };
+  const ids = garde.map(x => x.id);
+  return {
+    type: 'service', ids, principal: ids[0],
+    compris: ids.map(i => svcNomP(i)).join(' · '),
+    suggestions: notes.filter(x => !ids.includes(x.id)).slice(0, 4).map(x => x.id)
+  };
+}
+
+/* 🧰 COMPÉTENCES déclarées par le pro : sous-services choisis + niveau + métiers.
+   Elles sont confrontées aux mots de la demande (« maths », « vitres », « chaudière »…). */
+function competencesPro(ag) {
+  const out = [];
+  const sn = (ag && ag.subsNoms) || {};
+  for (const k in sn) {
+    const arr = Array.isArray(sn[k]) ? sn[k] : [];
+    for (const nom of arr) if (nom && !out.includes(nom)) out.push(String(nom).slice(0, 60));
+  }
+  if (ag && ag.niveau) out.unshift(String(ag.niveau).slice(0, 60));
+  return out.slice(0, 10);
+}
+function pCompPro(ag, mots) {
+  if (!mots || !mots.length) return 0;
+  const texte = normFr([competencesPro(ag).join(' '), (ag.services || []).map(id => svcNomP(id)).join(' ')].join(' '));
+  let n = 0;
+  for (const w of mots) if (texte.indexOf(w) >= 0) n++;
+  return Math.min(5, n * 2);                                  // 0 → 5 points bruts
+}
+/* ⏱️ Temps estimé pour rejoindre le lieu de prestation (moto/taxi urbain à Côte d'Ivoire) */
+function etaMin(distKm) {
+  if (distKm == null || !isFinite(distKm)) return null;
+  return Math.max(5, 5 + Math.round(distKm * 3));              // 5 min de base + ~3 min par km (≈ 20 km/h)
+}
+function etaTxt(mn) { return mn == null ? '' : ('≈ ' + mn + ' min'); }
+/* 🛡️ Score de vérification (0–100) : calculé sur des FAITS du dossier,
+   jamais sur une déclaration. ≥85 → badge « Vérifié + ». */
+function verifPro(ag) {
+  let s = 40;                                                   // dossier validé par Klean (obligatoire ici)
+  if (ag.piecePhoto || ag.pieceNum) s += 20;                    // pièce d'identité fournie
+  if (ag.photo) s += 10;                                        // photo de profil
+  if (ag.ref1Tel && ag.ref2Tel) s += 15; else if (ag.ref1Tel || ag.ref2Tel) s += 8;
+  const xp = parseInt(ag.experience, 10) || 0;
+  if (xp >= 3) s += 15; else if (xp >= 1) s += 8;
+  return Math.min(100, s);
+}
+function verifTxt(sc) { return sc >= 85 ? '🛡️ Vérifié +' : (sc >= 70 ? '🛡️ Vérifié' : '✔ Compte validé'); }
+
 function haversineKm(aLat, aLng, bLat, bLng) {
   const R = 6371, dLa = (bLat - aLat) * Math.PI / 180, dLo = (bLng - aLng) * Math.PI / 180;
   const s = Math.sin(dLa / 2) ** 2 + Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.sin(dLo / 2) ** 2;
@@ -492,6 +676,13 @@ function matchCfg() {
   if (typeof m.jitterM !== 'number') m.jitterM = 100;           // gigue anti-triangulation
   if (typeof m.rayonDefautKm !== 'number') m.rayonDefautKm = 15; // zone d'intervention par défaut
   if (typeof m.ficheOuverte !== 'boolean') m.ficheOuverte = true;
+  /* ⚖️ Poids du classement (0 = critère ignoré, 2 = prioritaire) — réglables par le PDG */
+  const PD = { distance: 1, dispo: 1, note: 1, missions: 1, verif: 1, prix: 0.5, zone: 1, competences: 1 };
+  if (!m.poids || typeof m.poids !== 'object' || Array.isArray(m.poids)) m.poids = {};
+  for (const k in PD) {
+    const v = parseFloat(m.poids[k]);
+    m.poids[k] = Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : PD[k];
+  }
   return m;
 }
 /* 🔢 Horodatage d'une position : accepte nombre (ms) OU texte ISO (corrige l'anomalie A1) */
@@ -552,12 +743,13 @@ function zoneOfAgent(ag) {
   const villes = Array.isArray(z.villes) ? z.villes.filter(Boolean).slice(0, 20) : [];
   return { km, villes };
 }
-function agentDansZone(ag, distKm, memeVille, memeQuartier, villeClient) {
+function agentDansZone(ag, distKm, memeVille, memeQuartier, villeClient, bonusKm) {
   if (memeQuartier) return true;                                  // même quartier : toujours accepté
   if (memeVille) return true;                                     // sa ville de service
   const z = zoneOfAgent(ag);
   if (villeClient && z.villes.some(v => normVille(v) === normVille(villeClient))) return true;
-  if (distKm != null) return distKm <= z.km;                       // zone d'intervention en km
+  const bonus = Math.max(0, Math.min(200, Number(bonusKm) || 0));   // « chercher un peu plus loin »
+  if (distKm != null) return distKm <= (z.km + bonus);             // zone d'intervention (+ élargissement demandé)
   return false;                                                    // ni ville ni distance vérifiable → exclu
 }
 /* 🟢 Disponibilité : libre / en mission / en pause / hors ligne */
@@ -604,6 +796,12 @@ function privacyOf(ag) {
   };
 }
 /* 📇 Carte publique d'un pro : uniquement les informations autorisées (jamais lat/lng, jamais d'adresse) */
+/* ⭐ Note lissée : un seul avis 5★ ne doit pas battre 40 avis à 4,8★ */
+function noteLissee(note, avis) {
+  const n = Math.max(0, parseInt(avis, 10) || 0);
+  const k = 3;                                        // confiance : 3 avis « virtuels » à 4,5
+  return Math.round((((note * n) + (4.5 * k)) / (n + k)) * 100) / 100;
+}
 function fichePublique(ag, o) {
   o = o || {};
   const p = privacyOf(ag);
@@ -623,7 +821,11 @@ function fichePublique(ag, o) {
     online: agentIsOnline(ag), dispo, dispoTxt: dispoTxt(dispo),
     zoneKm: z.km, villesZone: z.villes,
     note: Math.round((st.rating || 5) * 10) / 10,
+    noteLisse: noteLissee(st.rating || 5, st.avis || 0),
+    avis: st.avis || 0,
     missionsDone: st.missionsDone || 0,
+    verif: verifPro(ag), verifTxt: verifTxt(verifPro(ag)), verifPlus: verifPro(ag) >= 85,
+    experience: parseInt(ag.experience, 10) || 0,
     membreDepuis: (ag.createdAt || '').slice(0, 7),
     tel: telVisible ? tel : '', typeNum: (ag.telPro ? 'professionnel' : 'personnel'),
     appelDirect: telVisible && dispo !== 'hors',
@@ -943,6 +1145,12 @@ function recherchePro(o) {
   const cfg = matchCfg();
   const villeN = normVille(o.ville || '');
   const svc = String(o.service || '').trim();
+  /* métiers demandés : un seul (ancien appel) ou plusieurs (phrase comprise → union bornée) */
+  let svcIds = Array.isArray(o.services) && o.services.length ? o.services.filter(Boolean).slice(0, 3)
+    : (svc && svc !== 'custom' ? [svc] : []);
+  if (svc && svc !== 'custom' && !svcIds.includes(svc)) svcIds = [svc, ...svcIds].slice(0, 3);
+  /* mots utiles de la demande (pour confronter aux compétences déclarées) */
+  const motsDem = normFr(o.q || '').split(' ').filter(w => w.length > 2 && !FR_VIDES.has(w)).slice(0, 8);
   const qN = String(o.quartier || '').trim().toLowerCase();
   /* position du client : GPS vérifié, sinon le centre de sa ville (approx., on le dit au client) */
   let cPos = null, cSrc = 'aucune';
@@ -952,7 +1160,11 @@ function recherchePro(o) {
   const liste = [];
   for (const ag of (db.agents || [])) {
     if (!ag || ag.blocked || (ag.status || 'approved') !== 'approved') continue;   // statut actif uniquement
-    if (svc && svc !== 'custom' && !agentHasService(ag, svc)) continue;            // filtre dur : le métier demandé
+    /* filtre DUR : le pro doit faire l'un des métiers compris (jamais de pro hors métier) */
+    let metierFait = svcIds.length ? svcIds.filter(id => agentHasService(ag, id)) : [];
+    if (svcIds.length && !metierFait.length) continue;
+    /* fiche non publique = carte inutilisable : on ne la propose pas */
+    if (!privacyOf(ag).publieFiche) continue;
     const online = agentIsOnline(ag);
     if (!online && !o.inclureHorsLigne) continue;                                   // dispo d'abord
     const dispo = agentDispo(ag);
@@ -967,15 +1179,29 @@ function recherchePro(o) {
       dist = haversineKm(cPos.lat, cPos.lng, base.lat, base.lng);
       distSource = gpsFrais ? 'gps' : (ag.pos && posUsable(ag) ? 'zone' : 'ville');
     }
-    if (!agentDansZone(ag, dist, memeVille, memeQuartier, o.ville)) continue;        // hors zone → exclu
+    if (!agentDansZone(ag, dist, memeVille, memeQuartier, o.ville, o.zoneElargie)) continue;   // hors zone → exclu
 
-    /* score : plus petit = meilleur */
-    let score = (dist != null ? dist : 60);
-    if (!memeVille) score += 25;
-    if (memeQuartier) score -= 4;
-    if (dispo === 'occupe') score += 60;
-    if (dispo === 'pause') score += 90;
-    if (distSource !== 'gps') score += 8;
+    /* ═══ 🏆 SCORE 0–100 SUR LES 7 CRITÈRES DEMANDÉS (poids réglables par le PDG) ═══
+       points bruts → × poids → ramenés sur 100. Plus le score est haut, plus le pro est pertinent. */
+    const w = cfg.poids;
+    const pDist = dist == null ? 6 : Math.max(0, Math.round(40 * Math.exp(-dist / 8)));
+    const pDispo = dispo === 'libre' ? 25 : (dispo === 'occupe' ? 8 : 0);
+    const stA = agentStatsCached(ag);
+    const avis = stA.avis || 0;
+    const nL = noteLissee(stA.rating || 5, avis);
+    const pNote = Math.max(0, Math.min(15, Math.round((nL - 3.5) * 15)));
+    const pMissions = Math.max(0, Math.min(10, Math.round(Math.log2(1 + (stA.missionsDone || 0)) * 2)));
+    const vSc = verifPro(ag);
+    const pVerif = Math.round(vSc / 20);                       // 0–5
+    const pZone = (memeQuartier ? 6 : (memeVille ? 3 : 0)) + (distSource === 'gps' ? 4 : 0);
+    const baseMin = metierFait.length ? Math.min(...metierFait.map(id => svcBaseP(id) || 999999)) : null;
+    const pPrix = baseMin == null ? 0 : Math.max(0, Math.round(5 - (baseMin / 10000) * 2));   // indicatif
+    const pComp = pCompPro(ag, motsDem);                                                  // compétences déclarées
+    const obtenu = (pDist * w.distance) + (pDispo * w.dispo) + (pNote * w.note) + (pMissions * w.missions)
+      + (pVerif * w.verif) + (pPrix * w.prix) + (pZone * w.zone) + (pComp * w.competences);
+    const maxPoids = (40 * w.distance) + (25 * w.dispo) + (15 * w.note) + (10 * w.missions)
+      + (5 * w.verif) + (5 * w.prix) + (10 * w.zone) + (5 * w.competences);
+    const score = maxPoids > 0 ? Math.round(obtenu / maxPoids * 10000) / 100 : 0;   // 0–100, comparable entre pros
 
     const card = fichePublique(ag, o);
     /* 📏 distance affichée UNIQUEMENT si le GPS du pro est frais — sinon on donne une ZONE (jamais une fausse précision) */
@@ -994,18 +1220,41 @@ function recherchePro(o) {
       : (distSource === 'gps' ? ('à ' + card.distTxt + ' de vous (GPS)')
         : (memeVille ? ('même ville — ' + (ag.villeService || ag.ville || '') + ' (position ancienne)')
           : ('zone d’intervention ' + zoneOfAgent(ag).km + ' km')));
+    /* 🧾 du détail lisible pour que le client COMPARE (mêmes critères, même ordre) */
+    card.metierFait = metierFait;
+    card.competences = competencesPro(ag).slice(0, 4);
+    card.compTxt = card.competences.join(' · ');
+    card.etaMin = etaMin(dist);
+    card.etaTxt = card.etaMin != null ? etaTxt(card.etaMin) : '';
+    card.prixIndicatif = baseMin;
+    card.prixTxt = baseMin != null ? ('à partir de ' + baseMin.toLocaleString('fr-FR') + ' F') : '';
+    card.note = Math.round(nL * 10) / 10;                      // note affichée = note lissée
+    card.scorePct = Math.max(0, Math.min(100, Math.round(score)));
+    card.raisons = [
+      (card.distTxt ? (card.distApprox ? ('≈ ' + card.distTxt) : card.distTxt) : (card.zoneTxt || 'zone à confirmer')),
+      (dispo === 'libre' ? '🟢 disponible' : (dispo === 'occupe' ? '🟠 en mission' : (dispo === 'pause' ? '⏸️ en pause' : '⚪ hors ligne'))),
+      '⭐ ' + card.note + '/5' + (avis ? (' (' + avis + ' avis)') : ' (nouveau)'),
+      (card.missionsDone || 0) + ' prestation(s)',
+      card.verifTxt
+    ];
+    if (card.prixTxt) card.raisons.push(card.prixTxt);
+    if (card.etaTxt) card.raisons.push('⏱️ ' + card.etaTxt + ' pour vous rejoindre');
     card._score = score; card._note = card.note; card._done = card.missionsDone;
     card._seen = posAtMs(ag.pos) || (Date.parse(ag.lastSeen || '') || 0);
     liste.push(card);
   }
-  /* égalités : dispo, puis note, puis missions réalisées, puis contact le plus récent, puis ordre alphabétique (résultat stable) */
-  liste.sort((a, b) => (a._score - b._score) || (b._note - a._note) || (b._done - a._done) || (b._seen - a._seen) || String(a.nom).localeCompare(String(b.nom)));
+  /* 🏆 classement : meilleur score d'abord ; à égalité, note, puis prestations, puis contact récent, puis alphabétique (stable) */
+  liste.sort((a, b) => (b._score - a._score) || (b._note - a._note) || (b._done - a._done) || (b._seen - a._seen) || String(a.nom).localeCompare(String(b.nom)));
   const limit = Math.max(1, Math.min(100, o.limit || 40));
   const fin = liste.slice(0, limit).map(c => { delete c._score; delete c._note; delete c._done; delete c._seen; return c; });
   return {
-    ok: true, service: svc, ville: o.ville || '', quartier: o.quartier || '',
+    ok: true, service: svc || (svcIds[0] || ''), services: svcIds,
+    serviceNom: svcIds.length ? svcIds.map(svcNomP).join(' · ') : '',
+    ville: o.ville || '', quartier: o.quartier || '',
     posSource: cSrc, exact: cSrc === 'gps',
     n: fin.length, enLigne: fin.filter(x => x.online).length, libres: fin.filter(x => x.dispo === 'libre').length,
+    prixIndicatif: svcIds.length ? Math.min(...svcIds.map(id => svcBaseP(id) || 999999)) || null : null,
+    poids: cfg.poids,
     pros: fin, cfg: { distTtlMin: cfg.distTtlMin, zoneTtlMin: cfg.zoneTtlMin, rayonDefautKm: cfg.rayonDefautKm }
   };
 }
@@ -1259,7 +1508,7 @@ function agentStats(ag) {
   const comm = done.reduce((s, x) => s + Math.round(x.prixTotal * feePct()), 0);
   const notes = done.filter(x => x.note).map(x => x.note);
   return {
-    missionsDone: done.length, gain, comm,
+    missionsDone: done.length, gain, comm, avis: notes.length,
     rating: notes.length ? notes.reduce((s, n) => s + n, 0) / notes.length : 5.0,
     hist: done.slice(-30).reverse().map(x => ({ id: x.id, service: x.service, quartier: x.quartier, date: x.finishedAt && x.finishedAt.slice(5, 10), montant: x.prixTotal, gain: Math.round(x.prixTotal * (1 - feePct())), comm: Math.round(x.prixTotal * feePct()), note: x.note || 5 }))
   };
@@ -1412,17 +1661,94 @@ const server = http.createServer(async (req, res) => {
     if (!recherchePlafond('r:' + cle, cfg.maxRecherchesMin))
       return sendJson(res, 429, { error: 'Trop de recherches en une minute — patientez un instant', code: 'plafond' });
     const service = String(url.searchParams.get('service') || '').slice(0, 40);
+    const q = String(url.searchParams.get('q') || '').slice(0, 120);
     const ville = String(url.searchParams.get('ville') || (cli && cli.ville) || '').slice(0, 60);
     const quartier = String(url.searchParams.get('quartier') || (cli && cli.quartier) || '').slice(0, 60);
     const lat = parseFloat(url.searchParams.get('lat'));
     const lng = parseFloat(url.searchParams.get('lng'));
-    const resu = recherchePro({
-      service, ville, quartier,
-      lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
-      inclureHorsLigne: url.searchParams.get('horsLigne') === '1',
-      limit: parseInt(url.searchParams.get('limit'), 10) || 40
-    });
-    resu.quartier = resu.quartier || quartier;
+    const lim = parseInt(url.searchParams.get('limit'), 10) || 40;
+    const horsLigne = url.searchParams.get('horsLigne') === '1';
+    const zoneElargie = Math.max(0, Math.min(200, parseFloat(url.searchParams.get('zoneElargie')) || 0));
+
+    /* 📍 LIEU DE PRESTATION — priorité absolue : on cherche autour de l'endroit indiqué,
+       pas autour du client. Trois cas : ma position (GPS) · ma ville · un autre lieu saisi. */
+    const lieuMode = String(url.searchParams.get('lieuMode') || '').slice(0, 12);
+    const lieuTxt  = String(url.searchParams.get('lieu') || '').slice(0, 80);
+    const lieuVilleQ = String(url.searchParams.get('lieuVille') || '').slice(0, 60);
+    const lieuQuartQ = String(url.searchParams.get('lieuQuartier') || '').slice(0, 60);
+    const lieuLat = parseFloat(url.searchParams.get('lieuLat'));
+    const lieuLng = parseFloat(url.searchParams.get('lieuLng'));
+    let prest = null;                       // lieu de prestation résolu
+    let posSource = 'ville', lieuTxtFinal = '';
+    if (lieuMode === 'autre') {
+      prest = resoudreLieu(lieuTxt, lieuVilleQ, lieuQuartQ);
+      if (!prest || !prest.ok) {
+        const g = Number.isFinite(lieuLat) && validCILatLng(lieuLat, lieuLng) ? { lat: lieuLat, lng: lieuLng } : null;
+        if (g) prest = { ok: true, ville: lieuVilleQ || '', quartier: lieuQuartQ || '', lat: g.lat, lng: g.lng, precis: true, texte: lieuTxt || lieuVilleQ };
+      }
+      if (prest && prest.ok) { posSource = 'prestation'; lieuTxtFinal = prest.texte; }
+      else { prest = null; posSource = 'ville'; lieuTxtFinal = ''; }
+    } else if (lieuMode === 'moi') {
+      posSource = Number.isFinite(lat) && validCILatLng(lat, lng) ? 'gps' : 'ville';
+      lieuTxtFinal = posSource === 'gps' ? 'ma position actuelle' : ('ma ville' + (ville ? (' (' + ville + ')') : ''));
+    } else if (lieuMode === 'ville') {
+      posSource = 'ville';
+      lieuTxtFinal = lieuVilleQ || ville || '';
+    } else {
+      /* 🧩 ancien format (applications déjà installées) : des coordonnées valides = recherche autour du client */
+      posSource = Number.isFinite(lat) && validCILatLng(lat, lng) ? 'gps' : 'ville';
+      lieuTxtFinal = posSource === 'gps' ? 'ma position actuelle' : (ville || '');
+    }
+    const villeR = (prest && prest.ok && prest.ville) ? prest.ville : ((lieuMode === 'ville' && lieuVilleQ) ? lieuVilleQ : ville);
+    /* ⚠️ le quartier DU CLIENT n'a rien à faire ici quand la prestation est ailleurs */
+    const quartierR = (prest && prest.ok) ? String(prest.quartier || '') : quartier;
+    const geo = (prest && prest.ok)
+      ? { ville: villeR, quartier: quartierR, lat: prest.lat, lng: prest.lng }
+      : { ville: villeR, quartier: quartierR,
+          lat: (Number.isFinite(lat) && validCILatLng(lat, lng) && (lieuMode === 'moi' || !lieuMode)) ? lat : null,
+          lng: (Number.isFinite(lng) && validCILatLng(lat, lng) && (lieuMode === 'moi' || !lieuMode)) ? lng : null };
+
+    /* 🧠 COMPRÉHENSION de la demande : langage naturel, liste de métiers, ou code pro */
+    const comp = resoudreRecherche(q || service || '');
+    if (comp.type === 'kp') {
+      /* 🎫 identifiant SECONDAIRE : le code amène droit à son pro, où qu'il soit */
+      const ag = db.agents.find(a => a.numPro && a.numPro.replace(/\s/g, '').toUpperCase() === comp.code.replace(/\s/g, '').toUpperCase());
+      const introuvable = () => {
+        shieldLog(ip, 'kp-inconnu', '/api/recherche', comp.code, 2);
+        return sendJson(res, 404, { error: 'Ce code professionnel ne correspond à aucun professionnel actif', code: 'inconnu', mode: 'kp' });
+      };
+      if (!ag || ag.blocked || (ag.status || 'approved') !== 'approved') return introuvable();
+      const pv = privacyOf(ag);
+      if (!pv.publieFiche) return sendJson(res, 403, { error: 'Ce professionnel ne rend pas sa fiche publique', code: 'prive', mode: 'kp' });
+      const via = recherchePro({ ville: villeR, quartier: quartierR, lat: geo.lat, lng: geo.lng, inclureHorsLigne: true, limit: 200 });
+      let card = (via.pros || []).find(x => x.id === ag.id);
+      let horsZone = false;
+      if (!card) { card = fichePublique(ag, {}); horsZone = true; }   // hors zone : fiche consultable, marquée
+      card.recent = db.missions.filter(m => m.agentId === ag.id && m.status === 'terminee')
+        .slice(-4).reverse().map(m => ({ service: SVC_NAMES[m.service] || m.service, quand: (m.finishedAt || m.createdAt || '').slice(0, 10) }));
+      emitAdmin('recherche', '🎫 Code ' + comp.code + ' consulté (' + card.nom + ')');
+      return sendJson(res, 200, { ok: true, mode: 'kp', code: comp.code, compris: comp.compris, pro: card, horsZone, enLigne: !!card.online, posSource: via.posSource });
+    }
+    if (comp.type === 'inconnu') {
+      /* on ne devine pas : on dit honnêtement que la phrase n'a pas été comprise */
+      return sendJson(res, 200, { ok: true, mode: 'inconnu', compris: '', q, pros: [], n: 0,
+        suggestions: (comp.suggestions || []).length ? comp.suggestions : ['maison', 'clim', 'plomberie', 'cours'],
+        aide: 'Dites-nous le service en un mot (ménage, plomberie, cours…), choisissez un métier ci-dessous, ou passez par une demande sur mesure.' });
+    }
+    const resu = recherchePro(Object.assign({}, geo, {
+      service: service || '', services: (comp.ids && comp.ids.length) ? comp.ids : undefined,
+      inclureHorsLigne: horsLigne, limit: lim, zoneElargie, q
+    }));
+    resu.mode = 'service';
+    resu.compris = comp.compris || '';
+    resu.q = q;
+    resu.posSource = posSource;
+    resu.lieuTxt = lieuTxtFinal;
+    resu.lieuOk = !(lieuMode === 'autre' && !(prest && prest.ok));
+    resu.lieu = prest && prest.ok ? { ville: prest.ville, quartier: prest.quartier, precis: !!prest.precis, texte: prest.texte } : null;
+    resu.zoneElargie = zoneElargie;
+    resu.suggestions = comp.suggestions || [];
+    resu.quartier = resu.quartier || quartierR;
     resu.client = cli ? { id: cli.id, nom: cli.nom } : null;
     return sendJson(res, 200, resu);
   }
@@ -2126,6 +2452,15 @@ const server = http.createServer(async (req, res) => {
     n('distTtlMin', 1, 120); n('zoneTtlMin', 5, 720); n('maxRecherchesMin', 5, 600);
     n('jitterM', 0, 2000); n('rayonDefautKm', 1, 800);
     if (b.ficheOuverte !== undefined) cfg.ficheOuverte = !!b.ficheOuverte;
+    /* ⚖️ poids du classement : de 0 (ignoré) à 2 (prioritaire) */
+    if (b.poids && typeof b.poids === 'object') {
+      cfg.poids = cfg.poids || {};
+      for (const k in b.poids) {
+        if (!['distance', 'dispo', 'note', 'missions', 'verif', 'prix', 'zone', 'competences'].includes(k)) continue;
+        const v = parseFloat(b.poids[k]);
+        if (Number.isFinite(v)) cfg.poids[k] = Math.max(0, Math.min(2, v));
+      }
+    }
     saveDb();
     auditLog('match_config', Object.assign({ par: act(req) }, cfg));
     emitAdmin('admin', '⚙️ Mise en relation : TTL ' + cfg.distTtlMin + ' min · zone ' + cfg.rayonDefautKm + ' km · plafond ' + cfg.maxRecherchesMin + '/min');

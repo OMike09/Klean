@@ -389,40 +389,55 @@
 
 <!-- ══════════════════ CLIENT : ACCUEIL ══════════════════ -->
 <div class="view active" id="view-home">
-  <button id="svc-city-big" onclick="cityInfo()" style="width:100%;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-radius:16px;padding:13px 15px;margin:0 0 12px;box-shadow:0 4px 14px rgba(194,65,12,.28);text-align:left">
-    <span style="font-size:27px">🛠️</span>
-    <span style="flex:1;min-width:0">
-      <b style="display:block;font-size:15.5px;line-height:1.3;letter-spacing:.3px">🏙️ VILLE OÙ FAIRE LE SERVICE</b>
-      <small style="display:block;font-size:11px;opacity:.93;font-weight:600">Touchez ici pour changer de ville — le 📡 GPS est dans la fenêtre</small>
-    </span>
-    <b id="svc-city-name" style="font-size:15.5px;background:rgba(255,255,255,.2);padding:7px 13px;border-radius:99px;flex:none">Bouaké ▾</b>
-  </button>
-  <button onclick="ouvrirRecherche()" style="width:100%;border:none;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;border-radius:16px;padding:12px 15px;margin:0 0 12px;box-shadow:0 4px 14px rgba(10,138,98,.28);text-align:left">
-    <span style="font-size:24px">🔎</span>
-    <span style="flex:1;min-width:0">
-      <b style="display:block;font-size:14.5px;line-height:1.3;letter-spacing:.2px">RECHERCHER UN PRO PRÈS DE MOI</b>
-      <small style="display:block;font-size:11px;opacity:.93;font-weight:600">GPS + métier + disponibilité — ou par numéro professionnel</small>
-    </span>
-    <b style="font-size:19px;flex:none">›</b>
-  </button>
-  <div class="hero">
-    <span class="phase-tag" id="hero-phase">🇨🇮 Actif à Bouaké</span>
-    <h1>Tous vos services à domicile, un pro arrive chez vous 🛵</h1>
-    <p>Ménage, plomberie, électricité, jardinage… Comme Yango, mais pour la maison. Réservez, un pro disponible à proximité accepte et arrive chez vous.</p>
-    <div class="fake-search" style="padding:6px 8px 6px 16px">
-      <span style="flex:none">🔍</span><input id="home-svc-search" placeholder="Je cherche : ménage, maths, canal, nounou…" oninput="goSearchServices(this.value)" style="flex:1;border:none;outline:none;font:inherit;color:#333;background:transparent;min-width:0" autocomplete="off">
-      <button class="go" onclick="goSearchServices(document.getElementById('home-svc-search').value)" style="border:none;cursor:pointer;font:inherit">Réserver</button>
+  <!-- ═══ ACCUEIL : LA RECHERCHE (service → lieu de prestation → résultats) ═══ -->
+  <div style="background:linear-gradient(160deg,var(--p),var(--pd));border-radius:20px;padding:15px 14px;margin:0 0 12px;box-shadow:0 6px 20px rgba(194,65,12,.28);color:#fff">
+    <div style="display:flex;align-items:center;gap:9px">
+      <b style="font-size:24px;letter-spacing:2px">KLEAN</b>
+      <button id="svc-city-big" onclick="cityInfo()" style="margin-left:auto;border:1.5px solid rgba(255,255,255,.45);background:rgba(255,255,255,.18);color:#fff;font:inherit;font-weight:900;font-size:11.5px;padding:7px 11px;border-radius:99px;cursor:pointer">🏙️ <span id="svc-city-name">Bouaké</span> ▾</button>
     </div>
-    <div class="stats">
-      <div class="stat"><b id="hero-agents-n">48</b><span id="hero-agents-sub">Professionnels actifs à Bouaké</span></div>
-      <div class="stat"><b>17</b><span>Services à domicile</span></div>
-      <div class="stat"><b>~10 min</b><span>Temps d'attente</span></div>
+    <p style="margin:7px 0 13px;font-size:14px;line-height:1.4;font-weight:600;opacity:.98">Le service dont vous avez besoin, <b>où vous en avez besoin</b>.</p>
+
+    <div style="background:#fff;border-radius:17px;padding:13px;color:var(--ink)">
+      <label style="display:block;font-size:12.5px;font-weight:900;color:var(--pd);margin-bottom:6px">🔎 Que recherchez-vous ?</label>
+      <input id="home-svc-search" oninput="accueilSug(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();rechercherDepuisAccueil();}" placeholder="Ex. nettoyage, plomberie, cours à domicile…" style="width:100%;box-sizing:border-box;padding:12px;border-radius:12px;border:1.5px solid var(--line);background:#fff;font:inherit;font-weight:700" autocomplete="off">
+      <div id="accueil-sug" style="margin-top:8px"></div>
+
+      <div style="font-size:12.5px;font-weight:900;color:var(--pd);margin:13px 0 7px">📍 Où le service doit-il être effectué ?</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" id="lieu-btn-moi" onclick="accueilLieu('moi')" style="cursor:pointer;font:inherit;font-weight:900;font-size:12px;padding:9px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">📍 Ma position actuelle</button>
+        <button type="button" id="lieu-btn-ville" onclick="accueilLieu('ville')" style="cursor:pointer;font:inherit;font-weight:900;font-size:12px;padding:9px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">🏙️ Ma ville</button>
+        <button type="button" id="lieu-btn-autre" onclick="accueilLieu('autre')" style="cursor:pointer;font:inherit;font-weight:900;font-size:12px;padding:9px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">✍️ Un autre lieu</button>
+      </div>
+      <div id="accueil-lieu" style="margin-top:8px"></div>
+
+      <button type="button" onclick="rechercherDepuisAccueil()" style="width:100%;margin-top:12px;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:15px;border-radius:14px;font-size:16px;box-shadow:0 5px 14px rgba(232,93,4,.35)">🔍 Rechercher un service</button>
+      <div id="accueil-msg" style="margin-top:9px"></div>
     </div>
+
+    <div style="margin-top:11px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.32);border-radius:14px;padding:10px 11px">
+      <div style="font-size:12px;font-weight:900">🎫 Vous connaissez déjà votre professionnel ?</div>
+      <div style="display:flex;gap:6px;margin-top:7px">
+        <input id="accueil-kp" placeholder="Son code KP — ex. KP015842" onkeydown="if(event.key==='Enter'){event.preventDefault();accueilKpGo();}" style="flex:1;min-width:0;padding:10px;border-radius:10px;border:none;font:inherit;font-weight:800;letter-spacing:1px;text-transform:uppercase" autocomplete="off">
+        <button type="button" onclick="accueilKpGo()" style="border:none;background:#fff;color:var(--pd);font:inherit;font-weight:900;padding:10px 13px;border-radius:10px;cursor:pointer">Trouver</button>
+      </div>
+      <div style="font-size:10.5px;opacity:.92;margin-top:6px">Optionnel : vous n’avez jamais besoin d’un code pour utiliser Klean.</div>
+    </div>
+    <div style="margin-top:9px;font-size:10.5px;opacity:.92;line-height:1.45">🔒 Recherche autour du <b>lieu de la prestation</b> · pros inscrits, actifs et disponibles · <span id="hero-phase">🇨🇮 Actif à Bouaké</span></div>
   </div>
 
+  <div style="display:flex;gap:7px;margin:0 0 13px">
+    <div style="flex:1;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:9px 6px;text-align:center"><b style="display:block;font-size:17px;color:var(--pd)" id="hero-agents-n">—</b><span style="font-size:10px;color:var(--muted);font-weight:800;line-height:1.2;display:block" id="hero-agents-sub">Professionnels inscrits</span></div>
+    <div style="flex:1;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:9px 6px;text-align:center"><b style="display:block;font-size:17px;color:var(--pd)">17</b><span style="font-size:10px;color:var(--muted);font-weight:800;line-height:1.2;display:block">Services</span></div>
+    <div style="flex:1;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:9px 6px;text-align:center"><b style="display:block;font-size:17px;color:var(--pd)">~10 min</b><span style="font-size:10px;color:var(--muted);font-weight:800;line-height:1.2;display:block">Arrivée estimée</span></div>
+  </div>
+
+  <h3 class="sect-title">⚡ Services les plus demandés <small>Touchez pour lancer la recherche</small></h3>
+  <div id="accueil-pop" style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 6px"></div>
+
   <div class="wrap">
-    <h3 class="sect-title">Nos services <small>Prix transparents, affichés avant de réserver</small></h3>
-    <div class="svc-grid" id="home-svc"></div>
+    <h3 class="sect-title">Tous nos services <small>Prix transparents, affichés avant de réserver</small></h3>
+    <button type="button" id="home-svc-toggle" onclick="accueilToggleSvc()" style="width:100%;border:1.5px solid var(--line);background:var(--card);color:var(--pd);font:inherit;font-weight:900;padding:12px;border-radius:13px;cursor:pointer;margin-bottom:10px">📂 Voir les 17 services et leurs prix ▾</button>
+    <div class="svc-grid" id="home-svc" style="display:none"></div>
 
     <h3 class="sect-title">📞 Vos pros les plus proches <small>Par quartier ou GPS — appelez ou réservez</small></h3>
     <div id="proches-slot"></div>
@@ -3488,7 +3503,7 @@ refreshStats();
    par NUMÉRO PROFESSIONNEL. Toutes les distances viennent du SERVEUR :
    le GPS du téléphone n'est jamais cru sur parole (vérifié côté serveur).
    ═══════════════════════════════════════════════════════════════════════════ */
-const RECH = { svc:'', lat:null, lng:null, source:'', exact:false, liste:[], fiche:null, num:'', etape:'svc', msgErr:'' };
+const RECH = { svc:'', q:'', lat:null, lng:null, acc:0, source:'', exact:false, liste:[], fiche:null, num:'', etape:'q', msgErr:'', mode:'service', compris:'', suggestions:[], tri:'score', elargir:false, busy:false, lieu:null, lieuTxt:'', lieuOk:true, posSource:'', zoneElargie:0 };
 
 function rechEch(t){ return String(t==null?'':t).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 function rechSvcNom(id){ const s=(typeof SERVICES!=='undefined'?SERVICES:[]).find(x=>x.id===id); return s?s.nom:(id||''); }
@@ -3499,15 +3514,227 @@ function rechBox(){ return document.getElementById('ecran-recherche'); }
 
 /* ── bouton d'entrée réutilisable (accueil + bloc « pros les plus proches ») ── */
 function rechBouton(){
-  return '<div style="margin:0 0 10px"><button onclick="ouvrirRecherche()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:12px 14px;border-radius:14px;box-shadow:0 4px 12px rgba(10,138,98,.25);font-size:14px">🔎 Rechercher un pro près de moi · GPS</button></div>';
+  return '<div style="margin:0 0 10px"><button onclick="ouvrirRecherche()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:12px 14px;border-radius:14px;box-shadow:0 4px 12px rgba(10,138,98,.25);font-size:14px">🔎 Chercher un professionnel (une seule recherche)</button>'
+    + '<small style="display:block;margin-top:6px;color:#6b7c73;font-size:11.5px;text-align:center">Écrivez ce dont vous avez besoin — Klean trouve les pros autour de vous. Un code KP&nbsp;? Il marche aussi.</small></div>';
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🏠 ACCUEIL CLIENT — UNE SEULE RECHERCHE
+   « Le service dont vous avez besoin, où vous en avez besoin. »
+   1) ce que le client cherche (écrit ou choisi, avec suggestions)
+   2) OÙ la prestation doit être faite (sa position, sa ville, ou un autre lieu)
+   3) Rechercher un service → le serveur cherche autour du LIEU DE PRESTATION
+   Le code KP reste disponible, mais uniquement en secours.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const ACC_MOTS = {
+  maison:['menage','nettoyage','femme de menage','repassage','linge','nettoyer','propre','maison','appartement','villa','chambre'],
+  bureaux:['bureaux','bureau','commerce','boutique','magasin','agence','societe'],
+  canapes:['canape','canapes','fauteuil','tapis','moquette','detachage'],
+  vitres:['vitre','vitres','fenetre','fenetres','baie','vitrine','carreaux'],
+  demenagement:['apres demenagement','etat des lieux','fin de bail','emménagement','emmenagement'],
+  sdb:['salle de bain','salle de bains','douche','baignoire','wc','toilettes','faillance','faience','joints'],
+  grand:['grand menage','menage complet','fond en comble','grande maison'],
+  plomberie:['plomberie','plombier','fuite','robinet','tuyau','canalisation','bouche','debouchage','chauffe','chauffe-eau','evier','pression'],
+  electricite:['electricite','electricien','courant','panne','prise','interrupteur','disjoncteur','tableau','cablage','ampoule','lumiere','ventilateur'],
+  clim:['clim','climatisation','climatiseur','split','gaz','freon','froid','fraicheur'],
+  serrurerie:['serrurerie','serrurier','serrure','cle','cles','cylindre','verrou','cadenas'],
+  electro:['electromenager','frigo','refrigerateur','congelateur','machine a laver','four','cuisiniere','micro ondes'],
+  jardinage:['jardin','jardinage','jardinier','pelouse','gazon','tonte','haie','haies','arbre','plantes','desherbage'],
+  lavageauto:['lavage','voiture','vehicule','auto','car wash','suv','moto'],
+  bricolage:['bricolage','bricoleur','montage','meuble','etagere','fixation','tringle','rideaux','perceuse'],
+  demen:['demenagement','demenageur','porteur','portage','transport','cartons','camion'],
+  cuisine:['cuisinier','cuisiniere','cuisine','repas','traiteur','patisserie','chef','plat'],
+  evenement:['evenement','fete','mariage','reception','ceremonie','bapteme','anniversaire'],
+  entretien:['entretien','abonnement','chaque semaine','regulier','tous les jours','periodique'],
+  placement:['nounou','garde enfant','garde d enfant','gardien','vigile','aide menagere','personnel','employe'],
+  cours:['cours','soutien','scolaire','professeur','prof','repetiteur','maths','mathematiques','physique','chimie','francais','anglais','philosophie','histoire','lecture','ecriture','primaire','college','lycee','bac','formation','coach','informatique','bureautique','musique','piano','guitare','devoirs','eleve'],
+  canal:['canal','decodeur','parabole','satellite','antenne','chaine','abonnement tv']
+};
+function accueilMsg(t){
+  const el = document.getElementById('accueil-msg');
+  if(!el) return;
+  el.innerHTML = t ? ('<div style="background:#FFF4E8;border:1.5px solid #F6D9BE;color:#8a3d00;border-radius:11px;padding:9px 10px;font-size:12.5px;font-weight:800">'+t+'</div>') : '';
+}
+function accChipHTML(svc, petit){
+  return '<button type="button" onclick="accueilChip(\''+svc.id+'\')" style="cursor:pointer;font:inherit;font-weight:800;font-size:'+(petit?'11.5px':'12.5px')+';padding:8px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd)">'+svc.ic+' '+rechEch(svc.nom)+'</button>';
+}
+function accSvcSuggeres(q){
+  const n = normT(q||'').trim();
+  if(!n) return [];
+  const out = [];
+  for (const svc of (typeof SERVICES!=='undefined'?SERVICES:[])) {
+    if (svc.id === 'custom') continue;
+    let sc = 0;
+    const nom = normT(svc.nom), desc = normT(svc.desc||'');
+    if (nom === n) sc += 9; else if (nom.indexOf(n) >= 0) sc += 5;
+    if (desc.indexOf(n) >= 0) sc += 2;
+    /* mots-clés déclarés pour ce métier (« maths » → cours, « canapé » → canapés…) */
+    for (const m of (ACC_MOTS[svc.id] || [])) {
+      const nm = normT(m);
+      if (!nm) continue;
+      if (n.indexOf(nm) >= 0 || (nm.length > 5 && nm.indexOf(n) >= 0)) { sc += 4; break; }
+    }
+    if (sc > 0) out.push({ svc, sc });
+  }
+  out.sort((a,b)=>b.sc-a.sc);
+  return out.slice(0,5).map(x=>x.svc);
+}
+function accueilSug(v){
+  const box = document.getElementById('accueil-sug'); if(!box) return;
+  const kp = rechKpDetect(v);
+  if(kp){
+    box.innerHTML = '<div style="background:#FFF4E8;border:1.5px solid #F6D9BE;border-radius:12px;padding:10px;font-size:12.5px;font-weight:800;color:#8a3d00">🎫 Code professionnel détecté : '+rechEch(kp)+' <button type="button" onclick="accueilKpGo(\''+kp+'\')" style="margin-left:6px;border:none;background:var(--p);color:#fff;font:inherit;font-weight:900;padding:7px 11px;border-radius:9px;cursor:pointer;font-size:12px">Voir ce professionnel</button></div>';
+    return;
+  }
+  const l = accSvcSuggeres(v);
+  if(l.length){ box.innerHTML = '<div style="font-size:11px;color:var(--muted);font-weight:800;margin-bottom:5px">Suggestions :</div><div style="display:flex;gap:6px;flex-wrap:wrap">'+l.map(x=>accChipHTML(x,true)).join('')+'</div>'; return; }
+  box.innerHTML = (String(v||'').trim().length > 1)
+    ? '<div style="font-size:11.5px;color:var(--muted)">Aucun métier ne correspond à « '+rechEch(String(v).slice(0,40))+' ». Essayez « nettoyage », « plomberie », « cours »… ou passez par une <b>demande sur mesure</b>.</div>'
+    : '';
+}
+function accueilChip(id){
+  const svc = (typeof SERVICES!=='undefined'?SERVICES:[]).find(x=>x.id===id);
+  const nom = svc ? svc.nom : id;
+  const inp = document.getElementById('home-svc-search'); if(inp) inp.value = nom;
+  RECH.q = nom; RECH.svc = id;
+  const box = document.getElementById('accueil-sug'); if(box) box.innerHTML = '';
+  accueilMsg('');
+  if(!RECH.lieu || !RECH.lieu.mode) accueilLieu('ville');
+  const el = document.getElementById('lieu-btn-ville'); if(el) try{ el.scrollIntoView({block:'center'}); }catch(e){}
+}
+/* ── 📍 Le lieu de la PRESTATION (≠ forcément la position du client) ── */
+function accueilLieu(mode){
+  RECH.lieu = RECH.lieu || {};
+  RECH.lieu.mode = mode;
+  if(mode === 'ville'){
+    RECH.lieu.ville = (typeof cityName==='function' && c && c.city) ? cityName(c.city) : (RECH.lieu.ville || '');
+    RECH.lieu.quartier = (c && c.quartier) || '';
+  }
+  if(mode === 'autre') RECH.lieu.txt = RECH.lieu.txt || '';
+  accueilLieuPeindre();
+  if(mode === 'autre') setTimeout(()=>{ const t = document.getElementById('accueil-lieu-txt'); if(t) try{ t.focus(); }catch(e){} }, 60);
+}
+function accueilLieuPeindre(){
+  const box = document.getElementById('accueil-lieu'); if(!box) return;
+  const L = RECH.lieu || {};
+  ['moi','ville','autre'].forEach(m=>{
+    const b = document.getElementById('lieu-btn-'+m); if(!b) return;
+    const on = L.mode === m;
+    b.style.background = on ? 'linear-gradient(135deg,var(--p),var(--pd))' : '#fff';
+    b.style.color = on ? '#fff' : 'var(--pd)';
+  });
+  if(L.mode === 'moi'){
+    box.innerHTML = '<div style="font-size:11.5px;color:var(--muted)">Votre position actuelle servira de lieu de prestation (avec votre autorisation).</div>';
+  } else if(L.mode === 'ville'){
+    box.innerHTML = '<div style="font-size:11.5px;color:var(--muted)">Lieu : <b>'+rechEch(rechVille()||'—')+'</b>'+(rechQuartier()?(' · quartier '+rechEch(rechQuartier())):'')+' · <button type="button" onclick="cityInfo()" style="border:none;background:transparent;color:var(--pd);font:inherit;font-weight:900;cursor:pointer;font-size:11.5px">changer de ville</button></div>';
+  } else if(L.mode === 'autre'){
+    box.innerHTML = '<input id="accueil-lieu-txt" oninput="accueilLieuSug(this.value)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();rechercherDepuisAccueil();}" placeholder="Ville ou quartier — ex. Yamoussoukro, Koko Bouaké…" value="'+rechEch(L.txt||'')+'" style="width:100%;box-sizing:border-box;padding:11px;border-radius:11px;border:1.5px solid var(--line);font:inherit;font-weight:700" autocomplete="off"><div id="accueil-lieu-sug" style="margin-top:7px"></div>'
+      + '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;line-height:1.45">Klean intervient partout : 🏠 domicile · 🏢 bureau · 🏬 commerce · 🏨 hôtel · 🏗️ chantier · 🚗 véhicule · 🌳 espace public.</div>';
+  } else {
+    box.innerHTML = '';
+  }
+}
+function accueilLieuxTrouves(q){
+  const n = normT(q||'').trim(); if(!n) return [];
+  const out = [];
+  for (const ci of (typeof CITIES!=='undefined'?CITIES:[])) {
+    const nc = normT(ci.nom);
+    if(nc.indexOf(n) >= 0) out.push({ ville: ci.nom, quartier: '', sc: nc === n ? 3 : 2 });
+    for (const qt of (ci.quartiers||[])) if(normT(qt).indexOf(n) >= 0) out.push({ ville: ci.nom, quartier: qt, sc: normT(qt) === n ? 2.5 : 1 });
+  }
+  out.sort((a,b)=>b.sc-a.sc);
+  return out.slice(0,6);
+}
+function accueilLieuSug(v){
+  const box = document.getElementById('accueil-lieu-sug'); if(!box) return;
+  const l = accueilLieuxTrouves(v);
+  box.innerHTML = l.length
+    ? '<div style="display:flex;gap:6px;flex-wrap:wrap">'+l.map(x=>'<button type="button" onclick="accueilLieuChoisir(\''+rechEch(x.ville).replace(/'/g,"\\'")+'\',\''+rechEch(x.quartier).replace(/'/g,"\\'")+'\')" style="cursor:pointer;font:inherit;font-weight:800;font-size:11.5px;padding:8px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd)">📍 '+rechEch(x.quartier ? (x.quartier+', '+x.ville) : x.ville)+'</button>').join('')+'</div>'
+    : (String(v||'').trim().length > 1 ? '<div style="font-size:11.5px;color:var(--muted)">Lieu non reconnu — écrivez une ville de Côte d’Ivoire (ex. Yamoussoukro) ou un quartier (ex. Koko).</div>' : '');
+}
+function accueilLieuChoisir(ville, quartier){
+  RECH.lieu = RECH.lieu || {};
+  RECH.lieu.mode = 'autre';
+  RECH.lieu.ville = ville; RECH.lieu.quartier = quartier || '';
+  RECH.lieu.txt = quartier ? (quartier + ', ' + ville) : ville;
+  accueilLieuPeindre();
+  const t = document.getElementById('accueil-lieu-txt'); if(t) t.value = RECH.lieu.txt;
+  accueilLieuSug('');
+}
+function accueilLieuValider(){
+  const L = RECH.lieu || {};
+  if(L.mode !== 'autre') return true;
+  const el = document.getElementById('accueil-lieu-txt');
+  const v = ((el ? el.value : '') || L.txt || '').trim();
+  L.txt = v;
+  if(!v) return false;
+  if(!L.ville){
+    const t = accueilLieuxTrouves(v)[0];
+    if(t){ L.ville = t.ville; L.quartier = t.quartier || ''; }
+  }
+  return true;
+}
+/* ── 🎫 Code KP : accès direct, secondaire ── */
+async function accueilKpGo(code){
+  const v = (code !== undefined && code !== null && String(code).trim()) ? code : ((document.getElementById('accueil-kp')||{}).value||'');
+  const kp = rechKpDetect(v);
+  if(!kp){ accueilMsg('🎫 Code invalide : un code professionnel s’écrit <b>KP</b> suivi de 6 chiffres (ex. KP015842).'); return; }
+  accueilMsg('');
+  RECH.q = kp; RECH.svc = ''; RECH.elargir = false; RECH.zoneElargie = 0;
+  RECH.etape = 'liste'; RECH.busy = true;
+  ouvrirRecherche();
+  await rechParNumCode(kp);
+}
+/* ── 🔍 LE BOUTON PRINCIPAL ── */
+function rechercherDepuisAccueil(){
+  const inp = document.getElementById('home-svc-search');
+  const q = ((inp ? inp.value : '') || RECH.q || '').trim();
+  RECH.q = q;
+  if(!q){ accueilMsg('✍️ Écrivez ou choisissez le service recherché (ex. nettoyage, plomberie, cours à domicile).'); return; }
+  const kp = rechKpDetect(q);
+  if(kp) return accueilKpGo(kp);
+  if(RECH.svc && normT(q) !== normT(rechSvcNom(RECH.svc))) RECH.svc = '';
+  if(!RECH.lieu || !RECH.lieu.mode){ accueilLieu('ville'); }
+  if(!accueilLieuValider()){ accueilMsg('📍 Indiquez où le service doit être effectué (votre position, votre ville, ou un autre lieu).'); return; }
+  accueilMsg('');
+  RECH.elargir = false; RECH.zoneElargie = 0; RECH.tri = 'score';
+  ouvrirRecherche();
+  RECH.etape = 'liste'; RECH.busy = true;
+  const L = RECH.lieu || {};
+  if(L.mode === 'moi') rechLocaliser();
+  else rechChercher(false);
+}
+function accueilPop(){
+  const box = document.getElementById('accueil-pop'); if(!box) return;
+  const ids = ['maison','plomberie','electricite','clim','cours','cuisine','jardinage','grand','lavageauto','placement'];
+  box.innerHTML = ids.map(id=>{
+    const svc = (typeof SERVICES!=='undefined'?SERVICES:[]).find(x=>x.id===id);
+    return svc ? accChipHTML(svc) : '';
+  }).join('');
+}
+function accueilToggleSvc(){
+  const g = document.getElementById('home-svc'), b = document.getElementById('home-svc-toggle');
+  if(!g) return;
+  const ouvert = g.style.display !== 'none';
+  g.style.display = ouvert ? 'none' : 'grid';
+  if(b) b.innerHTML = ouvert ? '📂 Voir les 17 services et leurs prix ▾' : '📁 Masquer la liste des services ▴';
+}
+function accueilInit(){
+  try{ accueilPop(); }catch(e){}
+  try{
+    if(!RECH.lieu) RECH.lieu = { mode: 'ville', ville: rechVille(), quartier: rechQuartier() };
+    if(RECH.lieu.mode === 'ville'){ RECH.lieu.ville = rechVille(); RECH.lieu.quartier = rechQuartier(); }
+    accueilLieuPeindre();
+  }catch(e){}
+}
+try{ accueilInit(); }catch(e){}
 
 /* ═══════════ OUVERTURE / FERMETURE ═══════════ */
 function ouvrirRecherche(){
   const b = rechBox(); if(!b) return;
   b.style.display = 'block';
   document.body.style.overflow = 'hidden';
-  RECH.etape = RECH.svc ? 'pos' : 'svc';
+  RECH.etape = RECH.svc ? 'pos' : 'q';
   rechPeindre();
 }
 function rechFermer(){
@@ -3517,18 +3744,157 @@ function rechFermer(){
 }
 function rechPeindre(){
   const b = rechBox(); if(!b) return;
-  const tete = '<div style="position:sticky;top:0;z-index:5;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:10px">'
+  const sousTitre = RECH.compris ? ('Compris : '+rechEch(RECH.compris))
+    : (RECH.svc ? ('Métier : '+rechEch(rechSvcNom(RECH.svc))) : 'Une seule recherche pour tous les métiers');
+  const tete = '<div style="position:sticky;top:0;z-index:5;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:13px 16px">'
+    + '<div style="display:flex;align-items:center;gap:10px">'
     + '<div style="flex:1;min-width:0"><b style="font-size:15.5px;display:block">🔎 Trouver un professionnel</b>'
-    + '<small style="opacity:.92;font-size:11.5px">'+(RECH.svc?('Service : '+rechEch(rechSvcNom(RECH.svc))):'Choisissez d’abord votre service')+'</small></div>'
-    + '<button onclick="rechFermer()" style="border:none;background:rgba(255,255,255,.22);color:#fff;font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">✕</button></div>';
+    + '<small style="opacity:.92;font-size:11.5px">'+sousTitre+'</small></div>'
+    + '<button onclick="rechFermer()" style="border:none;background:rgba(255,255,255,.22);color:#fff;font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">✕</button></div>'
+    + rechEtapes(RECH.etape) + '</div>';
   let corps = '';
-  if(RECH.etape==='svc')      corps = rechVueSvc();
-  else if(RECH.etape==='pos') corps = rechVuePos();
+  if(RECH.etape==='q')          corps = rechVueQ();
+  else if(RECH.etape==='svc')   corps = rechVueSvc();
+  else if(RECH.etape==='pos')   corps = rechVuePos();
   else if(RECH.etape==='liste') corps = rechVueListe();
-  else if(RECH.etape==='num') corps = rechVueNum();
+  else if(RECH.etape==='num')   corps = rechVueNum();
   b.innerHTML = '<div style="position:fixed;inset:0;background:#f4f7f6;overflow-y:auto;-webkit-overflow-scrolling:touch">'+tete
     + '<div style="max-width:640px;margin:0 auto;padding:14px">'+corps+'</div></div>';
   try{ window.scrollTo(0,0); }catch(e){}
+}
+
+/* 🧭 Le parcours complet, toujours visible : le client sait où il en est */
+function rechEtapes(et){
+  const pas = [
+    {n:'Service', ok:true}, {n:'Position', ok:['pos','liste'].includes(et)}, {n:'Pros', ok:et==='liste'},
+    {n:'Choix', ok:et==='liste'}, {n:'Paiement'}, {n:'Évaluation'}
+  ];
+  let actif = et==='q' ? 0 : (et==='pos' ? 1 : (et==='liste' ? 2 : 0));
+  return '<div style="display:flex;gap:5px;overflow-x:auto;margin-top:10px;padding-bottom:2px">'
+    + pas.map((p,i)=>{
+        const on = i<=actif;
+        return '<span style="flex:none;font-size:10px;font-weight:900;padding:3px 8px;border-radius:99px;'
+          + (i===actif ? 'background:#fff;color:var(--pd)' : (on ? 'background:rgba(255,255,255,.3);color:#fff' : 'background:rgba(255,255,255,.14);color:rgba(255,255,255,.75)'))
+          + '">'+(i+1)+'. '+p.n+'</span>';
+      }).join('')
+    + '</div>';
+}
+
+/* ═══════════ L'ÉCRAN UNIQUE : « De quoi avez-vous besoin ? » ═══════════ */
+const RECH_POP = ['cours','maison','clim','plomberie','electricite','jardinage','cuisine','placement','grand','placement'];
+function rechChips(){
+  const vus = {};
+  return RECH_POP.filter(id=>{ if(vus[id]) return false; vus[id]=1; return true; })
+    .map(id=>'<button type="button" onclick="rechChipSet(\''+id+'\')" style="border:1.5px solid #e4eae7;background:#fff;color:#33433c;font:inherit;font-weight:800;font-size:12px;padding:8px 11px;border-radius:99px;cursor:pointer">'+rechSvcIc(id)+' '+rechEch(rechSvcNom(id))+'</button>').join('');
+}
+/* 🎫 Détection du code pro directement dans la barre principale */
+function rechKpDetect(v){
+  const r = String(v||'').toUpperCase().replace(/[\s._\-]/g,'');
+  let m = r.match(/^KP(\d{3,6})$/);
+  if(m) return 'KP-'+m[1].padStart(6,'0');
+  if(/^\d{6}$/.test(r)) return 'KP-'+r;
+  return '';
+}
+function rechVueQ(){
+  const kp = rechKpDetect(RECH.q||'');
+  return '<div style="background:#fff;border-radius:16px;padding:15px;box-shadow:0 2px 10px rgba(0,0,0,.05)">'
+    + '<h3 style="margin:0 0 4px;font-size:16.5px">De quoi avez-vous besoin ?</h3>'
+    + '<p style="margin:0 0 11px;color:#7A6A5E;font-size:12.5px">Écrivez-le simplement : <b>nettoyage</b>, <b>fuite d’eau</b>, <b>cours à domicile</b>… Klean comprend et cherche autour du <b>lieu de la prestation</b>.</p>'
+    + '<input class="inp" id="rech-q" placeholder="Ex. cours à domicile" value="'+rechEch(RECH.q||'')+'" oninput="RECH.q=this.value;rechMajChamp()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();rechLancer();}" style="margin-bottom:9px;font-size:15px;font-weight:700" autocomplete="off">'
+    + '<div id="rech-aide">'+(kp
+        ? ('<div style="background:#FFF4E8;border:1.5px solid #F6D9BE;border-radius:12px;padding:10px 11px;font-size:12.5px;font-weight:800;color:#8a3d00;margin-bottom:10px">🎫 Code détecté : '+rechEch(kp)+' <button type="button" onclick="rechParNumCode(\''+kp+'\')" style="margin-left:6px;border:none;background:var(--p);color:#fff;font:inherit;font-weight:900;padding:6px 10px;border-radius:9px;cursor:pointer;font-size:12px">Afficher ce pro</button></div>')
+        : rechAideSvc())+'</div>'
+    + '<div style="font-size:12.5px;font-weight:900;color:var(--pd);margin:4px 0 7px">📍 Où le service doit-il être effectué ?</div>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    + '<button type="button" id="r-lieu-moi" onclick="accueilLieu(\'moi\');rechLieuPeindre()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12px;padding:9px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">📍 Ma position</button>'
+    + '<button type="button" id="r-lieu-ville" onclick="accueilLieu(\'ville\');rechLieuPeindre()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12px;padding:9px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">🏙️ Ma ville</button>'
+    + '<button type="button" id="r-lieu-autre" onclick="accueilLieu(\'autre\');rechLieuPeindre()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12px;padding:9px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">✍️ Un autre lieu</button>'
+    + '</div><div id="rech-lieu-box" style="margin-top:8px"></div>'
+    + (RECH.msgErr ? ('<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:12px;padding:11px 12px;font-size:12.5px;font-weight:700;margin-top:10px">'+RECH.msgErr+'</div>') : '')
+    + '<button type="button" onclick="rechLancer()" style="width:100%;margin-top:12px;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:14px;border-radius:14px;font-size:15px">🔍 Rechercher un service</button>'
+    + '<div style="margin-top:12px;padding-top:11px;border-top:1.5px dashed #F6D9BE">'
+    + '<div style="font-size:12px;font-weight:900;color:var(--pd)">🎫 Vous connaissez déjà votre professionnel ?</div>'
+    + '<button type="button" onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;margin-top:7px;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd);font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer;font-size:12.5px">Entrer son code KP (ex. KP015842)</button></div>'
+    + '<div style="margin-top:10px;font-size:11px;color:#7A6A5E">🔒 Votre position sert uniquement au calcul de la distance et n’est jamais affichée.</div>'
+    + '</div>';
+}
+/* liste de métiers proposée dans la fenêtre de recherche */
+function rechAideSvc(){
+  const ids = ['maison','plomberie','electricite','clim','cours','cuisine','jardinage','grand','lavageauto','placement'];
+  return '<div style="font-size:11px;color:#7A6A5E;font-weight:800;margin-bottom:5px">Métiers courants :</div>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+ids.map(id=>{
+        const svc = (typeof SERVICES!=='undefined'?SERVICES:[]).find(x=>x.id===id);
+        return svc ? '<button type="button" onclick="RECH.svc=\''+id+'\';RECH.q=\''+rechSvcNom(id).replace(/'/g,"\\'")+'\';rechPeindre()" style="cursor:pointer;font:inherit;font-weight:800;font-size:11.5px;padding:8px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd)">'+svc.ic+' '+rechEch(svc.nom)+'</button>' : '';
+      }).join('')+'</div>';
+}
+/* les 3 choix de lieu, dans la fenêtre de recherche */
+function rechLieuPeindre(){
+  const box = document.getElementById('rech-lieu-box'); if(!box) return;
+  const L = RECH.lieu || {};
+  ['moi','ville','autre'].forEach(m=>{
+    const b = document.getElementById('r-lieu-'+m); if(!b) return;
+    const on = L.mode === m;
+    b.style.background = on ? 'linear-gradient(135deg,var(--p),var(--pd))' : '#fff';
+    b.style.color = on ? '#fff' : 'var(--pd)';
+  });
+  if(L.mode === 'moi') box.innerHTML = '<div style="font-size:11.5px;color:#7A6A5E">Votre position actuelle servira de lieu de prestation (avec votre autorisation).</div>';
+  else if(L.mode === 'ville') box.innerHTML = '<div style="font-size:11.5px;color:#7A6A5E">Lieu : <b>'+rechEch(L.ville||rechVille()||'—')+'</b>'+((L.quartier||rechQuartier())?(' · '+rechEch(L.quartier||rechQuartier())):'')+'</div>';
+  else if(L.mode === 'autre') box.innerHTML = '<input id="rech-lieu-txt" oninput="accueilLieuSug2(this.value)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();rechLancer();}" placeholder="Ville ou quartier — ex. Yamoussoukro, Koko Bouaké…" value="'+rechEch(L.txt||'')+'" style="width:100%;box-sizing:border-box;padding:11px;border-radius:11px;border:1.5px solid #e4eae7;font:inherit;font-weight:700" autocomplete="off"><div id="rech-lieu-sug" style="margin-top:7px"></div>'
+    + '<div style="font-size:10.5px;color:#7A6A5E;margin-top:6px;line-height:1.45">Tous les lieux : 🏠 domicile · 🏢 bureau · 🏬 commerce · 🏨 hôtel · 🏗️ chantier · 🚗 véhicule · 🌳 espace public.</div>';
+  else box.innerHTML = '';
+}
+function accueilLieuSug2(v){
+  const box = document.getElementById('rech-lieu-sug'); if(!box) return;
+  const l = accueilLieuxTrouves(v);
+  box.innerHTML = l.length
+    ? '<div style="display:flex;gap:6px;flex-wrap:wrap">'+l.map(x=>'<button type="button" onclick="accueilLieuChoisir(\''+rechEch(x.ville).replace(/'/g,"\\'")+'\',\''+rechEch(x.quartier).replace(/'/g,"\\'")+'\');rechLieuPeindre()" style="cursor:pointer;font:inherit;font-weight:800;font-size:11.5px;padding:8px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd)">📍 '+rechEch(x.quartier ? (x.quartier+', '+x.ville) : x.ville)+'</button>').join('')+'</div>'
+    : (String(v||'').trim().length > 1 ? '<div style="font-size:11.5px;color:#7A6A5E">Lieu non reconnu — écrivez une ville de Côte d’Ivoire (ex. Yamoussoukro).</div>' : '');
+}
+function rechMajChamp(){
+  /* on ne redessine QUE la zone d'aide : la frappe reste fluide */
+  try{
+    const a = document.getElementById('rech-aide'); if(!a) return;
+    const kp = rechKpDetect(RECH.q||'');
+    a.innerHTML = kp
+      ? ('<div style="background:#FFF4E8;border:1.5px solid #F6D9BE;border-radius:12px;padding:10px 11px;font-size:12.5px;font-weight:800;color:var(--pd);margin-bottom:10px">🎫 Code détecté : '+rechEch(kp)+' <button type="button" onclick="rechParNumCode(\''+kp+'\')" style="margin-left:6px;border:none;background:var(--pd);color:#fff;font:inherit;font-weight:900;padding:6px 10px;border-radius:9px;cursor:pointer;font-size:12px">Afficher ce pro</button></div>')
+      : ('<div style="font-size:11.5px;color:#6b7c73;margin-bottom:9px">Ou touchez un métier courant :</div>'
+         + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:11px">'+rechChips()+'</div>');
+  }catch(e){}
+}
+function rechChipSet(id){
+  RECH.svc = id; RECH.q = rechSvcNom(id);
+  const i = document.getElementById('rech-q'); if(i) i.value = RECH.q;
+  rechLocaliser();
+}
+function rechLancer(){
+  const i = document.getElementById('rech-q');
+  RECH.q = (i ? i.value : RECH.q || '').trim();
+  if(RECH.q && RECH.svc && normT(RECH.q) !== normT(rechSvcNom(RECH.svc))) RECH.svc = '';
+  RECH.msgErr = '';
+  if(!RECH.q){ RECH.msgErr = '✍️ Écrivez ce dont vous avez besoin (ex. nettoyage, cours à domicile).'; return rechPeindre(); }
+  const kp = rechKpDetect(RECH.q);
+  if(kp) return rechParNumCode(kp);
+  if(!RECH.lieu || !RECH.lieu.mode) accueilLieu('ville');
+  if(RECH.lieu.mode === 'autre'){
+    const t = document.getElementById('rech-lieu-txt');
+    if(t) RECH.lieu.txt = (t.value || '').trim();
+    if(!RECH.lieu.txt){ RECH.msgErr = '📍 Écrivez le lieu de la prestation (ex. Yamoussoukro).'; return rechPeindre(); }
+    if(!RECH.lieu.ville){ const l = accueilLieuxTrouves(RECH.lieu.txt)[0]; if(l){ RECH.lieu.ville = l.ville; RECH.lieu.quartier = l.quartier || ''; } }
+  }
+  RECH.elargir = false; RECH.zoneElargie = 0;
+  if(RECH.lieu.mode === 'moi'){ RECH.etape = 'liste'; rechLocaliser(); }
+  else rechChercher(false);
+}
+function rechLancerSansGps(){
+  const i = document.getElementById('rech-q');
+  RECH.q = (i ? i.value : RECH.q || '').trim();
+  if(RECH.q && RECH.svc && normT(RECH.q) !== normT(rechSvcNom(RECH.svc))) RECH.svc = '';
+  if(!RECH.q){ RECH.msgErr = '✍️ Écrivez ce dont vous avez besoin (ex. nettoyage, cours à domicile).'; return rechPeindre(); }
+  const kp = rechKpDetect(RECH.q);
+  if(kp) return rechParNumCode(kp);
+  if(!RECH.lieu || !RECH.lieu.mode) RECH.lieu = { mode:'ville', ville: rechVille(), quartier: rechQuartier() };
+  if(RECH.lieu.mode === 'moi') RECH.lieu = { mode:'ville', ville: rechVille(), quartier: rechQuartier() };
+  rechChercher(false);
 }
 
 /* ═══════════ ÉTAPE 1 : QUEL SERVICE ? ═══════════ */
@@ -3546,14 +3912,18 @@ function rechVueSvc(){
     + '</div>'
     + (list.length?'':'<p class="note" style="margin:8px 0 0">Aucun service ne correspond — essayez un autre mot.</p>')
     + '<div style="margin-top:14px;padding-top:12px;border-top:1.5px dashed #e4eae7">'
-    + '<button onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;border:1.5px solid #0a8a62;background:#f2fbf8;color:#0a8a62;font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer">🎫 Rechercher par numéro professionnel</button>'
+    + '<button onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;border:1.5px solid var(--pd);background:#FFF4E8;color:var(--pd);font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer">🎫 Rechercher par numéro professionnel</button>'
     + '</div></div>';
 }
 function rechPeintCorps(){
   const b = rechBox(); if(!b) return;
-  const corps = RECH.etape==='svc' ? rechVueSvc() : (RECH.etape==='num' ? rechVueNum() : (RECH.etape==='liste' ? rechVueListe() : rechVuePos()));
+  const corps = RECH.etape==='q' ? rechVueQ()
+    : (RECH.etape==='svc' ? rechVueSvc()
+    : (RECH.etape==='num' ? rechVueNum()
+    : (RECH.etape==='liste' ? rechVueListe() : rechVuePos())));
   const z = b.querySelector('div[style*="max-width:640px"]'); if(z) z.innerHTML = corps;
-  const q = document.getElementById('rech-svc-q'); if(q) try{ q.focus(); }catch(e){}
+  const q = document.getElementById('rech-svc-q') || document.getElementById('rech-q');
+  if(q && !z.querySelector('input:focus')) try{ q.focus(); }catch(e){}
 }
 
 /* ═══════════ ÉTAPE 2 : AUTORISATION GPS ═══════════ */
@@ -3571,17 +3941,17 @@ function rechVuePos(){
     + '<p style="margin:0 0 12px;font-size:13.5px;color:#33433c">Pour vous montrer les professionnels <b>les plus proches</b>, Klean a besoin de votre position. '
     + 'Elle sert <b>uniquement</b> au calcul de la distance : votre adresse exacte n’est <b>jamais</b> affichée, et les pros ne voient qu’une distance approximative.</p>'
     + (gpsOk
-      ? '<button onclick="rechLocaliser()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:14px;border-radius:14px;font-size:15px">📍 Autoriser ma position et chercher</button>'
+      ? '<button onclick="rechLocaliser()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:14px;border-radius:14px;font-size:15px">📍 Autoriser ma position et chercher</button>'
       : '<div style="background:#fff9e6;border:1.5px solid #ffe6a3;border-radius:12px;padding:11px;font-size:13px;font-weight:700;color:#8a6100">📵 Ce téléphone ne fournit pas de position (GPS indisponible). Utilisez la recherche par ville ou par numéro professionnel.</div>')
     + '<button onclick="rechChercher(false)" style="width:100%;margin-top:9px;border:1.5px solid #d8e2dd;background:#fff;color:#33433c;font:inherit;font-weight:800;padding:12px;border-radius:13px;cursor:pointer;font-size:13.5px">🏙️ Chercher sans GPS (par ville et quartier)</button>'
     + '<div style="margin-top:14px;padding-top:12px;border-top:1.5px dashed #e4eae7">'
-    + '<button onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;border:1.5px solid #0a8a62;background:#f2fbf8;color:#0a8a62;font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer">🎫 Rechercher par numéro professionnel</button></div>'
+    + '<button onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;border:1.5px solid var(--pd);background:#FFF4E8;color:var(--pd);font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer">🎫 Rechercher par numéro professionnel</button></div>'
     + '<button onclick="RECH.etape=\'svc\';rechPeindre()" style="width:100%;margin-top:9px;border:none;background:transparent;color:#6b7c73;font:inherit;font-weight:800;padding:8px;cursor:pointer;font-size:12.5px">← Changer de service</button>'
     + '</div>';
 }
 function rechLocaliser(){
   if(!navigator.geolocation){ RECH.msgErr='📵 GPS indisponible sur ce téléphone.'; return rechPeindre(); }
-  RECH.msgErr = '<span style="color:#0a8a62">📡 Recherche de votre position…</span>';
+  RECH.msgErr = '<span style="color:var(--pd)">📡 Recherche de votre position…</span>';
   rechPeindre();
   navigator.geolocation.getCurrentPosition(
     p=>{ RECH.lat = p.coords.latitude; RECH.lng = p.coords.longitude; RECH.acc = Math.round(p.coords.accuracy||0); rechChercher(true); },
@@ -3598,86 +3968,209 @@ function rechLocaliser(){
 
 /* ═══════════ ÉTAPE 3 : LA LISTE ═══════════ */
 async function rechChercher(avecGps){
-  RECH.etape = 'liste'; RECH.busy = true;
+  RECH.etape = 'liste'; RECH.busy = true; RECH.msgErr = '';
   rechPeindre();
-  const q = 'service='+encodeURIComponent(RECH.svc)
-    + '&ville='+encodeURIComponent(rechVille())
-    + '&quartier='+encodeURIComponent(rechQuartier())
-    + (avecGps && RECH.lat!=null ? ('&lat='+RECH.lat+'&lng='+RECH.lng+'&acc='+(RECH.acc||0)) : '');
+  let qs = 'q=' + encodeURIComponent(RECH.q || '');
+  if(RECH.svc) qs += '&service=' + encodeURIComponent(RECH.svc);
+  /* 📍 la recherche se fait autour du LIEU DE PRESTATION (pas forcément la position du client) */
+  const L = RECH.lieu || {};
+  /* GPS accordé + aucun lieu choisi → on cherche autour de la position actuelle */
+  const lieuMode = L.mode || (avecGps && RECH.lat != null ? 'moi' : 'ville');
+  qs += '&lieuMode=' + lieuMode;
+  if(lieuMode === 'autre'){
+    qs += '&lieu=' + encodeURIComponent(L.txt || '')
+        + '&lieuVille=' + encodeURIComponent(L.ville || '')
+        + '&lieuQuartier=' + encodeURIComponent(L.quartier || '');
+  } else if(lieuMode === 'ville'){
+    const vL = L.ville || rechVille(), qL = L.quartier || rechQuartier();
+    qs += '&lieuVille=' + encodeURIComponent(vL) + '&lieuQuartier=' + encodeURIComponent(qL);
+    qs += '&ville=' + encodeURIComponent(vL) + '&quartier=' + encodeURIComponent(qL);
+  } else {
+    qs += '&ville=' + encodeURIComponent(rechVille());
+  }
+  if(avecGps && RECH.lat != null && lieuMode === 'moi') qs += '&lat=' + RECH.lat + '&lng=' + RECH.lng + '&acc=' + (RECH.acc || 0);
+  if(RECH.elargir) qs += '&horsLigne=1';
+  if(RECH.zoneElargie) qs += '&zoneElargie=' + RECH.zoneElargie;
   const headers = {};
   try{ if(typeof client!=='undefined' && client && client.token) headers['X-Client-Token'] = client.token; }catch(e){}
   try{
-    const r = await fetch('/api/recherche?'+q, { headers, cache:'no-store' });
+    const r = await fetch('/api/recherche?'+qs, { headers, cache:'no-store' });
     const d = await r.json().catch(()=>({}));
     RECH.busy = false;
     if(r.status === 429){ RECH.msgErr = '⏳ Trop de recherches d’affilée — attendez une minute puis réessayez.'; RECH.liste = []; }
-    else if(!r.ok || d.error){ RECH.msgErr = '⚠️ '+(d.error||'Recherche impossible pour le moment'); RECH.liste = []; }
-    else { RECH.liste = d.pros||[]; RECH.source = d.posSource||''; RECH.exact = !!d.exact; RECH.enLigne = d.enLigne||0; RECH.libres = d.libres||0; RECH.msgErr=''; }
-  }catch(e){ RECH.busy=false; RECH.liste=[]; RECH.msgErr='📡 Serveur injoignable — vérifiez votre connexion.'; }
+    else if(r.status === 404 && d.code === 'inconnu'){ RECH.msgErr = '🎫 ' + (d.error || 'Code professionnel inconnu'); RECH.liste = []; }
+    else if(r.status === 403){ RECH.msgErr = '🔒 ' + (d.error || 'Fiche non publique'); RECH.liste = []; }
+    else if(!r.ok || d.error){ RECH.msgErr = '⚠️ ' + (d.error || 'Recherche impossible pour le moment'); RECH.liste = []; }
+    else if(d.mode === 'kp'){
+      /* 🎫 le code a mené droit à son pro : on ouvre sa fiche */
+      RECH.mode = 'kp'; RECH.compris = d.compris || 'Code professionnel';
+      RECH.fiche = d.pro; RECH.ficheSvc = (d.pro && (d.pro.services || [])[0]) || '';
+      RECH.liste = []; RECH.msgErr = '';
+      rechPeindre(); rechPeindreFiche(true);
+      return;
+    }
+    else {
+      RECH.mode = d.mode || 'service';
+      RECH.compris = d.compris || ''; RECH.suggestions = d.suggestions || [];
+      RECH.liste = d.pros || [];
+      RECH.source = d.posSource || ''; RECH.exact = !!d.exact;
+      RECH.lieuTxt = d.lieuTxt || ''; RECH.lieuOk = d.lieuOk !== false;
+      RECH.posSource = d.posSource || '';
+      RECH.enLigne = d.enLigne || 0; RECH.libres = d.libres || 0;
+      RECH.prixIndicatif = d.prixIndicatif || null;
+      RECH.serviceNom = d.serviceNom || '';
+    }
+  }catch(e){ RECH.busy = false; RECH.liste = []; RECH.msgErr = '📡 Serveur injoignable — vérifiez votre connexion.'; }
   rechPeindre();
 }
-function rechVueListe(){
-  const src = RECH.source;
-  const posTxt = src==='gps' ? '<b style="color:#0a8a62">📡 Votre position GPS</b>'
-    : (src==='zone' ? '📍 Position approximative (zone)' : (src==='ville' ? '🏙️ Position approximative (ville)' : '—'));
-  let h = '<div style="background:#fff;border-radius:16px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.05);margin-bottom:12px">'
-    + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:15px">'+rechSvcIc(RECH.svc)+' '+rechEch(rechSvcNom(RECH.svc))+'</b>'
-    + '<span style="margin-left:auto;font-size:11px;font-weight:900;background:#eef4ff;color:#2f6fd0;padding:4px 9px;border-radius:99px">'+(RECH.libres||0)+' disponible(s)</span>'
-    + '<span style="font-size:11px;font-weight:900;background:#f4f6f5;color:#6b7c73;padding:4px 9px;border-radius:99px">'+(RECH.enLigne||0)+' en ligne</span></div>'
-    + '<small style="display:block;margin-top:7px;color:#6b7c73;font-size:11.5px">Classés du plus proche au plus loin · '+posTxt+' · distance approximative, jamais votre adresse exacte</small>'
-    + '<div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">'
-    + (RECH.exact ? '<button onclick="rechChercher(false)" style="flex:1;min-width:130px;border:1.5px solid #d8e2dd;background:#fff;font:inherit;font-weight:800;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">🏙️ Sans GPS (ville)</button>'
-                 : '<button onclick="rechLocaliser()" style="flex:1;min-width:130px;border:none;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;font:inherit;font-weight:900;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">📍 Utiliser mon GPS</button>')
-    + '<button onclick="rechChercher('+(RECH.exact?'true':'false')+')" style="flex:1;min-width:110px;border:1.5px solid #d8e2dd;background:#fff;font:inherit;font-weight:800;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">🔄 Actualiser</button>'
-    + '<button onclick="RECH.etape=\'svc\';rechPeindre()" style="border:1.5px solid #d8e2dd;background:#fff;font:inherit;font-weight:800;padding:10px 12px;border-radius:11px;cursor:pointer;font-size:12.5px">🔁 Changer de service</button>'
-    + '</div></div>';
-  if(RECH.busy){
-    return h + '<div style="background:#fff;border-radius:16px;padding:22px;text-align:center;color:#6b7c73;font-weight:700">📡 Recherche des pros du métier autour de vous…</div>';
-  }
-  if(RECH.msgErr){
-    h += '<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:13px;padding:12px;font-size:13px;font-weight:700;margin-bottom:12px">'+RECH.msgErr+'</div>';
-  }
-  if(!RECH.liste.length && !RECH.msgErr){
-    /* cas demandé : aucun pro proche */
-    return h + '<div style="background:#fff;border-radius:16px;padding:16px;text-align:center">'
-      + '<div style="font-size:34px">🔍</div><b style="display:block;margin:6px 0">Aucun professionnel '+rechEch(rechSvcNom(RECH.svc)).toLowerCase()+' disponible autour de vous pour l’instant</b>'
-      + '<p style="color:#6b7c73;font-size:12.5px;margin:0 0 12px">Vous pouvez réserver quand même : votre demande partira chez les pros du métier dès qu’ils se mettent en ligne. Ou cherchez un pro par son numéro professionnel.</p>'
-      + '<button onclick="rechChercher(false)" style="width:100%;border:1.5px solid #0a8a62;background:#f2fbf8;color:#0a8a62;font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer;margin-bottom:8px">🏙️ Chercher dans toute la ville</button>'
-      + '<button onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;border:1.5px solid #d8e2dd;background:#fff;color:#33433c;font:inherit;font-weight:800;padding:11px;border-radius:12px;cursor:pointer">🎫 Rechercher par numéro professionnel</button>'
-      + '</div>';
-  }
-  h += RECH.liste.map((p,i)=>{
-    const dist = p.distTxt ? ('<span style="font-weight:900;color:#2f6fd0">'+(p.distApprox?'≈ ':'')+rechEch(p.distTxt)+'</span>')
-      : (p.zoneTxt ? ('<span style="font-weight:900;color:#6b7c73">'+rechEch(p.zoneTxt)+'</span>') : '<span style="color:#6b7c73;font-weight:700">zone inconnue</span>');
-    const dispoBg = p.dispo==='libre' ? '#e6fbf3' : (p.dispo==='occupe' ? '#fff5e6' : '#f4f6f5');
-    const dispoFg = p.dispo==='libre' ? '#0a8a62' : (p.dispo==='occupe' ? '#b36b00' : '#6b7c73');
-    return '<div style="background:#fff;border:1.5px solid '+(p.dispo==='libre'?'#d9f0e7':'#e4eae7')+';border-radius:15px;padding:11px 12px;margin-bottom:9px">'
-      + '<div style="display:flex;align-items:flex-start;gap:10px">'
-      + '<span style="flex:none;width:26px;height:26px;border-radius:50%;background:#0a8a62;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px">'+(i+1)+'</span>'
-      + '<div style="flex:1;min-width:0">'
-      + '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap"><b style="font-size:14.5px">'+rechEch(p.nom||'Pro')+'</b>'
-      + (p.numPro?('<span style="font-size:10.5px;font-weight:900;background:#f0f3f1;color:#5b6b63;padding:3px 7px;border-radius:99px">🎫 '+rechEch(p.numPro)+'</span>'):'')
-      + '<span style="font-size:10.5px;font-weight:900;background:'+dispoBg+';color:'+dispoFg+';padding:3px 8px;border-radius:99px">'+(p.dispo==='libre'?'🟢 ':p.dispo==='occupe'?'🟠 ':p.dispo==='pause'?'⏸️ ':'⚪ ')+rechEch(p.dispoTxt||'—')+'</span>'
-      + (p.note?('<span style="font-size:10.5px;font-weight:900;color:#b58900">★ '+p.note+'</span>'):'')+'</div>'
-      + '<div style="margin-top:3px;font-size:12.5px">'+dist+(p.pourquoi?(' <span style="color:#6b7c73">· '+rechEch(p.pourquoi)+'</span>'):'')+'</div>'
-      + '<div style="font-size:11.5px;color:#6b7c73;margin-top:2px">'+rechEch(p.ville||'')+(p.zoneAff?' · '+rechEch(p.zoneAff):'')+(p.missionsDone?(' · '+p.missionsDone+' mission(s)'):'')+'</div>'
-      + '</div></div>'
-      + '<div style="display:flex;gap:8px;margin-top:9px">'
-      + '<button onclick="rechFiche(\''+p.id+'\',\''+RECH.svc+'\')" style="flex:1;border:1.5px solid #0a8a62;background:#f2fbf8;color:#0a8a62;font:inherit;font-weight:900;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">👤 Voir le profil</button>'
-      + '<button onclick="rechFiche(\''+p.id+'\',\''+RECH.svc+'\',true)" style="flex:1;border:none;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;font:inherit;font-weight:900;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">💬 Contacter</button>'
-      + '</div></div>';
-  }).join('');
-  h += '<div style="background:#fff;border-radius:13px;padding:11px 12px;color:#6b7c73;font-size:11.5px">🔒 Les distances sont calculées et vérifiées <b>par le serveur Klean</b> : personne ne peut se déclarer plus proche qu’il ne l’est. Aucun numéro personnel n’est publié sans autorisation du pro.</div>';
-  return h;
+/* 🎫 Identifiant SECONDAIRE : le code KP ouvre la fiche, même sans GPS */
+async function rechParNumCode(code){
+  const kp = rechKpDetect(code) || String(code||'').trim().toUpperCase();
+  if(!kp){ RECH.msgErr = '✍️ Entrez un code professionnel (ex. KP-123456).'; return rechPeindre(); }
+  RECH.q = kp; RECH.svc = ''; RECH.elargir = false;
+  const i = document.getElementById('rech-q'); if(i) i.value = kp;
+  await rechChercher(false);
 }
 
+function rechTrier(mode){
+  RECH.tri = mode;
+  rechPeindre();
+}
+/* 🔀 comparaison : mêmes données, l'ordre change selon ce qui compte pour le client */
+function rechListeTriee(){
+  const L = (RECH.liste || []).slice();
+  if(RECH.tri === 'dist')      L.sort((a,b)=>((a.distKm==null?999:a.distKm)-(b.distKm==null?999:b.distKm))||((b.scorePct||0)-(a.scorePct||0)));
+  else if(RECH.tri === 'note') L.sort((a,b)=>((b.note||0)-(a.note||0))||((b.avis||0)-(a.avis||0)));
+  else if(RECH.tri === 'missions') L.sort((a,b)=>((b.missionsDone||0)-(a.missionsDone||0))||((b.scorePct||0)-(a.scorePct||0)));
+  else if(RECH.tri === 'prix') L.sort((a,b)=>((a.prixIndicatif==null?9e9:a.prixIndicatif)-(b.prixIndicatif==null?9e9:b.prixIndicatif))||((b.scorePct||0)-(a.scorePct||0)));
+  return L;
+}
+function rechTuile(m, lib, on){
+  return '<button type="button" onclick="rechTrier(\''+m+'\')" style="border:1.5px solid '+(on?'var(--pd)':'#d8e2dd')+';background:'+(on?'#FFF4E8':'#fff')+';color:'+(on?'var(--pd)':'#33433c')+';font:inherit;font-weight:900;font-size:11.5px;padding:8px 11px;border-radius:99px;cursor:pointer;white-space:nowrap">'+lib+'</button>';
+}
+function rechVueListe(){
+  const src = RECH.posSource || RECH.source;
+  const lieuTxt = RECH.lieuTxt || rechVille() || '';
+  const posTxt = src === 'prestation' ? ('📍 autour du lieu de prestation : <b>'+rechEch(lieuTxt)+'</b>')
+    : (src === 'gps' ? '📡 autour de votre position actuelle'
+    : (src === 'zone' ? '📍 position approximative (zone)' : ('🏙️ autour de <b>'+rechEch(lieuTxt||'votre ville')+'</b>')));
+  let h = '<div style="background:#fff;border-radius:16px;padding:13px;box-shadow:0 2px 10px rgba(0,0,0,.05);margin-bottom:11px">'
+    + '<b style="display:block;font-size:15.5px;color:var(--pd);line-height:1.3">Professionnels disponibles pour votre demande</b>'
+    + '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px"><span style="font-size:13px;font-weight:800">🔎 '+(RECH.compris?rechEch(RECH.compris):rechEch(RECH.q||'Recherche'))+'</span>'
+    + '<button type="button" onclick="RECH.etape=\'q\';RECH.msgErr=\'\';rechPeindre()" style="margin-left:auto;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd);font:inherit;font-weight:900;padding:6px 10px;border-radius:99px;cursor:pointer;font-size:11.5px">✏️ Modifier</button></div>'
+    + '<div style="margin-top:5px;font-size:12.5px;color:#41544c">'+posTxt+((RECH.lieuOk === false)?' <span style="color:#b36b00;font-weight:800">(lieu non reconnu : recherche élargie à votre ville)</span>':'')+'</div>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">'
+    + '<span style="font-size:11px;font-weight:900;background:#FFF4E8;color:var(--pd);padding:4px 9px;border-radius:99px">'+(RECH.libres||0)+' disponible(s)</span>'
+    + '<span style="font-size:11px;font-weight:900;background:#f4f6f5;color:#5b6b63;padding:4px 9px;border-radius:99px">'+(RECH.enLigne||0)+' en ligne</span>'
+    + (RECH.prixIndicatif?('<span style="font-size:11px;font-weight:900;background:#f7faf9;color:#33433c;padding:4px 9px;border-radius:99px">💰 dès '+RECH.prixIndicatif.toLocaleString('fr-FR')+' F</span>'):'')
+    + (RECH.zoneElargie?('<span style="font-size:11px;font-weight:900;background:#fff5e6;color:#b36b00;padding:4px 9px;border-radius:99px">zone élargie +'+RECH.zoneElargie+' km</span>'):'')
+    + (RECH.elargir?('<span style="font-size:11px;font-weight:900;background:#fff5e6;color:#b36b00;padding:4px 9px;border-radius:99px">pros hors ligne inclus</span>'):'')
+    + '</div>'
+    + '<small style="display:block;margin-top:7px;color:#7A6A5E;font-size:11px">Distances, temps estimés et classement sont calculés par le serveur Klean — votre adresse exacte n’apparaît jamais.</small>'
+    + '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">'
+    + (RECH.exact ? '<button type="button" onclick="rechChercher(false)" style="flex:1;min-width:118px;border:1.5px solid #e4eae7;background:#fff;font:inherit;font-weight:800;padding:9px;border-radius:11px;cursor:pointer;font-size:12px">🏙️ Sans GPS</button>'
+                 : '<button type="button" onclick="RECH.lieu=RECH.lieu||{};RECH.lieu.mode=\'moi\';RECH.etape=\'liste\';rechLocaliser()" style="flex:1;min-width:118px;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd);font:inherit;font-weight:900;padding:9px;border-radius:11px;cursor:pointer;font-size:12px">📍 Ma position</button>')
+    + '<button type="button" onclick="rechChercher('+(RECH.exact?'true':'false')+')" style="flex:1;min-width:100px;border:1.5px solid #e4eae7;background:#fff;font:inherit;font-weight:800;padding:9px;border-radius:11px;cursor:pointer;font-size:12px">🔄 Actualiser</button>'
+    + '</div></div>';
+
+  if(RECH.busy) return h + '<div style="background:#fff;border-radius:16px;padding:22px;text-align:center;color:#7A6A5E;font-weight:700">📡 Recherche des professionnels autour du lieu de la prestation…</div>';
+
+  /* 🤔 demande non comprise : on le dit et on propose (jamais de faux résultats) */
+  if(RECH.mode === 'inconnu'){
+    return h + '<div style="background:#fff;border-radius:16px;padding:16px;text-align:center">'
+      + '<div style="font-size:34px">🤔</div><b style="display:block;margin:6px 0">Je n’ai pas reconnu cette demande</b>'
+      + '<p style="color:#7A6A5E;font-size:12.5px;margin:0 0 12px">Reformulez avec un mot simple (nettoyage, plomberie, cours, clim…), ou choisissez un métier ci-dessous.</p>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:12px">'
+      + (RECH.suggestions||[]).map(id=>'<button type="button" onclick="RECH.svc=\''+id+'\';RECH.q=\''+rechSvcNom(id).replace(/'/g,"\\'")+'\';rechChercher(false)" style="border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd);font:inherit;font-weight:800;font-size:12px;padding:8px 11px;border-radius:99px;cursor:pointer">'+rechSvcIc(id)+' '+rechEch(rechSvcNom(id))+'</button>').join('')
+      + '</div>'
+      + '<button type="button" onclick="RECH.etape=\'q\';RECH.msgErr=\'\';rechPeindre()" style="width:100%;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;padding:12px;border-radius:12px;cursor:pointer">✏️ Reformuler ma demande</button>'
+      + '</div>';
+  }
+  if(RECH.msgErr){
+    h += '<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:13px;padding:12px;font-size:13px;font-weight:700;margin-bottom:11px">'+RECH.msgErr+'</div>';
+  }
+  /* 🚫 AUCUN PROFESSIONNEL : jamais un simple « aucun résultat » */
+  if(!RECH.liste.length && !RECH.msgErr){
+    return h + '<div style="background:#fff;border-radius:16px;padding:16px">'
+      + '<div style="text-align:center"><div style="font-size:34px">🔍</div>'
+      + '<b style="display:block;margin:6px 0">Aucun professionnel disponible pour l’instant</b>'
+      + '<p style="color:#7A6A5E;font-size:12.5px;margin:0 0 13px">Ce n’est pas une impasse : voici tout ce que Klean peut faire pour vous.</p></div>'
+      + '<button type="button" onclick="rechElargirZone(15)" style="width:100%;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;padding:13px;border-radius:12px;cursor:pointer;margin-bottom:8px">🔎 Élargir la zone de recherche (+15 km)</button>'
+      + '<button type="button" onclick="rechElargirZone(40)" style="width:100%;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd);font:inherit;font-weight:900;padding:13px;border-radius:12px;cursor:pointer;margin-bottom:8px">📍 Chercher un peu plus loin (+40 km, pros en veille inclus)</button>'
+      + '<button type="button" onclick="RECH.etape=\'q\';RECH.msgErr=\'\';rechPeindre()" style="width:100%;border:1.5px solid #e4eae7;background:#fff;color:#33433c;font:inherit;font-weight:800;padding:12px;border-radius:12px;cursor:pointer;margin-bottom:8px">✏️ Modifier le service demandé</button>'
+      + '<button type="button" onclick="rechDeposerDemande(true)" style="width:100%;border:1.5px solid #e4eae7;background:#fff;color:#33433c;font:inherit;font-weight:800;padding:12px;border-radius:12px;cursor:pointer;margin-bottom:8px">📅 Choisir une autre date ou heure</button>'
+      + '<button type="button" onclick="rechDeposerDemande(false)" style="width:100%;border:1.5px solid #e4eae7;background:#fff;color:#33433c;font:inherit;font-weight:800;padding:12px;border-radius:12px;cursor:pointer">📨 Déposer ma demande</button>'
+      + '<div style="margin-top:9px;font-size:11.5px;color:#7A6A5E;text-align:center">Votre demande sera envoyée aux professionnels de ce métier : ils la reçoivent dès qu’ils sont disponibles.</div>'
+      + '</div>';
+  }
+  /* 🏆 comparaison */
+  h += '<div style="display:flex;gap:6px;overflow-x:auto;padding:2px 0 9px">'
+    + rechTuile('score','🏆 Mieux classés',RECH.tri==='score') + rechTuile('dist','📏 Plus proches',RECH.tri==='dist')
+    + rechTuile('note','⭐ Mieux notés',RECH.tri==='note') + rechTuile('missions','🔧 Plus expérimentés',RECH.tri==='missions')
+    + rechTuile('prix','💰 Moins chers',RECH.tri==='prix') + '</div>';
+  h += rechListeTriee().map((p,i)=>{
+    const dist = p.distTxt ? ('<b style="color:#b45309">'+(p.distApprox?'≈ ':'')+rechEch(p.distTxt)+'</b>')
+      : (p.zoneTxt ? ('<b style="color:#7A6A5E">'+rechEch(p.zoneTxt)+'</b>') : '<b style="color:#7A6A5E">zone à confirmer</b>');
+    const dispoBg = p.dispo==='libre' ? '#e9f7ef' : (p.dispo==='occupe' ? '#fff5e6' : '#f4f6f5');
+    const dispoFg = p.dispo==='libre' ? '#0a7a4f' : (p.dispo==='occupe' ? '#b36b00' : '#6b7c73');
+    const svcNoms = (p.services||[]).slice(0,3).map(x=>rechSvcIc(x)+' '+rechSvcNom(x)).join(' · ');
+    return '<div style="background:#fff;border:1.5px solid '+(p.dispo==='libre'?'#F6D9BE':'#e4eae7')+';border-radius:15px;padding:12px;margin-bottom:9px">'
+      + '<div style="display:flex;align-items:flex-start;gap:10px">'
+      + '<span style="flex:none;width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px">'+(i+1)+'</span>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="font-size:15px">'+rechEch(p.nom||'Professionnel')+'</b>'
+      + (p.scorePct!=null?('<span style="font-size:10px;font-weight:900;background:var(--pd);color:#fff;padding:3px 7px;border-radius:99px">'+p.scorePct+'/100</span>'):'')
+      + '<span style="font-size:11px;font-weight:900;color:#b58900">★ '+(p.note!=null?p.note:'—')+'/5</span>'
+      + '<span style="font-size:10.5px;color:#7A6A5E">'+(p.avis?(p.avis+' avis'):'nouveau')+'</span>'
+      + (p.verifTxt?('<span style="font-size:10.5px;font-weight:900;background:'+(p.verifPlus?'#FDECDC':'#f4f6f5')+';color:'+(p.verifPlus?'var(--pd)':'#5b6b63')+';padding:3px 7px;border-radius:99px">'+rechEch(p.verifTxt)+'</span>'):'')
+      + '<span style="font-size:10.5px;font-weight:900;background:'+dispoBg+';color:'+dispoFg+';padding:3px 8px;border-radius:99px">'+(p.dispo==='libre'?'🟢 ':p.dispo==='occupe'?'🟠 ':p.dispo==='pause'?'⏸️ ':'⚪ ')+rechEch(p.dispoTxt||'—')+'</span>'
+      + '</div>'
+      + '<div style="margin-top:5px;font-size:12.5px">📍 '+dist+(p.etaTxt?(' · <b>⏱️ '+rechEch(p.etaTxt)+'</b>'):'')+(p.numPro?(' · <span style="color:#7A6A5E">🎫 '+rechEch(p.numPro)+'</span>'):'')+'</div>'
+      + '<div style="margin-top:4px;font-size:12px;color:#41544c">🧰 '+rechEch(svcNoms||'—')+((p.missionsDone!=null)?(' · <b>'+p.missionsDone+'</b> prestation(s)'):'')+'</div>'
+      + (p.compTxt?('<div style="margin-top:3px;font-size:11.5px;color:#41544c">✨ '+rechEch(p.compTxt)+'</div>'):'')
+      + '<div style="margin-top:4px;font-size:12.5px;font-weight:800;color:var(--pd)">💰 '+(p.prixTxt?rechEch(p.prixTxt):'à convenir')+'</div>'
+      + '</div></div>'
+      + '<div style="display:flex;gap:8px;margin-top:10px">'
+      + '<button type="button" onclick="rechFiche(\''+p.id+'\',\''+(RECH.svc||((p.services||[])[0]||''))+'\')" style="flex:1;border:1.5px solid var(--pd);background:#fff;color:var(--pd);font:inherit;font-weight:900;padding:11px;border-radius:11px;cursor:pointer;font-size:12.5px">👤 Voir le profil</button>'
+      + '<button type="button" onclick="rechFiche(\''+p.id+'\',\''+(RECH.svc||((p.services||[])[0]||''))+'\',true)" style="flex:1;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;padding:11px;border-radius:11px;cursor:pointer;font-size:12.5px">🛎️ Demander ce service</button>'
+      + '</div></div>';
+  }).join('');
+  h += '<div style="background:#fff;border-radius:13px;padding:11px 12px;color:#7A6A5E;font-size:11.5px">🔒 Classement par le serveur Klean : distance au lieu de prestation, disponibilité, métier, compétences, tarif indicatif, évaluations, nombre de prestations, professionnel vérifié. Aucun numéro personnel n’est publié sans l’accord du pro.</div>';
+  return h;
+}
+/* élargir la zone (le client ne reste jamais sans solution) */
+function rechElargirZone(km){
+  RECH.zoneElargie = km;
+  if(km >= 40) RECH.elargir = true;
+  rechChercher(RECH.exact);
+}
+/* déposer la demande : on part de la réservation existante, avec le lieu de prestation */
+function rechDeposerDemande(pourDate){
+  const svc = RECH.svc || ((RECH.liste[0]||{}).services||[])[0] || '';
+  const nom = svc ? rechSvcNom(svc) : (RECH.compris || RECH.q || '');
+  const L = RECH.lieu || {};
+  try{
+    if(L.ville){
+      const ci = (typeof CITIES!=='undefined'?CITIES:[]).find(x=>normT(x.nom)===normT(L.ville));
+      if(ci){
+        setCity(ci.id, true);
+        if(L.quartier){ c.quartier = L.quartier; }
+        if(typeof renderQuartiers==='function') renderQuartiers();
+      }
+    }
+  }catch(e){}
+  rechFermerFiche(); rechFermer();
+  try{ goSearchServices(nom); }catch(e){}
+  toast(pourDate ? '📅 Choisissez la date et l’heure de la prestation dans la réservation'
+                 : '📨 Complétez la réservation : votre demande partira aux pros de '+nom+' autour de '+(L.ville || rechVille() || 'votre secteur'));
+}
 /* ═══════════ RECHERCHE PAR NUMÉRO PROFESSIONNEL ═══════════ */
 function rechVueNum(){
   return '<div style="background:#fff;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,.05)">'
     + '<h3 style="margin:0 0 4px;font-size:16.5px">🎫 Rechercher par numéro professionnel</h3>'
     + '<p style="margin:0 0 12px;color:#6b7c73;font-size:12.5px">Saisissez le numéro professionnel Klean du pro (il commence par <b>KP-</b>, ex. <b>KP-123456</b>). Seules ses informations publiques s’affichent.</p>'
     + '<input class="inp" id="rech-num" placeholder="KP-123456" value="'+rechEch(RECH.num||'')+'" oninput="RECH.num=this.value.toUpperCase()" style="margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;font-weight:900" autocomplete="off">'
-    + '<button onclick="rechParNum()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:13px;border-radius:13px;font-size:14.5px">🔎 Afficher ce professionnel</button>'
+    + '<button onclick="rechParNum()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:13px;border-radius:13px;font-size:14.5px">🔎 Afficher ce professionnel</button>'
     + (RECH.numErr?('<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:12px;padding:11px;font-size:12.5px;font-weight:700;margin-top:11px">'+RECH.numErr+'</div>'):'')
     + '<div style="margin-top:13px;padding-top:12px;border-top:1.5px dashed #e4eae7;font-size:11.5px;color:#6b7c73">Un numéro professionnel ne donne accès à <b>aucune</b> information privée : ni téléphone personnel, ni adresse, ni position exacte.</div>'
     + '<button onclick="RECH.etape=\'svc\';rechPeindre()" style="width:100%;margin-top:11px;border:1.5px solid #d8e2dd;background:#fff;color:#33433c;font:inherit;font-weight:800;padding:11px;border-radius:12px;cursor:pointer;font-size:12.5px">← Rechercher par service et proximité</button>'
@@ -3687,7 +4180,7 @@ async function rechParNum(){
   const num = String(RECH.num||'').replace(/\s/g,'').toUpperCase();
   RECH.numErr = '';
   if(!num) return rechPeindre();
-  RECH.numErr = '<span style="color:#0a8a62">🔎 Recherche du numéro '+rechEch(num)+'…</span>';
+  RECH.numErr = '<span style="color:var(--pd)">🔎 Recherche du numéro '+rechEch(num)+'…</span>';
   rechPeindre();
   const d = await rechChargeFiche('num='+encodeURIComponent(num));
   if(d.ok){
@@ -3744,11 +4237,11 @@ function rechPeindreFiche(contact, chargement, err){
   const distTxt = p.distTxt ? ((p.distApprox?'≈ ':'')+p.distTxt+' de vous') : (p.zoneTxt || 'zone non précisée');
   const tel = String(p.tel||'').replace(/\D/g,'');
   const svcNoms = (p.services||[]).map(s=>rechSvcIc(s)+' '+rechSvcNom(s)).join(' · ');
-  const dispoBg = p.dispo==='libre' ? '#e6fbf3' : (p.dispo==='occupe' ? '#fff5e6' : '#f4f6f5');
-  const dispoFg = p.dispo==='libre' ? '#0a8a62' : (p.dispo==='occupe' ? '#b36b00' : '#6b7c73');
+  const dispoBg = p.dispo==='libre' ? '#FFF4E8' : (p.dispo==='occupe' ? '#fff5e6' : '#f4f6f5');
+  const dispoFg = p.dispo==='libre' ? 'var(--pd)' : (p.dispo==='occupe' ? '#b36b00' : '#6b7c73');
   let h = '<div onclick="rechFermerFiche()" style="position:fixed;inset:0;background:rgba(12,32,26,.55);z-index:10000"></div>'
     + '<div style="position:fixed;left:0;right:0;bottom:0;z-index:10001;background:#fff;border-radius:20px 20px 0 0;max-width:640px;margin:0 auto;max-height:92vh;overflow-y:auto">'
-    + '<div style="background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:16px;border-radius:20px 20px 0 0">'
+    + '<div style="background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:16px;border-radius:20px 20px 0 0">'
     + '<div style="display:flex;align-items:center;gap:12px">'
     + (p.photo ? '<img src="'+p.photo+'" style="width:54px;height:54px;border-radius:50%;object-fit:cover;border:2.5px solid rgba(255,255,255,.6)">'
                : '<span style="width:54px;height:54px;border-radius:50%;background:rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-size:24px">👤</span>')
@@ -3767,11 +4260,11 @@ function rechPeindreFiche(contact, chargement, err){
     + (p.membreDepuis?('<div>📅 <b>Sur Klean depuis :</b> '+rechEch(p.membreDepuis)+'</div>'):'')
     + '</div>';
   if(contact){
-    h += '<div style="margin-top:12px;background:#f2fbf8;border:1.5px solid #cdeee0;border-radius:13px;padding:12px">'
+    h += '<div style="margin-top:12px;background:#FFF4E8;border:1.5px solid #F6D9BE;border-radius:13px;padding:12px">'
       + '<b style="display:block;font-size:14px;margin-bottom:4px">💬 Contacter '+rechEch(p.nom||'ce pro')+'</b>'
       + '<small style="color:#41544c;font-size:12px">La façon la plus fiable : envoyez-lui la demande dans Klean, elle arrive sur son téléphone'+(p.dispo==='libre'?' immédiatement':' dès qu’il se libère')+'.</small></div>';
   }
-  h += '<button onclick="rechDemander()" style="width:100%;margin-top:12px;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,#0e7c66,#0a8a62);color:#fff;padding:14px;border-radius:14px;font-size:15px">🛎️ Demander le service'+(RECH.ficheSvc?(' · '+rechEch(rechSvcNom(RECH.ficheSvc))):'')+'</button>';
+  h += '<button onclick="rechDemander()" style="width:100%;margin-top:12px;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:14px;border-radius:14px;font-size:15px">🛎️ Demander le service'+(RECH.ficheSvc?(' · '+rechEch(rechSvcNom(RECH.ficheSvc))):'')+'</button>';
   if(tel && p.appelDirect){
     h += '<div style="display:flex;gap:8px;margin-top:9px">'
       + '<a href="tel:+225'+tel.replace(/^225/,'')+'" style="flex:1;text-align:center;background:#ff8a00;color:#1a1204;font-weight:900;padding:13px;border-radius:13px;text-decoration:none;font-size:14px">📞 Appeler</a>'
