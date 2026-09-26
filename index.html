@@ -384,6 +384,20 @@
 <div id="home-win-slot" style="display:none;margin:0 12px 8px;text-align:right"></div>
 <div id="aff-react" class="hidden"></div>
 <div id="quiz-box" class="hidden" style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px 14px 12px;margin:0 12px 12px;position:relative;z-index:30"></div>
+<!-- 🎮 JEU EN DIRECT (lot 101) : la bulle du jeu — compte à rebours, question, élimination, victoire.
+     Remplie par paintJeu(). Le suivi des joueurs encore en course est affiché en temps réel. -->
+<div id="jeu-box" class="hidden" style="background:var(--card);border:1.5px solid var(--p);border-radius:16px;padding:14px 14px 12px;margin:0 12px 12px;position:relative;z-index:31"></div>
+<style id="vit-style"></style>
+<style>
+#jeu-box .jeu-choix{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:var(--card2);border:1.5px solid var(--line);border-radius:12px;padding:11px 12px;margin-bottom:7px;cursor:pointer;font:inherit;font-size:14.5px;font-weight:700;color:var(--ink)}
+#jeu-box .jeu-choix:hover{border-color:var(--p)}
+#jeu-box .jeu-choix .k{flex:none;width:28px;height:28px;border-radius:9px;background:var(--pl);display:flex;align-items:center;justify-content:center;font-weight:900}
+#jeu-box .jeu-choix.juste{border-color:var(--p);background:rgba(21,201,138,.14)}
+#jeu-box .jeu-choix.faux{border-color:#ff6b6b;background:rgba(255,107,107,.12)}
+#jeu-cd{font-size:40px;font-weight:900;letter-spacing:.05em;text-align:center;color:var(--amber);line-height:1.05}
+#jeu-box .jeu-surv{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+#jeu-box .jeu-surv span{background:var(--card2);border-radius:9px;padding:5px 9px;font-size:12px;font-weight:800}
+</style>
 <!-- 📣 PUBLICITÉ — bloc FIXE : il reste à sa place pendant que l'accueil défile.
      Position et visibilité calculées par placerPub() : uniquement sur la page d'accueil. -->
 <div id="ad-box" class="hidden" style="position:fixed;left:0;right:0;margin:0 auto;max-width:480px;padding:0 12px;z-index:46;bottom:calc(78px + env(safe-area-inset-bottom, 0px));pointer-events:none"></div>
@@ -3515,6 +3529,8 @@ function loadAffiche(){
       const ic = a.type==='alerte'?'🚨 ': a.type==='quiz'?'🏆 ': a.type==='maj'?'✨ ':'ℹ️ ';
       const tx = ic + a.message + '        ·        ';
       tr.textContent = tx + tx + tx;
+      window._affType = a.type;            /* ⚙️ chaque rubrique a sa propre vitesse (lot 101) */
+      try{ appliquerVitesses(); }catch(e){}
       bar.classList.remove('hidden');
       bar.style.display='flex';
     }
@@ -3558,6 +3574,7 @@ window.__affOK = 1;   // 🛡️ affiches branchées (info · pub · quiz · urg
    🔒 Tout le texte est échappé : impossible d'injecter du code via la pub.
    ═══════════════════════════════════════════════════════════════════════════ */
 const PUB_FONDS = {
+  media:    ['#14181a', '#0b0e10'],   /* 🖼️ sans fond vert : la photo / vidéo prend toute la place */
   emeraude: ['#0e8a4c', '#075f34'],
   foret:    ['#0f7a4a', '#08432a'],
   menthe:   ['#2fa96b', '#137950'],
@@ -3667,6 +3684,247 @@ async function loadAd(){
 }
 loadAd();
 setInterval(loadAd, 6000);      // 📣 6 s : une pub publiée par le PDG apparaît presque tout de suite
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   🎮 JEUX EN DIRECT + ⚙️ VITESSES D'AFFICHAGE (lot 101)
+   ─ Le jeu se joue en direct : tout le monde répond à la même question en même temps,
+     une mauvaise réponse élimine, et le nombre de joueurs encore en course descend en direct.
+   ─ Le serveur reste le seul maître : la bonne réponse n'est envoyée QU'APRÈS le vote.
+   ─ La photo du gagnant n'est JAMAIS obligatoire : « Ajouter ma photo » est une option.
+   ─ Le PDG règle séparément la vitesse des Publicités, des Jeux, des Urgences et des Informations.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+var VITESSES = { pub: 3.2, jeux: 3.2, urgence: 3.2, infos: 3.2 };
+function vitNombre(k, def){ const v = Number(VITESSES[k]); return (isFinite(v) && v > 0) ? v : def; }
+/* les bandeaux : la valeur réglée au HQ × 10 donne la durée d'un passage complet (3,2 s → 32 s) */
+function vitBandeau(k){ return Math.max(6, Math.min(120, Math.round(vitNombre(k, 3.2) * 10))); }
+function appliquerVitesses(){
+  try{
+    const st = document.getElementById('vit-style');
+    if(st) st.textContent = '.pub-clignote{animation-duration:' + vitNombre('pub', 3.2) + 's !important}';
+    const tr = document.getElementById('aff-track');
+    if(tr){
+      const t = (window._affType === 'alerte') ? 'urgence' : (window._affType === 'quiz' ? 'jeux' : 'infos');
+      tr.style.animationDuration = vitBandeau(t) + 's';
+    }
+  }catch(e){}
+}
+async function chargerVitesses(){
+  try{
+    const d = await fetch('/api/vitesses', { cache:'no-store' }).then(r => r.json());
+    if(d && d.vitesses) VITESSES = Object.assign({}, VITESSES, d.vitesses);
+  }catch(e){}
+  appliquerVitesses();
+}
+chargerVitesses();
+setInterval(() => { try{ chargerVitesses(); }catch(e){} }, 60000);
+
+/* ─────────────────────── la bulle de jeu ─────────────────────── */
+var JEU_ETAT = null, JEU_SEC = 0, JEU_FEEDBACK = '', JEU_PHOTO = '', JEU_MASQUE = false;
+function jeuHdrs(){ const h={'Content-Type':'application/json'}; try{ const c=JSON.parse(localStorage.getItem('k2_client')||'null'); if(c&&c.token) h['X-Client-Token']=c.token; }catch(e){} return h; }
+function jeuQui(){ try{ return quizWho(); }catch(e){ return { accountId:'', nom:'' }; } }
+function jeuEnCoursPourMoi(){
+  const e = JEU_ETAT; if(!e || !e.partie) return false;
+  return e.partie.status === 'en_cours' && !!(e.moi && e.moi.inscrit && !e.moi.elimine && !e.moi.repondu);
+}
+function jeuAfficher(){
+  const b = document.getElementById('jeu-box'); if(!b) return;
+  let visible = !!JEU_ETAT && !JEU_MASQUE;
+  if(visible && !jeuEnCoursPourMoi()){ try{ visible = pubSurAccueil(); }catch(e){ visible = true; } }
+  b.classList.toggle('hidden', !visible);
+  b.style.display = visible ? 'block' : 'none';
+}
+function jeuCd(txt){
+  let ms = txt ? Date.parse(txt) : NaN;
+  if(!isFinite(ms)) return '';
+  const s = Math.max(0, Math.round((ms - Date.now())/1000));
+  const m = Math.floor(s/60), r = s % 60;
+  return (m > 0 ? (m + ' min ' + String(r).padStart(2,'0') + ' s') : (r + ' s'));
+}
+async function chargerJeux(){
+  if(document.hidden) return;
+  const w = jeuQui();
+  let d;
+  try{ d = await fetch('/api/jeux?who=' + encodeURIComponent(w.accountId||''), { cache:'no-store', headers: jeuHdrs() }).then(r => r.json()); }
+  catch(e){ return; }
+  if(!d || !d.jeux || !d.jeux.length){ JEU_ETAT = null; paintJeu(); return; }
+  const j = d.jeux.find(x => x.enCours) || d.jeux.find(x => x.peutJouer) || d.jeux[0];
+  let e = null;
+  try{ e = await fetch('/api/jeux/etat?id=' + encodeURIComponent(j.id) + '&who=' + encodeURIComponent(w.accountId||''), { cache:'no-store', headers: jeuHdrs() }).then(r => r.json()); }
+  catch(err){ return; }
+  if(!e || !e.jeu) return;
+  const autre = !JEU_ETAT || !JEU_ETAT.partie || (e.partie && JEU_ETAT.partie && e.partie.id !== JEU_ETAT.partie.id);
+  JEU_ETAT = e;
+  if(autre) JEU_FEEDBACK = '';
+  if(e.partie) JEU_SEC = e.partie.secondes || 0;
+  paintJeu();
+}
+function paintJeu(){
+  const b = document.getElementById('jeu-box'); if(!b) return;
+  const e = JEU_ETAT;
+  if(!e || !e.partie){ if(!e){ JEU_MASQUE=false; b.innerHTML=''; b.classList.add('hidden'); b.style.display='none'; return; } }
+  if(!e.partie){
+    /* le jeu existe mais rien n'est lancé : on annonce l'heure + un compte à rebours avant le début */
+    if(!e.peutJouer){ b.innerHTML=''; b.classList.add('hidden'); b.style.display='none'; return; }
+    const cd = jeuCd(e.jeu.debutAt);
+    b.innerHTML = '<b style="font-size:15px">🎮 ' + pubEsc(e.jeu.nom) + '</b>'
+      + '<p style="margin:7px 0 4px;font-size:13.5px;font-weight:700;line-height:1.4">' + pubEsc(e.jeu.regle || 'Le jeu n’a pas encore commencé. Vous pouvez déjà vous inscrire.') + '</p>'
+      + '<p style="font-size:13px;color:var(--muted);margin:0 0 8px">' + (e.jeu.pointsGagnant ? ('🏆 Le gagnant reçoit <b>' + e.jeu.pointsGagnant + ' Klean Points</b>. ') : '') + (cd ? ('Début dans <b>' + cd + '</b>.') : 'Le PDG lance la partie quand il veut.') + '</p>'
+      + '<button type="button" onclick="jeuInscrire(\'' + pubEsc(e.jeu.id) + '\')" style="width:100%;background:var(--p);border:none;color:#04231a;font-weight:900;padding:12px;border-radius:12px;cursor:pointer;font:inherit;font-size:14px">🙋 Participer au jeu</button>';
+    jeuAfficher();
+    return;
+  }
+  const p = e.partie, moi = e.moi || {}, jeu = e.jeu || {};
+  const tete = '<b style="font-size:15px">🎮 ' + pubEsc(jeu.nom || 'Jeu KLEAN') + '</b>';
+  const surv = '<div class="jeu-surv"><span>👥 ' + (p.inscrits || 0) + ' participant(s)</span><span style="background:rgba(21,201,138,.16)">🟢 ' + (p.restants || 0) + ' encore en course</span>' + ((p.elimines||0) ? ('<span style="background:rgba(255,107,107,.14)">✕ ' + p.elimines + ' éliminé(s)</span>') : '') + '</div>';
+  let corps = '';
+
+  if(p.status === 'inscription'){
+    if(moi.inscrit){
+      const cd = jeuCd(p.debutAt);
+      corps = '<p style="margin:7px 0 4px;font-size:14px;font-weight:800;color:var(--p)">✅ Vous êtes inscrit !</p>'
+        + '<p style="font-size:13.5px;color:var(--muted);margin:0 0 6px">Restez sur cet écran : la première question arrive. ' + (cd ? ('Début dans <b>' + cd + '</b>.') : '') + '</p>' + surv;
+    } else if(!e.inscriptionOuverte){
+      corps = '<p style="margin:7px 0 4px;font-size:13.5px;font-weight:800;color:#ff9f43">⏰ Inscriptions fermées : le jeu a déjà commencé (ou l’heure limite est passée).</p>'
+        + '<p style="font-size:12.5px;color:var(--muted);margin:0 0 6px">Vous pourrez rejoindre le prochain jeu. Suivez la partie ci-dessous.</p>' + surv;
+    } else {
+      const cd = jeuCd(p.debutAt);
+      corps = '<p style="margin:7px 0 6px;font-size:13.5px;font-weight:700">Les inscriptions sont ouvertes.' + (cd ? (' Début dans <b>' + cd + '</b>.') : '') + '</p>'
+        + '<button type="button" onclick="jeuInscrire(\'' + pubEsc(jeu.id) + '\')" style="width:100%;background:var(--p);border:none;color:#04231a;font-weight:900;padding:12px;border-radius:12px;cursor:pointer;font:inherit;font-size:14px">🙋 Je participe</button>' + surv;
+    }
+  } else if(p.status === 'en_cours'){
+    if(!moi.inscrit){
+      corps = '<p style="margin:7px 0 4px;font-size:13.5px;font-weight:800;color:#ff9f43">⏰ Inscriptions fermées : la partie a commencé.</p>'
+        + '<p style="font-size:12.5px;color:var(--muted);margin:0 0 6px">Les joueurs déjà inscrits continuent. Vous pourrez jouer au prochain jeu.</p>' + surv;
+    } else if(moi.elimine){
+      corps = '<p style="margin:7px 0 4px;font-size:14px;font-weight:900;color:#ff6b6b">✕ Vous êtes éliminé' + (moi.motif ? (' (' + pubEsc(moi.motif) + ')') : '') + '</p>'
+        + '<p style="font-size:13px;color:var(--muted);margin:0 0 6px">Merci d’avoir joué ! Regardez la suite : le nombre de joueurs encore en course descend en direct.</p>' + surv;
+    } else if(moi.repondu){
+      corps = '<p style="margin:7px 0 4px;font-size:14px;font-weight:800;color:var(--p)">' + (JEU_FEEDBACK || '✅ Réponse envoyée — attente des autres joueurs…') + '</p>'
+        + (typeof p.bonne === 'number' && p.question ? ('<p style="font-size:13px;color:var(--muted);margin:0 0 6px">Bonne réponse : <b>' + pubEsc(p.question.choix[p.bonne]) + '</b></p>') : '')
+        + surv;
+    } else if(p.question){
+      corps = '<p style="margin:7px 0 8px;font-size:15.5px;font-weight:800;line-height:1.35">' + pubEsc(p.question.q) + '</p>'
+        + '<div id="jeu-cd">' + Math.max(0, JEU_SEC || p.secondes || 0) + '</div>'
+        + '<p style="text-align:center;font-size:11.5px;color:var(--muted);margin:2px 0 9px">secondes pour répondre' + (p.niveauTxt ? (' · ' + pubEsc(p.niveauTxt)) : '') + ' — une mauvaise réponse élimine</p>'
+        + (p.question.choix || []).map((c, i) => '<button type="button" class="jeu-choix" onclick="jeuRepondre(\'' + pubEsc(jeu.id) + '\',' + i + ')"><span class="k">' + 'ABCD'[i] + '</span><span>' + pubEsc(c) + '</span></button>').join('')
+        + surv;
+    } else {
+      corps = '<p style="margin:7px 0 6px;font-size:13.5px;font-weight:700">La question suivante arrive…</p>' + surv;
+    }
+  } else if(p.status === 'termine'){
+    const gagnant = !!(moi.gagnant || (p.gagnants || []).some(g => g.nom === jeuQui().nom));
+    if(gagnant){
+      corps = '<p style="margin:7px 0 4px;font-size:19px;font-weight:900;color:var(--p);text-align:center">🏆 Bravo, vous avez gagné !</p>'
+        + ((jeu.pointsGagnant) ? ('<p style="text-align:center;font-size:14px;font-weight:800;margin:0 0 6px">+' + jeu.pointsGagnant + ' Klean Points</p>') : '')
+        + ((p.gagnants||[]).filter(g => g.photo).length ? ('<p style="text-align:center;font-size:12.5px;color:var(--muted);margin:0 0 6px">📸 Photo bien reçue</p>') : '')
+        + '<p style="font-size:13px;color:var(--muted);margin:6px 0 8px;text-align:center">Votre victoire est déjà validée : la photo est <b>facultative</b>, vous pouvez la mettre maintenant ou plus tard.</p>'
+        + '<input type="file" id="jeu-photo-file" accept="image/*" style="display:none" onchange="jeuChoisirPhoto(this)">'
+        + '<button type="button" onclick="document.getElementById(\'jeu-photo-file\').click()" style="width:100%;background:var(--card2);border:1.5px solid var(--p);color:var(--ink);font-weight:900;padding:11px;border-radius:12px;cursor:pointer;font:inherit;font-size:13.5px">📸 Ajouter ma photo (facultatif)</button>'
+        + '<button type="button" onclick="jeuMasquer()" style="width:100%;margin-top:7px;background:none;border:none;color:var(--muted);font-weight:800;padding:8px;cursor:pointer;font:inherit;font-size:12.5px">Non merci — sans photo</button>';
+    } else {
+      corps = '<p style="margin:7px 0 4px;font-size:14px;font-weight:800">🏁 Partie terminée</p>'
+        + '<p style="font-size:13.5px;margin:0 0 6px">' + ((p.gagnants||[]).length ? ('Gagnant' + ((p.gagnants.length>1)?'s':'') + ' : <b>' + p.gagnants.map(g => pubEsc(g.nom)).join(', ') + '</b>') : 'Aucun gagnant cette fois.') + '</p>'
+        + '<p style="font-size:12.5px;color:var(--muted);margin:0 0 6px">' + (p.raisonFin ? pubEsc(p.raisonFin) + ' · ' : '') + 'Merci d’avoir joué, le prochain jeu arrive bientôt.</p>'
+        + surv
+        + '<button type="button" onclick="jeuMasquer()" style="width:100%;margin-top:9px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:11px;cursor:pointer;font:inherit;font-size:12.5px">Masquer</button>';
+    }
+  }
+  b.innerHTML = tete + corps + (moi.inscrit ? '' : '');
+  jeuAfficher();
+}
+function jeuMasquer(){ JEU_MASQUE = true; jeuAfficher(); }
+async function jeuInscrire(id){
+  const w = jeuQui();
+  try{
+    const r = await fetch('/api/jeux/inscrire', { method:'POST', headers: jeuHdrs(), body: JSON.stringify({ id, who: w.accountId, nom: w.nom }) });
+    const d = await r.json().catch(() => ({}));
+    if(r.status === 409 && d.ferme) return alert('⏰ Inscriptions fermées : le jeu a déjà commencé ou l’heure limite est dépassée.\\nVous pourrez jouer au prochain jeu.');
+    if(r.status === 403) return alert('🚫 ' + (d.error || 'Vous ne pouvez pas participer à ce jeu.'));
+    if(!r.ok) return alert('⚠️ ' + (d.error || 'Inscription impossible'));
+    JEU_FEEDBACK = '✅ Inscription enregistrée — restez sur cet écran.';
+    await chargerJeux();
+  }catch(e){ alert('⚠️ Réseau indisponible — réessayez.'); }
+}
+async function jeuRepondre(id, choix){
+  const w = jeuQui(), p = (JEU_ETAT && JEU_ETAT.partie) || {};
+  try{ document.querySelectorAll('#jeu-box .jeu-choix').forEach((b,i) => { b.disabled = true; b.classList.add(i === choix ? 'juste' : 'faux'); }); }catch(e){}
+  try{
+    const r = await fetch('/api/jeux/repondre', { method:'POST', headers: jeuHdrs(), body: JSON.stringify({ id, partie: p.id || '', who: w.accountId, choix }) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) JEU_FEEDBACK = '⚠️ ' + (d.error || 'Réponse non enregistrée');
+    else JEU_FEEDBACK = d.message + (d.message ? '' : (d.juste ? '✅ Bonne réponse' : '✕ Mauvaise réponse'));
+    await chargerJeux();
+  }catch(e){ JEU_FEEDBACK = '⚠️ Réseau indisponible — vérifiez votre connexion.'; paintJeu(); }
+}
+/* 📸 la photo du gagnant : TOUJOURS facultative, compressée dans le téléphone avant l'envoi */
+function jeuCompresser(file, cb){
+  const fini = o => { try{ cb(o); }catch(e){} };
+  const brut = () => { const r=new FileReader(); r.onload=()=>fini({ dataUrl:String(r.result||'') }); r.onerror=()=>fini({ erreur:'Photo illisible — choisissez une autre image.' }); r.readAsDataURL(file); };
+  let url=''; try{ url = URL.createObjectURL ? URL.createObjectURL(file) : ''; }catch(e){ url=''; }
+  if(!url) return brut();
+  const img=new Image();
+  img.onload=()=>{
+    try{
+      let w=img.naturalWidth||0, h=img.naturalHeight||0;
+      if(!w || !h) throw 0;
+      const max=900; if(Math.max(w,h)>max){ const k=max/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
+      const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+      const cx=cv.getContext && cv.getContext('2d'); if(!cx) throw 0;
+      cx.drawImage(img,0,0,w,h);
+      let out=cv.toDataURL('image/jpeg',0.8);
+      if(out.length > 760000) out=cv.toDataURL('image/jpeg',0.6);
+      if(out.length > 760000){
+        const cv2=document.createElement('canvas'); cv2.width=Math.round(w*0.7); cv2.height=Math.round(h*0.7);
+        const cx2=cv2.getContext && cv2.getContext('2d');
+        if(cx2){ cx2.drawImage(cv,0,0,cv2.width,cv2.height); out=cv2.toDataURL('image/jpeg',0.55); }
+      }
+      try{ URL.revokeObjectURL(url); }catch(e){}
+      fini({ dataUrl: out });
+    }catch(e){ try{ URL.revokeObjectURL(url); }catch(e2){} brut(); }
+  };
+  img.onerror=()=>{ try{ URL.revokeObjectURL(url); }catch(e){} fini({ erreur:'Ce fichier n’est pas une photo lisible.' }); };
+  img.src=url;
+}
+async function jeuChoisirPhoto(input){
+  const f = input && input.files && input.files[0]; if(!f) return;
+  if(!/^image\//.test(String(f.type||''))) { input.value=''; return alert('❌ Choisissez une photo (JPG, PNG ou WEBP).'); }
+  if(f.size > 12*1048576) { input.value=''; return alert('❌ Photo trop lourde (' + (f.size/1048576).toFixed(1) + ' Mo). Maximum 12 Mo.'); }
+  const out = await new Promise(r => jeuCompresser(f, r));
+  input.value = '';
+  if(out.erreur) return alert('⚠️ ' + out.erreur);
+  const p = (JEU_ETAT && JEU_ETAT.partie) || {};
+  try{
+    const r = await fetch('/api/jeux/photo', { method:'POST', headers: jeuHdrs(), body: JSON.stringify({ id: (JEU_ETAT.jeu||{}).id, partie: p.id || '', who: jeuQui().accountId, photo: out.dataUrl }) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) return alert('⚠️ ' + (d.error || 'Photo refusée'));
+    alert('📸 Photo ajoutée à votre victoire. Merci !');
+    JEU_MASQUE = true;
+    await chargerJeux();
+  }catch(e){ alert('⚠️ Réseau indisponible — réessayez.'); }
+}
+/* le compte à rebours descend chaque seconde entre deux interrogations du serveur */
+setInterval(() => {
+  try{
+    if(!JEU_ETAT || !JEU_ETAT.partie) return;
+    const el = document.getElementById('jeu-cd');
+    if(JEU_ETAT.partie.status === 'en_cours' && el && JEU_ETAT.moi && JEU_ETAT.moi.inscrit && !JEU_ETAT.moi.repondu){
+      JEU_SEC = Math.max(0, (JEU_SEC || 0) - 1);
+      el.textContent = JEU_SEC;
+      if(JEU_SEC === 0) chargerJeux();
+      return;
+    }
+    /* compte à rebours avant le début, ou avant la fermeture des inscriptions */
+    const p = JEU_ETAT.partie;
+    if(p.status === 'inscription' && !JEU_MASQUE){
+      const cible = p.debutAt || null;
+      if(cible){ const box = document.getElementById('jeu-box'); if(box && box.classList.contains('hidden') === false) paintJeu(); }
+    }
+  }catch(e){}
+}, 1000);
+chargerJeux();
+setInterval(() => { try{ chargerJeux(); }catch(e){} }, 2500);
+window.__jeuxOK = 1;   /* 🛡️ jeux en direct branchés côté client */
+
 setTimeout(()=>{ try{ pubObserver(); placerPub(); }catch(e){} }, 600);
 window.__affOK = 1;   // 🛡️ publicité branchée
 /* ═══════════════════════════════════════════════════════════════════════════

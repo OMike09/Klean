@@ -137,6 +137,8 @@
 .home-todo b{color:var(--amber)}
 @media (max-width:1049px){
   #hq-nav{width:86vw;max-width:330px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+  .hq-sec-ferme{ opacity:.72; border-top-style:solid; }
+  .hq-sec:hover{ filter:brightness(1.15); }
   .hq-sec{margin-top:16px}
 }
 @media (min-width:1050px){
@@ -295,7 +297,7 @@
       <button type="button" onclick="openQuizClicks()" style="margin-top:10px;width:100%;background:rgba(255,138,0,.16);border:1.5px solid rgba(255,138,0,.5);color:#b36b00;font-weight:900;padding:11px 12px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:13.5px">👁 Voir qui a répondu (noms + choix)</button>
       <div id="panel-ads" style="margin-top:14px;background:var(--card2);border-radius:12px;padding:12px">
         <b style="display:block;font-size:13.5px;margin-bottom:4px">📣 Publicité de la page d’accueil</b>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 9px;line-height:1.45">Le bloc publicitaire reste <b>fixe</b> en bas de l’écran d’accueil (il ne défile pas) et son message <b>clignote doucement</b>. Vous réglez tout ici : texte, fond vert, écriture, image ou vidéo.</p>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 9px;line-height:1.45">Le bloc publicitaire reste <b>fixe</b> en bas de l’écran d’accueil (il ne défile pas) et son message <b>clignote doucement</b>. <b>La photo ou la vidéo se choisit directement dans la galerie du téléphone</b> : la compression est automatique, vous voyez l’aperçu avant de publier. Le fond vert reste disponible mais n’est plus obligatoire.</p>
 
         <!-- état + activation -->
         <div id="pub-etat" style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px;font-size:12px;line-height:1.5">Chargement…</div>
@@ -337,7 +339,9 @@
             <option value="lagon">🌊 Lagon (vert-bleu)</option>
             <option value="ananas">🍃 Ananas (vert-jaune)</option>
             <option value="perso">🎨 Personnalisé (je choisis mes 2 teintes)</option>
+            <option value="media">🖼️ Sans fond vert — la photo / vidéo prend toute la place</option>
           </select>
+          <small style="display:block;color:var(--muted);font-size:11px;margin:0 0 7px">Avec « Sans fond vert », la publicité s’affiche sur un fond sombre neutre : utile quand l’image ou la vidéo occupe déjà tout le bloc (plus besoin de fond vert).</small>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <label style="flex:1;min-width:120px;font-size:11px;font-weight:800;color:var(--muted)">Haut du dégradé
               <input type="color" id="pub-fond1" value="#0e8a4c" oninput="pubFondPerso()" style="width:100%;height:38px;padding:2px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2)">
@@ -350,13 +354,15 @@
 
         <!-- 3. média -->
         <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
-          <b style="display:block;font-size:12.5px;margin-bottom:4px">🖼️ Image ou 🎬 vidéo de la publicité</b>
-          <p style="font-size:11.5px;color:var(--muted);margin:0 0 7px;line-height:1.45">Image (JPG, PNG, WEBP, GIF) : 3 Mo max · Vidéo (MP4, WEBM) : 12 Mo max. Le fichier est vérifié par le serveur avant d’être accepté.</p>
+          <b style="display:block;font-size:12.5px;margin-bottom:4px">🖼️ Photo ou 🎬 vidéo (depuis la galerie)</b>
+          <p style="font-size:11.5px;color:var(--muted);margin:0 0 7px;line-height:1.45">Choisissez la <b>photo</b> ou la <b>vidéo</b> dans la galerie du téléphone. Les photos sont <b>compressées automatiquement</b> (qualité conservée, poids réduit) et les fichiers trop lourds ou d’un format inconnu sont <b>refusés avec un message clair</b>. Formats acceptés : JPG, PNG, WEBP, GIF (images) et MP4, WEBM (vidéos). Le serveur revérifie le fichier reçu.</p>
           <input type="file" id="pub-file-img" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none" onchange="pubChoisir(this,'image')">
           <input type="file" id="pub-file-vid" accept="video/mp4,video/webm" style="display:none" onchange="pubChoisir(this,'video')">
+          <input type="file" id="pub-file-any" accept="image/*,video/*" style="display:none" onchange="pubChoisir(this,'auto')">
           <div style="display:flex;gap:7px;flex-wrap:wrap">
-            <button type="button" onclick="document.getElementById('pub-file-img').click()" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">📷 Téléverser une image</button>
-            <button type="button" onclick="document.getElementById('pub-file-vid').click()" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">🎬 Téléverser une vidéo</button>
+            <button type="button" onclick="document.getElementById('pub-file-img').click()" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">📷 Choisir une photo</button>
+            <button type="button" onclick="document.getElementById('pub-file-vid').click()" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">🎬 Choisir une vidéo</button>
+            <button type="button" onclick="document.getElementById('pub-file-any').click()" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">📱 Galerie du téléphone</button>
           </div>
           <div id="pub-media-etat" style="font-size:11.5px;color:var(--muted);margin-top:7px">Aucun média.</div>
           <button type="button" id="pub-media-del" onclick="pubRetirerMedia()" style="display:none;width:100%;margin-top:7px;background:var(--card2);border:1.5px solid var(--line);color:var(--danger);font-weight:800;padding:9px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12px">🧹 Retirer le média</button>
@@ -794,6 +800,17 @@
   </div>
 
   <!-- 🏢 PROFIL DE L'ENTREPRISE — fiche d'identité lue dans vos réglages (lot 97) -->
+  <!-- ⚙️ VITESSES D'AFFICHAGE (lot 101) — un réglage indépendant par zone -->
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-vitesse">
+    <h3>⚙️ Vitesses d’affichage</h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Réglez séparément le rythme de chaque zone. <b>Plus la valeur est petite, plus ça bouge vite.</b> L’enregistrement s’applique tout de suite chez les utilisateurs.</p>
+      <div id="vi-liste"></div>
+      <button type="button" class="btn-main" style="width:100%;margin-top:10px" onclick="viEnregistrer()">💾 Enregistrer les vitesses</button>
+      <small style="display:block;margin-top:7px;color:var(--muted);font-size:11.5px">Publicités : durée du clignotement doux. Jeux, Urgence, Informations : vitesse de défilement du bandeau.</small>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px" id="panel-entreprise">
     <h3>🏢 Profil de l'entreprise <span class="cnt" id="ent-maj">—</span></h3>
     <div class="body" style="padding:12px 14px">
@@ -814,7 +831,8 @@
   </div>
 
   <div class="panel" style="margin-bottom:14px" id="panel-freeze">
-    <h3>⛔ Coupure générale des écritures (PDG)</h3>
+    <h3>⛔ Bloquer l’entreprise</h3>
+    <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Action de <b>modération la plus forte</b> : tout Klean passe en lecture seule — plus aucune écriture (missions, comptes, paiements, chat) sauf la vôtre. À utiliser en cas d’attaque, de bug grave ou de fuite de données.</p>
     <div class="body" style="padding:12px 14px">
       <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Personne n’écrit plus : gestionnaires, <b>clients</b> et <b>professionnels</b> (missions, messages, inscriptions, profils). Lecture seule. Vous (PDG) restez maître du HQ. Mot de passe obligatoire.</p>
       <input id="frz-pw" type="password" placeholder="Votre mot de passe PDG" style="width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:8px">
@@ -1023,6 +1041,108 @@
   </div>
 
   <!-- ═══════════════ ℹ️ INFORMATIONS ═══════════════ -->
+  <!-- 🎮 JEUX EN DIRECT (lot 101) — création, questions, programmation, suivi en direct -->
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-jeux">
+    <h3>🎮 Jeux <span class="cnt" id="jx-cnt">0</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Un jeu = des questions + une heure de départ. Les joueurs répondent <b>en même temps</b>, chaque mauvaise réponse élimine, et le nombre de survivants descend en direct jusqu’au gagnant. <b>L’activité du jeu est réservée au compte principal</b> (comme le quiz et Flip Fizz).</p>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button type="button" class="btn-main" style="flex:1;min-width:150px" onclick="jxNouveau()">➕ Nouveau jeu</button>
+        <button type="button" onclick="loadJeux()" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px 13px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">🔄 Actualiser</button>
+      </div>
+
+      <div id="jx-list" style="margin-bottom:12px"></div>
+
+      <div style="border:1.5px solid var(--line);border-radius:12px;padding:11px;background:var(--bg)">
+        <input type="hidden" id="jx-id">
+        <b style="display:block;font-size:12.5px;margin-bottom:7px" id="jx-titre">➕ Créer un jeu</b>
+        <input id="jx-nom" placeholder="Nom du jeu (ex : Grand Quiz KLEAN du samedi)" style="width:100%;box-sizing:border-box;margin-bottom:7px;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:7px">
+          <label style="flex:1;min-width:140px;font-size:11.5px;font-weight:800">Thème des questions<br>
+            <select id="jx-theme" style="width:100%;margin-top:4px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px"></select>
+          </label>
+          <label style="flex:1;min-width:140px;font-size:11.5px;font-weight:800">Où le jeu apparaît<br>
+            <span style="display:block;margin-top:5px;font-weight:700">
+              <label style="display:block;font-size:12px"><input type="checkbox" id="jx-p-accueil"> Page d’accueil</label>
+              <label style="display:block;font-size:12px"><input type="checkbox" id="jx-p-profils"> Profil / espace Compte</label>
+              <label style="display:block;font-size:12px"><input type="checkbox" id="jx-p-autres"> Rubrique Jeux</label>
+            </span>
+          </label>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:7px">
+          <label style="flex:1;min-width:140px;font-size:11.5px;font-weight:800">Qui peut participer — clients<br>
+            <select id="jx-rc" style="width:100%;margin-top:4px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+              <option value="all">Tous les clients</option><option value="done">Ceux qui ont une mission terminée</option><option value="none">Ceux qui n’ont pas encore de mission</option>
+            </select>
+          </label>
+          <label style="flex:1;min-width:140px;font-size:11.5px;font-weight:800">Qui peut participer — professionnels<br>
+            <select id="jx-rp" style="width:100%;margin-top:4px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+              <option value="all">Tous les professionnels</option><option value="done">Ceux qui ont une mission terminée</option><option value="none">Ceux qui n’ont pas encore de mission</option>
+            </select>
+          </label>
+        </div>
+        <small style="display:block;color:var(--muted);font-size:11px;margin:-2px 0 8px">C’est <b>le même système de restriction que le quiz</b> : la règle est appliquée par le serveur au moment où le joueur entre.</small>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:7px">
+          <label style="flex:1;min-width:150px;font-size:11.5px;font-weight:800">Début du jeu (date et heure)<br>
+            <input type="datetime-local" id="jx-debut" style="width:100%;margin-top:4px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">
+          </label>
+          <label style="flex:1;min-width:150px;font-size:11.5px;font-weight:800">Heure limite d’inscription<br>
+            <input type="datetime-local" id="jx-inscr" style="width:100%;margin-top:4px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">
+          </label>
+        </div>
+        <small style="display:block;color:var(--muted);font-size:11px;margin:-2px 0 8px">Après l’heure limite, <b>les retardataires ne peuvent plus rejoindre</b> ; ceux déjà inscrits continuent. Un compte à rebours s’affiche chez les joueurs.</small>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:7px">
+          <label style="font-size:11.5px;font-weight:800">Secondes par question<br>
+            <input type="number" id="jx-duree" min="5" max="120" value="20" style="width:90px;margin-top:4px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+          </label>
+          <label style="font-size:11.5px;font-weight:800">Points pour le gagnant<br>
+            <input type="number" id="jx-pts" min="0" max="1000" value="10" style="width:90px;margin-top:4px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+          </label>
+          <label style="display:flex;gap:6px;align-items:center;font-size:12px;font-weight:800;margin-top:14px"><input type="checkbox" id="jx-progress" checked> Difficulté progressive</label>
+        </div>
+        <small style="display:block;color:var(--muted);font-size:11px;margin:-2px 0 9px">« Difficulté progressive » : les premières questions sont faciles, puis la difficulté monte toute seule (et s’adapte quand peu de joueurs restent). C’est une option indépendante.</small>
+
+        <div style="border-top:1px dashed var(--line);padding-top:9px;margin-bottom:8px">
+          <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;font-weight:800"><input type="checkbox" id="jx-ia"> 🤖 Génération automatique des questions par IA</label>
+          <div id="jx-ia-box" style="display:none;margin-top:7px">
+            <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">
+              <input type="number" id="jx-ia-nb" min="3" max="30" value="8" style="width:74px;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px" title="Nombre de questions">
+              <select id="jx-ia-niveau" style="padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px"><option value="1">Facile</option><option value="2">Moyen</option><option value="3">Difficile</option></select>
+              <select id="jx-ia-langue" style="padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px"><option>français</option><option>anglais</option></select>
+              <select id="jx-ia-type" style="padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px"><option value="qcm">Choix multiples</option><option value="vraifaux">Vrai / Faux</option></select>
+              <label style="font-size:11.5px;font-weight:800"><input type="checkbox" id="jx-ia-prog" checked> progression</label>
+              <button type="button" onclick="jxGenerer()" style="background:var(--p);border:none;color:#04231a;font-weight:900;padding:9px 12px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12px">🤖 Générer les questions</button>
+            </div>
+            <small style="display:block;margin-top:6px;color:var(--muted);font-size:11px">Le générateur intégré fonctionne sans clé : il puise dans la banque KLEAN (maths, culture ivoirienne, découverte de KLEAN, français, sciences). Si vous ajoutez une clé IA (variable <b>KLEAN_IA_KEY</b>), l’application l’utilisera automatiquement.</small>
+            <small id="jx-ia-etat" style="display:block;margin-top:4px;font-size:11.5px;font-weight:800;color:var(--p)"></small>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
+          <button type="button" onclick="jxAjouterQuestion()" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:9px 12px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12px">➕ Ajouter une question à la main</button>
+          <button type="button" onclick="jxEnregistrer()" style="background:var(--blue);border:none;color:#04231a;font-weight:900;padding:9px 14px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12.5px">💾 Enregistrer</button>
+          <button type="button" onclick="jxActif()" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:9px 12px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12px" id="jx-btn-actif">✅ Activer / désactiver</button>
+        </div>
+        <div id="jx-questions" style="margin-bottom:4px"></div>
+      </div>
+
+      <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:11px">
+        <b style="display:block;font-size:12.5px;margin-bottom:7px">🔴 Partie en direct</b>
+        <div id="jx-live" style="font-size:12.5px">Aucune partie en cours.</div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">
+          <button type="button" onclick="jxLancer()" style="background:var(--p);border:none;color:#04231a;font-weight:900;padding:10px 13px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12.5px">🚀 Lancer la partie</button>
+          <button type="button" onclick="jxSuivant()" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px 13px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12.5px">⏭️ Question suivante</button>
+          <button type="button" onclick="jxClore()" style="background:rgba(255,176,32,.16);border:1.5px solid rgba(255,176,32,.45);color:var(--amber);font-weight:900;padding:10px 13px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12.5px">🏁 Terminer la partie</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px;display:none" id="panel-infos">
     <h3>ℹ️ Informations publiées <span class="cnt" id="in-cnt">—</span></h3>
     <div class="body" style="padding:12px 14px">
@@ -1172,7 +1292,8 @@ async function loadAll(){
     if(ME && ME.role==='pdg') etape('Bouclier', ()=>loadShield());
     etape('Sauvegardes', ()=>loadSauvegardes());
     etape('Litiges', ()=>loadLitiges());
-    etape('Menu', ()=>{ paintHqNav(); paintHome(); paintEntreprise(); });
+    etape('Jeux', ()=>loadJeux());
+    etape('Menu', ()=>{ paintHqNav(); paintHome(); paintEntreprise(); hqPliage(); });
     if(!window._qzPoll){ window._qzPoll=setInterval(loadQuizHQ, 1000); }
     if(!window._livePoll){ window._livePoll=setInterval(paintAnnLive, 4000); paintAnnLive(); }
   }catch(e){
@@ -1287,6 +1408,7 @@ const HQ_MENU = [
   { g:'🎮 Marketing & récompenses', items:[
     ['panel-flip','🎮 Flip Fizz & récompenses','jeu points klean cadeaux parties gratuites'],
     ['panel-quizbank','🧠 Quiz & questions','catégories questions défi quotidien séries classement'],
+    ['panel-jeux','🎮 Jeux','jeu en direct élimination questions ia participants gagnant', true],
     ['panel-promo','🎟️ Codes promo & partenaires','réduction coupon partenaire sponsor', true]
   ]},
   { g:'🔐 Sécurité & modération', items:[
@@ -1294,14 +1416,17 @@ const HQ_MENU = [
     ['panel-demande-comptes','🟠 Demandes de blocage / suppression','gestionnaires motif compte', true],
     ['panel-trash','♻️ Comptes supprimés','récupérer restaurer corbeille', true],
     ['panel-shield','🛡️ Bouclier anti-malveillance','ip recelées attaques protection', true],
-    ['panel-freeze','⛔ Coupure des écritures','geler lecture seule PDG', true],
     ['panel-audit','📜 Journal d’audit','traçabilité actions historique', true],
     ['panel-sauvegardes','💾 Sauvegardes des données','télécharger restaurer copie de secours perte de données export', true]
   ]},
   { g:'⚙️ Paramètres', items:[
     ['panel-cfg','⚙️ Réglages plateforme','commission configuration GPS national', true],
+    ['panel-vitesse','⚙️ Vitesses d’affichage','vitesse défilement publicités jeux urgence informations rythme annonces', true],
     ['panel-entreprise','🏢 Profil de l’entreprise','identité klean pays devise commission villes services moyens de paiement'],
     ['panel-cfg','🔑 Mot de passe & sécurité HQ','changer mot de passe PDG', false, 'changePwd()']
+  ]},
+  { g:'🚨 Sécurité & modération — actions sensibles', items:[
+    ['panel-freeze','⛔ Bloquer l’entreprise','bloquer entreprise suspendre les écritures urgence modération tout arrêter', true]
   ]}
 ];
 /* HQ_GO reste la liste utilisée par les puces de recherche (compatibilité) */
@@ -1314,9 +1439,9 @@ const HQ_ORDER = ['panel-home','panel-search','kpis','substrip','panel-ca7',
   'panel-missions','panel-quotes','panel-litiges',
   'panel-pay','panel-paydest',
   'panel-ann','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
-  'panel-flip','panel-quizbank','panel-promo',
-  'panel-urgences','panel-demande-comptes','panel-trash','panel-shield','panel-freeze','panel-audit','panel-sauvegardes',
-  'panel-entreprise','panel-cfg'];
+  'panel-flip','panel-quizbank','panel-jeux','panel-promo',
+  'panel-urgences','panel-demande-comptes','panel-trash','panel-shield','panel-audit','panel-sauvegardes',
+  'panel-entreprise','panel-cfg','panel-vitesse','panel-freeze'];
 /* ═══════════ 🧭 NAVIGATION LATÉRALE + 🏠 VUE GÉNÉRALE (lot 97) ═══════════ */
 function hqNavToggle(force){
   const nav = document.getElementById('hq-nav'), back = document.getElementById('hq-nav-back');
@@ -1448,6 +1573,311 @@ function paintHome(){
   try{ paintStockage(); }catch(e){}
   const maj = document.getElementById('home-maj');
   if(maj) maj.textContent = 'à ' + new Date().toTimeString().slice(0, 5);
+}
+/* ═══════════ 🎮 JEUX EN DIRECT (lot 101) ═══════════ */
+var JEUX = [], JEUX_PARTIES = [], JEU_THEMES = {}, JEUX_COURANT = null, JX_QUESTIONS = [];
+function jxV(id){ const e = document.getElementById(id); return e ? e.value : ''; }
+function jxChk(id){ const e = document.getElementById(id); return !!(e && e.checked); }
+function jxDate(v){ return v ? new Date(v).toISOString() : ''; }
+function jxLocal(iso){ try{ return iso ? new Date(iso).toISOString().slice(0, 16) : ''; }catch(e){ return ''; } }
+async function loadJeux(){
+  try{
+    const d = await fetchJ('/api/admin/jeux');
+    JEUX = d.jeux || []; JEUX_PARTIES = d.parties || []; JEU_THEMES = d.themes || {};
+    const th = document.getElementById('jx-theme');
+    if(th && !th.options.length) th.innerHTML = Object.keys(JEU_THEMES).map(k => '<option value="' + k + '">' + JEU_THEMES[k] + '</option>').join('');
+    VI = Object.assign({ pub: 3.2, jeux: 3.2, urgence: 3.2, infos: 3.2 }, d.vitesses || {});
+    paintJeux(); paintVitesses();
+  }catch(e){ hqOubli('Jeux', e); }
+}
+function paintJeux(){
+  const c = document.getElementById('jx-cnt'); if(c) c.textContent = JEUX.length;
+  const box = document.getElementById('jx-list'); if(!box) return;
+  if(!JEUX.length){ box.innerHTML = '<div class="empty" style="padding:12px"><b>Aucun jeu pour l’instant</b><p>Créez votre premier jeu en direct : questions automatiques ou écrites à la main.</p></div>'; return; }
+  box.innerHTML = JEUX.map(j => {
+    const actif = j.actif;
+    const ia = j.ia && j.ia.actif ? ' · 🤖 IA' : '';
+    return '<div style="border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:8px;background:var(--bg)">'
+      + '<div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">'
+      + '<b style="font-size:12.5px">' + (actif ? '🟢' : '⚪') + ' ' + (j.nom || 'Sans nom') + '</b>'
+      + '<span class="badge" style="background:' + (actif ? 'rgba(21,201,138,.16)' : 'var(--card2)') + ';color:' + (actif ? 'var(--p)' : 'var(--muted)') + '">' + (actif ? 'EN LIGNE' : 'DÉSACTIVÉ') + '</span>'
+      + '<small style="color:var(--muted)">' + j.nbQuestions + ' question(s)' + ia + ' · ' + (JEU_THEMES[j.theme] || '') + '</small>'
+      + '</div>'
+      + '<small style="display:block;color:var(--muted);font-size:11.5px;margin-top:4px">Où : '
+        + [j.placement.accueil ? 'accueil' : '', j.placement.profils ? 'profil' : '', j.placement.autres !== false ? 'rubrique Jeux' : ''].filter(Boolean).join(' · ')
+        + ' · Qui : clients ' + ({ all: 'tous', done: 'mission terminée', none: 'sans mission' }[j.rest.clients] || '') + ' · pros ' + ({ all: 'tous', done: 'mission terminée', none: 'sans mission' }[j.rest.pros] || '')
+        + (j.debutAt ? ('<br>🕐 Début : ' + String(j.debutAt).slice(0, 16).replace('T', ' à ')) : '')
+        + (j.inscriptionFinAt ? (' · ✋ Inscriptions jusqu’à ' + String(j.inscriptionFinAt).slice(0, 16).replace('T', ' à ')) : '')
+        + '</small>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">'
+      + '<button type="button" onclick="jxEditer(\'' + j.id + '\')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11.5px">✏️ Modifier</button>'
+      + '<button type="button" onclick="jxBasculer(\'' + j.id + '\')" style="background:' + (actif ? 'rgba(255,107,107,.12)' : 'rgba(21,201,138,.14)') + ';border:1.5px solid ' + (actif ? 'rgba(255,107,107,.4)' : 'rgba(21,201,138,.45)') + ';color:' + (actif ? 'var(--red)' : 'var(--p)') + ';font-weight:900;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11.5px">' + (actif ? '⏸️ Désactiver' : '▶️ Activer') + '</button>'
+      + '<button type="button" onclick="jxSupprimer(\'' + j.id + '\')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--muted);font-weight:800;padding:7px 10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11.5px">🗑️</button>'
+      + '</div></div>';
+  }).join('');
+  paintLive();
+}
+function jxNouveau(){
+  JEUX_COURANT = null; JX_QUESTIONS = [];
+  ['jx-nom'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; });
+  document.getElementById('jx-id').value = '';
+  document.getElementById('jx-titre').textContent = '➕ Créer un jeu';
+  jxChkSet('jx-p-accueil', true); jxChkSet('jx-p-profils', false); jxChkSet('jx-p-autres', true);
+  jxChkSet('jx-progress', true); jxChkSet('jx-ia', false);
+  const ib = document.getElementById('jx-ia-box'); if(ib) ib.style.display = 'none';
+  document.getElementById('jx-duree').value = 20; document.getElementById('jx-pts').value = 10;
+  jxPaintQuestions();
+}
+function jxChkSet(id, v){ const e = document.getElementById(id); if(e) e.checked = !!v; }
+function jxEditer(id){
+  const j = JEUX.find(x => x.id === id); if(!j) return;
+  JEUX_COURANT = j; document.getElementById('jx-id').value = j.id;
+  document.getElementById('jx-titre').textContent = '✏️ Modifier : ' + j.nom;
+  const set = (i, v) => { const e = document.getElementById(i); if(e) e.value = v == null ? '' : v; };
+  set('jx-nom', j.nom); set('jx-theme', j.theme); set('jx-duree', j.dureeQuestion || 20);
+  set('jx-pts', j.pointsGagnant || 0);
+  jxChkSet('jx-p-accueil', j.placement.accueil); jxChkSet('jx-p-profils', j.placement.profils); jxChkSet('jx-p-autres', j.placement.autres !== false);
+  set('jx-rc', j.rest.clients); set('jx-rp', j.rest.pros);
+  set('jx-debut', jxLocal(j.debutAt)); set('jx-inscr', jxLocal(j.inscriptionFinAt));
+  jxChkSet('jx-progress', j.progresDifficulte);
+  const ia = j.ia || {}; jxChkSet('jx-ia', !!ia.actif);
+  const ib = document.getElementById('jx-ia-box'); if(ib) ib.style.display = ia.actif ? 'block' : 'none';
+  if(ia.actif){ set('jx-ia-nb', ia.nb || 8); set('jx-ia-niveau', ia.niveau || 1); set('jx-ia-langue', ia.langue || 'français'); set('jx-ia-type', ia.type || 'qcm'); jxChkSet('jx-ia-prog', ia.progression !== false); }
+  JX_QUESTIONS = (j.questions || []).slice();
+  jxPaintQuestions();
+  const pan = document.getElementById('panel-jeux');
+  try{ if(pan && pan.scrollIntoView) pan.scrollIntoView({ behavior: 'smooth', block: 'start' }); }catch(e){}
+}
+function jxAjouterQuestion(){
+  JX_QUESTIONS.push({ q: '', choix: ['', '', ''], bonne: 0, niveau: 1, source: 'administrateur' });
+  jxPaintQuestions();
+}
+function jxPaintQuestions(){
+  const box = document.getElementById('jx-questions'); if(!box) return;
+  if(!JX_QUESTIONS.length){ box.innerHTML = '<small style="color:var(--muted)">Aucune question : utilisez « Générer les questions » ou « Ajouter une question à la main ».</small>'; return; }
+  box.innerHTML = '<b style="display:block;font-size:12px;margin-bottom:6px">📝 Questions (' + JX_QUESTIONS.length + ') — modifiables avant le lancement</b>'
+    + JX_QUESTIONS.map((q, i) => '<div style="border:1.5px solid var(--line);border-radius:10px;padding:9px;margin-bottom:7px;background:var(--card2)">'
+      + '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><b style="font-size:11.5px">Q' + (i + 1) + '</b>'
+      + '<span class="badge" style="background:var(--bg);color:var(--muted);font-size:10px">' + ({ 1: 'facile', 2: 'moyen', 3: 'difficile' }[q.niveau] || 'moyen') + '</span>'
+      + '<small style="color:var(--muted);font-size:10.5px">' + (q.source || '') + '</small>'
+      + '<button type="button" onclick="jxJeter(' + i + ')" style="margin-left:auto;background:rgba(255,107,107,.12);border:1.5px solid rgba(255,107,107,.35);color:var(--red);font-weight:800;padding:4px 8px;border-radius:7px;cursor:pointer;font-family:inherit;font-size:11px">🗑️ supprimer</button></div>'
+      + '<input value="' + String(q.q || '').replace(/"/g, '&quot;') + '" oninput="JX_QUESTIONS[' + i + '].q=this.value" placeholder="Énoncé de la question" style="width:100%;box-sizing:border-box;margin-bottom:5px;padding:8px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px">'
+      + (q.choix || []).map((c, k) => '<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">'
+          + '<input type="radio" name="jx-b' + i + '" ' + (k === q.bonne ? 'checked' : '') + ' onchange="JX_QUESTIONS[' + i + '].bonne=' + k + '" title="Bonne réponse">'
+          + '<input value="' + String(c || '').replace(/"/g, '&quot;') + '" oninput="JX_QUESTIONS[' + i + '].choix[' + k + ']=this.value" style="flex:1;padding:7px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px">'
+          + '</div>').join('')
+      + '<select onchange="JX_QUESTIONS[' + i + '].niveau=parseInt(this.value,10)" style="margin-top:5px;padding:7px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:11.5px">'
+      + [1, 2, 3].map(x => '<option value="' + x + '" ' + ((q.niveau || 1) === x ? 'selected' : '') + '>' + ({ 1: 'facile', 2: 'moyen', 3: 'difficile' }[x]) + '</option>').join('')
+      + '</select></div>').join('');
+}
+function jxJeter(i){ JX_QUESTIONS.splice(i, 1); jxPaintQuestions(); }
+function jxCorps(){
+  return {
+    id: document.getElementById('jx-id').value || '',
+    nom: jxV('jx-nom'), theme: jxV('jx-theme'),
+    placement: { accueil: jxChk('jx-p-accueil'), profils: jxChk('jx-p-profils'), autres: jxChk('jx-p-autres') },
+    rest: { clients: jxV('jx-rc'), pros: jxV('jx-rp') },
+    debutAt: jxDate(jxV('jx-debut')), inscriptionFinAt: jxDate(jxV('jx-inscr')),
+    dureeQuestion: parseInt(jxV('jx-duree'), 10) || 20, pointsGagnant: parseInt(jxV('jx-pts'), 10) || 0,
+    progresDifficulte: jxChk('jx-progress'),
+    ia: { actif: jxChk('jx-ia'), theme: jxV('jx-theme'), nb: parseInt(jxV('jx-ia-nb'), 10) || 8, niveau: parseInt(jxV('jx-ia-niveau'), 10) || 1, langue: jxV('jx-ia-langue'), type: jxV('jx-ia-type'), progression: jxChk('jx-ia-prog') },
+    questions: JX_QUESTIONS
+  };
+}
+async function jxGenerer(){
+  const btn = event && event.target; if(btn){ btn.disabled = true; btn.textContent = '⏳ Génération…'; }
+  const et = document.getElementById('jx-ia-etat');
+  try{
+    const r = await fetch('/api/admin/jeux/generer', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ia: jxCorps().ia }) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) { if(et) et.textContent = '⚠️ ' + (d.error || 'Génération impossible'); return; }
+    JX_QUESTIONS = JX_QUESTIONS.concat(d.questions || []);
+    jxPaintQuestions();
+    if(et) et.textContent = '✅ ' + (d.message || '') + ' Vous pouvez les modifier ou en supprimer.';
+  }catch(e){ if(et) et.textContent = '⚠️ Réseau indisponible'; }
+  finally{ if(btn){ btn.disabled = false; btn.textContent = '🤖 Générer les questions'; } }
+}
+async function jxEnregistrer(){
+  const corps = jxCorps();
+  if(!corps.id && (corps.nom || '').trim().length < 3) return alert('⚠️ Donnez un nom au jeu');
+  try{
+    const r = await fetch('/api/admin/jeux', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corps) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) return alert('⚠️ ' + (d.error || 'Enregistrement impossible'));
+    document.getElementById('jx-id').value = d.jeu.id;
+    document.getElementById('jx-titre').textContent = '✏️ Modifier : ' + d.jeu.nom;
+    alert('✅ Jeu enregistré (' + d.jeu.nbQuestions + ' question(s))' + (d.jeu.actif ? '' : '\n\nIl est encore désactivé : cliquez « Activer » pour l’afficher aux joueurs.'));
+    loadJeux();
+  }catch(e){ alert('⚠️ Réseau indisponible'); }
+}
+function jxActif(){
+  const id = jxV('jx-id') || ((JEUX[0] || {}).id || '');
+  if(!id) return alert('⚠️ Choisissez d’abord un jeu dans la liste');
+  return jxBasculer(id);
+}
+async function jxBasculer(id){
+  const j = JEUX.find(x => x.id === id); if(!j) return;
+  try{
+    const r = await fetch('/api/admin/jeux/actif', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id, actif: !j.actif }) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+    loadJeux();
+  }catch(e){ alert('⚠️ Réseau indisponible'); }
+}
+async function jxSupprimer(id){
+  if(!confirm('Supprimer définitivement ce jeu et ses questions ?\n(Les parties déjà jouées restent dans l’historique.)')) return;
+  try{
+    const r = await fetch('/api/admin/jeux?id=' + encodeURIComponent(id), { method:'DELETE' });
+    if(!r.ok) return alert('⚠️ Suppression impossible');
+    JX_QUESTIONS = []; jxNouveau(); loadJeux();
+  }catch(e){ alert('⚠️ Réseau indisponible'); }
+}
+async function jxLancer(){
+  let id = document.getElementById('jx-id').value;
+  if(!id){ if(!JX_QUESTIONS.length) return alert('⚠️ Choisissez un jeu (ou enregistrez-le d’abord)'); }
+  try{
+    const r = await fetch('/api/admin/jeux/partie/lancer', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) return alert('⚠️ ' + (d.error || 'Lancement impossible'));
+    alert('🚀 ' + (d.message || 'Partie lancée'));
+    loadJeux();
+  }catch(e){ alert('⚠️ Réseau indisponible'); }
+}
+async function jxSuivant(){
+  const p = JEUX_PARTIES[0];
+  if(!p || p.status === 'termine') return alert('⚠️ Aucune partie en cours');
+  const r = await fetch('/api/admin/jeux/partie/suivant', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: p.id }) });
+  const d = await r.json().catch(() => ({}));
+  if(!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+  loadJeux();
+}
+async function jxClore(){
+  const p = JEUX_PARTIES[0];
+  if(!p || p.status === 'termine') return alert('⚠️ Aucune partie en cours');
+  if(!confirm('Terminer la partie maintenant et désigner le(s) gagnant(s) ?')) return;
+  await fetch('/api/admin/jeux/partie/clore', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: p.id }) });
+  loadJeux();
+}
+async function paintLive(){
+  const box = document.getElementById('jx-live'); if(!box) return;
+  const p = JEUX_PARTIES[0];
+  if(!p){ box.innerHTML = 'Aucune partie en cours.'; return; }
+  const enCours = p.status !== 'termine';
+  box.innerHTML = '<div style="border:1.5px solid var(--line);border-radius:11px;padding:10px;background:var(--bg)">'
+    + '<b>' + (p.status === 'termine' ? '🏁' : '🔴') + ' ' + p.nom + '</b> <small style="color:var(--muted)">' + p.id + ' · ' + ({ inscription: 'inscriptions ouvertes', en_cours: 'en direct', termine: 'terminée' }[p.status] || p.status) + '</small>'
+    + '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:7px;font-size:12px;font-weight:800">'
+    + '<span style="background:var(--card2);border-radius:9px;padding:6px 9px">👥 Participants <b>' + p.total + '</b></span>'
+    + '<span style="background:rgba(21,201,138,.14);border-radius:9px;padding:6px 9px">🟢 En course <b>' + p.restants + '</b></span>'
+    + '<span style="background:rgba(255,107,107,.12);border-radius:9px;padding:6px 9px">✕ Éliminés <b>' + Math.max(0, p.total - p.restants) + '</b></span>'
+    + (p.raisonFin ? ('</div><small style="color:var(--muted)">' + p.raisonFin + '</small><div>') : '')
+    + '</div>'
+    + ((p.gagnants || []).length ? ('<div style="margin-top:7px;font-size:12.5px;color:var(--p);font-weight:900">🏆 Gagnant' + (p.gagnants.length > 1 ? 's' : '') + ' : ' + p.gagnants.map(g => g.nom + (g.photo ? ' 📸' : '')).join(', ') + '</div>') : '')
+    + (enCours ? '<small style="display:block;margin-top:6px;color:var(--muted);font-size:11.5px">La question suivante s’enchaîne toute seule quand tout le monde a répondu ou quand le temps est écoulé. Vous pouvez aussi forcer avec « ⏭️ Question suivante ».</small>' : '')
+    + '</div>';
+}
+/* suivi en direct : le tableau de bord se met à jour tout seul */
+function jxLiveTick(){
+  const p = document.getElementById('panel-jeux');
+  if(!p || p.style.display === 'none') return;
+  fetchJ('/api/admin/jeux/live').then(d => {
+    if(!d || !d.partie) return;
+    const i = JEUX_PARTIES.findIndex(x => x.id === d.partie.id);
+    const ligne = { id: d.partie.id, jeuId: d.partie.jeuId, nom: d.partie.nom, status: d.partie.status, total: d.partie.total, restants: d.partie.restants, gagnants: d.partie.gagnants, raisonFin: d.partie.raisonFin, qi: d.partie.qi, at: '' };
+    if(i < 0) JEUX_PARTIES.unshift(ligne); else JEUX_PARTIES[i] = Object.assign({}, JEUX_PARTIES[i], ligne);
+    /* question en cours + qui a répondu */
+    let q = '';
+    if(d.partie.question) q = '<div style="margin-top:8px;font-size:12.5px"><b>Q' + ((d.partie.posees || 0)) + '.</b> ' + d.partie.question.q
+      + '<br><small style="color:var(--muted)">Bonne réponse : <b>' + (d.partie.question.choix[d.partie.question.bonne] || '') + '</b> · ' + (d.partie.secondes || 0) + ' s restantes</small></div>';
+    const liste = (d.partie.participants || []).map(x => '<span style="display:inline-block;margin:3px 4px 0 0;padding:4px 8px;border-radius:8px;font-size:11.5px;font-weight:800;background:' + (x.elimine ? 'rgba(255,107,107,.12)' : 'rgba(21,201,138,.14)') + ';color:' + (x.elimine ? 'var(--red)' : 'var(--p)') + '">' + (x.elimine ? '✕' : '🟢') + ' ' + x.nom + (x.repondu ? ' ✓' : '') + (x.photo ? ' 📸' : '') + '</span>').join('');
+    paintLive();
+    const box = document.getElementById('jx-live');
+    if(box) box.innerHTML += q + (liste ? ('<div style="margin-top:6px">' + liste + '</div>') : '');
+  }).catch(() => {});
+}
+
+/* ═══════════ ⚙️ VITESSES D'AFFICHAGE (lot 101) ═══════════ */
+var VI = { pub: 3.2, jeux: 3.2, urgence: 3.2, infos: 3.2 };
+var VI_ZONES = [['pub', '📣 Publicités', 'Vitesse du clignotement doux du message publicitaire'], ['jeux', '🎮 Jeux', 'Défilement du bandeau de jeu'], ['urgence', '🆘 Urgence', 'Défilement du bandeau d’urgence'], ['infos', 'ℹ️ Informations', 'Défilement du bandeau d’informations']];
+function paintVitesses(){
+  const box = document.getElementById('vi-liste'); if(!box) return;
+  box.innerHTML = VI_ZONES.map(z => '<label style="display:block;margin-bottom:10px">'
+    + '<b style="font-size:12.5px">' + z[1] + ' — <span id="vi-v-' + z[0] + '">' + VI[z[0]] + ' s</span></b>'
+    + '<input type="range" min="0.5" max="10" step="0.1" value="' + VI[z[0]] + '" oninput="VI[\'' + z[0] + '\']=Number(this.value); document.getElementById(\'vi-v-' + z[0] + '\').textContent=this.value+\' s\'" style="width:100%">'
+    + '<small style="color:var(--muted);font-size:11px">' + z[2] + '</small></label>').join('');
+}
+async function viEnregistrer(){
+  try{
+    const r = await fetch('/api/admin/vitesses', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(VI) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) return alert('⚠️ ' + (d.error || 'Enregistrement impossible'));
+    VI = d.vitesses; paintVitesses();
+    alert('✅ Vitesses enregistrées : elles s’appliquent tout de suite chez les utilisateurs.');
+  }catch(e){ alert('⚠️ Réseau indisponible'); }
+}
+
+/* ═══════════ 📂 SECTIONS REPLIABLES (lot 101) ═══════════ */
+function hqPliage(){
+  const cle = 'klean_hq_plies';
+  let plies = {};
+  try{ plies = JSON.parse(localStorage.getItem(cle) || '{}'); }catch(e){ plies = {}; }
+  const secs = [...document.querySelectorAll('.wrap > .hq-sec')];
+  secs.forEach(t => {
+    const nom = t.dataset.nom || t.textContent.trim();
+    t.dataset.nom = nom;
+    /* 🧠 on retient l'état d'origine de chaque bloc (certains panneaux ne s'ouvrent qu'au clic) */
+    let el = t.nextElementSibling;
+    while(el && !el.classList.contains('hq-sec')){
+      if(el.dataset && el.dataset.d0 === undefined) el.dataset.d0 = el.style.display || '';
+      el = el.nextElementSibling;
+    }
+    if(!t.dataset.pret){
+      t.dataset.pret = '1';
+      t.style.cursor = 'pointer';
+      t.title = 'Cliquer pour replier / déplier cette catégorie';
+      const f = document.createElement('span');
+      f.style.cssText = 'margin-left:auto;font-size:12px;opacity:.75;font-weight:700';
+      f.className = 'hq-sec-fleche';
+      f.textContent = '▾';
+      t.appendChild(f);
+      t.addEventListener('click', () => {
+        const on = t.classList.toggle('hq-sec-ferme');
+        let p = {}; try{ p = JSON.parse(localStorage.getItem(cle) || '{}'); }catch(e) { p = {}; }
+        p[nom] = on ? 1 : 0; try{ localStorage.setItem(cle, JSON.stringify(p)); }catch(e) {}
+        hqPliageAppliquer();
+      });
+    }
+    if(plies[nom]) t.classList.add('hq-sec-ferme'); else t.classList.remove('hq-sec-ferme');
+  });
+  hqPliageAppliquer();
+}
+function hqPliageAppliquer(){
+  const secs = [...document.querySelectorAll('.wrap > .hq-sec')];
+  secs.forEach(t => {
+    const ferme = t.classList.contains('hq-sec-ferme');
+    const f = t.querySelector('.hq-sec-fleche');
+    if(f) f.textContent = ferme ? '▸ (' + t.dataset.nb + ' bloc' + (Number(t.dataset.nb) > 1 ? 's' : '') + ' replié' + (Number(t.dataset.nb) > 1 ? 's' : '') + ')' : '▾';
+    if(!ferme){ t.style.background = ''; }
+    let el = t.nextElementSibling, nb = 0;
+    while(el && !el.classList.contains('hq-sec')){
+      if(!el.dataset || el.id === 'hq-erreur'){ el = el.nextElementSibling; continue; }
+      if(el.dataset.d0 === undefined) el.dataset.d0 = el.style.display || '';
+      el.style.display = ferme ? 'none' : el.dataset.d0;
+      nb++;
+      el = el.nextElementSibling;
+    }
+    t.dataset.nb = String(nb);
+  });
+  window._hqPlies = secs.filter(x => x.classList.contains('hq-sec-ferme')).length;
+}
+function hqPliageTout(fermer){
+  const cle = 'klean_hq_plies';
+  let p = {};
+  [...document.querySelectorAll('.wrap > .hq-sec')].forEach(t => {
+    t.classList.toggle('hq-sec-ferme', !!fermer);
+    p[t.dataset.nom || t.textContent.replace('▾', '').trim()] = fermer ? 1 : 0;
+  });
+  try{ localStorage.setItem(cle, JSON.stringify(p)); }catch(e) {}
+  hqPliageAppliquer();
 }
 /* ═══════════ 🟠 LITIGES & REMBOURSEMENTS (lot 99) ═══════════ */
 let LITIGES = null, LITIGES_FILTRE = 'actifs';
@@ -1712,6 +2142,8 @@ function jumpPanel(id){
   try{
     if(id==='panel-pay'){ try{ chargerPaiements(); }catch(e){} try{ chargerProviderPay(); }catch(e){} }
     if(id==='panel-flip' || id==='panel-quizbank' || id==='panel-infos' || id==='panel-urgences'){ try{ chargerHQ96(); }catch(e){} }
+    if(id==='panel-jeux'){ try{ loadJeux(); }catch(e){} }
+    if(id==='panel-vitesse'){ try{ loadJeux(); paintVitesses(); }catch(e){} }
   }catch(e){}
 }
 async function runSearchHQ(){
@@ -3294,7 +3726,7 @@ function pubRemplir(ad, views){
 function pubMediaEtat(){
   const e=document.getElementById('pub-media-etat'); if(!e) return;
   if(window._pubMedia.url){
-    e.innerHTML='✅ Média en place : <b>'+(window._pubMedia.type==='video'?'🎬 vidéo':'🖼️ image')+'</b> — '+window._pubMedia.url
+    e.innerHTML='✅ Média en place : <b>'+(window._pubMedia.type==='video'?'🎬 vidéo':'🖼️ photo')+'</b>'+(window._pubMedia.resume?(' · '+window._pubMedia.resume):'')+' — '+window._pubMedia.url
       +'<br><a href="'+window._pubMedia.url+'" target="_blank" rel="noopener" style="color:var(--p);font-weight:800">Voir le fichier</a>';
     const d=document.getElementById('pub-media-del'); if(d) d.style.display='';
   } else {
@@ -3302,21 +3734,101 @@ function pubMediaEtat(){
     const d=document.getElementById('pub-media-del'); if(d) d.style.display='none';
   }
 }
-/* 📤 téléversement : le fichier part au serveur, qui vérifie le type réel et la taille */
+/* ═══ 🖼️/🎬 LOT 101 — galerie, vérifications et COMPRESSION AUTOMATIQUE avant envoi ═══
+   • formats acceptés seulement (images JPG/PNG/WEBP/GIF · vidéos MP4/WEBM)
+   • photo : dimensions lues, redimensionnement doux + compression JPEG (qualité conservée)
+   • fichier trop lourd ou illisible → refusé AVANT l'envoi, avec un message clair
+   • le média accepté s'affiche tout de suite dans l'aperçu, avant publication */
+const PUB_IMG_TYPES = ['image/jpeg','image/jpg','image/png','image/webp','image/gif'];
+const PUB_VID_TYPES = ['video/mp4','video/webm'];
+function pubMo(octets){ return (octets/1048576).toFixed(1); }
+function pubKo(octets){ return Math.max(1, Math.round(octets/1024)); }
+function pubCompresserImage(file, cb){
+  const fini = (out) => { try{ cb(out); }catch(e){} };
+  let url='';
+  try{ url = URL.createObjectURL ? URL.createObjectURL(file) : ''; }catch(e){ url=''; }
+  const lireBrut = (motif) => {
+    const r=new FileReader();
+    r.onload=()=>fini({ dataUrl:String(r.result||''), dims:'', compresse:false, note:motif });
+    r.onerror=()=>fini({ erreur:'Fichier illisible — choisissez une autre photo.' });
+    r.readAsDataURL(file);
+  };
+  if(!url){ return lireBrut('envoi direct (navigateur sans canvas)'); }
+  const img = new Image();
+  img.onload = () => {
+    try{
+      let w=img.naturalWidth||0, h=img.naturalHeight||0;
+      if(!w || !h) throw new Error('dimensions inconnues');
+      if(Math.min(w,h) < 150) throw new Error('trop petite (minimum 150 px)');
+      const max=1280, avant=w+'×'+h;
+      if(Math.max(w,h) > max){ const k=max/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
+      const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+      const cx=cv.getContext && cv.getContext('2d');
+      if(!cx) throw new Error('canvas indisponible');
+      cx.drawImage(img,0,0,w,h);
+      let out=cv.toDataURL('image/jpeg',0.86), q=86;
+      if(out.length > 900000){ out=cv.toDataURL('image/jpeg',0.7); q=70; }
+      if(out.length > 900000){
+        const cv2=document.createElement('canvas'); cv2.width=Math.round(w*0.72); cv2.height=Math.round(h*0.72);
+        const cx2=cv2.getContext && cv2.getContext('2d');
+        if(cx2){ cx2.drawImage(cv,0,0,cv2.width,cv2.height); out=cv2.toDataURL('image/jpeg',0.55); q=55; w=cv2.width; h=cv2.height; }
+      }
+      try{ URL.revokeObjectURL(url); }catch(e){}
+      fini({ dataUrl:out, dims:avant+' → '+w+'×'+h, compresse:true, qualite:q });
+    }catch(err){ try{ URL.revokeObjectURL(url); }catch(e){} lireBrut('envoi direct — '+(err&&err.message?err.message:'compression impossible')); }
+  };
+  img.onerror = () => { try{ URL.revokeObjectURL(url); }catch(e){} fini({ erreur:'Ce fichier n’est pas une photo lisible (JPG, PNG ou WEBP).' }); };
+  img.src = url;
+}
+function pubVerifVideo(file, cb){
+  let url='';
+  try{ url = URL.createObjectURL ? URL.createObjectURL(file) : ''; }catch(e){ url=''; }
+  if(!url) return cb({ ok:true, note:'' });
+  const v=document.createElement('video');
+  v.preload='metadata';
+  v.onloadedmetadata = () => {
+    const d = Math.round(v.duration||0);
+    try{ URL.revokeObjectURL(url); }catch(e){}
+    if(d && d>75) return cb({ erreur:'Vidéo trop longue ('+d+' s). Maximum 75 secondes pour la publicité.' });
+    cb({ ok:true, note: d ? ('durée '+d+' s') : '' });
+  };
+  v.onerror = () => { try{ URL.revokeObjectURL(url); }catch(e){} cb({ ok:true, note:'' }); };
+  v.src = url;
+}
 async function pubChoisir(input, genre){
   const f=input && input.files && input.files[0]; if(!f) return;
-  const max=genre==='video'?12:3;
-  if(f.size > max*1048576) return alert('❌ Fichier trop lourd : '+(f.size/1048576).toFixed(1)+' Mo. Maximum '+max+' Mo pour une '+genre+'.');
+  const type=String(f.type||'').toLowerCase();
+  const estImage=PUB_IMG_TYPES.indexOf(type)>=0, estVideo=PUB_VID_TYPES.indexOf(type)>=0;
+  if(!estImage && !estVideo) return alert('❌ Fichier non pris en charge ('+(type||'type inconnu')+').\nChoisissez une photo (JPG, PNG, WEBP, GIF) ou une vidéo (MP4, WEBM).');
+  if(estImage && f.size > 12*1048576) return alert('❌ Photo trop lourde : '+pubMo(f.size)+' Mo. Maximum 12 Mo avant compression.');
+  if(estVideo && f.size > 12*1048576) return alert('❌ Vidéo trop lourde : '+pubMo(f.size)+' Mo. Maximum 12 Mo — réduisez la durée ou la qualité.');
   const jauge=document.getElementById('pub-media-jauge'); if(jauge) jauge.style.display='';
+  const dire=(t)=>{ const e=document.getElementById('pub-media-etat'); if(e) e.innerHTML=t; };
   try{
-    const dataUrl=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); });
+    let dataUrl='', resume='';
+    if(estImage){
+      dire('⏳ Compression de la photo…');
+      const out = await new Promise(r => pubCompresserImage(f, r));
+      if(out.erreur) throw new Error(out.erreur);
+      dataUrl = out.dataUrl;
+      const avant = pubKo(f.size)+' Ko', apres = pubKo(Math.round(String(dataUrl).length*0.75))+' Ko';
+      resume = (out.dims ? 'dimensions '+out.dims+' · ' : '') + 'poids '+avant+' → '+apres
+        + (out.compresse ? (' (compressée à '+out.qualite+' % de qualité' + (Number(apres.replace('\D',''))<Number(avant.replace('\D','')) ? ', image allégée' : '') + ')') : '')
+        + (out.note ? ' · ' + out.note : '');
+    } else {
+      dire('⏳ Vérification de la vidéo…');
+      const out = await new Promise(r => pubVerifVideo(f, r));
+      if(out.erreur) throw new Error(out.erreur);
+      dataUrl = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); });
+      resume = 'vidéo ' + pubMo(f.size) + ' Mo' + (out.note ? ' · ' + out.note : '');
+    }
     const r=await fetch('/api/admin/pub/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataUrl})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(d.error||'Envoi refusé');
-    window._pubMedia={ url:d.url, type:d.mediaType };
+    window._pubMedia={ url:d.url, type:d.mediaType, resume:resume };
     pubMediaEtat(); pubApercu();
-    alert('✅ '+(d.mediaType==='video'?'Vidéo':'Image')+' acceptée ('+d.mo+' Mo).\nCliquez sur « Enregistrer et publier maintenant » pour la mettre en ligne.');
-  }catch(e){ alert('⚠️ '+(e && e.message ? e.message : 'Envoi impossible')); }
+    alert('✅ '+(d.mediaType==='video'?'Vidéo':'Photo')+' acceptée ('+d.mo+' Mo).\n'+resume+'\n\nVérifiez l’aperçu ci-dessus, puis cliquez sur « Enregistrer et publier maintenant ».');
+  }catch(e){ alert('⚠️ '+(e && e.message ? e.message : 'Envoi impossible')); dire('Aucun média.'); pubMediaEtat(); }
   finally{ if(jauge) jauge.style.display='none'; input.value=''; }
 }
 async function pubRetirerMedia(){
@@ -4501,7 +5013,9 @@ async function ugStatut(id, statut){
     document.addEventListener('keydown', e => { if(e.key === 'Escape') hqNavClose(); });
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else setTimeout(boot, 0);
-  window.addEventListener('load', () => { try{ hqReorganiser(); paintHqNav(); paintHome(); paintEntreprise(); }catch(e){} });
+  window.addEventListener('load', () => { try{ hqReorganiser(); paintHqNav(); paintHome(); paintEntreprise(); hqPliage(); }catch(e){} });
+  /* 🔴 le suivi de la partie en direct se rafraîchit toutes les 3 s */
+  if(!window._jxPoll) window._jxPoll = setInterval(() => { try{ jxLiveTick(); }catch(e){} }, 3000);
 })();
 
 /* mise en place des champs de réponse + des aperçus au démarrage */
@@ -4509,6 +5023,22 @@ async function ugStatut(id, statut){
   const z = document.getElementById('qb-choix'); if(z) z.innerHTML = qbChoixHTML('');
   ffChk('ff-recomp', true);
   setTimeout(() => { ffEtat(); ffApercu(); }, 400);
+})();
+/* 🎮/⚙️ branchements des nouveaux champs du lot 101 */
+(function init101(){
+  const ia = document.getElementById('jx-ia');
+  if(ia) ia.addEventListener('change', () => { const b = document.getElementById('jx-ia-box'); if(b) b.style.display = ia.checked ? 'block' : 'none'; });
+  const bar = document.getElementById('substrip');
+  if(bar && !document.getElementById('hq-pli-tout')){
+    const d = document.createElement('div');
+    d.style.cssText = 'display:flex;gap:6px;margin:0 0 8px';
+    d.innerHTML = '<button type="button" id="hq-pli-tout" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:11.5px">▸ Tout replier</button>'
+      + '<button type="button" id="hq-depli-tout" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:11.5px">▾ Tout déplier</button>';
+    bar.parentNode.insertBefore(d, bar);
+    d.querySelector('#hq-pli-tout').onclick = () => hqPliageTout(true);
+    d.querySelector('#hq-depli-tout').onclick = () => hqPliageTout(false);
+  }
+  try{ jxNouveau(); }catch(e){}
 })();
 </script>
 

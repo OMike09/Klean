@@ -160,6 +160,10 @@ function poserDefauts() {
   db.urgContacts = db.urgContacts || {};    // contacts d'urgence personnels { clientId: [...] }
   db.litiges = db.litiges || [];            // 🟠 litiges & remboursements (lot 99) — dossiers de réclamation
   db.pubFiles = db.pubFiles || {};          // 🖼️ copie des médias de publicité (lot 100) — survit aux redéploiements
+  /* ═══ 🎮 JEUX EN DIRECT (lot 101) ═══ */
+  db.jeux = db.jeux || [];                  // jeux créés depuis le HQ (configurations)
+  db.jeuxParties = db.jeuxParties || [];    // parties en direct (participants, éliminations, gagnants)
+  db.vitesses = Object.assign({ pub: 3.2, jeux: 3.2, urgence: 3.2, infos: 3.2 }, db.vitesses || {});
 }
 
 async function initStorage() {
@@ -1961,6 +1965,273 @@ function litigeMessageClient(l, texte) {
   db.supportMsgs.push({ id: uid('SR'), role: 'client', uid: l.clientId, nom: l.clientNom, from: 'hq', par: 'KLEAN', text: texte, at: nowISO(), readHQ: true, readUser: false });
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   🎮 LOT 101 — JEUX EN DIRECT (élimination progressive) + génération de questions
+   · une « partie » réunit des participants connectés en même temps ;
+   · le SERVEUR est seul maître du temps et des éliminations (aucune confiance au téléphone) ;
+   · une mauvaise réponse OU une réponse trop tardive élimine ;
+   · les questions montent en difficulté si l'administrateur coche « difficulté progressive ».
+   ═══════════════════════════════════════════════════════════════════════════════ */
+const JEU_REST = ['all', 'done', 'none'];                       /* le MÊME système que le quiz */
+const JEU_PLACEMENTS = { accueil: 'Page d’accueil', profils: 'Profil / espace Compte', autres: 'Autres emplacements (rubrique Jeux)' };
+const JEU_NIVEAUX = { 1: 'facile', 2: 'moyen', 3: 'difficile' };
+function jeuRestOk(rule, done) { return rule === 'all' ? true : rule === 'done' ? !!done : rule === 'none' ? !done : true; }
+function jeuPeutJouer(player, jeu) {
+  const r = (jeu && jeu.rest) || { clients: 'all', pros: 'all' };
+  if (player.role === 'client') return jeuRestOk(r.clients, player.done);
+  if (player.role === 'agent') return jeuRestOk(r.pros, player.done);
+  return jeuRestOk(r.clients, false);
+}
+function jeuInfo(jeu) {
+  const q = (jeu.questions || []);
+  return {
+    id: jeu.id, nom: jeu.nom, theme: jeu.theme || '', actif: !!jeu.actif,
+    placement: jeu.placement || { accueil: true, profils: false, autres: true },
+    rest: jeu.rest || { clients: 'all', pros: 'all' },
+    debutAt: jeu.debutAt || null, inscriptionFinAt: jeu.inscriptionFinAt || null,
+    dureeQuestion: jeu.dureeQuestion || 20, progresDifficulte: !!jeu.progresDifficulte,
+    nbQuestions: q.length, niveaux: q.map(x => x.niveau || 1),
+    ia: jeu.ia || null, creeAt: jeu.creeAt || null
+  };
+}
+function jeuPublic(jeu, player, partie) {
+  const r = jeuInfo(jeu);
+  r.inscriptionOuverte = jeuInscriptionOuverte(jeu);
+  r.peutJouer = jeuPeutJouer(player, jeu);
+  if (partie) r.partie = { id: partie.id, status: partie.status };
+  return r;
+}
+function jeuInscriptionOuverte(jeu) {
+  if (!jeu || !jeu.actif) return false;
+  if (jeu.inscriptionFinAt && Date.now() > new Date(jeu.inscriptionFinAt).getTime()) return false;   /* ⏰ retardataires refusés */
+  return true;
+}
+function jeuQuestion(j, i) {
+  const q = ((j && j.questions) || [])[i]; if (!q) return null;
+  return { i, q: q.q, choix: (q.choix || []).slice(0, 4), niveau: q.niveau || 1, duree: j.dureeQuestion || 20, bonne: q.bonne };
+}
+/* 🎯 difficulté progressive : on choisit la question dont le niveau colle au stade de la partie,
+   en tenant aussi compte du nombre de participants encore en course. */
+function jeuChoisirSuivante(jeu, session) {
+  const reste = (jeu.questions || []).map((q, i) => ({ q, i })).filter(x => !(session.utilisees || []).includes(x.i));
+  if (!reste.length) return -1;
+  if (!jeu.progresDifficulte) return reste[0].i;
+  const total = Math.max(1, (jeu.questions || []).length);
+  const avancement = Math.min(1, (session.utilisees || []).length / Math.max(1, total - 1));
+  const vivants = session.participants.filter(p => !p.elimine).length;
+  const serrage = (session.participants.length > 1 && vivants <= session.participants.length / 3) ? 1 : 0;
+  const cible = Math.max(1, Math.min(3, 1 + Math.round(2 * avancement) + serrage));
+  let best = reste[0], ecart = 9;
+  for (const x of reste) { const d = Math.abs((x.q.niveau || 1) - cible); if (d < ecart) { ecart = d; best = x; } }
+  return best.i;
+}
+function jeuxTrouverPartie(id) { return (db.jeuxParties || []).find(p => p.id === id) || null; }
+function jeuxTrouverJeu(id) { return (db.jeux || []).find(j => j.id === id) || null; }
+function jeuxPartieActive(id) {
+  const list = (db.jeuxParties || []).filter(p => p.jeuId === id && p.status !== 'termine');
+  return list.length ? list[list.length - 1] : null;
+}
+/* ouvre la question suivante ; désigne les gagnants quand la partie est finie */
+function jeuxOuvrirQuestion(session, jeu, raison) {
+  const vivants = session.participants.filter(p => !p.elimine);
+  if (!session.participants.length) {
+    /* 🕐 personne encore inscrit : la partie ATTEND (l'organisateur a lancé, les joueurs arrivent) */
+    session.status = 'inscription'; saveDb(); return { fin: false, attente: true };
+  }
+  if (!vivants.length) { jeuxTerminer(session, jeu, 'plus aucun participant'); return { fin: true }; }
+  if (vivants.length === 1) { jeuxTerminer(session, jeu, 'dernier participant en course'); return { fin: true }; }
+  const i = jeuChoisirSuivante(jeu, session);
+  if (i < 0) { jeuxTerminer(session, jeu, 'toutes les questions ont été posées'); return { fin: true }; }
+  const q = jeu.questions[i];
+  session.utilisees = (session.utilisees || []).concat([i]);
+  session.qi = i;
+  session.status = 'en_cours';
+  session.qAt = nowISO();
+  session.qFinAt = new Date(Date.now() + (jeu.dureeQuestion || 20) * 1000).toISOString();
+  session.reponses = {};
+  session.participants.forEach(p => { p.repondu = false; p.derniereReponse = null; });
+  session.raison = raison || '';
+  saveDb();
+  emitAdmin('jeu', '🎮 ' + session.nom + ' — question ' + (session.utilisees.length) + '/' + (jeu.questions || []).length + ' · ' + session.participants.filter(p => !p.elimine).length + ' en course');
+  return { fin: false, i };
+}
+function jeuxEliminerNonRepondants(session) {
+  const fin = Date.parse(session.qFinAt || 0);
+  if (!fin || Date.now() < fin) return 0;
+  let n = 0;
+  session.participants.forEach(p => { if (!p.elimine && !p.repondu) { p.elimine = true; p.motif = 'temps écoulé'; n++; } });
+  return n;
+}
+function jeuxTerminer(session, jeu, raison) {
+  let vivants = session.participants.filter(p => !p.elimine);
+  let r = raison || '';
+  if (!vivants.length && session.participants.length) {
+    /* 🏆 dernier tour fatal pour tout le monde : le meilleur score est retenu (le jeu a toujours un gagnant) */
+    const max = Math.max.apply(null, session.participants.map(p => p.bon || 0));
+    vivants = session.participants.filter(p => (p.bon || 0) === max)
+      .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')))
+      .slice(0, 1);
+    r = (raison || '') + ' — aucun survivant : le meilleur score est retenu';
+  }
+  session.status = 'termine';
+  session.finAt = nowISO();
+  session.raisonFin = r;
+  session.gagnants = vivants.map(p => ({ uid: p.uid, nom: p.nom, bon: p.bon || 0, photo: p.photo || '' }));
+  session.qi = -1;
+  saveDb();
+  if (session.gagnants.length) {
+    emitAdmin('jeu', '🏆 ' + session.nom + ' : gagnant' + (session.gagnants.length > 1 ? 's' : '') + ' — ' + session.gagnants.map(g => g.nom).join(', '));
+    /* les points Klean Points sont ajoutés par le jeu, jamais de l'argent liquide */
+    session.gagnants.forEach(g => {
+      try { ptsMouvement(g.uid, Math.max(0, parseInt(session.pointsGagnant, 10) || 0), 'Victoire au jeu « ' + session.nom + ' »', session.id); } catch (e) {}
+    });
+  } else {
+    emitAdmin('jeu', '🎮 ' + session.nom + ' : aucun survivant (' + (raison || '') + ')');
+  }
+  return session;
+}
+/* appelée à chaque lecture : fait avancer la partie sans horloge serveur dédiée */
+function jeuxTick(session) {
+  if (!session || session.status === 'termine') return session;
+  const jeu = jeuxTrouverJeu(session.jeuId); if (!jeu) return session;
+  if (session.status === 'inscription') {
+    const heureOk = !jeu.debutAt || Date.now() >= new Date(jeu.debutAt).getTime();
+    if (heureOk && session.participants.length) jeuxOuvrirQuestion(session, jeu, 'début du jeu');
+    return session;
+  }
+  if (session.status === 'en_cours') {
+    jeuxEliminerNonRepondants(session);
+    const vivants = session.participants.filter(p => !p.elimine);
+    const toutRepondu = session.participants.filter(p => !p.elimine).every(p => p.repondu);
+    if (vivants.length === 0 || vivants.length === 1 || toutRepondu) jeuxOuvrirQuestion(session, jeu, toutRepondu ? 'tout le monde a répondu' : 'survivants');
+    else saveDb();
+  }
+  return session;
+}
+/* ============================ 🧠 GÉNÉRATEUR DE QUESTIONS ============================
+   Deux modes : « banque » (l'administrateur écrit/importe) et « automatique ».
+   Le mode automatique fonctionne par DÉFAUT sans aucune clé (générateur intégré, thèmes vérifiés) ;
+   si vous fournissez une clé (KLEAN_IA_KEY), il utilise l'IA et retombe sur le générateur en cas d'échec. */
+const JEU_THEMES = {
+  maths: 'Calcul & logique', culture_ci: 'Côte d’Ivoire', klean: 'Klean Service', francais: 'Langue française', sciences: 'Découverte & sciences'
+};
+let _jeuRand = null;
+function jeuAleatoire(max) { return Math.floor(Math.random() * max); }
+function jeuMelanger(a) { const t = a.slice(); for (let i = t.length - 1; i > 0; i--) { const j = jeuAleatoire(i + 1); const x = t[i]; t[i] = t[j]; t[j] = x; } return t; }
+function jeuQCM(q, bonne, faux, niveau) {
+  /* on garantit 4 propositions DIFFÉRENTES (sinon on complète par des écarts) */
+  const vus = [];
+  const ajouter = v => { const t = String(v); if (vus.indexOf(t) < 0) vus.push(t); };
+  ajouter(bonne); (faux || []).forEach(ajouter);
+  let k = 1;
+  while (vus.length < 4 && k < 30) { ajouter(Number(bonne) ? Number(bonne) + k : bonne + ' (variante ' + k + ')'); k++; }
+  const choix = jeuMelanger(vus.slice(0, 4));
+  return { q, choix, bonne: choix.indexOf(String(bonne)), niveau: niveau || 1 };
+}
+/* une question par « recette », du plus facile au plus difficile */
+function jeuQuestionIntegree(theme, niveau) {
+  const N = niveau || 1;
+  if (theme === 'maths') {
+    if (N === 1) { const a = 2 + jeuAleatoire(8), b = 2 + jeuAleatoire(8); return jeuQCM(a + ' + ' + b + ' = ?', String(a + b), [String(a + b + 1), String(a + b - 2), String(a + b + 10)], 1); }
+    if (N === 2) { const a = 3 + jeuAleatoire(9), b = 3 + jeuAleatoire(9); return jeuQCM(a + ' × ' + b + ' = ?', String(a * b), [String(a * b + a), String(a * b - b), String(a * b + 10)], 2); }
+    const a = 12 + jeuAleatoire(18), b = 4 + jeuAleatoire(6); const r = Math.floor(a / b), reste = a % b;
+    return jeuQCM(a + ' ÷ ' + b + ' = ? (arrondi entier)', r + ' reste ' + reste, [String(r + 1), String(r - 1), String(r + 2)], 3);
+  }
+  if (theme === 'culture_ci') {
+    const F = [
+      ['Quelle est la capitale politique de la Côte d’Ivoire ?', 'Yamoussoukro', ['Abidjan', 'Bouaké', 'Korhogo'], 1],
+      ['Quelle monnaie utilise-t-on en Côte d’Ivoire ?', 'Le franc CFA (XOF)', ['Le naira', 'Le cédi', 'Le dirham'], 1],
+      ['Quelle est la plus grande ville de Côte d’Ivoire ?', 'Abidjan', ['Bouaké', 'Yamoussoukro', 'San Pedro'], 1],
+      ['Dans quelle région se trouve Bouaké ?', 'La Vallée du Bandama', ['Le Bas-Sassandra', 'Les Lagunes', 'Le Zanzan'], 2],
+      ['Quel fleuve traverse la Côte d’Ivoire ?', 'Le Bandama', ['Le Niger', 'Le Sénégal', 'Le Congo'], 2],
+      ['Quel est le plus haut sommet de Côte d’Ivoire ?', 'Le mont Nimba', ['Le mont Tonkoui', 'Le mont Korhogo', 'Le mont Abidjan'], 3]
+    ];
+    const f = F.filter(x => x[3] === N); const c = f.length ? f[jeuAleatoire(f.length)] : F[jeuAleatoire(F.length)];
+    return jeuQCM(c[0], c[1], c[2], c[3]);
+  }
+  if (theme === 'klean') {
+    const F = [
+      ['Comment s’appelle le numéro professionnel d’un pro KLEAN ?', 'Un code KP- suivi de 6 chiffres', ['Un numéro de compte bancaire', 'Un code postal', 'Un code promo'], 1],
+      ['Que faire si aucun professionnel n’est disponible autour de vous ?', 'Déposer une demande ou élargir la recherche', ['Payer d’avance', 'Abandonner', 'Attendre une semaine'], 1],
+      ['Les Klean Points peuvent-ils être convertis en argent liquide ?', 'Non, jamais', ['Oui, en espèces', 'Oui, à la banque', 'Seulement le week-end'], 2],
+      ['Qui valide définitivement un remboursement ?', 'Le compte principal (PDG)', ['Le professionnel', 'Le gestionnaire', 'Le client'], 2],
+      ['Que se passe-t-il si vous ne donnez pas l’autorisation GPS ?', 'Vous pouvez chercher par quartier ou par ville', ['L’application se ferme', 'Rien n’est possible', 'Le compte est bloqué'], 2]
+    ];
+    const f = F.filter(x => x[3] === N); const c = f.length ? f[jeuAleatoire(f.length)] : F[jeuAleatoire(F.length)];
+    return jeuQCM(c[0], c[1], c[2], c[3]);
+  }
+  if (theme === 'sciences') {
+    const F = [
+      ['Combien de pattes a une araignée ?', '8', ['6', '10', '4'], 1],
+      ['Quel est le plus grand océan du monde ?', 'Le Pacifique', ['L’Atlantique', 'L’océan Indien', 'L’Arctique'], 2],
+      ['Quel gaz les plantes absorbent-elles pour respirer ?', 'Le dioxyde de carbone', ['L’oxygène', 'L’azote', 'L’hélium'], 2],
+      ['Quelle partie du corps pompe le sang ?', 'Le cœur', ['Le foie', 'Le poumon', 'L’estomac'], 1]
+    ];
+    const f = F.filter(x => x[3] === N); const c = f.length ? f[jeuAleatoire(f.length)] : F[jeuAleatoire(F.length)];
+    return jeuQCM(c[0], c[1], c[2], c[3]);
+  }
+  /* français (par défaut) */
+  const F = [
+    ['Quel est le pluriel de « cheval » ?', 'chevaux', ['chevals', 'chevales', 'chevaus'], 1],
+    ['Choisissez le mot correct : « Je … à Bouaké. »', 'vais', ['va', 'vas', 'allons'], 1],
+    ['Quel est le contraire de « rapide » ?', 'lent', ['vite', 'pressé', 'fort'], 2],
+    ['Complétez : « Ils … arrivés hier. »', 'sont', ['est', 'ont', 'seront'], 2],
+    ['Quel mot est un synonyme de « travailler » ?', 'œuvrer', ['chômer', 'dormir', 'jouer'], 3]
+  ];
+  const f = F.filter(x => x[3] === N); const c = f.length ? F[jeuAleatoire(f.length)] : F[jeuAleatoire(F.length)];
+  return jeuQCM(c[0], c[1], c[2], c[3]);
+}
+function jeuGenererIntegre(opt) {
+  const nb = Math.max(3, Math.min(30, parseInt(opt.nb, 10) || 8));
+  const theme = JEU_THEMES[opt.theme] ? opt.theme : 'francais';
+  const progression = opt.progression !== false;
+  const base = ['none', 'all', 'done'].includes(opt.type) ? 'all' : String(opt.type || 'qcm');
+  const out = [], dejaVues = {};
+  for (let i = 0; i < nb; i++) {
+    let niv = progression ? (1 + Math.round((i / Math.max(1, nb - 1)) * 2)) : (parseInt(opt.niveau, 10) || 1);
+    niv = Math.max(1, Math.min(3, niv));
+    /* 🚫 pas de question en double : on retire tant qu'on tombe sur une question déjà posée */
+    let q = null;
+    for (let essai = 0; essai < 24 && !q; essai++) {
+      const c = jeuQuestionIntegree(theme, (essai > 14 ? (1 + jeuAleatoire(3)) : niv));
+      if (!dejaVues[c.q]) q = c;
+    }
+    if (!q) q = jeuQuestionIntegree(theme, niv);      /* stock entièrement épuisé : on réutilise (assumé) */
+    dejaVues[q.q] = 1;
+    if (base === 'vraifaux') q = { q: q.q + ' — Vrai ou faux ?', choix: [q.choix[q.bonne], 'Faux'], bonne: 0, niveau: niv };
+    out.push({ q: q.q, choix: q.choix, bonne: q.bonne, niveau: q.niveau, source: 'générateur intégré' });
+  }
+  return out;
+}
+/* 🤖 si une clé IA est configurée, on l'utilise ; sinon on garde le générateur intégré */
+async function jeuGenererIA(opt) {
+  const cle = process.env.KLEAN_IA_KEY || process.env.OPENAI_API_KEY || '';
+  if (!cle) return { questions: jeuGenererIntegre(opt), mode: 'integre' };
+  try {
+    const url = process.env.KLEAN_IA_URL || 'https://api.openai.com/v1/chat/completions';
+    const modele = process.env.KLEAN_IA_MODEL || 'gpt-4o-mini';
+    const prompt = 'Génère ' + (parseInt(opt.nb, 10) || 8) + ' questions de quiz en ' + (opt.langue || 'français')
+      + ' sur le thème « ' + (JEU_THEMES[opt.theme] || opt.theme || 'culture générale') + ' »'
+      + ', difficulté ' + (JEU_NIVEAUX[opt.niveau] || 'moyen') + (opt.progression !== false ? ' et croissante du plus facile au plus difficile' : '')
+      + '. Réponds UNIQUEMENT par un tableau JSON d’objets {"q": "...", "choix": ["...","...","...","..."], "bonne": 0, "niveau": 1|2|3}.';
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cle },
+      body: JSON.stringify({ model: modele, temperature: 0.7, messages: [{ role: 'user', content: prompt }] }) });
+    if (!r.ok) throw new Error('IA ' + r.status);
+    const d = await r.json();
+    const txt = (((d.choices || [])[0] || {}).message || {}).content || '';
+    const m = txt.match(/\[[\s\S]*\]/); if (!m) throw new Error('réponse illisible');
+    const arr = JSON.parse(m[0]);
+    const qs = arr.filter(x => x && x.q && Array.isArray(x.choix) && x.choix.length >= 2)
+      .map(x => ({ q: String(x.q).slice(0, 200), choix: x.choix.slice(0, 4).map(c => String(c).slice(0, 80)), bonne: Math.max(0, Math.min(x.choix.length - 1, parseInt(x.bonne, 10) || 0)), niveau: Math.max(1, Math.min(3, parseInt(x.niveau, 10) || 2)), source: 'IA' }));
+    if (qs.length < 3) throw new Error('trop peu de questions');
+    return { questions: qs, mode: 'ia' };
+  } catch (e) {
+    console.log('  ⚠️  Génération IA indisponible (' + e.message + ') → générateur intégré');
+    return { questions: jeuGenererIntegre(opt), mode: 'integre', erreur: String(e.message || e) };
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
@@ -3418,6 +3689,9 @@ const server = http.createServer(async (req, res) => {
     }));
     return sendJson(res, 200, { ok: true, id: sid, n: list.length, pros: list });
   }
+  if (p === '/api/vitesses' && req.method === 'GET') {
+    return sendJson(res, 200, { ok: true, vitesses: db.vitesses || {} });
+  }
   if (p === '/api/annonce') {
     if (typeof quizRevealIfDue === 'function') try { quizRevealIfDue(); } catch (e) {}
     const screen = String(url.searchParams.get('screen') || '').toLowerCase();
@@ -3965,6 +4239,136 @@ const server = http.createServer(async (req, res) => {
       ouverts: miens.filter(l => ['ouvert', 'en_cours'].includes(l.status)).length,
       rembourses: miens.filter(l => ['rembourse', 'regle'].includes(l.status)).length
     });
+  }
+
+  /* ═══════════════ 🎮 JEUX EN DIRECT — côté joueur (lot 101) ═══════════════ */
+  if (p === '/api/jeux' && req.method === 'GET') {
+    const player = quizPlayerFrom(req, { accountId: url.searchParams.get('who') || '' });
+    const debutat = (db.jeux || []).filter(j => j.actif);
+    const liste = debutat.map(j => {
+      const partie = jeuxPartieActive(j.id);
+      const pub = jeuPublic(j, player, partie);
+      pub.enCours = !!partie;
+      pub.partieStatus = partie ? partie.status : null;
+      pub.inscrit = !!(partie && partie.participants.some(x => x.uid === player.id));
+      pub.dejaGagne = !!(partie && partie.status === 'termine' && (partie.gagnants || []).some(g => g.uid === player.id));
+      return pub;
+    }).filter(x => x.peutJouer || x.enCours);
+    return sendJson(res, 200, { ok: true, jeux: liste, vitesses: db.vitesses || {}, role: player.role, restantsGlobal: 0 });
+  }
+  if (p === '/api/jeux/etat' && req.method === 'GET') {
+    const player = quizPlayerFrom(req, { accountId: url.searchParams.get('who') || '' });
+    const jeu = jeuxTrouverJeu(String(url.searchParams.get('id') || ''));
+    if (!jeu) return sendJson(res, 404, { error: 'Jeu introuvable' });
+    let session = jeuxPartieActive(jeu.id) || (db.jeuxParties || []).slice().reverse().find(x => x.jeuId === jeu.id && x.status === 'termine') || null;
+    if (!session) return sendJson(res, 200, { ok: true, jeu: jeuInfo(jeu), partie: null, moi: null });
+    jeuxTick(session);
+    const moi = session.participants.find(x => x.uid === player.id) || null;
+    const reste = Math.max(0, Math.round((Date.parse(session.qFinAt || 0) - Date.now()) / 1000));
+    const q = session.status === 'en_cours' ? jeuQuestion(jeu, session.qi) : null;
+    return sendJson(res, 200, {
+      ok: true, jeu: jeuInfo(jeu),
+      partie: {
+        id: session.id, status: session.status, inscrits: session.participants.length,
+        restants: session.participants.filter(x => !x.elimine).length,
+        elimines: session.participants.filter(x => x.elimine).length,
+        question: q ? { i: q.i, q: q.q, choix: q.choix, niveau: q.niveau } : null,
+        niveauTxt: q ? (JEU_NIVEAUX[q.niveau] || '') : '',
+        secondes: session.status === 'en_cours' ? reste : 0,
+        debutAt: session.debutAt || null, inscriptionFinAt: session.inscriptionFinAt || null,
+        gagnants: (session.gagnants || []).map(g => ({ nom: g.nom, photo: g.photo || '' })),
+        raisonFin: session.raisonFin || '',
+        /* 🔒 anti-triche : la bonne réponse n'est envoyée au joueur QU'APRÈS son vote (ou quand la partie est finie) */
+        bonne: (q && (session.status !== 'en_cours' || (moi && moi.repondu))) ? (jeu.questions[session.qi] || {}).bonne : null
+      },
+      moi: moi ? { inscrit: true, elimine: !!moi.elimine, motif: moi.motif || '', repondu: !!moi.repondu, maReponse: moi.derniereReponse, bon: moi.bon || 0, gagnant: (session.gagnants || []).some(g => g.uid === player.id), photo: !!moi.photo } : { inscrit: false },
+      inscriptionOuverte: jeuInscriptionOuverte(jeu),
+      peutJouer: jeuPeutJouer(player, jeu)
+    });
+  }
+  if (p === '/api/jeux/inscrire' && req.method === 'POST') {
+    const b = await readBody(req);
+    const player = quizPlayerFrom(req, b);
+    const jeu = jeuxTrouverJeu(String(b.id || ''));
+    if (!jeu) return sendJson(res, 404, { error: 'Jeu introuvable' });
+    if (!jeu.actif) return sendJson(res, 403, { error: 'Ce jeu n’est pas ouvert' });
+    if (!jeuPeutJouer(player, jeu)) {
+      const r = (jeu.rest || {}).clients;
+      const side = player.role === 'agent' ? 'professionnels' : 'clients';
+      const need = (player.role === 'agent' ? (jeu.rest || {}).pros : r) === 'none'
+        ? 'réservé à ceux qui n’ont pas encore de mission terminée'
+        : 'réservé à ceux qui ont déjà une mission terminée (pas une mission en attente)';
+      return sendJson(res, 403, { error: 'Jeu ' + need + ' (' + side + ')' });
+    }
+    if (!player.id) return sendJson(res, 400, { error: 'Identifiez-vous pour participer (connectez-vous à votre compte KLEAN)' });
+    /* ⏰ les retardataires ne peuvent plus rejoindre */
+    if (!jeuInscriptionOuverte(jeu)) {
+      return sendJson(res, 409, { error: 'Inscriptions fermées : le jeu a déjà commencé ou l’heure limite est dépassée.', ferme: true });
+    }
+    let session = jeuxPartieActive(jeu.id);
+    if (!session) {
+      session = { id: uid('JP'), jeuId: jeu.id, nom: jeu.nom, at: nowISO(), par: 'inscription directe', status: 'inscription',
+        debutAt: jeu.debutAt || null, inscriptionFinAt: jeu.inscriptionFinAt || null, pointsGagnant: jeu.pointsGagnant || 0,
+        participants: [], utilisees: [], qi: -1, reponses: {}, gagnants: [], qFinAt: null };
+      db.jeuxParties.push(session);
+    }
+    if (session.participants.some(x => x.uid === player.id)) return sendJson(res, 200, { ok: true, deja: true, partie: session.id });
+    if (session.status === 'termine') return sendJson(res, 409, { error: 'Cette partie est terminée — le prochain jeu arrive bientôt.', ferme: true });
+    session.participants.push({ uid: player.id, nom: player.nom || 'Anonyme', role: player.role, at: nowISO(), elimine: false, bon: 0, photo: '' });
+    saveDb(); bcAll({ type: 'jeu_maj', at: nowISO() });
+    auditLog('jeu_inscription', { jeu: jeu.id, partie: session.id, joueur: player.nom });
+    return sendJson(res, 201, { ok: true, partie: session.id, inscrits: session.participants.length, message: 'Vous êtes inscrit ! Restez sur cet écran : la première question arrive.' });
+  }
+  if (p === '/api/jeux/repondre' && req.method === 'POST') {
+    const b = await readBody(req);
+    const player = quizPlayerFrom(req, b);
+    const jeu = jeuxTrouverJeu(String(b.id || ''));
+    if (!jeu) return sendJson(res, 404, { error: 'Jeu introuvable' });
+    let session = jeuxTrouverPartie(String(b.partie || '')) || jeuxPartieActive(jeu.id);
+    if (!session) return sendJson(res, 404, { error: 'Aucune partie en cours' });
+    jeuxTick(session);
+    const moi = session.participants.find(x => x.uid === player.id);
+    if (!moi) return sendJson(res, 403, { error: 'Vous n’êtes pas inscrit à cette partie' });
+    if (session.status !== 'en_cours') return sendJson(res, 409, { error: session.status === 'termine' ? 'Partie terminée' : 'La partie n’a pas encore commencé', status: session.status });
+    if (moi.elimine) return sendJson(res, 403, { error: 'Vous avez été éliminé' });
+    if (moi.repondu) return sendJson(res, 409, { error: 'Vous avez déjà répondu à cette question' });
+    if (Date.now() > Date.parse(session.qFinAt || 0)) { jeuxTick(session); return sendJson(res, 409, { error: 'Temps écoulé pour cette question' }); }
+    const q = (jeu.questions || [])[session.qi];
+    if (!q) return sendJson(res, 409, { error: 'Aucune question en cours' });
+    const choix = parseInt(b.choix, 10);
+    moi.repondu = true; moi.derniereReponse = choix;
+    const juste = (choix === q.bonne);
+    if (juste) moi.bon = (moi.bon || 0) + 1;
+    else { moi.elimine = true; moi.motif = 'mauvaise réponse'; }
+    saveDb();
+    /* tout le monde a répondu → on enchaîne tout de suite */
+    const vivants = session.participants.filter(x => !x.elimine);
+    const toutRepondu = vivants.every(x => x.repondu);
+    if (toutRepondu || !vivants.length) jeuxTick(session);
+    bcAll({ type: 'jeu_maj', at: nowISO() });
+    return sendJson(res, 200, {
+      ok: true, juste, bonne: q.bonne, elimine: !!moi.elimine,
+      restants: session.participants.filter(x => !x.elimine).length,
+      status: session.status, gagnant: (session.gagnants || []).some(g => g.uid === player.id),
+      message: juste ? '✅ Bonne réponse — vous passez à la question suivante' : '✕ Mauvaise réponse — vous êtes éliminé, merci d’avoir joué !'
+    });
+  }
+  /* 📸 photo du gagnant — TOUJOURS FACULTATIVE (la victoire est validée même sans photo) */
+  if (p === '/api/jeux/photo' && req.method === 'POST') {
+    const b = await readBody(req);
+    const player = quizPlayerFrom(req, b);
+    const session = jeuxTrouverPartie(String(b.partie || '')) || jeuxPartieActive(String(b.id || ''));
+    if (!session) return sendJson(res, 404, { error: 'Aucune partie' });
+    const moi = session.participants.find(x => x.uid === player.id);
+    if (!moi) return sendJson(res, 403, { error: 'Vous n’êtes pas inscrit à cette partie' });
+    if (!(session.gagnants || []).some(g => g.uid === player.id)) return sendJson(res, 403, { error: 'La photo est réservée au gagnant' });
+    const img = String(b.photo || '');
+    if (img && !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]{100,}$/.test(img)) return sendJson(res, 400, { error: 'Image illisible (JPG, PNG ou WEBP)' });
+    if (img.length > 900000) return sendJson(res, 413, { error: 'Photo trop lourde (maximum ~600 Ko après compression)' });
+    moi.photo = img; session.gagnants.forEach(g => { if (g.uid === player.id) g.photo = img; });
+    auditLog('jeu_photo', { partie: session.id, par: player.nom, avecPhoto: !!img });
+    saveDb();
+    return sendJson(res, 200, { ok: true, message: img ? '📸 Photo ajoutée à votre victoire' : 'Photo retirée — votre victoire reste validée' });
   }
 
   if (p === '/api/support/send' && req.method === 'POST') {
@@ -4742,6 +5146,183 @@ const server = http.createServer(async (req, res) => {
     emitAdmin('litige', '💸 Remboursement versé sur ' + l.id + ' (' + l.remboursement.montant.toLocaleString('fr-FR') + ' F)');
     saveDb();
     return sendJson(res, 200, { ok: true, litige: litigePublic(l) });
+  }
+
+  /* ═══════════════ 🎮 JEUX (lot 101) — création, programmation, parties en direct ═══════════════ */
+  if (p === '/api/admin/jeux' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const parties = (db.jeuxParties || []).slice(-40).reverse().map(x => ({
+      id: x.id, jeuId: x.jeuId, nom: x.nom, status: x.status, at: x.at, qi: x.qi,
+      total: x.participants.length, restants: x.participants.filter(y => !y.elimine).length,
+      gagnants: x.gagnants || [], raisonFin: x.raisonFin || '', debutAt: x.debutAt || null, qFinAt: x.qFinAt || null
+    }));
+    return sendJson(res, 200, { ok: true, jeux: (db.jeux || []).map(jeuInfo), parties, vitesses: db.vitesses || {}, themes: JEU_THEMES, placements: JEU_PLACEMENTS, niveaux: JEU_NIVEAUX });
+  }
+  if (p === '/api/admin/jeux' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const b = await readBody(req);
+    const id = String(b.id || '').trim();
+    let jeu = id ? jeuxTrouverJeu(id) : null;
+    const neuf = !jeu;
+    if (!jeu) {
+      jeu = { id: uid('GX'), creeAt: nowISO(), creePar: act(req), questions: [], actif: false };
+      db.jeux.push(jeu);
+    }
+    if (b.nom !== undefined) jeu.nom = String(b.nom || '').trim().slice(0, 60);
+    if (neuf && jeu.nom.length < 3) { db.jeux = db.jeux.filter(x => x.id !== jeu.id); return sendJson(res, 400, { error: 'Donnez un nom au jeu (3 caractères minimum)' }); }
+    if (b.theme !== undefined) jeu.theme = JEU_THEMES[b.theme] ? b.theme : (jeu.theme || 'francais');
+    if (b.placement !== undefined && b.placement && typeof b.placement === 'object')
+      jeu.placement = { accueil: !!b.placement.accueil, profils: !!b.placement.profils, autres: !!b.placement.autres };
+    if (b.rest !== undefined && b.rest)
+      jeu.rest = { clients: JEU_REST.includes(b.rest.clients) ? b.rest.clients : 'all', pros: JEU_REST.includes(b.rest.pros) ? b.rest.pros : 'all' };
+    if (b.debutAt !== undefined) jeu.debutAt = b.debutAt ? String(b.debutAt).slice(0, 24) : null;
+    if (b.inscriptionFinAt !== undefined) jeu.inscriptionFinAt = b.inscriptionFinAt ? String(b.inscriptionFinAt).slice(0, 24) : null;
+    if (b.dureeQuestion !== undefined) jeu.dureeQuestion = Math.max(5, Math.min(120, parseInt(b.dureeQuestion, 10) || 20));
+    if (b.progresDifficulte !== undefined) jeu.progresDifficulte = !!b.progresDifficulte;
+    if (b.pointsGagnant !== undefined) jeu.pointsGagnant = Math.max(0, Math.min(1000, parseInt(b.pointsGagnant, 10) || 0));
+    if (b.ia !== undefined) jeu.ia = b.ia && typeof b.ia === 'object' ? {
+      actif: !!b.ia.actif, theme: JEU_THEMES[b.ia.theme] ? b.ia.theme : 'francais', nb: Math.max(3, Math.min(30, parseInt(b.ia.nb, 10) || 8)),
+      niveau: Math.max(1, Math.min(3, parseInt(b.ia.niveau, 10) || 1)), langue: String(b.ia.langue || 'français').slice(0, 20),
+      type: ['qcm', 'vraifaux'].includes(b.ia.type) ? b.ia.type : 'qcm', progression: b.ia.progression !== false
+    } : null;
+    if (Array.isArray(b.questions)) {
+      jeu.questions = b.questions.filter(x => x && x.q && Array.isArray(x.choix) && x.choix.length >= 2).slice(0, 40).map(x => ({
+        q: String(x.q).slice(0, 200), choix: x.choix.slice(0, 4).map(c => String(c).slice(0, 80)),
+        bonne: Math.max(0, Math.min(x.choix.length - 1, parseInt(x.bonne, 10) || 0)),
+        niveau: Math.max(1, Math.min(3, parseInt(x.niveau, 10) || 1)), source: String(x.source || 'administrateur').slice(0, 30)
+      }));
+    }
+    jeu.majAt = nowISO(); jeu.majPar = act(req);
+    auditLog('jeu_enregistre', { id: jeu.id, nom: jeu.nom, questions: jeu.questions.length, par: act(req) });
+    emitAdmin('jeu', '🎮 Jeu « ' + jeu.nom + ' » enregistré (' + jeu.questions.length + ' question(s))');
+    saveDb();
+    bcAll({ type: 'jeu_maj', at: nowISO() });
+    return sendJson(res, 200, { ok: true, jeu: jeuInfo(jeu), nouveau: neuf });
+  }
+  if (p === '/api/admin/jeux/actif' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const b = await readBody(req);
+    const jeu = jeuxTrouverJeu(String(b.id || ''));
+    if (!jeu) return sendJson(res, 404, { error: 'Jeu introuvable' });
+    if (b.actif && !(jeu.questions || []).length) return sendJson(res, 400, { error: 'Ajoutez d’abord des questions (banque ou génération automatique)' });
+    jeu.actif = !!b.actif; jeu.majAt = nowISO(); jeu.majPar = act(req);
+    auditLog('jeu_actif', { id: jeu.id, actif: jeu.actif, par: act(req) });
+    saveDb();
+    bcAll({ type: 'jeu_maj', at: nowISO() });
+    return sendJson(res, 200, { ok: true, jeu: jeuInfo(jeu), message: jeu.actif ? 'Jeu activé : il apparaît selon vos emplacements.' : 'Jeu désactivé : les joueurs ne le voient plus.' });
+  }
+  if (p === '/api/admin/jeux' && req.method === 'DELETE') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const id = String(url.searchParams.get('id') || '');
+    const av = (db.jeux || []).length;
+    db.jeux = (db.jeux || []).filter(x => x.id !== id);
+    if (db.jeux.length === av) return sendJson(res, 404, { error: 'Jeu introuvable' });
+    auditLog('jeu_supprime', { id, par: act(req) });
+    saveDb();
+    return sendJson(res, 200, { ok: true });
+  }
+  /* 🤖 génération des questions — « banque » ou « automatique » (générateur intégré / IA si une clé est fournie) */
+  if (p === '/api/admin/jeux/generer' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const b = await readBody(req);
+    const opt = b && b.ia && typeof b.ia === 'object' ? b.ia : b || {};
+    const res2 = await jeuGenererIA(opt);
+    const qs = res2.questions;
+    auditLog('jeu_questions_generees', { mode: res2.mode, nb: qs.length, par: act(req) });
+    return sendJson(res, 200, {
+      ok: true, questions: qs, mode: res2.mode, erreur: res2.erreur || '',
+      message: res2.mode === 'ia' ? 'Questions générées par IA — relisez-les avant de les enregistrer.' :
+        'Questions proposées par le générateur intégré (aucune clé IA configurée) — relisez-les avant d’enregistrer.'
+    });
+  }
+  /* ▶️ lancer une partie (inscriptions ouvertes maintenant, ou à l'heure programmée) */
+  if (p === '/api/admin/jeux/partie/lancer' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const b = await readBody(req);
+    const jeu = jeuxTrouverJeu(String(b.id || ''));
+    if (!jeu) return sendJson(res, 404, { error: 'Jeu introuvable' });
+    if (!(jeu.questions || []).length) return sendJson(res, 400, { error: 'Ce jeu n’a aucune question' });
+    const deja = jeuxPartieActive(jeu.id);
+    if (deja) return sendJson(res, 409, { error: 'Une partie est déjà en cours sur ce jeu (' + deja.id + ')' });
+    const futur = jeu.debutAt && Date.now() < new Date(jeu.debutAt).getTime();
+    const session = {
+      id: uid('JP'), jeuId: jeu.id, nom: jeu.nom, at: nowISO(), par: act(req),
+      status: futur ? 'inscription' : 'en_cours', debutAt: jeu.debutAt || null,
+      inscriptionFinAt: jeu.inscriptionFinAt || null,
+      pointsGagnant: jeu.pointsGagnant || 0,
+      participants: [], utilisees: [], qi: -1, reponses: {}, gagnants: [], qFinAt: null
+    };
+    db.jeuxParties.push(session);
+    if (db.jeuxParties.length > 200) db.jeuxParties = db.jeuxParties.slice(-120);
+    if (!futur) {
+      if (!session.participants.length) { session.status = 'inscription'; }
+      else jeuxOuvrirQuestion(session, jeu, 'début immédiat');
+    }
+    auditLog('jeu_lance', { jeu: jeu.id, partie: session.id, futur, par: act(req) });
+    saveDb();
+    bcAll({ type: 'jeu_maj', at: nowISO() });
+    return sendJson(res, 200, { ok: true, partie: session.id, status: session.status, message: futur ? ('Inscriptions ouvertes jusqu’au début du jeu (' + String(jeu.debutAt).slice(0, 16).replace('T', ' à ') + ')') : 'Partie lancée : la première question est affichée.' });
+  }
+  if (p === '/api/admin/jeux/partie/suivant' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const b = await readBody(req);
+    const session = jeuxTrouverPartie(String(b.id || ''));
+    if (!session) return sendJson(res, 404, { error: 'Partie introuvable' });
+    if (session.status === 'termine') return sendJson(res, 409, { error: 'Cette partie est terminée' });
+    const jeu = jeuxTrouverJeu(session.jeuId); if (!jeu) return sendJson(res, 404, { error: 'Jeu introuvable' });
+    /* ⏱️ passer à la question suivante élimine, comme l'horloge, ceux qui n'ont pas répondu */
+    session.qFinAt = new Date(Date.now() - 1000).toISOString();
+    const sortis = jeuxEliminerNonRepondants(session);
+    if (sortis) session.raison = sortis + ' joueur(s) éliminé(s) — temps écoulé';
+    const r = jeuxOuvrirQuestion(session, jeu, 'question suivante (organisateur)');
+    saveDb(); bcAll({ type: 'jeu_maj', at: nowISO() });
+    return sendJson(res, 200, { ok: true, fin: !!r.fin, status: session.status, restants: session.participants.filter(p => !p.elimine).length });
+  }
+  if (p === '/api/admin/jeux/partie/clore' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const b = await readBody(req);
+    const session = jeuxTrouverPartie(String(b.id || ''));
+    if (!session) return sendJson(res, 404, { error: 'Partie introuvable' });
+    const jeu = jeuxTrouverJeu(session.jeuId) || { nom: session.nom, questions: [] };
+    if (session.status !== 'termine') jeuxTerminer(session, jeu, 'clôturée par ' + act(req));
+    saveDb(); bcAll({ type: 'jeu_maj', at: nowISO() });
+    return sendJson(res, 200, { ok: true, gagnants: session.gagnants || [] });
+  }
+  /* 📊 suivi en direct : le tableau de bord voit le nombre de survivants diminuer */
+  if (p === '/api/admin/jeux/live' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const id = String(url.searchParams.get('id') || '');
+    let session = id ? jeuxTrouverPartie(id) : null;
+    if (!session) session = (db.jeuxParties || []).slice().reverse().find(x => x.status !== 'termine')
+      || (db.jeuxParties || []).slice(-1)[0] || null;      /* 🏁 partie finie : le HQ garde le résultat affiché */
+    if (!session) return sendJson(res, 200, { ok: true, partie: null, vide: true });
+    jeuxTick(session);
+    const jeu = jeuxTrouverJeu(session.jeuId);
+    const reste = Math.max(0, Math.round((Date.parse(session.qFinAt || 0) - Date.now()) / 1000));
+    return sendJson(res, 200, {
+      ok: true,
+      partie: {
+        id: session.id, jeuId: session.jeuId, nom: session.nom, status: session.status, qi: session.qi,
+        total: session.participants.length, restants: session.participants.filter(p => !p.elimine).length,
+        elimines: session.participants.filter(p => p.elimine).length,
+        question: session.status === 'en_cours' ? (jeuQuestion(jeu, session.qi) || null) : null,
+        secondes: session.status === 'en_cours' ? Math.max(0, reste) : 0,
+        nbQuestions: jeu ? (jeu.questions || []).length : 0, posees: (session.utilisees || []).length,
+        debutAt: session.debutAt || null, gagnants: session.gagnants || [], raisonFin: session.raisonFin || '',
+        participants: session.participants.map(p => ({ nom: p.nom, role: p.role, elimine: !!p.elimine, repondu: !!p.repondu, bon: p.bon || 0, motif: p.motif || '', photo: !!p.photo, inscritAt: p.at }))
+      }
+    });
+  }
+  /* ⚙️ les vitesses d'affichage (indépendantes) : Publicités, Jeux, Urgence, Informations */
+  if (p === '/api/admin/vitesses' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const v = db.vitesses || {};
+    ['pub', 'jeux', 'urgence', 'infos'].forEach(k => { if (b[k] !== undefined) v[k] = Math.max(0.5, Math.min(15, Number(b[k]) || 3.2)); });
+    db.vitesses = v;
+    auditLog('vitesses', { par: act(req), vitesses: v });
+    saveDb(); bcAll({ type: 'vitesses', vitesses: v });
+    return sendJson(res, 200, { ok: true, vitesses: v });
   }
 
   if (p === '/api/admin/whoami' && req.method === 'GET') {
