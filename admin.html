@@ -127,6 +127,34 @@
 .hq-nav-i .ic{font-size:15px;width:19px;text-align:center;flex:none}
 .hq-nav-back{position:fixed;inset:0;background:rgba(6,14,11,.55);z-index:65;display:none;border:none;padding:0}
 .hq-nav-back.on{display:block}
+/* 🎛️ palette de recherche générale (lot 101 bis) */
+#hq-pal{position:fixed;inset:0;z-index:120;background:rgba(3,12,8,.62);display:flex;align-items:flex-start;justify-content:center;padding:8vh 12px 12px}
+#hq-pal.hidden{display:none}
+.pal-box{width:100%;max-width:600px;background:var(--card);border:1.5px solid var(--line);border-radius:16px;box-shadow:0 22px 60px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column;max-height:84vh}
+.pal-top{display:flex;align-items:center;gap:9px;padding:11px 12px;border-bottom:1px solid var(--line)}
+.pal-ic{font-size:17px}
+#pal-in{flex:1;min-width:0;padding:11px 12px;border-radius:11px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:14px;font-weight:700}
+#pal-in:focus{outline:none;border-color:var(--p)}
+.pal-x{background:var(--card2);border:1.5px solid var(--line);color:var(--muted);font-weight:900;width:38px;height:38px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:15px;flex:none}
+#pal-list{overflow:auto;padding:6px 6px 10px}
+.pal-g{font-size:10.5px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:9px 8px 5px}
+.pal-i{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:none;border-radius:11px;padding:10px 11px;cursor:pointer;font-family:inherit;color:var(--ink);font-size:13px;font-weight:700;min-height:44px}
+.pal-i:hover{background:var(--card2)}
+.pal-i.on{background:var(--card2);outline:2px solid var(--p)}
+.pal-i .ic{flex:none;font-size:16px;width:22px;text-align:center}
+.pal-i .tx{flex:1;min-width:0}
+.pal-i .tx small{display:block;color:var(--muted);font-size:11px;font-weight:700;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pal-i .go{flex:none;color:var(--muted);font-size:11.5px;font-weight:800}
+.pal-i.act .go{color:var(--p)}
+.pal-vide{padding:18px 12px;color:var(--muted);font-size:12.5px;text-align:center;line-height:1.6}
+.pal-pied{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:9px 12px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);font-weight:700}
+.hq-kbd{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:10px;font-weight:900}
+@media (max-width:640px){
+  #hq-pal{padding:0}
+  .pal-box{max-width:none;height:100%;max-height:none;border-radius:0;border:none}
+  .hq-aller-t,.hq-kbd{display:none}
+  .pal-aide{display:none}
+}
 .hq-sec{font-size:11px;font-weight:900;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin:20px 2px 9px;display:flex;align-items:center;gap:9px}
 .hq-sec:after{content:'';flex:1;height:1px;background:var(--line)}
 .home-card{display:block;width:100%;text-align:left;background:var(--bg);border:1.5px solid var(--line);border-radius:13px;padding:11px 12px;cursor:pointer;font-family:inherit;color:var(--ink)}
@@ -162,10 +190,25 @@
 </script>
 <button id="hq-nav-back" class="hq-nav-back" type="button" onclick="hqNavToggle(false)" aria-hidden="true"></button>
 <nav id="hq-nav" aria-label="Menu du tableau de bord"></nav>
+<!-- 🎛️ RECHERCHE GÉNÉRALE (lot 101 bis) — un raccourci vers TOUT le tableau de bord.
+     Ouverte par le bouton « Aller à… », par Ctrl+K / ⌘K, ou par la touche « / ». -->
+<div id="hq-pal" class="hidden" onclick="if(event.target===this) paletteHQ(false)">
+  <div class="pal-box" role="dialog" aria-modal="true" aria-label="Recherche générale du tableau de bord">
+    <div class="pal-top">
+      <span class="pal-ic">🔎</span>
+      <input id="pal-in" placeholder="Aller à une fenêtre ou lancer une action… (pub, jeu, vitesse, mission, Awa…)" oninput="paletteMaj()" autocomplete="off" maxlength="60" aria-label="Recherche générale">
+      <button type="button" class="pal-x" onclick="paletteHQ(false)" title="Fermer (Échap)" aria-label="Fermer">✕</button>
+    </div>
+    <div id="pal-list" role="listbox"></div>
+    <div class="pal-pied"><span id="pal-cnt">—</span><span class="pal-aide">↑ ↓ pour choisir · Entrée pour ouvrir · Échap pour fermer</span></div>
+  </div>
+</div>
+
 <header>
   <div class="h-in">
     <div class="logo"><span class="bubble">✨</span>KLEAN <span class="hq-tag">HQ · Côte d'Ivoire 🇨🇮</span></div>
     <button id="hq-menu-btn" class="hq-nav-btn" onclick="hqNavToggle()" title="Ouvrir / fermer le menu" aria-label="Menu">☰</button>
+    <button id="hq-aller" onclick="paletteHQ(true)" title="Recherche générale : trouver n’importe quelle fenêtre ou action du tableau de bord (raccourci Ctrl+K)" style="display:flex;align-items:center;gap:7px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-family:inherit;font-size:12px;font-weight:800;padding:8px 12px;border-radius:99px;cursor:pointer">🔎 <span class="hq-aller-t">Aller à…</span><kbd class="hq-kbd">Ctrl K</kbd></button>
     <button onclick="ouvrirFenetreComptes('client')" title="Créer un compte client ou professionnel avec ses codes d'accès" style="margin-left:auto;background:linear-gradient(135deg,var(--p),var(--pd));border:none;color:#fff;font-size:11.5px;font-weight:900;padding:8px 13px;border-radius:99px;cursor:pointer;font-family:inherit">🏗️ Créer un compte</button>
     <button onclick="changePwd()" title="Changer le mot de passe" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">🔑 Mot de passe</button>
     <button onclick="logout()" title="Se déconnecter" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">⏻ Quitter</button>
@@ -189,7 +232,9 @@
   <div class="panel" style="margin-bottom:14px" id="panel-search">
     <h3>🔎 Raccourcis — tout le tableau de bord</h3>
     <div class="body" style="padding:12px 14px">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 9px;line-height:1.5">Tapez <b>n’importe quoi</b> : une fenêtre (« pub », « jeu », « vitesse »), une action (« sauvegarder », « bloquer ») ou une donnée (nom, téléphone, n° de mission). <b>Le même moteur</b> alimente cette zone et la palette <b>Ctrl+K</b>.</p>
       <input id="hq-q" placeholder="Aller à une fenêtre ou chercher un nom, tél, mission…" oninput="searchHQ()" style="width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:14px;font-weight:700">
+      <button type="button" class="btn-main" style="width:100%;margin-top:8px" onclick="paletteHQ(true)">🎛️ Ouvrir la palette de raccourcis (Ctrl+K)</button>
       <div id="hq-q-go" style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px"></div>
       <div id="hq-q-out" style="margin-top:10px;max-height:220px;overflow:auto;font-size:13px"></div>
     </div>
@@ -1252,6 +1297,7 @@ async function loadAll(){
   try{
     paintHqGo();
     ME = await fetchJ('/api/admin/whoami').catch(()=>ME);
+    try{ window.ME = ME; }catch(e){}
     const soft = u => fetchJ(u).catch(()=>null);
     let [ov, ms, ags, cands, ppl, cfg, aud] = await Promise.all([
       soft('/api/admin/overview'),
@@ -2119,6 +2165,291 @@ function hqOubli(nom, e){
   console.warn('HQ · ' + nom + ' : ' + ((e && e.message) || e));
 }
 window.hqOubli = hqOubli;
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   🔎 RECHERCHE GÉNÉRALE DU TABLEAU DE BORD (lot 101 bis)
+   Un seul moteur — `hqChercher()` — pour :
+     • la palette (Ctrl+K / ⌘K / « / » / bouton « Aller à… ») : raccourci vers TOUT ;
+     • le panneau « 🔎 Raccourcis » déjà présent (on ne recrée rien, on réutilise).
+   Trois familles de résultats :
+     🧭 FENÊTRES : toutes les rubriques du rôle connecté (PDG ou gestionnaire) ;
+     ⚡ ACTIONS  : les gestes courants (créer un jeu, publier une pub, bloquer l’entreprise…) ;
+     🗂️ DONNÉES  : clients, pros, missions, litiges… via la recherche du serveur.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+var HQ_ACTIONS = [
+  {l:'➕ Créer un jeu en direct', m:'nouveau jeu quiz direct questions ia participants creer', p:'panel-jeux', f:'jxNouveau'},
+  {l:'🤖 Générer les questions d’un jeu (IA ou banque)', m:'generer ia banque questions theme maths culture', p:'panel-jeux'},
+  {l:'🚀 Lancer une partie de jeu', m:'lancer partie direct jeu demarrer', p:'panel-jeux'},
+  {l:'🏆 Voir les gagnants d’un jeu', m:'gagnant resultat partie jeu live suivi', p:'panel-jeux'},
+  {l:'⚙️ Régler la vitesse des annonces', m:'vitesse publicite jeux urgence informations rythme defilement', p:'panel-vitesse'},
+  {l:'📢 Publier une publicité sur l’accueil', m:'pub publicite accueil photo video fond vert apercu publier', p:'panel-ads'},
+  {l:'🖼️ Publier une affiche / information', m:'affiche annonce bandeau info defilant message', p:'panel-ann'},
+  {l:'🆘 Envoyer une alerte d’urgence', m:'urgence sos alerte danger', p:'panel-urgences'},
+  {l:'🎮 Ouvrir Flip Fizz & récompenses', m:'flip fizz jeu points recompenses cadeaux', p:'panel-flip'},
+  {l:'🧠 Ouvrir la banque de quiz', m:'quiz questions banque categories classement', p:'panel-quizbank'},
+  {l:'🎟️ Codes promo & partenaires', m:'promo coupon partenaire reduction sponsor', p:'panel-promo'},
+  {l:'💳 Moyens de paiement', m:'paiement orange moov wave carte encaissement transaction', p:'panel-pay'},
+  {l:'🏦 Numéros de paiement (marchands)', m:'numeros marchands destination paiement', p:'panel-paydest'},
+  {l:'🟠 Traiter les litiges & remboursements', m:'litige remboursement signalement reclamation decision', p:'panel-litiges'},
+  {l:'🎯 Mise en relation GPS (rayon, zone)', m:'gps rayon zone distance mise en relation proche', p:'panel-match'},
+  {l:'🏙️ Villes & quartiers déployables', m:'ville quartier zone deploiement carte', p:'', f:'ouvrirFenetreVilles'},
+  {l:'🛠️ Créer / déployer un service', m:'service creer deployer tarif nouveau', p:'panel-svc-create'},
+  {l:'👑 Créer un gestionnaire ou un agent de terrain', m:'equipe gestionnaire agent terrain creer role', p:'panel-team'},
+  {l:'🏗️ Créer un compte client ou professionnel', m:'compte client professionnel codes acces inscrire nouveau', p:'', f:"ouvrirFenetreComptes('client')"},
+  {l:'🛡️ Vérifier les dossiers de professionnels', m:'dossier pro candidature validation verifier', p:'panel-cands'},
+  {l:'🪪 Rôles & permissions', m:'roles permissions droits acces qui peut faire quoi', p:'panel-roles'},
+  {l:'🪙 Klean Points & limites de jeu (clients)', m:'points klean solde piece client recompense limites', p:'panel-flip'},
+  {l:'💾 Sauvegarder les données maintenant', m:'sauvegarde sauvegarder backup copie secours export telecharger', p:'panel-sauvegardes'},
+  {l:'📜 Journal d’audit (qui a fait quoi)', m:'audit journal trace historique actions', p:'panel-audit'},
+  {l:'🛡️ Bouclier anti-malveillance', m:'bouclier ip attaque protection malveillance', p:'panel-shield'},
+  {l:'⛔ Bloquer l’entreprise (lecture seule)', m:'bloquer entreprise lecture seule moderation tout arreter couper', p:'panel-freeze'},
+  {l:'🔑 Changer mon mot de passe', m:'mot de passe changer securite pdg', p:'panel-cfg', f:'changePwd'},
+  {l:'🏢 Profil de l’entreprise', m:'entreprise profil identite pays devise commission', p:'panel-entreprise'},
+  {l:'💬 Support & messages des utilisateurs', m:'support message conversation assistance client', p:'panel-support'},
+  {l:'🧭 Messages des agents de terrain', m:'terrain recenseur message agent repondre', p:'panel-field-inbox'},
+  {l:'🟠 Fil PDG ↔ gestionnaires', m:'fil pdg gestionnaires discussion interne equipe', p:'panel-hqchat'},
+  {l:'👥 Chercher une personne (client / professionnel)', m:'chercher personne client pro contact fiche telephone', p:'people'},
+  {l:'📋 Chercher une prestation / mission', m:'chercher mission prestation demande historique', p:'panel-missions'},
+  {l:'📈 Voir les revenus et commissions', m:'revenu commission chiffre affaires benefice argent', p:'panel-ca7'},
+  {l:'⚙️ Réglages de la plateforme', m:'reglages configuration commission gps plafond', p:'panel-cfg'},
+  {l:'🏠 Revenir à la vue générale', m:'accueil vue generale resume tableau de bord', p:'panel-home'}
+];
+/* une fenêtre est réservée au PDG ? (même règle que le menu latéral) */
+function hqPdgSeul(){
+  const m = (typeof window !== 'undefined' && window.ME) || ((typeof ME !== 'undefined') ? ME : null);
+  return !!(m && m.role === 'pdg');
+}
+function hqFenetres(){
+  const pdg = hqPdgSeul(), out = [], vus = {};
+  HQ_MENU.forEach(g => g.items.forEach(it => {
+    if(it[3] && !pdg) return;                       /* rubrique réservée au PDG */
+    if(!document.getElementById(it[0])) return;     /* rubrique absente : on ne propose pas */
+    if(vus[it[0]]){
+      /* ♻️ même fenêtre nommée 2 fois dans le menu : UNE seule entrée, mais les 2 libellés
+         restent trouvables (fusion sans perte, rien n'est supprimé du menu) */
+      vus[it[0]].alias = (vus[it[0]].alias || '') + ' ' + it[1] + ' ' + (it[2] || '');
+      return;
+    }
+    const fiche = { t:'F', id:it[0], l:it[1], m:(it[2] || ''), g:g.g.replace(/^\S+\s*/, ''), p:it[0], alias:'' };
+    vus[it[0]] = fiche; out.push(fiche);
+  }));
+  return out;
+}
+function hqActions(){
+  const pdg = hqPdgSeul();
+  const reserves = {};
+  HQ_MENU.forEach(g => g.items.forEach(it => { if(it[3]) reserves[it[0]] = 1; }));
+  return HQ_ACTIONS.filter(a => !(reserves[a.p] && !pdg)).map(a => ({ t:'A', l:a.l, m:a.m, p:a.p || '', f:a.f || '', t2:'a' }));
+}
+/* 🧠 score : tous les mots tapés doivent se retrouver ; démarrage et position comptent */
+function hqScore(txt, q){
+  const t = pNorm(txt), x = pNorm(q).trim();
+  if(!x) return 1;
+  let s = 0;
+  if(t.indexOf(x) === 0) s += 60; else if(t.indexOf(x) >= 0) s += 40;
+  const mots = x.split(/\s+/).filter(Boolean);
+  for(const mot of mots){ const i = t.indexOf(mot); if(i < 0) return 0; if(i === 0 || /[\s·›,\-—/]/.test(t.charAt(i - 1))) s += 8; else s += 4; }
+  s -= Math.min(10, Math.floor(t.length / 40));      /* à égalité, le libellé le plus court d'abord */
+  return s;
+}
+function hqChercher(q, max){
+  const out = [];
+  hqFenetres().forEach(x => { const s = hqScore(x.l + ' ' + x.m + ' ' + x.g + ' ' + (x.alias || ''), q); if(s > 0) out.push(Object.assign({ s: s }, x)); });
+  hqActions().forEach(x => { const s = hqScore(x.l + ' ' + x.m, q); if(s > 0) out.push(Object.assign({ s: s + 6 }, x)); });
+  out.sort((a, b) => b.s - a.s || String(a.l).localeCompare(String(b.l)));
+  return max ? out.slice(0, max) : out;
+}
+/* 🗂️ données réelles (clients, pros, missions, litiges…) : le serveur cherche, on affiche */
+var PAL_DATA = [], PAL_TM = null, PAL_DERNIER = '', PAL_CACHE = {};
+async function paletteDonnees(q){
+  if(PAL_CACHE[q]) return PAL_CACHE[q];
+  try{
+    const d = await fetch('/api/admin/search?q=' + encodeURIComponent(q), { cache:'no-store' }).then(r => r.json());
+    const items = [];
+    (d.sections || []).forEach(sec => (sec.items || []).slice(0, 6).forEach(it => {
+      items.push({ t:'D', l:it.t || '', s:it.s || '', g:sec.title || 'Résultats', p:sec.panel || '' });
+    }));
+    PAL_CACHE[q] = items.slice(0, 14);
+  }catch(e){ PAL_CACHE[q] = []; }
+  return PAL_CACHE[q];
+}
+
+/* ─────────────── la palette ─────────────── */
+var PAL_ITEMS = [], PAL_SEL = 0, PAL_OUVERTE = false;
+function paletteOuverte(){ const b = document.getElementById('hq-pal'); return !!(b && !b.classList.contains('hidden')); }
+function paletteHQ(ouvrir){
+  const b = document.getElementById('hq-pal'); if(!b) return;
+  const veux = (ouvrir === undefined) ? !paletteOuverte() : !!ouvrir;
+  if(veux === paletteOuverte()) return;
+  b.classList.toggle('hidden', !veux);
+  PAL_OUVERTE = veux;
+  document.body.style.overflow = veux ? 'hidden' : '';
+  if(veux){
+    const inp = document.getElementById('pal-in'); if(inp){ inp.value = ''; try{ inp.focus(); }catch(e){} }
+    PAL_SEL = 0; paletteMaj();
+  }
+}
+function paletteFermer(){ paletteHQ(false); }
+function paletteIcone(item){
+  const m = String(item.l || '').match(/^\S+/);
+  return (m ? m[0] : (item.t === 'A' ? '⚡' : '🧭'));
+}
+function paletteLigne(item, i){
+  const actif = (i === PAL_SEL) ? ' on' : '';
+  const cl = item.t === 'A' ? 'pal-i act' : 'pal-i';
+  const sous = item.t === 'D' ? (item.s || item.g) : (item.t === 'A' ? (item.p ? 'Ouvrir cette fenêtre et faire l’action' : 'Action rapide') : (item.g || ''));
+  return '<button type="button" class="' + cl + actif + '" data-i="' + i + '" onclick="paletteChoisir(' + i + ')" onmousemove="paletteSel(' + i + ')">'
+    + '<span class="ic">' + paletteIcone(item) + '</span>'
+    + '<span class="tx">' + item.l + (sous ? ('<small>' + sous + '</small>') : '') + '</span>'
+    + '<span class="go">' + (item.t === 'A' ? 'faire ↵' : 'ouvrir ↵') + '</span></button>';
+}
+function paletteMaj(){
+  const box = document.getElementById('pal-list'); if(!box) return;
+  const inp = document.getElementById('pal-in');
+  const q = inp ? String(inp.value || '').trim() : '';
+  PAL_DERNIER = q;
+  const trouve = hqChercher(q, q ? 40 : 200);
+  PAL_ITEMS = trouve.slice();
+  const fen = trouve.filter(x => x.t === 'F'), act = trouve.filter(x => x.t === 'A');
+  let html = '';
+  if(!q){
+    /* sans rien taper : TOUT est proposé, rangé par famille → c’est le raccourci général */
+    const parG = {};
+    fen.forEach(x => { parG[x.g] = parG[x.g] || []; parG[x.g].push(x); });
+    html += '<div class="pal-g">🧭 Toutes les fenêtres (' + fen.length + ')</div>';
+    Object.keys(parG).forEach(g => {
+      html += '<div class="pal-g" style="padding-top:6px;opacity:.8">' + g + '</div>';
+      parG[g].forEach(x => { html += paletteLigne(x, PAL_ITEMS.indexOf(x)); });
+    });
+    if(act.length){
+      html += '<div class="pal-g">⚡ Actions rapides (' + act.length + ')</div>';
+      act.forEach(x => { html += paletteLigne(x, PAL_ITEMS.indexOf(x)); });
+    }
+    box.innerHTML = html;
+  } else {
+    if(fen.length || act.length){
+      if(fen.length){
+        html += '<div class="pal-g">🧭 Fenêtres (' + fen.length + ')</div>';
+        fen.forEach(x => { html += paletteLigne(x, PAL_ITEMS.indexOf(x)); });
+      }
+      if(act.length){
+        html += '<div class="pal-g">⚡ Actions (' + act.length + ')</div>';
+        act.forEach(x => { html += paletteLigne(x, PAL_ITEMS.indexOf(x)); });
+      }
+    } else {
+      html += '<div class="pal-vide">Aucune fenêtre ne correspond à « ' + q + ' ».<br>Essayez : <b>pub</b>, <b>jeu</b>, <b>vitesse</b>, <b>mission</b>, <b>sauvegarde</b>, <b>bloquer</b> — ou un nom de client.</div>';
+    }
+    box.innerHTML = html;
+    /* 🗂️ et on complète avec les données réelles (2 lettres minimum) */
+    if(q.length >= 2){
+      if(PAL_CACHE[q]){ paletteInsererDonnees(); }
+      else {
+        clearTimeout(PAL_TM);
+        PAL_TM = setTimeout(async () => {
+          const items = await paletteDonnees(q);
+          if(PAL_DERNIER !== q) return;
+          PAL_DATA = items;
+          paletteInsererDonnees();
+        }, 260);
+        PAL_DATA = [];
+      }
+    } else PAL_DATA = [];
+  }
+  if(PAL_SEL >= PAL_ITEMS.length) PAL_SEL = Math.max(0, PAL_ITEMS.length - 1);
+  paletteMajCompteur(q);
+  paletteSurligne();
+}
+function paletteInsererDonnees(){
+  const box = document.getElementById('pal-list'); if(!box || !PAL_DATA.length) return;
+  const q = PAL_DERNIER;
+  PAL_ITEMS = PAL_ITEMS.filter(x => x.t !== 'D').concat(PAL_DATA);
+  const base = PAL_ITEMS.findIndex(x => x.t === 'D');
+  const lignes = PAL_DATA.map((x, k) => paletteLigne(x, base + k)).join('');
+  const bloc = '<div class="pal-g">🗂️ Données trouvées (' + PAL_DATA.length + ')</div>' + lignes;
+  if(/\uD83D\uDDC2/.test(box.innerHTML) || /pal-g">🗂️/.test(box.innerHTML)) return;
+  box.innerHTML += bloc;
+  paletteMajCompteur(q);
+  paletteSurligne();
+}
+function paletteMajCompteur(q){
+  const c = document.getElementById('pal-cnt'); if(!c) return;
+  const fen = PAL_ITEMS.filter(x => x.t === 'F').length, act = PAL_ITEMS.filter(x => x.t === 'A').length, don = PAL_ITEMS.filter(x => x.t === 'D').length;
+  if(!q) c.innerHTML = '🔎 <b>' + (fen + act) + '</b> raccourcis disponibles : ' + fen + ' fenêtre(s) + ' + act + ' action(s)';
+  else c.innerHTML = '🔎 <b>' + (fen + act + don) + '</b> résultat(s)' + (don ? (' — dont ' + don + ' donnée(s)') : '');
+}
+function paletteSel(i){
+  if(i < 0 || i >= PAL_ITEMS.length) return;
+  PAL_SEL = i; paletteSurligne();
+}
+function paletteSurligne(){
+  const box = document.getElementById('pal-list'); if(!box) return;
+  [...box.querySelectorAll('.pal-i')].forEach(b => b.classList.toggle('on', Number(b.getAttribute('data-i')) === PAL_SEL));
+  const on = box.querySelector('.pal-i.on');
+  if(on && on.scrollIntoView) { try{ on.scrollIntoView({ block:'nearest' }); }catch(e){} }
+}
+function paletteTouche(e){
+  const k = e.key || '';
+  if(k === 'ArrowDown'){ e.preventDefault(); paletteSel(Math.min(PAL_ITEMS.length - 1, PAL_SEL + 1)); }
+  else if(k === 'ArrowUp'){ e.preventDefault(); paletteSel(Math.max(0, PAL_SEL - 1)); }
+  else if(k === 'Enter'){ e.preventDefault(); paletteChoisir(PAL_SEL); }
+  else if(k === 'Escape'){ e.preventDefault(); paletteHQ(false); }
+  else if(k === 'Home'){ e.preventDefault(); paletteSel(0); }
+  else if(k === 'End'){ e.preventDefault(); paletteSel(PAL_ITEMS.length - 1); }
+}
+/* ouvrir la fenêtre choisie + pré-remplir la recherche de cette fenêtre si elle en a une */
+function paletteOuvrir(p, q){
+  if(!p) return;
+  try{ jumpPanel(p); }catch(e){}
+  const cible = { 'people':'#people-search', 'panel-missions':'#m-q', 'panel-litiges':'#li-q', 'panel-pros':'#people-search', 'panel-search':'#hq-q' }[p];
+  if(cible && q){
+    const inp = document.querySelector(cible);
+    if(inp){
+      inp.value = q;
+      try{
+        if(p === 'panel-missions') missionsFiltre();
+        else if(p === 'panel-litiges') renderLitiges();
+        else renderPeople();
+      }catch(e){}
+    }
+  }
+}
+function paletteChoisir(i){
+  const it = PAL_ITEMS[i]; if(!it) return;
+  paletteHQ(false);
+  if(it.t === 'A'){
+    paletteOuvrir(it.p, '');
+    if(it.f){ try{ (it.f.indexOf('(') >= 0) ? (new Function(it.f))() : window[it.f](); }catch(e){} }
+    return;
+  }
+  if(it.t === 'D'){ paletteOuvrir(it.p, it.l); return; }
+  paletteOuvrir(it.p, '');
+}
+/* ⌨️ raccourcis globaux : Ctrl+K / ⌘K (ouvrir-fermer), « / » (ouvrir), Échap (fermer) */
+function paletteSaisie(e){
+  const t = (e && e.target) || {};
+  const tag = String(t.tagName || '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || !!t.isContentEditable;
+}
+document.addEventListener('keydown', function(e){
+  const k = String(e.key || '').toLowerCase();
+  if((e.ctrlKey || e.metaKey) && k === 'k'){ e.preventDefault(); paletteHQ(); return; }
+  /* ⌨️ tant que la palette est ouverte, on pilote la sélection où que soit le curseur */
+  if(paletteOuverte() && !e.ctrlKey && !e.metaKey && !e.altKey){
+    if(k === 'arrowdown' || k === 'down'){ e.preventDefault(); return paletteSel(Math.min(PAL_ITEMS.length - 1, PAL_SEL + 1)); }
+    if(k === 'arrowup' || k === 'up'){ e.preventDefault(); return paletteSel(Math.max(0, PAL_SEL - 1)); }
+    if(k === 'enter'){ e.preventDefault(); return paletteChoisir(PAL_SEL); }
+    if(k === 'home'){ e.preventDefault(); return paletteSel(0); }
+    if(k === 'end'){ e.preventDefault(); return paletteSel(PAL_ITEMS.length - 1); }
+    if(k === 'tab'){ e.preventDefault(); const inp = document.getElementById('pal-in'); if(inp) try{ inp.focus(); }catch(x){} return; }
+  }
+  if(k === 'escape' && paletteOuverte()){ try{ e.preventDefault(); }catch(x){} paletteHQ(false); return; }
+  if(k === '/' && !paletteOuverte() && !paletteSaisie(e)){
+    if(document.querySelector('.modal-ov.open, #sheet.open, [id^="win-"][style*="display: block"]')) return;
+    e.preventDefault(); paletteHQ(true);
+  }
+});
+window.paletteOuverte = paletteOuverte; window.hqChercher = hqChercher; window.paletteLigne = paletteLigne;
+
 function searchHQ(){
   paintHqGo();
   clearTimeout(_hqQtm);
@@ -2126,9 +2457,19 @@ function searchHQ(){
 }
 function paintHqGo(){
   const box=document.getElementById('hq-q-go'); if(!box) return;
-  const n=pNorm(((document.getElementById('hq-q')||{}).value||'').trim());
-  const list = HQ_GO.filter(x=>!n || pNorm(x[0]+' '+x[1]+' '+(x[2]||'')).includes(n));
-  box.innerHTML = list.map(x=>'<button type="button" onclick="jumpPanel(\''+x[0]+'\')" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font:inherit;font-size:11.5px;font-weight:800;padding:8px 11px;border-radius:99px;cursor:pointer">'+x[1]+'</button>').join('') || '<span style="color:var(--muted);font-size:12px">Aucune fenêtre</span>';
+  const q=((document.getElementById('hq-q')||{}).value||'').trim();
+  /* 🔎 même moteur que la palette (Ctrl+K) : fenêtres + actions, classées par pertinence */
+  const res = hqChercher(q, q ? 14 : 200);
+  const fen = res.filter(x=>x.t==='F'), act = res.filter(x=>x.t==='A');
+  const style = 'background:var(--card2);border:1px solid var(--line);color:var(--ink);font:inherit;font-size:11.5px;font-weight:800;padding:8px 11px;border-radius:99px;cursor:pointer';
+  const puces = (liste) => liste.map(x=>'<button type="button" onclick="' + (x.t==='A' ? ('paletteChoisirAction(\'' + String(x.f||'').replace(/'/g,"\\'") + '\',\'' + x.p + '\')') : ('jumpPanel(\'' + x.p + '\')')) + '" title="' + (x.m||'').replace(/"/g,'') + '" style="' + style + '">' + (x.t==='A' ? '⚡ ' : '') + x.l + '</button>').join('');
+  box.innerHTML = (fen.length ? ('<div style="width:100%;font-size:10.5px;font-weight:900;color:var(--muted);letter-spacing:.05em;text-transform:uppercase">🧭 Fenêtres</div>' + puces(fen)) : '')
+    + (act.length ? ('<div style="width:100%;font-size:10.5px;font-weight:900;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;margin-top:6px">⚡ Actions</div>' + puces(act)) : '')
+    || '<span style="color:var(--muted);font-size:12px">Tapez pour chercher une fenêtre, une action ou une donnée</span>';
+}
+function paletteChoisirAction(f, p){
+  try{ jumpPanel(p); }catch(e){}
+  if(f){ try{ (f.indexOf('(') >= 0) ? (new Function(f))() : window[f](); }catch(e){} }
 }
 function jumpPanel(id){
   const el=document.getElementById(id);
@@ -3169,6 +3510,7 @@ async function shieldAct(kind, ip){
 if(!window._shPoll){ window._shPoll=setInterval(()=>{ const p=document.getElementById('panel-shield'); if(p && p.style.display!=='none' && ME && ME.role==='pdg') loadShield(); }, 8000); }
 async function loadTeam(){
   try{ ME = await fetchJ('/api/admin/whoami'); }catch(e){ ME = {role:'pdg', nom:'PDG'}; }
+  try{ window.ME = ME; }catch(e){}
   document.querySelector('#team-gate').style.display = ME && ME.role==='pdg' ? 'none' : 'block';
   document.querySelector('#team-form').style.display = ME && ME.role==='pdg' ? 'block' : 'none';
   const frz=document.getElementById('panel-freeze'); if(frz) frz.style.display = (ME && ME.role==='pdg') ? '' : 'none';
@@ -5014,6 +5356,7 @@ async function ugStatut(id, statut){
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else setTimeout(boot, 0);
   window.addEventListener('load', () => { try{ hqReorganiser(); paintHqNav(); paintHome(); paintEntreprise(); hqPliage(); }catch(e){} });
+  try{ if(location.hash === '#recherche') paletteHQ(true); }catch(e){}
   /* 🔴 le suivi de la partie en direct se rafraîchit toutes les 3 s */
   if(!window._jxPoll) window._jxPoll = setInterval(() => { try{ jxLiveTick(); }catch(e){} }, 3000);
 })();
