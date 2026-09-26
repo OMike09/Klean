@@ -1383,7 +1383,11 @@ function agentCompletion(ag) {
 }
 
 /* ───────── API REST ───────── */
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.md': 'text/plain; charset=utf-8', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.md': 'text/plain; charset=utf-8', '.ico': 'image/x-icon',
+  /* 📣 médias publicitaires (et icônes) : indispensables pour servir une image ou une vidéo de pub */
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.m4v': 'video/mp4',
+  '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json', '.pdf': 'application/pdf' };
 function sendJson(res, code, obj) {
   const b = JSON.stringify(obj);
   res.writeHead(code, {
@@ -1487,6 +1491,56 @@ function shieldGate(req, res, p) {
   }
   return false;
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   📣 MÉDIAS DE LA PUBLICITÉ — stockés sur le DISQUE (dossier pub/), jamais en base :
+   une vidéo en base64 gonflerait db.json et la mémoire du serveur pour rien.
+   Le navigateur ne reçoit qu'un chemin /pub/pub-xxxx.jpg → impossible d'inventer
+   un autre chemin (le nom est fabriqué par le serveur, jamais par le client).
+   ═══════════════════════════════════════════════════════════════════════════ */
+const PUB_DIR = path.join(__dirname, 'pub');
+try { fs.mkdirSync(PUB_DIR, { recursive: true }); } catch (e) {}
+const PUB_IMG_MAX = 3 * 1024 * 1024;      // 3 Mo par image
+const PUB_VID_MAX = 12 * 1024 * 1024;     // 12 Mo par vidéo (forfaits mobiles ivoiriens)
+const PUB_MEDIA_TYPES = {
+  'image/jpeg': { ext: 'jpg', genre: 'image', max: PUB_IMG_MAX },
+  'image/png': { ext: 'png', genre: 'image', max: PUB_IMG_MAX },
+  'image/webp': { ext: 'webp', genre: 'image', max: PUB_IMG_MAX },
+  'image/gif': { ext: 'gif', genre: 'image', max: PUB_IMG_MAX },
+  'video/mp4': { ext: 'mp4', genre: 'video', max: PUB_VID_MAX },
+  'video/webm': { ext: 'webm', genre: 'video', max: PUB_VID_MAX }
+};
+/* 🔎 la vraie nature du fichier est vérifiée dans les OCTETS, pas dans la déclaration du navigateur */
+function pubTypeReel(buf) {
+  if (!buf || buf.length < 12) return null;
+  const b = buf, hex = (i) => b[i];
+  if (hex(0) === 0xff && hex(1) === 0xd8 && hex(2) === 0xff) return 'image/jpeg';
+  if (hex(0) === 0x89 && hex(1) === 0x50 && hex(2) === 0x4e && hex(3) === 0x47) return 'image/png';
+  if (b.slice(0, 4).toString('latin1') === 'GIF8') return 'image/gif';
+  if (b.slice(0, 4).toString('latin1') === 'RIFF' && b.slice(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (b.slice(4, 8).toString('latin1') === 'ftyp') return 'video/mp4';
+  if (hex(0) === 0x1a && hex(1) === 0x45 && hex(2) === 0xdf && hex(3) === 0xa3) return 'video/webm';
+  return null;
+}
+/* 🧹 on ne garde jamais un média orphelin sur le disque */
+function pubSupprimerFichier(url) {
+  try {
+    const nom = String(url || '').replace(/^\/pub\//, '');
+    if (!/^[A-Za-z0-9_.-]{3,80}$/.test(nom)) return;
+    const fp = path.join(PUB_DIR, nom);
+    if (path.dirname(fp) !== PUB_DIR) return;
+    fs.unlink(fp, () => {});
+  } catch (e) {}
+}
+/* corps volumineux : uniquement pour l'upload d'un média (le reste garde la limite serrée de readBody) */
+function readBodyBig(req, max) {
+  return new Promise(r => {
+    let d = ''; let trop = false;
+    req.on('data', c => { d += c; if (d.length > (max || 2e7)) { trop = true; req.destroy(); } });
+    req.on('end', () => { if (trop) return r(null); try { r(JSON.parse(d || '{}')); } catch (e) { r({}); } });
+    req.on('error', () => r(null));
+  });
+}
+
 function readBody(req) {
   return new Promise(r => {
     let d = '';
@@ -3314,6 +3368,53 @@ const server = http.createServer(async (req, res) => {
     emitAdmin('annonce', '📣 Affiche / quiz retiré (' + scope + ')');
     return sendJson(res, 200, { ok: true, scope });
   }
+  /* ═══ 🧼 nettoie/borne tout ce que le PDG envoie pour la publicité ═══ */
+  function pubHex(v, def) {
+    const x = String(v || '').trim();
+    return /^#[0-9a-fA-F]{6}$/.test(x) ? x.toLowerCase() : def;
+  }
+  function pubMediaOk(u) {
+    return /^\/pub\/[A-Za-z0-9_.-]{3,80}\.(jpe?g|png|webp|gif|mp4|webm)$/i.test(String(u || ''));
+  }
+  function sanitizeAd(b, base) {
+    const a = Object.assign({}, base || {});
+    const sTxt = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, n || 140);
+    if (b.kind !== undefined) a.kind = ['produit', 'promo', 'lancement', 'stock'].includes(b.kind) ? b.kind : 'produit';
+    if (b.firm !== undefined) a.firm = sTxt(b.firm, 60);
+    if (b.prod !== undefined) a.prod = sTxt(b.prod, 80);
+    if (b.cat !== undefined) a.cat = sTxt(b.cat, 20) || 'autre';
+    if (b.text !== undefined) a.text = sTxt(b.text, 200);
+    if (b.prix !== undefined) a.prix = sTxt(b.prix, 40);
+    if (b.old !== undefined) a.old = sTxt(b.old, 40);
+    if (b.off !== undefined) a.off = sTxt(b.off, 40);
+    if (b.tel !== undefined) a.tel = String(b.tel || '').replace(/\D/g, '').slice(0, 15);
+    if (b.clients !== undefined) a.hideClient = !b.clients;
+    if (b.pros !== undefined) a.hideAgent = !b.pros;
+    /* 🟩 fond vert : 2 couleurs du dégradé + un jeu prêt à l'emploi */
+    if (b.fond1 !== undefined) a.fond1 = pubHex(b.fond1, a.fond1 || '#0e8a4c');
+    if (b.fond2 !== undefined) a.fond2 = pubHex(b.fond2, a.fond2 || '#075f34');
+    if (b.fond !== undefined) a.fond = ['emeraude', 'foret', 'menthe', 'lagon', 'ananas', 'perso'].includes(b.fond) ? b.fond : 'emeraude';
+    /* ✍️ écriture */
+    if (b.police !== undefined) a.police = ['moderne', 'classique', 'arrondie'].includes(b.police) ? b.police : 'moderne';
+    if (b.taille !== undefined) a.taille = Math.max(12, Math.min(20, parseInt(b.taille, 10) || 14));
+    /* ✨ clignotement */
+    if (b.clignote !== undefined) a.clignote = !!b.clignote;
+    if (b.rythme !== undefined) a.rythme = ['doux', 'moyen', 'net'].includes(b.rythme) ? b.rythme : 'doux';
+    /* 🖼️ média : seul un chemin fabriqué par le serveur est accepté */
+    if (b.mediaUrl !== undefined) {
+      const u = String(b.mediaUrl || '');
+      if (u && !pubMediaOk(u)) return { err: 'Média refusé (chemin invalide)' };
+      if (a.mediaUrl && a.mediaUrl !== u) pubSupprimerFichier(a.mediaUrl);   // remplacé → on nettoie
+      a.mediaUrl = u;
+      a.mediaType = u ? (/^\/pub\/.*\.(mp4|webm)$/i.test(u) ? 'video' : 'image') : '';
+    }
+    if (b.actif !== undefined) a.active = !!b.actif;
+    if (b.mediaType !== undefined && a.mediaUrl) a.mediaType = (b.mediaType === 'video' ? 'video' : 'image');
+    a.parent = a.parent || 'accueil';
+    a.majAt = nowISO();
+    return { ad: a };
+  }
+
   if (p === '/api/ads' && req.method === 'GET') {
     const screen = String(url.searchParams.get('screen') || '').toLowerCase();
     const ad = db.ad || null;
@@ -3343,22 +3444,68 @@ const server = http.createServer(async (req, res) => {
     const prod = String(b.prod || b.title || '').trim().slice(0, 80);
     if (firm.length < 2) return sendJson(res, 400, { error: 'Nom de l’entreprise requis' });
     if (prod.length < 2) return sendJson(res, 400, { error: 'Nom du produit requis' });
-    db.ad = {
-      active: true, kind, firm, prod,
-      cat: String(b.cat || 'autre').slice(0, 20),
-      text: String(b.text || '').trim().slice(0, 140),
-      prix: String(b.prix || '').trim().slice(0, 40),
-      old: String(b.old || '').trim().slice(0, 40),
-      off: String(b.off || '').trim().slice(0, 40),
-      tel: String(b.tel || '').replace(/\D/g, '').slice(0, 15),
-      hideClient: !b.clients, hideAgent: !b.pros,
-      at: nowISO(), par: act(req)
-    };
+    const avant = db.ad || {};
+    const r = sanitizeAd(b, {
+      active: true, kind, firm, prod, cat: 'autre', text: '', prix: '', old: '', off: '', tel: '',
+      hideClient: false, hideAgent: false, views: avant.views || {},
+      fond: 'emeraude', fond1: '#0e8a4c', fond2: '#075f34',
+      police: 'moderne', taille: 14, clignote: true, rythme: 'doux',
+      mediaUrl: avant.mediaUrl || '', mediaType: avant.mediaType || '',
+      at: avant.at || nowISO(), par: avant.par || act(req), parent: 'accueil'
+    });
+    if (r.err) return sendJson(res, 400, { error: r.err });
+    r.ad.at = nowISO(); r.ad.par = act(req); r.ad.active = (b.actif === undefined) ? true : !!b.actif;
+    db.ad = r.ad;
     saveDb();
+    emitAdmin('annonce', '📣 Publicité mise à jour par le PDG');
     return sendJson(res, 200, { ok: true, ad: db.ad });
+  }
+  /* 🔌 activer / désactiver la publicité SANS la supprimer ni retoucher ses réglages */
+  if (p === '/api/admin/ads/actif' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    if (!db.ad) return sendJson(res, 400, { error: 'Aucune publicité enregistrée' });
+    db.ad.active = !!b.actif;
+    db.ad.majAt = nowISO();
+    saveDb();
+    emitAdmin('annonce', db.ad.active ? '📣 Publicité ACTIVÉE pour les clients' : '⏸️ Publicité désactivée');
+    return sendJson(res, 200, { ok: true, actif: db.ad.active });
+  }
+  /* ⬆️ TÉLÉVERSEMENT D'UN MÉDIA DE PUBLICITÉ (image ou vidéo) — PDG uniquement */
+  if (p === '/api/admin/pub/media' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBodyBig(req, 2e7);
+    if (!b) return sendJson(res, 413, { error: 'Fichier trop lourd (limite 12 Mo pour une vidéo, 3 Mo pour une image)' });
+    const dataUrl = String(b.dataUrl || '');
+    const m = dataUrl.match(/^data:([a-z0-9.+\/-]+);base64,([A-Za-z0-9+/=\s]+)$/i);
+    if (!m) return sendJson(res, 400, { error: 'Fichier illisible — choisissez une image JPG/PNG/WEBP/GIF ou une vidéo MP4/WEBM' });
+    const mime = m[1].toLowerCase();
+    const meta = PUB_MEDIA_TYPES[mime];
+    if (!meta) return sendJson(res, 400, { error: 'Format non autorisé (' + mime + '). Images : JPG, PNG, WEBP, GIF. Vidéos : MP4, WEBM.' });
+    let buf;
+    try { buf = Buffer.from(m[2].replace(/\s/g, ''), 'base64'); } catch (e) { return sendJson(res, 400, { error: 'Fichier illisible' }); }
+    if (!buf || !buf.length) return sendJson(res, 400, { error: 'Fichier vide' });
+    if (buf.length > meta.max) return sendJson(res, 413, { error: 'Trop lourd : ' + (buf.length / 1048576).toFixed(1) + ' Mo. Maximum ' + (meta.max / 1048576) + ' Mo pour une ' + meta.genre + '.' });
+    const reel = pubTypeReel(buf);
+    if (!reel) return sendJson(res, 400, { error: 'Ce fichier n’est pas une vraie image ou vidéo (contenu non reconnu)' });
+    if (PUB_MEDIA_TYPES[reel].genre !== meta.genre) return sendJson(res, 400, { error: 'Le contenu du fichier ne correspond pas à son type' });
+    const nom = 'pub-' + Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex') + '.' + meta.ext;
+    try { fs.writeFileSync(path.join(PUB_DIR, nom), buf); }
+    catch (e) { return sendJson(res, 500, { error: 'Enregistrement impossible sur le serveur' }); }
+    const ancien = db.ad && db.ad.mediaUrl;
+    if (ancien && ancien !== '/pub/' + nom) pubSupprimerFichier(ancien);
+    auditLog('pub_media', { nom, genre: meta.genre, octets: buf.length });
+    return sendJson(res, 200, { ok: true, url: '/pub/' + nom, mediaType: meta.genre, octets: buf.length, mo: Math.round(buf.length / 104857.6) / 10 });
+  }
+  /* 🧹 retirer le média sans toucher au reste de la publicité */
+  if (p === '/api/admin/pub/media' && req.method === 'DELETE') {
+    if (!pdgOnly(req, res)) return;
+    if (db.ad && db.ad.mediaUrl) { pubSupprimerFichier(db.ad.mediaUrl); db.ad.mediaUrl = ''; db.ad.mediaType = ''; db.ad.majAt = nowISO(); saveDb(); }
+    return sendJson(res, 200, { ok: true });
   }
   if (p === '/api/admin/ads' && req.method === 'DELETE') {
     if (!pdgOnly(req, res)) return;
+    if (db.ad && db.ad.mediaUrl) pubSupprimerFichier(db.ad.mediaUrl);   // 🧹 pas de fichier orphelin
     db.ad = null; saveDb();
     return sendJson(res, 200, { ok: true });
   }
@@ -4493,10 +4640,29 @@ const server = http.createServer(async (req, res) => {
   }
   let file = p === '/' ? '/index.html' : p;
   file = path.normalize(file).replace(/^(\.\.[/\\])+/, '');
+  /* ═══════════════════════════════════════════════════════════════════════
+     🔒 LISTE BLANCHE DES FICHIERS PUBLICS
+     Avant ce correctif, TOUT fichier posé à la racine était téléchargeable :
+     /db.json (toute la base : téléphones, jetons, paiements) et /server.js
+     étaient accessibles à n'importe qui. On n'expose plus que ce dont
+     l'application a besoin + les médias de publicité (/pub/…).
+     ═══════════════════════════════════════════════════════════════════════ */
+  const PUB_FICHIERS = new Set([
+    '/index.html', '/admin.html', '/admin-login.html', '/gest.html', '/gest-login.html', '/field.html',
+    '/net.js', '/sw.js', '/hq-sw.js', '/klean-guard.js',
+    '/manifest.json', '/manifest-hq.json', '/favicon.ico', '/robots.txt'
+  ]);
+  const PUB_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.ico', '.css', '.woff2', '.mp4', '.webm']);
+  const ext = path.extname(file).toLowerCase();
+  const dansPub = /^\/pub\/[A-Za-z0-9_.-]{3,80}\.(jpe?g|png|webp|gif|mp4|webm)$/i.test(file);
+  if (!PUB_FICHIERS.has(file) && !PUB_EXT.has(ext) && !dansPub) {
+    res.writeHead(404, { 'X-Content-Type-Options': 'nosniff' }); res.end('404'); return;
+  }
+  if (dansPub) file = '/pub/' + path.basename(file);
   const fp = path.join(__dirname, file);
   fs.readFile(fp, (err, data) => {
     if (err) { res.writeHead(404); res.end('404'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
     res.end(data);
   });
 });

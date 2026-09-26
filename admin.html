@@ -102,6 +102,16 @@
   #hq-splash img{width:min(82vw,420px);height:min(82vw,420px);object-fit:cover;border-radius:50%;box-shadow:0 12px 40px rgba(0,0,0,.45)}
   #hq-splash.hide{opacity:0;pointer-events:none}
 </style>
+<style>
+/* 📣 aperçu de la publicité : STRICTEMENT le même rendu que l'accueil */
+@keyframes kleanPubPulse{0%,100%{opacity:1;text-shadow:0 1px 3px rgba(0,0,0,.45)}50%{opacity:.74;text-shadow:0 1px 3px rgba(0,0,0,.45),0 0 12px rgba(255,255,255,.55)}}
+.pub-msg{font-size:14px;line-height:1.5;font-weight:700;letter-spacing:.2px;word-break:break-word}
+.pub-clignote{animation:kleanPubPulse 3.2s ease-in-out infinite}
+.pub-clignote.pub-rythme-moyen{animation-duration:2.2s}
+.pub-clignote.pub-rythme-net{animation-duration:1.5s}
+@media (prefers-reduced-motion: reduce){.pub-clignote{animation:none !important}}
+.pub-media{width:100%;display:block;border-radius:12px;margin-top:9px;background:#04321d;max-height:150px;object-fit:cover}
+</style>
 </head>
 <body>
 <div id="hq-splash"><img src="/hq-icon-512.png" alt=""></div>
@@ -233,39 +243,120 @@
       <button type="button" onclick="openVues('annonce')" style="margin-top:8px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-family:inherit;width:100%">👁 Ordre des vu(s) — affiche</button>
       <button type="button" onclick="openQuizClicks()" style="margin-top:10px;width:100%;background:rgba(255,138,0,.16);border:1.5px solid rgba(255,138,0,.5);color:#b36b00;font-weight:900;padding:11px 12px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:13.5px">👁 Voir qui a répondu (noms + choix)</button>
       <div id="panel-ads" style="margin-top:14px;background:var(--card2);border-radius:12px;padding:12px">
-        <b style="display:block;font-size:13px;margin-bottom:6px">📣 Promo produits d’entreprises (sous le quiz)</b>
-        <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.4">Vous faites la pub d’un <b>produit</b> pour une entreprise. Les champs suivent le type d’annonce.</p>
-        <select id="ad-kind" onchange="syncAdFields()" style="width:100%;margin-bottom:7px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <option value="produit">🛒 Produit à vendre</option>
-          <option value="promo">🏷️ Promo / prix réduit</option>
-          <option value="lancement">✨ Nouveau produit / lancement</option>
-          <option value="stock">📦 Disponible maintenant</option>
-        </select>
-        <input id="ad-firm" maxlength="60" placeholder="Entreprise * (ex : Orange, Nestlé, une boutique)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        <input id="ad-prod" maxlength="80" placeholder="Produit * (ex : Forfait 10 Go, lait Nido 400g)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        <select id="ad-cat" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <option value="alim">🍚 Alimentaire / boisson</option>
-          <option value="telco">📱 Télécom / crédit</option>
-          <option value="mode">👕 Mode / beauté</option>
-          <option value="maison">🏠 Maison / électro</option>
-          <option value="banque">🏦 Banque / argent</option>
-          <option value="autre">📦 Autre</option>
-        </select>
-        <input id="ad-text" maxlength="140" placeholder="Phrase de vente (ex : Livré à Abidjan aujourd’hui)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        <input id="ad-prix" placeholder="Prix (ex : 2 500 F)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        <div id="ad-f-promo" style="display:none">
-          <input id="ad-old" placeholder="Ancien prix (barré)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-          <input id="ad-off" placeholder="Réduction (ex : −20 % ou 1 acheté = 1 offert)" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
+        <b style="display:block;font-size:13.5px;margin-bottom:4px">📣 Publicité de la page d’accueil</b>
+        <p style="font-size:12px;color:var(--muted);margin:0 0 9px;line-height:1.45">Le bloc publicitaire reste <b>fixe</b> en bas de l’écran d’accueil (il ne défile pas) et son message <b>clignote doucement</b>. Vous réglez tout ici : texte, fond vert, écriture, image ou vidéo.</p>
+
+        <!-- état + activation -->
+        <div id="pub-etat" style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px;font-size:12px;line-height:1.5">Chargement…</div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:800;margin-bottom:9px"><input type="checkbox" id="pub-actif" style="width:18px;height:18px"> Publicité affichée sur l’accueil des clients</label>
+
+        <!-- 1. message -->
+        <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+          <b style="display:block;font-size:12.5px;margin-bottom:6px">✍️ Message publicitaire (il clignote)</b>
+          <textarea id="ad-text" maxlength="200" rows="2" placeholder="Ex : Livraison offerte à Bouaké aujourd’hui !" oninput="pubApercu()" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800;margin-bottom:6px"><input type="checkbox" id="pub-clignote" checked onchange="pubApercu()" style="width:17px;height:17px"> Faire clignoter le message</label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <label style="flex:1;min-width:120px;font-size:11px;font-weight:800;color:var(--muted)">Rythme du clignotement
+              <select id="pub-rythme" onchange="pubApercu()" style="width:100%;margin-top:3px;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">
+                <option value="doux">🐢 Doux (recommandé)</option>
+                <option value="moyen">⚡ Moyen</option>
+                <option value="net">🔥 Net (attire plus)</option>
+              </select>
+            </label>
+            <label style="flex:1;min-width:120px;font-size:11px;font-weight:800;color:var(--muted)">Écriture
+              <select id="pub-police" onchange="pubApercu()" style="width:100%;margin-top:3px;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">
+                <option value="moderne">Moderne (Segoe / système)</option>
+                <option value="classique">Classique (serif)</option>
+                <option value="arrondie">Arrondie (Trebuchet)</option>
+              </select>
+            </label>
+            <label style="flex:1;min-width:120px;font-size:11px;font-weight:800;color:var(--muted)">Taille du message : <b id="pub-taille-val">14</b> px
+              <input type="range" id="pub-taille" min="12" max="20" step="1" value="14" oninput="document.getElementById('pub-taille-val').textContent=this.value;pubApercu()" style="width:100%;margin-top:6px">
+            </label>
+          </div>
         </div>
-        <input id="ad-tel" placeholder="Tél / WhatsApp pour commander" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12.5px">
-        <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-          <label style="font-size:12px;font-weight:800"><input type="checkbox" id="ad-cli" checked> Clients</label>
-          <label style="font-size:12px;font-weight:800"><input type="checkbox" id="ad-pro" checked> Pros</label>
+
+        <!-- 2. fond vert -->
+        <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+          <b style="display:block;font-size:12.5px;margin-bottom:6px">🟩 Fond vert du bloc</b>
+          <select id="pub-fond" onchange="pubFondChange()" style="width:100%;margin-bottom:7px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+            <option value="emeraude">🟢 Émeraude (par défaut)</option>
+            <option value="foret">🌲 Forêt (plus foncé)</option>
+            <option value="menthe">🌿 Menthe (plus clair)</option>
+            <option value="lagon">🌊 Lagon (vert-bleu)</option>
+            <option value="ananas">🍃 Ananas (vert-jaune)</option>
+            <option value="perso">🎨 Personnalisé (je choisis mes 2 teintes)</option>
+          </select>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <label style="flex:1;min-width:120px;font-size:11px;font-weight:800;color:var(--muted)">Haut du dégradé
+              <input type="color" id="pub-fond1" value="#0e8a4c" oninput="pubFondPerso()" style="width:100%;height:38px;padding:2px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2)">
+            </label>
+            <label style="flex:1;min-width:120px;font-size:11px;font-weight:800;color:var(--muted)">Bas du dégradé
+              <input type="color" id="pub-fond2" value="#075f34" oninput="pubFondPerso()" style="width:100%;height:38px;padding:2px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2)">
+            </label>
+          </div>
         </div>
-        <button type="button" class="btn-main" style="width:100%" onclick="publierAd()">📣 Publier la promo produit</button>
-        <button type="button" onclick="retirerAd()" style="width:100%;margin-top:6px;background:var(--card);border:1px solid var(--line);padding:9px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">✕ Retirer la pub</button>
-        <small id="ad-cur" style="display:block;margin-top:8px;color:var(--muted)">Aucune pub produit.</small>
-        <button type="button" onclick="openVues('ad')" style="margin-top:8px;width:100%;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-family:inherit">👁 Ordre des vu(s) — publicité</button>
+
+        <!-- 3. média -->
+        <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+          <b style="display:block;font-size:12.5px;margin-bottom:4px">🖼️ Image ou 🎬 vidéo de la publicité</b>
+          <p style="font-size:11.5px;color:var(--muted);margin:0 0 7px;line-height:1.45">Image (JPG, PNG, WEBP, GIF) : 3 Mo max · Vidéo (MP4, WEBM) : 12 Mo max. Le fichier est vérifié par le serveur avant d’être accepté.</p>
+          <input type="file" id="pub-file-img" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none" onchange="pubChoisir(this,'image')">
+          <input type="file" id="pub-file-vid" accept="video/mp4,video/webm" style="display:none" onchange="pubChoisir(this,'video')">
+          <div style="display:flex;gap:7px;flex-wrap:wrap">
+            <button type="button" onclick="document.getElementById('pub-file-img').click()" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">📷 Téléverser une image</button>
+            <button type="button" onclick="document.getElementById('pub-file-vid').click()" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">🎬 Téléverser une vidéo</button>
+          </div>
+          <div id="pub-media-etat" style="font-size:11.5px;color:var(--muted);margin-top:7px">Aucun média.</div>
+          <button type="button" id="pub-media-del" onclick="pubRetirerMedia()" style="display:none;width:100%;margin-top:7px;background:var(--card2);border:1.5px solid var(--line);color:var(--danger);font-weight:800;padding:9px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12px">🧹 Retirer le média</button>
+          <div id="pub-media-jauge" style="display:none;margin-top:7px;font-size:11.5px;font-weight:800;color:var(--p)">⏳ Envoi en cours…</div>
+        </div>
+
+        <!-- 4. infos produit -->
+        <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+          <b style="display:block;font-size:12.5px;margin-bottom:6px">🏷️ Produit / entreprise (facultatif mais recommandé)</b>
+          <select id="ad-kind" onchange="syncAdFields();pubApercu()" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+            <option value="produit">🛒 Produit à vendre</option>
+            <option value="promo">🏷️ Promo / prix réduit</option>
+            <option value="lancement">✨ Nouveau produit / lancement</option>
+            <option value="stock">📦 Disponible maintenant</option>
+          </select>
+          <input id="ad-prod" maxlength="80" placeholder="Titre — produit (ex : Forfait 10 Go)" oninput="pubApercu()" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+          <input id="ad-firm" maxlength="60" placeholder="Entreprise * (ex : Orange, Nestlé, une boutique)" oninput="pubApercu()" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+          <select id="ad-cat" style="width:100%;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+            <option value="alim">🍚 Alimentaire / boisson</option>
+            <option value="telco">📱 Télécom / crédit</option>
+            <option value="mode">👕 Mode / beauté</option>
+            <option value="maison">🏠 Maison / électro</option>
+            <option value="banque">🏦 Banque / argent</option>
+            <option value="autre">📦 Autre</option>
+          </select>
+          <input id="ad-prix" placeholder="Prix (ex : 2 500 F)" oninput="pubApercu()" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+          <div id="ad-f-promo" style="display:none">
+            <input id="ad-old" placeholder="Ancien prix (barré)" oninput="pubApercu()" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+            <input id="ad-off" placeholder="Réduction (ex : −20 % ou 1 acheté = 1 offert)" oninput="pubApercu()" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+          </div>
+          <input id="ad-tel" placeholder="Tél / WhatsApp pour commander" oninput="pubApercu()" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <label style="font-size:12px;font-weight:800"><input type="checkbox" id="ad-cli" checked onchange="pubApercu()"> Clients</label>
+            <label style="font-size:12px;font-weight:800"><input type="checkbox" id="ad-pro" checked onchange="pubApercu()"> Pros</label>
+          </div>
+        </div>
+
+        <!-- 5. aperçu -->
+        <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+          <b style="display:block;font-size:12.5px;margin-bottom:6px">👁 Aperçu avant publication <span style="font-weight:700;color:var(--muted)">(exactement ce que verra le client, en bas de son accueil)</span></b>
+          <div id="pub-apercu" style="max-width:340px;margin:0 auto"></div>
+        </div>
+
+        <!-- 6. boutons -->
+        <button type="button" class="btn-main" style="width:100%;padding:13px;font-size:14px" onclick="publierAd()">💾 Enregistrer et publier maintenant</button>
+        <div style="display:flex;gap:7px;margin-top:7px;flex-wrap:wrap">
+          <button type="button" onclick="pubBasculer()" style="flex:1;min-width:130px;background:var(--card);border:1.5px solid var(--line);padding:11px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:12.5px">⏸️ Activer / désactiver</button>
+          <button type="button" onclick="retirerAd()" style="flex:1;min-width:130px;background:var(--card);border:1.5px solid var(--line);color:var(--danger);padding:11px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:12.5px">✕ Retirer la publicité</button>
+        </div>
+        <small id="ad-cur" style="display:block;margin-top:9px;color:var(--muted);font-size:11.5px">Aucune publicité enregistrée.</small>
+        <button type="button" onclick="openVues('ad')" style="margin-top:8px;width:100%;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">👁 Ordre des vu(s) — publicité</button>
       </div>
       <div id="field-chat-hq" style="margin-top:12px;background:var(--card2);border-radius:12px;padding:10px">
         <b style="font-size:12.5px">💬 Fil agents de terrain</b>
@@ -766,6 +857,7 @@ const HQ_GO = [
   ['panel-ca7','📈 CA 7 jours'],
   ['panel-team','👑 Équipe dirigeante'],
   ['panel-ann','📣 Affiche'],
+  ['panel-ads','📣 Publicité accueil'],
   ['panel-quotes','🛠️ Sur mesure'],
   ['panel-field-inbox','🧭 Messages terrain'],
   ['panel-support','💬 Support'],
@@ -1534,11 +1626,7 @@ async function loadAnnonce(){
     }
   }catch(e){}
   paintAnnLive();
-  try{
-    const ad=await fetch('/api/admin/ads',{cache:'no-store'}).then(r=>r.json());
-    const c=document.getElementById('ad-cur');
-    if(c && ad && ad.ad) c.textContent='📣 En ligne : '+(ad.ad.firm||'')+' — '+(ad.ad.prod||'')+' · Vu(s) : '+(ad.views||0);
-  }catch(e){}
+  try{ await chargerPub(); }catch(e){}   // 📣 remplit tout le panneau publicité (lot 95)
 }
 async function paintAnnLive(){
   try{
@@ -2264,36 +2352,179 @@ async function sendHqChat(){
   const r=await fetch('/api/admin/hq-chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v})});
   if(r.ok){ inp.value=''; loadHqChat(); inp.focus(); }
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   📣 PUBLICITÉ — gestion depuis le tableau de bord
+   (mêmes couleurs/polices que l'accueil : l'aperçu est le rendu réel)
+   ═══════════════════════════════════════════════════════════════════════════ */
+const PUB_FONDS = {
+  emeraude: ['#0e8a4c','#075f34'], foret: ['#0f7a4a','#08432a'], menthe: ['#2fa96b','#137950'],
+  lagon: ['#0d9488','#0b5f56'], ananas: ['#57a814','#2f6b0c']
+};
+const PUB_POLICE = {
+  moderne: "'Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif",
+  classique: "Georgia,'Times New Roman',Times,serif",
+  arrondie: "'Trebuchet MS',Verdana,'Segoe UI',sans-serif"
+};
+window._pubMedia = { url:'', type:'' };      // média déjà accepté par le serveur
+window._pubActif = false;
+function pubV(id, def){ const e=document.getElementById(id); return e ? e.value : (def===undefined?'':def); }
+function pubC(id){ const e=document.getElementById(id); return e ? !!e.checked : false; }
+function pubSet(id, v){ const e=document.getElementById(id); if(e) e.value=v; }
+function pubChk(id, v){ const e=document.getElementById(id); if(e) e.checked=!!v; }
+/* ⚠️ lecture d'une case à cocher : à NE PAS confondre avec pubChk (qui écrit).
+   Avant, pubApercu() appelait pubChk('pub-clignote') avec un seul argument :
+   la case était donc DÉCOCHÉE à chaque aperçu. D'où cette fonction dédiée. */
+function pubEst(id){ const e=document.getElementById(id); return !!(e && e.checked); }
+function pubApercu(){
+  const box=document.getElementById('pub-apercu'); if(!box) return;
+  const fond=pubV('pub-fond','emeraude');
+  const preset=PUB_FONDS[fond]||PUB_FONDS.emeraude;
+  const c1=/^#[0-9a-fA-F]{6}$/.test(pubV('pub-fond1'))?pubV('pub-fond1'):preset[0];
+  const c2=/^#[0-9a-fA-F]{6}$/.test(pubV('pub-fond2'))?pubV('pub-fond2'):preset[1];
+  const police=PUB_POLICE[pubV('pub-police','moderne')]||PUB_POLICE.moderne;
+  const taille=parseInt(pubV('pub-taille','14'),10)||14;
+  const rythme=pubV('pub-rythme','doux');
+  const clignote=pubEst('pub-clignote')?(' pub-clignote pub-rythme-'+rythme):'';
+  const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const kind=pubV('ad-kind','produit');
+  const badge={produit:'🛒 Produit',promo:'🏷️ Promo',lancement:'✨ Nouveau',stock:'📦 Dispo'}[kind]||'📣 Pub';
+  const prix=pubV('ad-prix'), old=pubV('ad-old'), off=pubV('ad-off'), tel=pubV('ad-tel').replace(/\D/g,'');
+  const media=window._pubMedia.url ? (window._pubMedia.type==='video'
+      ? '<video class="pub-media" src="'+esc(window._pubMedia.url)+'" muted loop playsinline autoplay></video>'
+      : '<img class="pub-media" src="'+esc(window._pubMedia.url)+'" alt="">')
+    : '<div style="margin-top:9px;border:1.5px dashed rgba(255,255,255,.55);border-radius:12px;padding:10px;text-align:center;font-size:11.5px;font-weight:800;opacity:.85">📷 Aucune image / vidéo — le texte seul s’affichera</div>';
+  box.innerHTML='<div style="border-radius:16px;padding:12px 13px;background:linear-gradient(160deg,'+c1+','+c2+');border:1.5px solid rgba(255,255,255,.3);box-shadow:0 10px 26px rgba(3,32,18,.38);color:#fff;font-family:'+police+'">'
+    +'<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:10.5px;font-weight:900;letter-spacing:.7px;text-transform:uppercase;opacity:.95">'
+    +'<span style="background:rgba(0,0,0,.3);padding:3px 9px;border-radius:99px">'+badge+'</span>'
+    +'<span style="background:rgba(255,255,255,.18);padding:3px 9px;border-radius:99px">👁 Vu —</span></div>'
+    +media
+    +'<b style="display:block;font-size:16.5px;line-height:1.25;margin:8px 0 1px;text-shadow:0 1px 3px rgba(0,0,0,.45)">'+esc(pubV('ad-prod')||'Titre du produit')+'</b>'
+    +(pubV('ad-firm')?('<small style="display:block;font-weight:800;opacity:.92;font-size:12px">'+esc(pubV('ad-firm'))+'</small>'):'')
+    +(pubV('ad-text')?('<div class="pub-msg'+clignote+'" style="font-size:'+taille+'px;background:rgba(0,0,0,.24);border-radius:11px;padding:8px 10px;margin:9px 0 0">'+esc(pubV('ad-text'))+'</div>'):'')
+    +((prix||off)?('<div style="margin-top:9px;display:flex;align-items:center;flex-wrap:wrap">'+(prix?(old?('<span style="text-decoration:line-through;opacity:.7;margin-right:9px">'+esc(old)+'</span><b style="font-size:16px">'+esc(prix)+'</b>'):('<b style="font-size:16px">'+esc(prix)+'</b>')):'')+(off?('<span style="display:inline-block;margin-left:8px;background:#fff;color:'+c2+';font-weight:900;font-size:11.5px;padding:3px 9px;border-radius:99px">'+esc(off)+'</span>'):'')+'</div>'):'')
+    +(tel?('<span style="display:inline-block;margin-top:10px;background:#25d366;color:#04321d;font-weight:900;padding:10px 15px;border-radius:11px;font-size:13.5px">📞 Commander / WhatsApp</span>'):'')
+    +'</div>';
+}
+function pubFondPerso(){ pubSet('pub-fond','perso'); pubApercu(); }
+function pubFondChange(){
+  const f=pubV('pub-fond','emeraude');
+  const p=PUB_FONDS[f];
+  if(p){ pubSet('pub-fond1',p[0]); pubSet('pub-fond2',p[1]); }
+  pubApercu();
+}
 function syncAdFields(){
-  const k=(document.getElementById('ad-kind')||{}).value||'produit';
+  const k=pubV('ad-kind','produit');
   const e=document.getElementById('ad-f-promo'); if(e) e.style.display = k==='promo'?'':'none';
+  pubApercu();
+}
+/* remplit le panneau avec la publicité enregistrée */
+function pubRemplir(ad, views){
+  const c=document.getElementById('ad-cur');
+  window._pubActif=!!(ad && ad.active);
+  window._pubMedia={ url:(ad && ad.mediaUrl)||'', type:(ad && ad.mediaType)||'' };
+  if(!ad){
+    if(c) c.textContent='Aucune publicité enregistrée.';
+    const e=document.getElementById('pub-etat'); if(e) e.innerHTML='⚪ <b>Aucune publicité.</b> Remplissez le message puis « Enregistrer et publier ».';
+    pubChk('pub-actif',false); pubMediaEtat(); pubApercu(); return;
+  }
+  pubSet('ad-kind', ad.kind||'produit'); pubSet('ad-prod', ad.prod||''); pubSet('ad-firm', ad.firm||'');
+  pubSet('ad-cat', ad.cat||'autre'); pubSet('ad-prix', ad.prix||''); pubSet('ad-old', ad.old||''); pubSet('ad-off', ad.off||'');
+  pubSet('ad-tel', ad.tel||''); pubSet('ad-text', ad.text||'');
+  pubChk('ad-cli', !ad.hideClient); pubChk('ad-pro', !ad.hideAgent); pubChk('pub-actif', !!ad.active);
+  pubSet('pub-fond', ad.fond||'emeraude'); pubSet('pub-fond1', ad.fond1||(PUB_FONDS[ad.fond||'emeraude']||PUB_FONDS.emeraude)[0]); pubSet('pub-fond2', ad.fond2||(PUB_FONDS[ad.fond||'emeraude']||PUB_FONDS.emeraude)[1]);
+  pubSet('pub-police', ad.police||'moderne'); pubSet('pub-taille', String(ad.taille||14));
+  const tv=document.getElementById('pub-taille-val'); if(tv) tv.textContent=String(ad.taille||14);
+  pubChk('pub-clignote', ad.clignote!==false); pubSet('pub-rythme', ad.rythme||'doux');
+  syncAdFields(); pubMediaEtat(); pubApercu();
+  const e=document.getElementById('pub-etat');
+  if(e) e.innerHTML = (ad.active?'🟢 <b>Publicité ACTIVE</b> sur l’accueil des clients':'⏸️ <b>Publicité enregistrée mais DÉSACTIVÉE</b>')
+    + ' · 👁 '+(views||0)+' vue(s)'
+    + (ad.mediaUrl?(' · '+(ad.mediaType==='video'?'🎬 vidéo':'🖼️ image')):' · sans média')
+    + '<br><span style="color:var(--muted)">Dernière mise à jour : '+((ad.at||'').slice(0,16).replace('T',' '))+' par '+((ad.par||'—'))+'</span>';
+}
+function pubMediaEtat(){
+  const e=document.getElementById('pub-media-etat'); if(!e) return;
+  if(window._pubMedia.url){
+    e.innerHTML='✅ Média en place : <b>'+(window._pubMedia.type==='video'?'🎬 vidéo':'🖼️ image')+'</b> — '+window._pubMedia.url
+      +'<br><a href="'+window._pubMedia.url+'" target="_blank" rel="noopener" style="color:var(--p);font-weight:800">Voir le fichier</a>';
+    const d=document.getElementById('pub-media-del'); if(d) d.style.display='';
+  } else {
+    e.textContent='Aucun média.';
+    const d=document.getElementById('pub-media-del'); if(d) d.style.display='none';
+  }
+}
+/* 📤 téléversement : le fichier part au serveur, qui vérifie le type réel et la taille */
+async function pubChoisir(input, genre){
+  const f=input && input.files && input.files[0]; if(!f) return;
+  const max=genre==='video'?12:3;
+  if(f.size > max*1048576) return alert('❌ Fichier trop lourd : '+(f.size/1048576).toFixed(1)+' Mo. Maximum '+max+' Mo pour une '+genre+'.');
+  const jauge=document.getElementById('pub-media-jauge'); if(jauge) jauge.style.display='';
+  try{
+    const dataUrl=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); });
+    const r=await fetch('/api/admin/pub/media',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataUrl})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Envoi refusé');
+    window._pubMedia={ url:d.url, type:d.mediaType };
+    pubMediaEtat(); pubApercu();
+    alert('✅ '+(d.mediaType==='video'?'Vidéo':'Image')+' acceptée ('+d.mo+' Mo).\nCliquez sur « Enregistrer et publier maintenant » pour la mettre en ligne.');
+  }catch(e){ alert('⚠️ '+(e && e.message ? e.message : 'Envoi impossible')); }
+  finally{ if(jauge) jauge.style.display='none'; input.value=''; }
+}
+async function pubRetirerMedia(){
+  if(!window._pubMedia.url) return;
+  if(!confirm('Retirer le média de la publicité ?')) return;
+  window._pubMedia={ url:'', type:'' };
+  try{ await fetch('/api/admin/pub/media',{method:'DELETE'}); }catch(e){}
+  pubMediaEtat(); pubApercu();
 }
 async function publierAd(){
-  const kind=(document.getElementById('ad-kind')||{}).value||'produit';
-  const firm=((document.getElementById('ad-firm')||{}).value||'').trim();
-  const prod=((document.getElementById('ad-prod')||{}).value||'').trim();
-  if(firm.length<2) return alert('❌ Nom de l’entreprise requis');
-  if(prod.length<2) return alert('❌ Nom du produit requis');
-  const r=await fetch('/api/admin/ads',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    kind, firm, prod,
-    cat:((document.getElementById('ad-cat')||{}).value||'autre'),
-    text:((document.getElementById('ad-text')||{}).value||'').trim(),
-    prix:((document.getElementById('ad-prix')||{}).value||'').trim(),
-    old:((document.getElementById('ad-old')||{}).value||'').trim(),
-    off:((document.getElementById('ad-off')||{}).value||'').trim(),
-    tel:((document.getElementById('ad-tel')||{}).value||'').trim(),
-    clients: !!(document.getElementById('ad-cli')||{}).checked,
-    pros: !!(document.getElementById('ad-pro')||{}).checked
-  })});
-  const d=await r.json().catch(()=>({}));
-  if(!r.ok) return alert('⚠️ '+(d.error||'Pub impossible'));
-  const c=document.getElementById('ad-cur'); if(c) c.textContent='📣 En ligne : '+firm+' — '+prod;
-  alert('📣 Promo produit publiée sous le quiz.');
+  const firm=pubV('ad-firm').trim(), prod=pubV('ad-prod').trim();
+  if(firm.length<2) return alert('❌ Nom de l’entreprise requis (ex : KleanShop Bouaké)');
+  if(prod.length<2) return alert('❌ Titre / produit requis (ex : Savon KLEAN 5 L)');
+  if(!pubV('ad-text').trim()) { if(!confirm('Le message publicitaire est vide : le bloc s’affichera sans phrase. Continuer ?')) return; }
+  const corps={
+    kind:pubV('ad-kind','produit'), firm, prod, cat:pubV('ad-cat','autre'),
+    text:pubV('ad-text').trim(), prix:pubV('ad-prix').trim(), old:pubV('ad-old').trim(), off:pubV('ad-off').trim(),
+    tel:pubV('ad-tel').trim(), clients:pubC('ad-cli'), pros:pubC('ad-pro'),
+    fond:pubV('pub-fond','emeraude'), fond1:pubV('pub-fond1'), fond2:pubV('pub-fond2'),
+    police:pubV('pub-police','moderne'), taille:parseInt(pubV('pub-taille','14'),10)||14,
+    clignote:pubC('pub-clignote'), rythme:pubV('pub-rythme','doux'),
+    mediaUrl:window._pubMedia.url||'', mediaType:window._pubMedia.type||'',
+    actif:pubC('pub-actif')
+  };
+  try{
+    const r=await fetch('/api/admin/ads',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(corps)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) return alert('⚠️ '+(d.error||'Publication impossible'));
+    pubRemplir(d.ad||null, 0);
+    alert('✅ Publicité '+(corps.actif?'publiée et ACTIVE':'enregistrée (désactivée)')+'. Elle apparaît sur l’accueil des clients en quelques secondes.');
+  }catch(e){ alert('⚠️ Publication impossible — vérifiez la connexion au serveur.'); }
+}
+async function pubBasculer(){
+  try{
+    const r=await fetch('/api/admin/ads/actif',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actif:!window._pubActif})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
+    window._pubActif=!!d.actif; pubChk('pub-actif',window._pubActif);
+    await chargerPub();
+    alert(window._pubActif?'✅ Publicité ACTIVÉE':'⏸️ Publicité désactivée');
+  }catch(e){ alert('⚠️ Impossible — serveur injoignable.'); }
 }
 async function retirerAd(){
-  await fetch('/api/admin/ads',{method:'DELETE'});
-  const c=document.getElementById('ad-cur'); if(c) c.textContent='Aucune pub.';
-  alert('✕ Pub retirée.');
+  if(!confirm('Retirer complètement la publicité (et son média) ?')) return;
+  try{
+    await fetch('/api/admin/ads',{method:'DELETE'});
+    window._pubMedia={url:'',type:''}; pubRemplir(null,0);
+    alert('✕ Publicité retirée.');
+  }catch(e){ alert('⚠️ Retrait impossible.'); }
+}
+async function chargerPub(){
+  try{
+    const d=await fetch('/api/admin/ads',{cache:'no-store'}).then(r=>r.json());
+    pubRemplir(d.ad||null, d.views||0);
+    const c=document.getElementById('ad-cur');
+    if(c && d.ad) c.textContent='📣 '+(d.ad.active?'En ligne':'Désactivée')+' : '+(d.ad.firm||'')+' — '+(d.ad.prod||'')+' · Vu(s) : '+(d.views||0);
+  }catch(e){ const e2=document.getElementById('pub-etat'); if(e2) e2.textContent='Serveur injoignable.'; }
 }
 async function loadPdgExtras(){
   ['panel-promo','panel-pay','panel-paydest','panel-trash','panel-demande-comptes'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display=''; });

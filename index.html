@@ -384,8 +384,20 @@
 <div id="home-win-slot" style="display:none;margin:0 12px 8px;text-align:right"></div>
 <div id="aff-react" class="hidden"></div>
 <div id="quiz-box" class="hidden" style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px 14px 12px;margin:0 12px 12px;position:relative;z-index:30"></div>
-<div id="ad-box" class="hidden" style="margin:0 12px 12px;border-radius:16px;padding:14px;background:linear-gradient(160deg,#1a1208,#2a1a0c);border:1.5px solid rgba(255,176,32,.35);color:#fff"></div>
-<style>@keyframes kleanMarqueeLtr{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}</style>
+<!-- 📣 PUBLICITÉ — bloc FIXE : il reste à sa place pendant que l'accueil défile.
+     Position et visibilité calculées par placerPub() : uniquement sur la page d'accueil. -->
+<div id="ad-box" class="hidden" style="position:fixed;left:0;right:0;margin:0 auto;max-width:480px;padding:0 12px;z-index:46;bottom:calc(78px + env(safe-area-inset-bottom, 0px));pointer-events:none"></div>
+<style>@keyframes kleanMarqueeLtr{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}
+/* 📣 PUB : clignotement doux et professionnel (jamais brutal) — rythme réglable depuis le HQ */
+@keyframes kleanPubPulse{0%,100%{opacity:1;text-shadow:0 1px 3px rgba(0,0,0,.45)}50%{opacity:.74;text-shadow:0 1px 3px rgba(0,0,0,.45),0 0 12px rgba(255,255,255,.55)}}
+.pub-msg{font-size:14px;line-height:1.5;font-weight:700;letter-spacing:.2px;word-break:break-word}
+.pub-clignote{animation:kleanPubPulse 3.2s ease-in-out infinite}
+.pub-clignote.pub-rythme-moyen{animation-duration:2.2s}
+.pub-clignote.pub-rythme-net{animation-duration:1.5s}
+.pub-sans-anim{animation:none !important}
+@media (prefers-reduced-motion: reduce){.pub-clignote{animation:none !important}}
+.pub-media{width:100%;display:block;border-radius:12px;margin-top:9px;background:#04321d;max-height:150px;object-fit:cover}
+</style>
 
 <!-- ══════════════════ CLIENT : ACCUEIL ══════════════════ -->
 <div class="view active" id="view-home">
@@ -3310,17 +3322,112 @@ loadAffiche();
 setInterval(loadAffiche, 1000);
 setInterval(function(){ if(window._lastQuizA) paintQuiz(window._lastQuizA); }, 250);
 window.__affOK = 1;   // 🛡️ affiches branchées (info · pub · quiz · urgence)
+/* ═══════════════════════════════════════════════════════════════════════════
+   📣 PUBLICITÉ DE L'ACCUEIL — bloc FIXE (ne défile pas), fond VERT, message qui
+   clignote doucement. Le PDG règle tout depuis le tableau de bord (tableau
+   PUB_FONDS / PUB_POLICE ci-dessous = mêmes valeurs que l'aperçu du HQ).
+   🔒 Tout le texte est échappé : impossible d'injecter du code via la pub.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const PUB_FONDS = {
+  emeraude: ['#0e8a4c', '#075f34'],
+  foret:    ['#0f7a4a', '#08432a'],
+  menthe:   ['#2fa96b', '#137950'],
+  lagon:    ['#0d9488', '#0b5f56'],
+  ananas:   ['#57a814', '#2f6b0c']
+};
+const PUB_POLICE = {
+  moderne:  "'Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif",
+  classique: "Georgia,'Times New Roman',Times,serif",
+  arrondie: "'Trebuchet MS',Verdana,'Segoe UI',sans-serif"
+};
+function pubEsc(v){
+  return String(v==null?'':v).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function pubCouleurs(ad){
+  const p = PUB_FONDS[ad && ad.fond] || PUB_FONDS.emeraude;
+  const ok = v => /^#[0-9a-fA-F]{6}$/.test(String(v||''));
+  return [ ok(ad && ad.fond1) ? ad.fond1 : p[0], ok(ad && ad.fond2) ? ad.fond2 : p[1] ];
+}
+function pubMediaSrc(ad){
+  const u = String((ad && ad.mediaUrl) || '');
+  return /^\/pub\/[A-Za-z0-9_.-]{3,80}\.(jpe?g|png|webp|gif|mp4|webm)$/i.test(u) ? u : '';
+}
+function pubMasquerMedia(el){ try{ el.style.display='none'; }catch(e){} }
+/* 🖼️/🎬 le média ne casse jamais la publicité : s'il ne charge pas, il disparaît et le texte reste */
+function pubMediaHtml(ad){
+  const u = pubMediaSrc(ad); if(!u) return '';
+  if((ad.mediaType === 'video') || /\.(mp4|webm)$/i.test(u)){
+    return '<video class="pub-media" src="'+pubEsc(u)+'" muted loop playsinline preload="metadata" autoplay onclick="pubVideo(this)" onerror="pubMasquerMedia(this)"></video>';
+  }
+  return '<img class="pub-media" src="'+pubEsc(u)+'" alt="" loading="lazy" onerror="pubMasquerMedia(this)">';
+}
+function pubVideo(v){ try{ if(v.paused) v.play(); else v.pause(); }catch(e){} }
 function paintAd(ad, views){
   const box=document.getElementById('ad-box'); if(!box) return;
-  if(!ad){ box.classList.add('hidden'); box.innerHTML=''; return; }
+  if(!ad){ window._pubOn=false; box.innerHTML=''; box.classList.add('hidden'); placerPub(); return; }
   window._adViews=views||0;
+  /* 📍 la position fixe ne doit jamais être recalculée à cause du média qui charge */
   const badge={produit:'🛒 Produit',promo:'🏷️ Promo',lancement:'✨ Nouveau',stock:'📦 Dispo'}[ad.kind]||'📣 Pub';
-  const prix=ad.prix?(ad.old?('<span style="text-decoration:line-through;opacity:.6;margin-right:8px">'+ad.old+'</span><b style="color:#ffb020">'+ad.prix+'</b>'):('<b style="color:#ffb020">'+ad.prix+'</b>')):'';
-  const off=ad.off?('<div style="margin-top:4px;font-weight:800;color:#ffb020">'+ad.off+'</div>'):'';
-  const tel=ad.tel||'';
-  const cta=tel?('<a href="https://wa.me/225'+tel.replace(/^225/,'')+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;background:#25d366;color:#fff;font-weight:900;text-decoration:none;padding:9px 14px;border-radius:10px">Commander</a>'):'';
-  box.innerHTML='<small style="opacity:.8;font-weight:800">PUB · '+badge+' · Vu(s) : '+(views||window._adViews||0)+'</small><b style="display:block;font-size:16px;margin:4px 0 2px">'+(ad.prod||'')+'</b><small style="opacity:.85">'+(ad.firm||'')+'</small><p style="margin:8px 0 0;font-size:13px;line-height:1.4">'+(ad.text||'')+'</p>'+(prix?('<div style="margin-top:8px">'+prix+'</div>'):'')+off+cta;
+  const c=[pubCouleurs(ad)[0], pubCouleurs(ad)[1]];
+  const police=PUB_POLICE[ad.police]||PUB_POLICE.moderne;
+  const taille=Math.max(12, Math.min(20, parseInt(ad.taille,10)||14));
+  const rythme=['doux','moyen','net'].includes(ad.rythme)?ad.rythme:'doux';
+  const clignote=(ad.clignote===false)?'':' pub-clignote pub-rythme-'+rythme;
+  const prix=ad.prix?(ad.old?('<span style="text-decoration:line-through;opacity:.7;margin-right:9px">'+pubEsc(ad.old)+'</span><b style="font-size:16px">'+pubEsc(ad.prix)+'</b>'):('<b style="font-size:16px">'+pubEsc(ad.prix)+'</b>')):'';
+  const off=ad.off?('<span style="display:inline-block;margin-left:8px;background:#fff;color:'+c[1]+';font-weight:900;font-size:11.5px;padding:3px 9px;border-radius:99px">'+pubEsc(ad.off)+'</span>'):'';
+  const tel=String(ad.tel||'').replace(/\D/g,'');
+  const cta=tel?('<a href="https://wa.me/225'+pubEsc(tel.replace(/^225/,''))+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;background:#25d366;color:#04321d;font-weight:900;text-decoration:none;padding:10px 15px;border-radius:11px;font-size:13.5px;box-shadow:0 4px 12px rgba(0,0,0,.25)">📞 Commander / WhatsApp</a>'):'';
+  box.innerHTML='<div style="pointer-events:auto;border-radius:16px;padding:12px 13px;background:linear-gradient(160deg,'+c[0]+','+c[1]+');border:1.5px solid rgba(255,255,255,.3);box-shadow:0 10px 26px rgba(3,32,18,.38);color:#fff;font-family:'+police+'">'
+    + '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:10.5px;font-weight:900;letter-spacing:.7px;text-transform:uppercase;opacity:.95">'
+    + '<span style="background:rgba(0,0,0,.3);padding:3px 9px;border-radius:99px">'+badge+'</span>'
+    + '<span style="background:rgba(255,255,255,.18);padding:3px 9px;border-radius:99px">👁 Vu '+(views||window._adViews||0)+'</span>'
+    + '</div>'
+    + pubMediaHtml(ad)
+    + '<b style="display:block;font-size:16.5px;line-height:1.25;margin:8px 0 1px;text-shadow:0 1px 3px rgba(0,0,0,.45)">'+pubEsc(ad.prod||'')+'</b>'
+    + (ad.firm?('<small style="display:block;font-weight:800;opacity:.92;font-size:12px">'+pubEsc(ad.firm)+'</small>'):'')
+    + (ad.text?('<div class="pub-msg'+clignote+'" style="font-size:'+taille+'px;background:rgba(0,0,0,.24);border-radius:11px;padding:8px 10px;margin:9px 0 0">'+pubEsc(ad.text)+'</div>'):'')
+    + ((prix||off)?('<div style="margin-top:9px;display:flex;align-items:center;flex-wrap:wrap">'+prix+off+'</div>'):'')
+    + cta
+    + '</div>';
   box.classList.remove('hidden');
+  window._pubOn=true;
+  placerPub();
+  window._pubPrisEnCompte=false;
+}
+/* 📌 POSITION FIXE — calculée selon le bandeau d'affiche, et SEULEMENT sur l'accueil */
+function pubSurAccueil(){
+  const home=document.getElementById('view-home');
+  if(!home || !home.classList.contains('active')) return false;
+  if(document.querySelector('.modal-ov.open, #sheet.open')) return true;   // une fenêtre ouverte par-dessus : on ne gêne pas
+  return true;
+}
+function placerPub(){
+  const box=document.getElementById('ad-box'); if(!box) return;
+  const aff=document.getElementById('aff-bar');
+  const affOn=!!(aff && !aff.classList.contains('hidden') && aff.style.display!=='none');
+  const bas = affOn ? 'calc(136px + env(safe-area-inset-bottom, 0px))' : 'calc(78px + env(safe-area-inset-bottom, 0px))';
+  box.style.bottom = bas;
+  const visible = !!window._pubOn && pubSurAccueil();
+  box.classList.toggle('hidden', !visible);
+  box.style.display = visible ? 'block' : 'none';
+  /* 🔽 l'accueil réserve la hauteur exacte du bloc : rien ne passe dessous */
+  const home=document.getElementById('view-home');
+  if(home){
+    if(visible){
+      const h=box.offsetHeight||0;
+      home.style.paddingBottom=(bas.indexOf('136')===0?236:178)+h+'px';
+    } else home.style.paddingBottom='';
+  }
+}
+function pubObserver(){
+  try{
+    const obs=new MutationObserver(()=>{ try{ placerPub(); }catch(e){} });
+    document.querySelectorAll('.view').forEach(v=>obs.observe(v,{attributes:true,attributeFilter:['class']}));
+    const aff=document.getElementById('aff-bar'); if(aff) obs.observe(aff,{attributes:true,attributeFilter:['class','style']});
+    const nb=document.getElementById('nav-client'); if(nb) obs.observe(nb,{attributes:true,attributeFilter:['class']});
+    window.addEventListener('resize',()=>{ try{ placerPub(); }catch(e){} });
+    window.addEventListener('orientationchange',()=>setTimeout(placerPub,300));
+  }catch(e){}
 }
 async function loadAd(){
   try{
@@ -3330,7 +3437,8 @@ async function loadAd(){
   }catch(e){}
 }
 loadAd();
-setInterval(loadAd, 20000);
+setInterval(loadAd, 6000);      // 📣 6 s : une pub publiée par le PDG apparaît presque tout de suite
+setTimeout(()=>{ try{ pubObserver(); placerPub(); }catch(e){} }, 600);
 window.__affOK = 1;   // 🛡️ publicité branchée
 function pingPresence(){
   try{
@@ -4626,7 +4734,8 @@ async function mesPaiementsPro(){
     try{
       if(typeof loadAd === 'function'){
         loadAd();
-        if(!window.__adT){ window.__adT = 1; setInterval(loadAd, 20000); }
+        if(!window.__adT){ window.__adT = 1; setInterval(loadAd, 6000); }
+        try{ if(typeof pubObserver === 'function'){ pubObserver(); } placerPub(); }catch(e){}
       }
     }catch(e){ console.warn('Klean : publicité non affichée —', e && e.message); }
   }
