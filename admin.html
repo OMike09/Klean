@@ -769,6 +769,60 @@
     </div>
   </div>
 
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-catnat">
+    <h3>📚 Catalogue national des services</h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.5">
+        L’ordre est toujours le même : <b>Catégorie → Service → Sous-service → Tâche</b> (une tâche n’est jamais une catégorie à elle seule).
+        Ici le PDG peut <b>renommer</b>, ajouter des <b>mots-clés</b> et du <b>langage local</b>, <b>ajouter</b> un sous-service ou une tâche, et <b>désactiver</b>.
+        Une entrée désactivée <b>n’est jamais supprimée</b> : les commandes passées gardent leur libellé.
+      </p>
+      <div id="cn-compteurs" style="font-size:12.5px;font-weight:900;color:var(--p);margin-bottom:8px">Chargement…</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <input id="cn-q" placeholder="Chercher un service, un sous-service, une tâche…" oninput="renderCatNat()" style="flex:1;min-width:150px;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+        <button class="btn-main" style="padding:10px 13px" onclick="chargerCatNat()">🔄 Actualiser</button>
+      </div>
+      <div style="border:1.5px dashed var(--line);border-radius:12px;padding:10px;margin-top:9px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <b style="font-size:12.5px">➕ Ajouter</b>
+          <select id="cn-niv" style="padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+            <option value="sous">Un sous-service (dans un service)</option>
+            <option value="tache">Une tâche (dans un sous-service)</option>
+          </select>
+          <input id="cn-parent" list="cn-parents" placeholder="Parent (numéro)" style="flex:1;min-width:120px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <datalist id="cn-parents"></datalist>
+          <input id="cn-nom" placeholder="Nom affiché au client" maxlength="80" style="flex:1;min-width:130px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <button class="btn-main" style="padding:9px 13px" onclick="catNatAjouter()">Ajouter</button>
+        </div>
+        <small style="display:block;margin-top:6px;color:var(--muted);font-size:11.5px">Astuce : les boutons <b>➕</b> sur chaque ligne remplissent le parent tout seuls (une tâche se range toujours dans un sous-service, jamais directement dans une catégorie).</small>
+      </div>
+      <div style="border:1.5px dashed var(--line);border-radius:12px;padding:10px;margin-top:9px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <b style="font-size:12.5px">🗂️ Nouvelle catégorie</b>
+          <input id="cn-fam-nom" placeholder="Nom (ex : Mobilité & livraison express)" maxlength="60" style="flex:1;min-width:150px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <input id="cn-fam-ic" placeholder="🛵" maxlength="4" style="width:64px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <button class="btn-main" style="padding:9px 13px" onclick="cnNouvelleFam()">Créer la catégorie</button>
+        </div>
+      </div>
+      <div style="border:1.5px dashed var(--line);border-radius:12px;padding:10px;margin-top:9px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <b style="font-size:12.5px">🆕 Nouveau service entier</b>
+          <input id="cn-svc-ic" placeholder="🛠️" maxlength="4" style="width:60px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <input id="cn-svc-nom" placeholder="Nom du service (ex : Coursier express)" maxlength="70" style="flex:1;min-width:150px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <select id="cn-svc-fam" style="padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit"></select>
+          <select id="cn-svc-met" style="padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit"></select>
+          <input id="cn-svc-tache" placeholder="Première tâche (ex : livraison urgente de documents)" maxlength="80" style="flex:1;min-width:170px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <button class="btn-main" style="padding:9px 13px" onclick="cnNouveauSvc()">Créer le service</button>
+        </div>
+        <small style="display:block;margin-top:6px;color:var(--muted);font-size:11.5px">Le service entre dans le même arbre que les autres : mêmes recherches, mêmes filtres, mêmes pros. Une première tâche est créée avec (renommez-la ensuite ou ajoutez-en d'autres).</small>
+      </div>
+      <div id="cn-etat" style="display:none;margin-top:8px;font-size:12.5px;font-weight:800"></div>
+      <div id="cn-arbre" style="margin-top:10px"></div>
+      <div id="cn-idees" style="margin-top:14px"></div>
+      <div id="cn-regl" style="margin-top:16px"></div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px" id="panel-svc-create">
     <h3>🛠️ Créer un service</h3>
     <div class="body" style="padding:12px 14px">
@@ -1428,6 +1482,7 @@ const HQ_MENU = [
   ]},
   { g:'🧰 Services & territoires', items:[
     ['panel-svc-browse','📂 Services & professionnels','catalogue catégories tarifs pros par service'],
+    ['panel-catnat','📚 Catalogue national des services','catalogue national catégories services sous-services tâches mots-clés synonymes ajouter renommer désactiver activer'],
     ['panel-svc-create','🛠️ Créer / déployer un service','nouveau service prix déployer villes'],
     ['panel-villes','🏙️ Villes & quartiers','zones déployables inscription GPS'],
     ['panel-match','🎯 Mise en relation GPS','rayon km zone distance contact']
@@ -1482,7 +1537,7 @@ HQ_MENU.forEach(g => g.items.forEach(it => { if(!HQ_GO.some(x => x[0] === it[0] 
    les « Revenus » (panel-ca7) sont rangés avec les Paiements & finances, leur vraie catégorie. */
 const HQ_ORDER = ['panel-home','panel-search','kpis','substrip',
   'people','panel-online-cli','panel-pros','panel-cands','panel-team','panel-roles',
-  'panel-svc-browse','panel-svc-create','panel-villes','panel-match',
+  'panel-svc-browse','panel-svc-create','panel-catnat','panel-villes','panel-match',
   'panel-missions','panel-quotes','panel-litiges',
   'panel-ca7','panel-pay','panel-paydest',
   'panel-ann','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
@@ -1844,6 +1899,251 @@ function jxLiveTick(){
 
 /* ═══════════ ⚙️ VITESSES D'AFFICHAGE (lot 101) ═══════════ */
 var VI = { pub: 3.2, jeux: 3.2, urgence: 3.2, infos: 3.2 };
+/* ═══════════════ 📚 CATALOGUE NATIONAL — FENÊTRE DU PDG (lot « Klean Service ») ═══════════════
+   Règle d'or : on ne supprime JAMAIS une entrée (elle peut figurer dans d'anciennes commandes),
+   on la désactive. Le client, lui, ne voit que ce qui est actif. */
+let CN = { familles: [], servicesHQ: [], suggestions: [], nbServices: 0, nbSous: 0, nbTaches: 0, nbMetiers: 0 };
+function cnEchap(t) { return String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function cnDire(msg, ok) {
+  const el = document.getElementById('cn-etat'); if (!el) return;
+  el.style.display = 'block'; el.style.color = ok === false ? '#ff6b6b' : '#3ddc97';
+  el.textContent = msg;
+  clearTimeout(cnDire._t); cnDire._t = setTimeout(() => { el.style.display = 'none'; }, 4500);
+}
+const CN_B = {
+  min: 'padding:5px 8px;border-radius:8px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:11.5px;font-weight:800;cursor:pointer',
+  off: 'padding:5px 8px;border-radius:8px;border:1.5px solid rgba(255,107,107,.5);background:rgba(255,107,107,.12);color:#ff9c9c;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer',
+  on: 'padding:5px 8px;border-radius:8px;border:1.5px solid rgba(61,220,151,.5);background:rgba(61,220,151,.12);color:#8ff0c4;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer'
+};
+function cnBoutons(num, nbTaches) {
+  return '<span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px">'
+    + '<button type="button" style="' + CN_B.min + '" title="Renommer (le client verra ce nom)" onclick="catNatAction(\'renommer\',\'' + cnEchap(num) + '\')">✏️</button>'
+    + '<button type="button" style="' + CN_B.min + '" title="Ajouter un mot-clé / langage local" onclick="catNatAction(\'mot\',\'' + cnEchap(num) + '\')">🔑</button>'
+    + (nbTaches ? '' : '<button type="button" style="' + CN_B.min + '" title="Ajouter une sous-entrée" onclick="cnAjouteDans(\'' + cnEchap(num) + '\',\'' + (nbTaches === undefined ? 'tache' : 'sous') + '\')">➕</button>')
+    + '</span>';
+}
+function cnBoutonBasculer(num, off) {
+  return '<button type="button" style="' + (off ? CN_B.on : CN_B.off) + '" onclick="catNatAction(\'basculer\',\'' + cnEchap(num) + '\')">'
+    + (off ? '▶️ Réactiver' : '⏸ Désactiver') + '</button>';
+}
+async function chargerCatNat() {
+  const box = document.getElementById('cn-arbre'); if (!box) return;
+  box.innerHTML = '<small style="color:var(--muted)">Chargement du catalogue…</small>';
+  try {
+    const d = await fetch('/api/admin/catalogue', { cache: 'no-store' }).then(r => r.json());
+    if (!d || !d.ok) throw new Error('réponse');
+    CN = d; renderCatNat();
+  } catch (e) { box.innerHTML = '<small style="color:#ff6b6b">Chargement impossible — vérifiez la connexion puis réessayez.</small>'; }
+}
+function renderCatNat() {
+  const box = document.getElementById('cn-arbre'); if (!box) return;
+  const q = ((document.getElementById('cn-q') || {}).value || '').trim().toLowerCase();
+  const comp = document.getElementById('cn-compteurs');
+  if (comp) comp.textContent = '📊 ' + (CN.nbServices || 0) + ' services · ' + (CN.nbSous || 0) + ' sous-services · ' + (CN.nbTaches || 0) + ' tâches · '
+    + (CN.nbMetiers || 0) + ' métiers · ' + ((CN.off || []).length) + ' entrée(s) désactivée(s)';
+  /* les parents proposés dans le champ libre */
+  const dl = document.getElementById('cn-parents');
+  if (dl) dl.innerHTML = (CN.servicesHQ || []).map(s => '<option value="' + cnEchap(s.num) + '">Service : ' + cnEchap(s.nom) + '</option>'
+    + (s.sous || []).map(x => '<option value="' + cnEchap(x.num) + '">Sous-service : ' + cnEchap(x.nom) + '</option>').join('')).join('');
+  /* les listes déroulantes de création */
+  const selFam = document.getElementById('cn-svc-fam');
+  if (selFam) selFam.innerHTML = (CN.famillesHQ || []).map(x => '<option value="' + cnEchap(x.id) + '">🗂️ ' + cnEchap(x.nom) + (x.off ? ' (désactivée)' : '') + '</option>').join('');
+  const selMet = document.getElementById('cn-svc-met');
+  if (selMet && !selMet.dataset.pret) {
+    selMet.dataset.pret = '1';
+    selMet.innerHTML = '<option value="">Métier qui intervient (obligatoire pour recevoir des pros)</option>'
+      + (CN.metiers || []).map(m => '<option value="' + cnEchap(m.id) + '">' + (m.ic || '🛠️') + ' ' + cnEchap(m.nom) + (m.natif ? '' : ' (créé)') + '</option>').join('');
+  }
+  const filt = (t) => !q || String(t).toLowerCase().indexOf(q) >= 0;
+  let html = '', total = 0;
+  for (const f of (CN.famillesHQ || CN.familles || [])) {
+    const svcs = (CN.servicesHQ || []).filter(s => s.famille === f.id);
+    const milieu = svcs.filter(s => !q || filt(s.nom) || s.sous.some(x => filt(x.nom) || x.taches.some(t => filt(t.nom))));
+    /* 🗂️ une catégorie VIDE (créée par le PDG) reste affichée : il doit pouvoir y ranger un service */
+    if (!milieu.length && q) continue;
+    html += '<div style="margin:12px 0 5px;display:flex;gap:5px;align-items:center;flex-wrap:wrap">'
+      + '<span style="font-size:13px;font-weight:900">' + f.ic + ' ' + cnEchap(f.nom) + '</span>'
+      + '<small style="color:var(--muted);font-weight:700">' + milieu.length + ' service(s)'
+      + (f.off ? ' · <span style="color:#ff9c9c">désactivée</span>' : '') + (f.cree ? ' · créée par vous' : '') + '</small>'
+      + '<span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:auto">'
+      + '<button type="button" style="' + CN_B.min + '" title="Renommer la catégorie" onclick="cnFamAction(\'fam-renommer\',\'' + cnEchap(f.id) + '\')">✏️ Catégorie</button>'
+      + '<button type="button" style="' + CN_B.min + '" title="Icône de la catégorie" onclick="cnFamAction(\'fam-icone\',\'' + cnEchap(f.id) + '\')">🎨</button>'
+      + '<button type="button" style="' + (f.off ? CN_B.on : CN_B.off) + '" onclick="cnFamAction(\'fam-basculer\',\'' + cnEchap(f.id) + '\')">' + (f.off ? '▶️ Réactiver' : '⏸ Désactiver') + '</button>'
+      + '</span></div>';
+    if (!milieu.length) html += '<div style="font-size:11.5px;color:var(--muted);font-weight:700;margin:0 0 7px 4px">Aucun service dedans pour l’instant — utilisez la liste 🗂️ d’un service pour le ranger ici.</div>';
+    for (const s of milieu) {
+      total++;
+      html += '<details style="border:1.5px solid var(--line);border-radius:11px;padding:7px 9px;margin-bottom:6px;background:var(--card2)">'
+        + '<summary style="cursor:pointer;font-size:13px;font-weight:800">' + (s.ic || '🛠️') + ' ' + cnEchap(s.nom)
+        + (s.off ? ' <span style="color:#ff9c9c;font-size:11px">(désactivé — invisible chez les clients)</span>' : '')
+        + '<br><small style="color:var(--muted);font-weight:700">métier qui intervient : ' + cnEchap(s.metier || '—')
+        + ((s.metierCanon && s.metierCanon !== s.metier) ? (' 🔗 même métier que « ' + cnEchap((((CN.metiers || []).find(m => m.id === s.metierCanon)) || {}).nom || s.metierCanon) + ' »') : '')
+        + ' · n° ' + cnEchap(s.num)
+        + (s.ajout ? ' · créé par vous' : '') + (s.mots ? ' · mots ajoutés : ' + cnEchap(s.mots) : '') + '</small></summary>'
+        + '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:7px 0">' + cnBoutons(s.num, undefined)
+      + '<button type="button" style="' + CN_B.min + '" title="Changer l’icône" onclick="catNatAction(\'icone\',\'' + cnEchap(s.num) + '\')">🎨 Icône</button>'
+      + cnBoutonBasculer(s.num, !!s.off)
+      + '<select title="Ranger ce service dans une autre catégorie" onchange="cnRanger(\'' + cnEchap(s.num) + '\', this.value)" style="' + CN_B.min + '">'
+      + (CN.famillesHQ || []).map(x => '<option value="' + cnEchap(x.id) + '"' + (x.id === s.famille ? ' selected' : '') + '>🗂️ ' + cnEchap(x.nom) + '</option>').join('')
+      + '</select></div>'
+      + '<div style="display:flex;gap:4px;flex-wrap:wrap;margin:0 0 5px"><small style="width:100%;color:var(--muted);font-weight:800;font-size:11px">🏠 Où l’intervention a lieu (touchez pour ajouter/retirer)</small>'
+      + (CN.lieuxRef || []).map(l => cnChip(l, s.num, (s.lieux || []).indexOf(l.id) >= 0, 'lieu')).join('') + '</div>'
+      + '<div style="display:flex;gap:4px;flex-wrap:wrap;margin:0 0 5px"><small style="width:100%;color:var(--muted);font-weight:800;font-size:11px">💰 Comment c’est facturé</small>'
+      + (CN.tarifsRef || []).map(t => cnChip(t, s.num, (s.tarifs || []).indexOf(t.id) >= 0, 'tarif')).join('') + '</div>'
+      + (s.dispo === 'immediat' ? '<div style="font-size:11px;font-weight:800;color:var(--pd);margin-bottom:5px">⚡ Disponible immédiatement (urgence) — sinon 📅 sur rendez-vous</div>' : '');
+      for (const x of (s.sous || [])) {
+        const tas = (x.taches || []).filter(t => !q || filt(t.nom) || filt(x.nom));
+        if (q && !filt(x.nom) && !tas.length) continue;
+        html += '<details style="border-left:3px solid var(--line);padding:5px 0 5px 8px;margin-bottom:4px">'
+          + '<summary style="cursor:pointer;font-size:12.5px;font-weight:800">' + cnEchap(x.nom)
+          + ' <small style="color:var(--muted)">' + (x.taches || []).length + ' tâches · métier : ' + cnEchap(x.metier || '—') + '</small>'
+          + (x.off ? ' <span style="color:#ff9c9c;font-size:11px">(désactivé)</span>' : '') + '</summary>'
+          + '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:5px 0">' + cnBoutons(x.num, undefined) + cnBoutonBasculer(x.num, !!x.off) + '</div>'
+          + '<div style="font-size:12px;line-height:1.9">' + tas.map(t =>
+            '<div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:2px 0">'
+            + '<span style="flex:1;min-width:150px' + (t.off ? ';text-decoration:line-through;color:var(--muted)' : '') + '">• ' + cnEchap(t.nom)
+            + (t.ajout ? ' <small style="color:var(--p)">(ajouté)</small>' : '') + '</span>'
+            + cnBoutons(t.num, true) + cnBoutonBasculer(t.num, !!t.off) + '</div>').join('') + '</div></details>';
+      }
+      html += '</details>';
+    }
+  }
+  box.innerHTML = html || '<small style="color:var(--muted)">Aucune entrée ne correspond à cette recherche.</small>';
+  renderCatNatIdees();
+  cnReglemente();
+}
+function renderCatNatIdees() {
+  const box = document.getElementById('cn-idees'); if (!box) return;
+  const l = CN.suggestions || [];
+  box.innerHTML = '<div style="font-size:13px;font-weight:900;margin-bottom:5px">🙋 Demandes des clients hors catalogue'
+    + ' <small style="color:var(--muted);font-weight:700">' + l.length + ' — l’IA ne publie JAMAIS toute seule : c’est vous qui validez</small></div>'
+    + (l.length ? l.map(x => '<div style="border:1.5px solid var(--line);border-radius:10px;padding:8px;margin-bottom:5px;font-size:12.5px">'
+      + '<b>« ' + cnEchap(x.texte) + ' »</b> <small style="color:var(--muted)">— ' + cnEchap(x.par || 'client') + ' · ' + cnEchap(String(x.at || '').slice(0, 16).replace('T', ' ')) + (x.n > 1 ? ' · demandé ' + x.n + ' fois' : '') + '</small>'
+      + (x.cree ? '<div style="color:#8ff0c4;font-weight:800;margin-top:4px">✅ Rangé dans le catalogue : ' + cnEchap(x.cree.nom) + '</div>'
+        : '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'
+        + '<button type="button" style="' + CN_B.min + '" onclick="catNatIdee(\'' + cnEchap(x.id) + '\',\'tache\')">➕ En faire une tâche</button>'
+        + '<button type="button" style="' + CN_B.min + '" onclick="catNatIdee(\'' + cnEchap(x.id) + '\',\'sous\')">➕ En faire un sous-service</button>'
+        + '<button type="button" style="' + CN_B.min + '" onclick="catNatAction(\'idee-vue\',\'\',{id:\'' + cnEchap(x.id) + '\'})">👁️ Marquer comme vue</button>'
+        + '</div>') + '</div>').join('')
+      : '<small style="color:var(--muted)">Aucune demande pour le moment.</small>');
+}
+function cnAjouteDans(parent, niveau) {
+  const nv = document.getElementById('cn-niv'), pa = document.getElementById('cn-parent');
+  if (nv) nv.value = niveau === 'sous' ? 'sous' : 'tache';
+  if (pa) pa.value = parent;
+  const nom = document.getElementById('cn-nom'); if (nom && nom.focus) nom.focus();
+  cnDire('Parent rempli (n° ' + parent + ') — écrivez le nom puis « Ajouter ».');
+}
+async function catNatEnvoyer(corps, ok) {
+  try {
+    const r = await fetch('/api/admin/catalogue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { cnDire((d && d.error) || 'Action refusée', false); return null; }
+    CN = Object.assign(CN, d); renderCatNat(); cnDire(ok || '✅ Enregistré — les clients voient la mise à jour tout de suite'); return d;
+  } catch (e) { cnDire('Action impossible — vérifiez la connexion', false); return null; }
+}
+async function catNatAction(action, num, extra) {
+  const o = Object.assign({ action, num }, extra || {});
+  if (action === 'icone') {
+    const v = (typeof prompt === 'function') ? prompt('Icône de la catégorie (un seul symbole, ex : 🧹 🚿 🔥) :', '') : null;
+    if (v === null || !String(v).trim()) return; o.ic = String(v).trim();
+  }
+  if (action === 'renommer') {
+    const v = (typeof prompt === 'function') ? prompt('Nouveau nom affiché au client :', '') : null;
+    if (v === null || !String(v).trim()) return; o.nom = String(v).trim();
+  }
+  if (action === 'mot') {
+    const v = (typeof prompt === 'function') ? prompt('Mot-clé ou expression locale à ajouter (ex : « gars pour déplacer mes affaires ») :', '') : null;
+    if (v === null || !String(v).trim()) return; o.mot = String(v).trim();
+  }
+  await catNatEnvoyer(o);
+}
+async function cnFamAction(action, id) {
+  const o = { action, id };
+  if (action === 'fam-renommer') {
+    const v = (typeof prompt === 'function') ? prompt('Nouveau nom de la catégorie (vu par les clients) :', '') : null;
+    if (v === null || !String(v).trim()) return; o.nom = String(v).trim();
+  }
+  if (action === 'fam-icone') {
+    const v = (typeof prompt === 'function') ? prompt('Icône de la catégorie (ex : 🛵 🗂️ 🧰) :', '') : null;
+    if (v === null || !String(v).trim()) return; o.ic = String(v).trim();
+  }
+  await catNatEnvoyer(o, action === 'fam-basculer' ? '✅ Catégorie mise à jour' : '✅ Catégorie mise à jour — les clients voient le changement');
+}
+async function cnRanger(num, fam) {
+  if (!fam) return;
+  await catNatEnvoyer({ action: 'fam-service', num, id: fam }, '✅ Service rangé dans sa nouvelle catégorie');
+}
+async function cnNouvelleFam() {
+  const nom = ((document.getElementById('cn-fam-nom') || {}).value || '').trim();
+  const ic = ((document.getElementById('cn-fam-ic') || {}).value || '').trim();
+  if (nom.length < 2) { cnDire('Écrivez le nom de la catégorie', false); return; }
+  const d = await catNatEnvoyer({ action: 'fam-ajouter', nom, ic }, '✅ Catégorie créée — rangez-y des services avec la liste 🗂️ de chaque service');
+  if (d) { const e = document.getElementById('cn-fam-nom'); if (e) e.value = ''; const e2 = document.getElementById('cn-fam-ic'); if (e2) e2.value = ''; }
+}
+async function cnNouveauSvc() {
+  const nom = ((document.getElementById('cn-svc-nom') || {}).value || '').trim();
+  const ic = ((document.getElementById('cn-svc-ic') || {}).value || '').trim();
+  const fam = ((document.getElementById('cn-svc-fam') || {}).value || '');
+  const metier = ((document.getElementById('cn-svc-met') || {}).value || '');
+  const tache = ((document.getElementById('cn-svc-tache') || {}).value || '').trim();
+  if (nom.length < 2) { cnDire('Écrivez le nom du service', false); return; }
+  const d = await catNatEnvoyer({ action: 'svc-ajouter', nom, ic, fam, metier, tache }, '✅ Service créé — ajoutez-lui des tâches avec ➕');
+  if (d) { ['cn-svc-nom', 'cn-svc-tache'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; }); }
+}
+async function catNatAjouter() {
+  const niveau = ((document.getElementById('cn-niv') || {}).value || 'tache');
+  const parent = ((document.getElementById('cn-parent') || {}).value || '').trim();
+  const nom = ((document.getElementById('cn-nom') || {}).value || '').trim();
+  if (!parent || !nom) { cnDire('Choisissez le parent et écrivez le nom', false); return; }
+  const d = await catNatEnvoyer({ action: 'ajouter', niveau, parent, nom }, '✅ Ajouté au catalogue — visible chez les clients et les pros');
+  if (d) { const e = document.getElementById('cn-nom'); if (e) e.value = ''; }
+}
+async function catNatIdee(id, niveau) {
+  const parent = (typeof prompt === 'function') ? prompt('Dans quel parent ranger cette demande ? (numéro du service ou du sous-service)', '') : null;
+  if (parent === null || !String(parent).trim()) return;
+  await catNatEnvoyer({ action: 'idee-creer', id, niveau, parent: String(parent).trim() }, '✅ Rangé dans le catalogue — vous pouvez encore le renommer ou le désactiver');
+}
+/* ── 🏠 types d'intervention · 💰 modes de tarification · 🩺 habilitations ── */
+function cnChip(ref, num, actif, action, titre) {
+  return '<button type="button" title="' + cnEchap(titre || '') + '" onclick="catNatAction(\'' + action + '\',\'' + cnEchap(num) + '\',{id:\'' + cnEchap(ref.id) + '\'})" style="cursor:pointer;font:inherit;font-weight:800;font-size:11px;padding:4px 8px;border-radius:99px;border:1.5px solid ' + (actif ? 'var(--pd)' : 'var(--line)') + ';background:' + (actif ? '#FFF4E8' : 'var(--card2)') + ';color:' + (actif ? 'var(--pd)' : 'var(--muted)') + '">' + (actif ? '✅ ' : '➕ ') + ref.ic + ' ' + cnEchap(ref.nom) + '</button>';
+}
+function cnReglemente() {
+  const box = document.getElementById('cn-regl'); if (!box) return;
+  const pros = CN.pros || [], liste = CN.reglementes || [];
+  box.innerHTML = '<div style="font-size:13px;font-weight:900;margin-bottom:5px">🩺 Prestations réglementées'
+    + ' <small style="color:var(--muted);font-weight:700">séparées du reste — réservées aux professionnels dont le diplôme ou l’agrément a été vérifié. Un pro non habilité ne peut PAS accepter ces missions.</small></div>'
+    + liste.map(r => {
+      const okPros = pros.filter(p => (p.habilitations || []).indexOf(r.id) >= 0);
+      const reste = pros.filter(p => (p.habilitations || []).indexOf(r.id) < 0).slice(0, 200);
+      return '<div style="border:1.5px solid var(--line);border-radius:11px;padding:9px;margin-bottom:7px;background:var(--card2)">'
+        + '<b style="font-size:12.5px">' + r.ic + ' ' + cnEchap(r.nom) + '</b>'
+        + '<div style="font-size:11.5px;color:var(--muted);font-weight:700;margin-top:2px">📄 ' + cnEchap(r.exige) + '</div>'
+        + '<div style="font-size:11.5px;color:var(--muted);font-weight:700;margin-top:2px">' + (r.note ? cnEchap(r.note) : '') + '</div>'
+        + '<div style="font-size:11px;color:var(--muted);font-weight:700;margin-top:3px">🔎 Déclenché par : ' + cnEchap((r.cles || []).join(', ')) + ((r.services && r.services.length) ? (' · service n° ' + r.services.join(', ')) : '') + '</div>'
+        + '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'
+        + (okPros.length ? okPros.map(p => '<button type="button" title="Retirer l’habilitation" onclick="cnRetirerHabil(\'' + cnEchap(p.id) + '\',\'' + cnEchap(r.id) + '\',\'' + cnEchap(p.nom) + '\')" style="cursor:pointer;font:inherit;font-weight:800;font-size:11px;padding:5px 9px;border-radius:99px;border:1.5px solid rgba(61,220,151,.5);background:rgba(61,220,151,.12);color:#8ff0c4">🩺 ' + cnEchap(p.nom) + ' ✕</button>').join('')
+          : '<small style="color:var(--amber);font-weight:800">Aucun professionnel habilité pour l’instant.</small>')
+        + '</div>'
+        + (reste.length ? '<div style="display:flex;gap:5px;margin-top:7px;flex-wrap:wrap">'
+          + '<select id="regl-pro-' + cnEchap(r.id) + '" style="flex:1;min-width:130px;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:12px">'
+          + reste.map(p => '<option value="' + cnEchap(p.id) + '">' + cnEchap(p.nom) + (p.numPro ? ' (' + cnEchap(p.numPro) + ')' : '') + (p.ville ? ' · ' + cnEchap(p.ville) : '') + '</option>').join('') + '</select>'
+          + '<button type="button" style="' + CN_B.min + '" onclick="cnHabiliter(\'' + cnEchap(r.id) + '\')">🩺 Habiliter (document vérifié)</button></div>' : '')
+        + '</div>';
+    }).join('');
+}
+async function cnHabiliter(id) {
+  const sel = document.getElementById('regl-pro-' + id);
+  const pro = sel ? sel.value : '';
+  if (!pro) return cnDire('Choisissez un professionnel', false);
+  const doc = (typeof prompt === 'function') ? prompt('Référence du document vérifié (diplôme, agrément, numéro d’ordre) :', '') : null;
+  if (doc === null || !String(doc).trim()) return cnDire('Habilitation non enregistrée : la référence du document est obligatoire', false);
+  await catNatEnvoyer({ action: 'habiliter', id, pro, doc: String(doc).trim() }, '🩺 Professionnel habilité — il peut maintenant accepter ces missions');
+}
+async function cnRetirerHabil(pro, id, nom) {
+  if (typeof confirm === 'function' && !confirm('Retirer l’habilitation de ' + nom + ' pour cette prestation réglementée ? Il ne pourra plus l’accepter.')) return;
+  await catNatEnvoyer({ action: 'habiliter', id, pro, doc: 'retrait' }, '🚫 Habilitation retirée');
+}
 var VI_ZONES = [['pub', '📣 Publicités', 'Vitesse du clignotement doux du message publicitaire'], ['jeux', '🎮 Jeux', 'Défilement du bandeau de jeu'], ['urgence', '🆘 Urgence', 'Défilement du bandeau d’urgence'], ['infos', 'ℹ️ Informations', 'Défilement du bandeau d’informations']];
 function paintVitesses(){
   const box = document.getElementById('vi-liste'); if(!box) return;
@@ -2516,6 +2816,7 @@ function jumpPanel(id){
     if(id==='panel-pay'){ try{ chargerPaiements(); }catch(e){} try{ chargerProviderPay(); }catch(e){} }
     if(id==='panel-flip' || id==='panel-quizbank' || id==='panel-infos' || id==='panel-urgences'){ try{ chargerHQ96(); }catch(e){} }
     if(id==='panel-jeux'){ try{ loadJeux(); }catch(e){} }
+    if(id==='panel-catnat'){ try{ chargerCatNat(); }catch(e){} }
     if(id==='panel-vitesse' || id==='panel-cfg'){ try{ loadJeux(); }catch(e){} }
     if(id==='panel-vitesse'){ try{ loadJeux(); paintVitesses(); }catch(e){} }
   }catch(e){}
@@ -2985,11 +3286,21 @@ async function loadCatalogHQ(){
     const extra=(await fetch('/api/admin/services',{cache:'no-store'}).then(r=>r.json()).catch(()=>({}))).services||[];
     const builtin=Object.keys(SVC_N||{}).map(id=>({id, ic:SVC[id]||'🛠️', nom:SVC_N[id], opts:[], builtin:true}));
     const all=builtin.concat(extra.map(s=>Object.assign({builtin:false},s)));
-    window._catalogHQ=all;
+    /* 🔗 FUSION : deux métiers qui font le même travail ne s'affichent plus qu'une fois */
+    let fus={};
+    try{
+      const d=await fetch('/api/services',{cache:'no-store'}).then(r=>r.json());
+      (d.services||[]).forEach(x=>{ if(x && x.id && x.fusionne) fus[x.id]={vers:x.fusionne, versNom:x.fusionneNom||x.fusionne}; });
+      (d.services||[]).forEach(x=>{ if(x && x.id && Array.isArray(x.regroupe) && x.regroupe.length){ const e=all.find(y=>y.id===x.id); if(e) e.regroupe=x.regroupe; } });
+    }catch(e){}
+    window._catalogHQ=all; window._catalogFusion=fus;
     const tree=document.getElementById('sv-tree'); if(!tree) return;
     tree.innerHTML=all.map(s=>{
       const subs=(s.opts||[]).map(o=>'<button type="button" onclick="voirProsService(\''+s.id+'\')" style="display:block;width:100%;text-align:left;background:transparent;border:none;padding:5px 8px 5px 22px;font:inherit;font-size:12px;cursor:pointer;color:var(--muted)">↳ '+(o.nom||o.id)+'</button>').join('');
-      return '<div style="border-bottom:1px solid var(--line);padding:4px 0"><button type="button" onclick="voirProsService(\''+s.id+'\')" style="width:100%;text-align:left;background:transparent;border:none;padding:8px;font:inherit;font-weight:800;cursor:pointer">'+(s.ic||'🛠️')+' '+(s.nom||s.id)+(s.builtin?'':' <small style="color:var(--amber)">nouveau</small>')+'</button>'+subs+'</div>';
+      const f=fus[s.id];
+      const info = f ? '<small style="color:var(--muted);font-weight:700"> — 🔗 même métier que « '+f.versNom+' » (une seule liste de pros pour les deux)</small>'
+        : ((s.regroupe&&s.regroupe.length) ? '<small style="color:var(--muted);font-weight:700"> — 🔗 regroupe : '+s.regroupe.map(x=>x.nom).join(', ')+'</small>' : '');
+      return '<div style="border-bottom:1px solid var(--line);padding:4px 0"><button type="button" onclick="voirProsService(\''+s.id+'\')" style="width:100%;text-align:left;background:transparent;border:none;padding:8px;font:inherit;font-weight:800;cursor:pointer">'+(s.ic||'🛠️')+' '+(s.nom||s.id)+(s.builtin?'':' <small style="color:var(--amber)">nouveau</small>')+'</button>'+info+subs+'</div>';
     }).join('');
   }catch(e){}
   etatDeploySvc();
@@ -3985,6 +4296,9 @@ function connectWS(){
       if(m.type==='admin_event'){
         addFeed(m.text, m.at);
         setTimeout(loadAll, 400); // rafraîchit KPIs & listes
+      }
+      if(m.type==='catalogue_maj'){   // 📚 le catalogue a changé (ici ou sur un autre appareil du PDG)
+        try{ const pn=document.getElementById('panel-catnat'); if(pn && pn.style.display!=='none') chargerCatNat(); }catch(e){}
       }
     }catch(e){}
   };

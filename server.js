@@ -507,33 +507,543 @@ const SVC_CAT = [
    Ces métiers complètent le catalogue : AUCUN métier existant n'a été supprimé ni renommé.
    « famille » sert à ranger/expliquer · « mots » sont les mots-clés (synonymes ET fautes courantes). */
 const SVC_NOUVEAUX = {
-  peinture:   { ic:'🎨', nom:'Peinture & façades',      base:15000, famille:'bâtiment',   mots:'peinture peintre repeindre badigeon mur murs plafond facade laque vernis enduit couleur ' },
-  carrelage:  { ic:'🧱', nom:'Carrelage & faïence',     base:18000, famille:'bâtiment',   mots:'carrelage carreleur carreau faience dalle sol murale joint pose ' },
-  macon:      { ic:'🏗️', nom:'Maçonnerie & clôtures',   base:20000, famille:'bâtiment',   mots:'macon maconnerie cloture portail mur dalle ciment beton crepissage fondation ' },
-  menuiserie: { ic:'🪵', nom:'Menuiserie & meubles',    base:15000, famille:'bâtiment',   mots:'menuisier menuiserie bois meuble placard armoire table lit porte charniere sur mesure ebeniste ' },
-  vitrerie:   { ic:'🪞', nom:'Vitrerie & miroirs',      base:8000,  famille:'bâtiment',   mots:'vitrier vitrerie vitre glace miroir verre cassure ' },
-  soudure:    { ic:'🔥', nom:'Soudure & ferronnerie',   base:10000, famille:'bâtiment',   mots:'soudeur soudure fer ferronnerie grille barriere metallique ' },
-  meca_auto:  { ic:'🚙', nom:'Mécanique auto',          base:15000, famille:'réparation', mots:'mecanicien mecanicien mecano meca garagiste voiture auto vehicule panne batterie pneu creve vidange freins moteur courroie demarrage ' },
-  meca_moto:  { ic:'🏍️', nom:'Mécanique moto',          base:8000,  famille:'réparation', mots:'moto motocyclette scooter mecanicien panne chaine huile ' },
-  telephone:  { ic:'📱', nom:'Réparation téléphone',    base:8000,  famille:'réparation', mots:'telephone portable smartphone ecran tactile batterie reparateur vitre arriere connecteur ' },
-  ordinateur: { ic:'💻', nom:'Ordinateur & informatique',base:10000, famille:'réparation', mots:'ordinateur pc laptop portable informaticien windows logiciel fichier imprimante lent virus ' },
-  internet:   { ic:'📶', nom:'Internet & wifi',         base:10000, famille:'installation', mots:'internet wifi connexion routeur box fibre reseau lente debit ' },
-  camera:     { ic:'📹', nom:'Caméras & alarmes',       base:25000, famille:'installation', mots:'camera cameras surveillance videosurveillance alarme securite interphone portail surveillance ' },
-  cordonnerie:{ ic:'👟', nom:'Cordonnerie (chaussures, sacs)', base:3000, famille:'réparation', mots:'cordonnier chaussure chaussures sac talon semelle couture cuir ' },
-  documents:  { ic:'🖨️', nom:'Documents, CV & impression', base:3000, famille:'services', mots:'cv impression imprimer photocopie scanner taper document affiche flyer logo carte visite brocure reluire ' },
-  conseil:    { ic:'💼', nom:'Conseil & entreprise',    base:25000, famille:'services',   mots:'comptable comptabilite business plan entreprise etude marche fiscal declaration community manager publicite communication marketing ' },
-  immobilier: { ic:'🏘️', nom:'Immobilier',              base:15000, famille:'services',   mots:'immobilier maison chambre appartement terrain location louer vendre locataire visite agence ' },
-  coiffure:   { ic:'💈', nom:'Coiffure à domicile',     base:5000,  famille:'personne',   mots:'coiffeur coiffeuse coiffure cheveux tresses nattes degrade barbe raser perruque meches ' },
-  beaute:     { ic:'💅', nom:'Beauté & soins',          base:6000,  famille:'personne',   mots:'ongles manucure pedicure maquillage maquilleuse beaute soin visage cils epilation esthetique ' },
-  photo:      { ic:'📸', nom:'Photo & vidéo',           base:25000, famille:'personne',   mots:'photographe photo video videaste cameraman film montage retouche mariage shooting ' },
-  couture:    { ic:'🧵', nom:'Couture & retouches',     base:8000,  famille:'personne',   mots:'couturier couturiere couture robe chemise pantalon tenue retouche fermeture tailleur sur mesure ' },
-  livraison:  { ic:'🛵', nom:'Livraison & coursier',    base:3000,  famille:'transport',  mots:'livreur livraison colis coursier paquet document deplacement envoi transport express ' },
-  chauffeur:  { ic:'🚕', nom:'Chauffeur',               base:15000, famille:'transport',  mots:'chauffeur voiture avec conducteur deplacement trajet conduire ' }
+  peinture:   { ic:'🎨', nom:'Peinture & façades',      base:15000, desc:'Murs, plafonds, façades', famille:'bâtiment',   mots:'peinture peintre repeindre badigeon mur murs plafond facade laque vernis enduit couleur ' },
+  carrelage:  { ic:'🧱', nom:'Carrelage & faïence',     base:18000, desc:'Sols, murs, faïence, joints', famille:'bâtiment',   mots:'carrelage carreleur carreau faience dalle sol murale joint pose ' },
+  macon:      { ic:'🏗️', nom:'Maçonnerie & clôtures',   base:20000, desc:'Murs, dalles, clôtures, crépissage', famille:'bâtiment',   mots:'macon maconnerie cloture portail mur dalle ciment beton crepissage fondation ' },
+  menuiserie: { ic:'🪵', nom:'Menuiserie & meubles',    base:15000, desc:'Portes, placards, meubles sur mesure', famille:'bâtiment',   mots:'menuisier menuiserie bois meuble placard armoire table lit porte charniere sur mesure ebeniste ' },
+  vitrerie:   { ic:'🪞', nom:'Vitrerie & miroirs',      base:8000,  desc:'Vitres cassées, miroirs, vitrines', famille:'bâtiment',   mots:'vitrier vitrerie vitre glace miroir verre cassure ' },
+  soudure:    { ic:'🔥', nom:'Soudure & ferronnerie',   base:10000, desc:'Portails, grilles, ferronnerie', famille:'bâtiment',   mots:'soudeur souder soudure fer ferronnerie grille barriere metallique portail metal portail casse reparer portail ' },
+  meca_auto:  { ic:'🚙', nom:'Mécanique auto',          base:15000, desc:'Panne, vidange, freins, batterie', famille:'réparation', mots:'mecanicien mecanicien mecano meca garagiste voiture auto vehicule panne batterie pneu creve vidange freins moteur courroie demarrage ' },
+  meca_moto:  { ic:'🏍️', nom:'Mécanique moto',          base:8000,  desc:'Entretien et réparation de moto', famille:'réparation', mots:'moto motocyclette scooter mecanicien panne chaine huile ' },
+  telephone:  { ic:'📱', nom:'Réparation téléphone',    base:8000,  desc:'Écran, batterie, connecteur', famille:'réparation', mots:'telephone portable smartphone ecran tactile batterie reparateur vitre arriere connecteur ' },
+  ordinateur: { ic:'💻', nom:'Ordinateur & informatique',base:10000, desc:'Dépannage, nettoyage, logiciels', famille:'réparation', mots:'ordinateur pc laptop portable informaticien windows logiciel fichier imprimante lent virus ' },
+  internet:   { ic:'📶', nom:'Internet & wifi',         base:10000, desc:'Wifi, box, câblage, réseau', famille:'installation', mots:'internet wifi connexion routeur box fibre reseau lente debit ' },
+  camera:     { ic:'📹', nom:'Caméras & alarmes',       base:25000, desc:'Caméras, alarmes, interphone', famille:'installation', mots:'camera cameras surveillance videosurveillance alarme securite interphone portail surveillance ' },
+  cordonnerie:{ ic:'👟', nom:'Cordonnerie (chaussures, sacs)', base:3000, desc:'Chaussures, sacs, ceintures', famille:'réparation', mots:'cordonnier chaussure chaussures sac talon semelle couture cuir ' },
+  documents:  { ic:'🖨️', nom:'Documents, CV & impression', base:3000, desc:'CV, dossiers, impression, scan', famille:'services', mots:'cv impression imprimer photocopie scanner taper document affiche flyer logo carte visite brocure reluire ' },
+  conseil:    { ic:'💼', nom:'Conseil & entreprise',    base:25000, desc:'Entreprise, démarches, projets', famille:'services',   mots:'comptable comptabilite business plan entreprise etude marche fiscal declaration community manager publicite communication marketing ' },
+  immobilier: { ic:'🏘️', nom:'Immobilier',              base:15000, desc:'Visite, location, achat, vente', famille:'services',   mots:'immobilier maison chambre appartement terrain location louer vendre locataire visite agence ' },
+  coiffure:   { ic:'💈', nom:'Coiffure à domicile',     base:5000,  desc:'Coiffure à domicile', famille:'personne',   mots:'coiffeur coiffeuse coiffure cheveux tresses nattes degrade barbe raser perruque meches ' },
+  beaute:     { ic:'💅', nom:'Beauté & soins',          base:6000,  desc:'Ongles, maquillage, soins', famille:'personne',   mots:'ongles manucure pedicure maquillage maquilleuse beaute soin visage cils epilation esthetique ' },
+  photo:      { ic:'📸', nom:'Photo & vidéo',           base:25000, desc:'Photos et vidéos, montage', famille:'personne',   mots:'photographe photo video videaste cameraman film montage retouche mariage shooting ' },
+  couture:    { ic:'🧵', nom:'Couture & retouches',     base:8000,  desc:'Retouches, couture sur mesure', famille:'personne',   mots:'couturier couturiere couture robe chemise pantalon tenue retouche fermeture tailleur sur mesure ' },
+  livraison:  { ic:'🛵', nom:'Livraison & coursier',    base:3000,  desc:'Colis, courses, documents', famille:'transport',  mots:'livreur livraison colis coursier paquet document deplacement envoi transport express ' },
+  chauffeur:  { ic:'🚕', nom:'Chauffeur',               base:15000, desc:'Déplacements, transferts, mise à dispo', famille:'transport',  mots:'chauffeur voiture avec conducteur deplacement trajet conduire ' }
 };
 /* on AJOUTE ces métiers au catalogue existant (les 22 d'origine restent intacts) */
-for (const [id, s2] of Object.entries(SVC_NOUVEAUX)) SVC_CAT.push({ id, nom: s2.nom, ic: s2.ic, base: s2.base, famille: s2.famille, mots: s2.mots });
+for (const [id, s2] of Object.entries(SVC_NOUVEAUX)) SVC_CAT.push({ id, nom: s2.nom, ic: s2.ic, base: s2.base, desc: s2.desc || '', famille: s2.famille, mots: s2.mots });
+/* ═══════════════════════════════════════════════════════════════════════════════
+   📚 CATALOGUE NATIONAL KLEAN — Côte d'Ivoire (lot « Klean Service »)
+   4 niveaux : CATÉGORIE → SERVICE → SOUS-SERVICE → TÂCHE  (768 tâches)
+   Il est reconstruit à partir de KLEAN-CATALOGUE-NATIONAL.md par tools/construire-catalogue.py.
+   Le PDG peut l'enrichir depuis le tableau de bord (ajouts, mots-clés, désactivations) —
+   on ne SUPPRIME jamais une entrée utilisée par d'anciennes commandes : on la désactive.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+const CAT_NAT_FAM = [
+  { id:'maison', ic:'🏠', nom:'Maison, ménage & nettoyage', services:['1','2','44'], populaire:true },
+  { id:'depannage', ic:'🔧', nom:'Dépannage & technique', services:['3','4','5','6'], populaire:true },
+  { id:'travaux', ic:'🛠️', nom:'Bâtiment & travaux', services:['7','8','9','10'], populaire:true },
+  { id:'transport', ic:'🚚', nom:'Transport, déménagement & stockage', services:['12','13','31'], populaire:true },
+  { id:'auto', ic:'🚗', nom:'Auto & moto', services:['14','15'], populaire:true },
+  { id:'pers', ic:'💇', nom:'Beauté, bien-être & sport', services:['18','19','20','21'], populaire:true },
+  { id:'numerique', ic:'📱', nom:'Téléphone, informatique & sécurité', services:['16','17','26','37'], populaire:true },
+  { id:'jardin', ic:'🌿', nom:'Jardin, animaux & agriculture', services:['11','32','33'], populaire:true },
+  { id:'personne', ic:'👶', nom:'Personne, famille & main-d\'œuvre', services:['22','45'], populaire:true },
+  { id:'cuisine', ic:'🍳', nom:'Cuisine, événementiel & médias', services:['23','24','25'], populaire:true },
+  { id:'formation', ic:'🎓', nom:'Cours, formation & démarches', services:['27','28','29','46'], populaire:true },
+  { id:'urgence', ic:'🚨', nom:'Urgence & dépannage immédiat', services:['43'], populaire:true },
+  { id:'pro', ic:'🏢', nom:'Entreprises, commerces & hôtels', services:['39','40','41','42'], populaire:false },
+  { id:'artisanat', ic:'✂️', nom:'Couture, artisanat & créations', services:['34','35','36'], populaire:false },
+  { id:'immo', ic:'🏘️', nom:'Immobilier & voyageurs', services:['30','47'], populaire:false },
+  { id:'funeraire', ic:'⚱️', nom:'Services funéraires', services:['38'], populaire:false },
+  { id:'autre', ic:'🛠️', nom:'Je ne trouve pas mon service', services:['48'], populaire:false },
+];
+const CAT_NAT = [
+  { num:'1', nom:'Maison, ménage et nettoyage', ic:'🏠', sous:[
+    { num:'1.1', nom:'Ménage à domicile', taches:'ménage général|balayage|lavage des sols|nettoyage des murs|dépoussiérage|nettoyage des meubles|nettoyage des chambres|nettoyage du salon|nettoyage de la cuisine|nettoyage de la salle de bain|nettoyage des toilettes|nettoyage de la terrasse|nettoyage du balcon|nettoyage après réception|ménage avant emménagement|ménage après déménagement|ménage régulier|ménage ponctuel|grand ménage' },
+    { num:'1.2', nom:'Nettoyage spécialisé', taches:'nettoyage de canapé|nettoyage de fauteuil|nettoyage de matelas|nettoyage de tapis|nettoyage de moquette|nettoyage de rideaux|nettoyage de vitres|nettoyage de baies vitrées|nettoyage de portes|nettoyage de façades|nettoyage de bureaux|nettoyage de magasins|nettoyage de restaurants|nettoyage d\'hôtels|nettoyage d\'écoles|nettoyage de locaux professionnels' },
+    { num:'1.3', nom:'Nettoyage après travaux', taches:'nettoyage après construction|nettoyage après rénovation|enlèvement de poussière de chantier|nettoyage de peinture|nettoyage de ciment|nettoyage de carrelage après travaux|évacuation de petits déchets de chantier' },
+    { num:'1.4', nom:'Désinfection et assainissement', taches:'désinfection de maison|désinfection de bureau|désinfection de toilettes|désinfection de locaux|traitement anti-odeurs|désinsectisation|dératisation|traitement contre les cafards|traitement contre les fourmis|traitement contre les moustiques|traitement contre les termites' },
+  ]},
+  { num:'2', nom:'Blanchisserie, linge et repassage', ic:'🧺', sous:[
+    { num:'2.1', nom:'Linge', taches:'lavage de vêtements|lavage à la main|lavage en machine|lavage de linge de maison|lavage de draps|lavage de couvertures|lavage de couettes|lavage de serviettes' },
+    { num:'2.2', nom:'Repassage', taches:'repassage de vêtements|repassage de chemises|repassage de pantalons|repassage de robes|repassage de tenues professionnelles|repassage de linge de maison' },
+    { num:'2.3', nom:'Pressing', taches:'nettoyage à sec|nettoyage de costume|nettoyage de robe|nettoyage de veste|nettoyage de chaussures|nettoyage de sacs' },
+    { num:'2.4', nom:'Collecte et livraison du linge', taches:'collecte du linge|livraison du linge|lavage + repassage|collecte + lavage + livraison' },
+  ]},
+  { num:'3', nom:'Plomberie et installations sanitaires', ic:'🔧', sous:[
+    { num:'3.1', nom:'Dépannage plomberie', taches:'fuite d\'eau|fuite de robinet|fuite de tuyau|fuite sous évier|fuite de WC|fuite de douche|fuite de chauffe-eau|canalisation bouchée|évier bouché|lavabo bouché|douche bouchée|WC bouché' },
+    { num:'3.2', nom:'Installation sanitaire', taches:'installation de robinet|installation de douche|installation de lavabo|installation de WC|installation d\'évier|installation de chauffe-eau|installation de tuyauterie|installation de réservoir d\'eau|installation de pompe' },
+    { num:'3.3', nom:'Entretien plomberie', taches:'entretien de plomberie|entretien de chauffe-eau|nettoyage de canalisation|recherche de fuite|remplacement de tuyaux|remplacement de robinetterie' },
+  ]},
+  { num:'4', nom:'Électricité', ic:'💡', sous:[
+    { num:'4.1', nom:'Dépannage électrique', taches:'panne électrique|coupure électrique intérieure|prise qui ne fonctionne pas|interrupteur défectueux|disjoncteur qui saute|court-circuit|problème d\'éclairage|problème de câblage' },
+    { num:'4.2', nom:'Installation électrique', taches:'installation de prise|installation d\'interrupteur|installation de lampe|installation de plafonnier|installation de ventilateur|installation de climatiseur|installation de tableau électrique|câblage maison|câblage bureau|câblage magasin' },
+    { num:'4.3', nom:'Sécurité électrique', taches:'diagnostic électrique|mise en sécurité|remplacement de tableau|remplacement de disjoncteur|mise à la terre|recherche de surcharge' },
+  ]},
+  { num:'5', nom:'Climatisation, froid et réfrigération', ic:'❄️', sous:[
+    { num:'5.1', nom:'Climatisation', taches:'installation de climatiseur|entretien de climatiseur|nettoyage de climatiseur|recharge de gaz|dépannage de climatiseur|fuite de gaz|climatiseur qui ne refroidit plus|climatiseur qui coule|climatiseur bruyant|changement de condensateur|changement de ventilateur' },
+    { num:'5.2', nom:'Réfrigération', taches:'réparation de réfrigérateur|réparation de congélateur|entretien de réfrigérateur|recharge de gaz frigo|diagnostic frigorifique|réparation de chambre froide|installation de chambre froide' },
+  ]},
+  { num:'6', nom:'Électroménager', ic:'🔌', sous:[
+    { num:'6.1', nom:'Gros électroménager', taches:'réparation de réfrigérateur|réparation de congélateur|réparation de machine à laver|réparation de lave-vaisselle|réparation de four|réparation de cuisinière|réparation de chauffe-eau' },
+    { num:'6.2', nom:'Petit électroménager', taches:'réparation de mixeur|réparation de blender|réparation de fer à repasser|réparation de micro-ondes|réparation d\'aspirateur|réparation de cafetière|réparation de bouilloire|réparation de ventilateur' },
+    { num:'6.3', nom:'Prestations électroménager', taches:'diagnostic appareil|réparation appareil|entretien appareil|installation appareil|remplacement de pièces|démontage appareil|remontage appareil' },
+  ]},
+  { num:'7', nom:'Bâtiment, construction et rénovation', ic:'🛠️', sous:[
+    { num:'7.1', nom:'Maçonnerie', taches:'construction de mur|réparation de mur|fondation|dalle|chape|escalier|clôture|portail|réparation de fissures|démolition légère' },
+    { num:'7.2', nom:'Carrelage', taches:'pose de carrelage|remplacement de carreau|réparation de carrelage|carrelage sol|carrelage mur|faïence|joints de carrelage' },
+    { num:'7.3', nom:'Peinture bâtiment', taches:'peinture intérieure|peinture extérieure|peinture plafond|peinture murale|peinture façade|préparation des murs|enduit|ponçage|finition peinture' },
+    { num:'7.4', nom:'Plafonds', taches:'plafond PVC|plafond staff|faux plafond|plafond décoratif|réparation de plafond' },
+    { num:'7.5', nom:'Étanchéité', taches:'étanchéité toiture|étanchéité terrasse|étanchéité salle de bain|traitement infiltration|réparation fuite toiture' },
+  ]},
+  { num:'8', nom:'Menuiserie bois', ic:'🪵', sous:[
+    { num:'8.1', nom:'Fabrication bois', taches:'fabrication de porte|fabrication de fenêtre|fabrication de placard|fabrication d\'armoire|fabrication de lit|fabrication de table|fabrication de chaise|fabrication de bureau|fabrication d\'étagère|fabrication de meuble TV|cuisine en bois|meuble sur mesure' },
+    { num:'8.2', nom:'Réparation bois', taches:'réparation de porte|réparation de meuble|remplacement de charnière|réparation de tiroir|réparation de serrure de meuble|restauration de meuble' },
+  ]},
+  { num:'9', nom:'Menuiserie aluminium et vitrerie', ic:'🪟', sous:[
+    { num:'9.1', nom:'Aluminium', taches:'porte aluminium|fenêtre aluminium|baie vitrée|véranda|garde-corps aluminium|vitrine' },
+    { num:'9.2', nom:'Vitrerie', taches:'moustiquaire|vitrage|remplacement de vitre|réparation de vitre|pose de miroir|découpe de verre' },
+  ]},
+  { num:'10', nom:'Ferronnerie et soudure', ic:'🔥', sous:[
+    { num:'10.1', nom:'Fabrication métallique', taches:'portail métallique|porte métallique|grille de sécurité|fenêtre métallique|clôture métallique|garde-corps métallique|escalier métallique|charpente métallique' },
+    { num:'10.2', nom:'Soudure et réparation métal', taches:'soudure|réparation métallique|soudure de portail cassé|fabrication sur mesure métal' },
+  ]},
+  { num:'11', nom:'Jardinage et espaces verts', ic:'🌿', sous:[
+    { num:'11.1', nom:'Entretien jardin', taches:'tonte de pelouse|débroussaillage|désherbage|taille de haie|taille d\'arbres|élagage|ramassage de feuilles|nettoyage de jardin' },
+    { num:'11.2', nom:'Aménagement jardin', taches:'création de jardin|plantation|installation de gazon|création de potager|installation d\'arrosage|aménagement paysager' },
+    { num:'11.3', nom:'Entretien spécialisé jardin', taches:'traitement des plantes|lutte contre parasites|entretien d\'arbres|entretien de fleurs' },
+  ]},
+  { num:'12', nom:'Déménagement et manutention', ic:'📦', sous:[
+    { num:'12.1', nom:'Déménagement', taches:'déménagement maison|déménagement appartement|déménagement bureau|déménagement magasin|transport de meubles|emballage|déballage' },
+    { num:'12.2', nom:'Manutention', taches:'chargement|déchargement|manutention|démontage de meubles|remontage de meubles|évacuation d\'objets' },
+  ]},
+  { num:'13', nom:'Transport et livraison', ic:'🛵', sous:[
+    { num:'13.1', nom:'Livraison', taches:'livraison de documents|livraison de colis|livraison de repas|livraison de courses|livraison de médicaments|livraison de vêtements|livraison de meubles|livraison de matériaux' },
+    { num:'13.2', nom:'Courses et commissions', taches:'faire des courses|achat au marché|retrait de colis|dépôt de documents|commission administrative|livraison urgente' },
+    { num:'13.3', nom:'Transport de biens', taches:'transport de meubles|transport de matériel|transport de marchandises|transport de matériaux' },
+  ]},
+  { num:'14', nom:'Automobile', ic:'🚙', sous:[
+    { num:'14.1', nom:'Mécanique auto', taches:'vidange|changement de filtre|diagnostic auto|réparation moteur|réparation frein|réparation embrayage|réparation suspension|réparation direction|réparation échappement' },
+    { num:'14.2', nom:'Pneumatiques', taches:'changement de pneu|réparation de pneu|crevaison|équilibrage|permutation des pneus' },
+    { num:'14.3', nom:'Batterie auto', taches:'dépannage batterie|recharge batterie|remplacement batterie|démarrage avec batterie externe' },
+    { num:'14.4', nom:'Entretien esthétique auto', taches:'lavage automobile|nettoyage intérieur voiture|nettoyage extérieur voiture|nettoyage siège voiture|polissage|lustrage|rénovation des phares' },
+  ]},
+  { num:'15', nom:'Moto', ic:'🏍️', sous:[
+    { num:'15.1', nom:'Mécanique moto', taches:'réparation moto|vidange moto|réparation frein moto|changement pneu moto|réparation moteur moto|batterie moto|chaîne|embrayage|diagnostic moto|dépannage moto|lavage moto' },
+  ]},
+  { num:'16', nom:'Téléphones, informatique et électronique', ic:'📱', sous:[
+    { num:'16.1', nom:'Téléphones', taches:'changement écran|changement batterie téléphone|réparation connecteur|réparation bouton|diagnostic téléphone|récupération de données téléphone|configuration téléphone' },
+    { num:'16.2', nom:'Ordinateurs', taches:'réparation ordinateur|installation système|installation logiciels|nettoyage ordinateur|changement disque|changement RAM|récupération de données ordinateur|configuration réseau' },
+    { num:'16.3', nom:'Réseaux', taches:'installation Wi-Fi|configuration routeur|câblage réseau|réseau d\'entreprise|installation caméra IP|dépannage Internet' },
+    { num:'16.4', nom:'Autres appareils', taches:'réparation télévision|réparation décodeur|réparation imprimante|réparation vidéoprojecteur|réparation console de jeux|réparation appareils électroniques' },
+  ]},
+  { num:'17', nom:'Caméras, sécurité et domotique', ic:'📹', sous:[
+    { num:'17.1', nom:'Vidéosurveillance', taches:'installation caméra|configuration caméra|maintenance caméra|installation alarme|installation interphone|installation visiophone' },
+    { num:'17.2', nom:'Domotique', taches:'serrure connectée|contrôle d\'accès|automatisation portail|domotique maison|configuration objets connectés' },
+  ]},
+  { num:'18', nom:'Coiffure', ic:'💈', sous:[
+    { num:'18.1', nom:'Coiffure hommes', taches:'coupe classique|coupe moderne|dégradé|taille de barbe|rasage|coloration cheveux homme|soins capillaires homme' },
+    { num:'18.2', nom:'Coiffure femmes', taches:'tresses|nattes|vanilles|locks|perruque|pose perruque|coiffure naturelle|brushing|coloration cheveux femme|soins capillaires femme|coiffure mariage|coiffure événementielle' },
+    { num:'18.3', nom:'Coiffure enfants', taches:'coupe enfant|coiffure enfant|tresses enfant' },
+  ]},
+  { num:'19', nom:'Beauté et esthétique', ic:'💅', sous:[
+    { num:'19.1', nom:'Ongles et mains', taches:'manucure|pédicure|pose d\'ongles|vernis|nail art|soins des mains' },
+    { num:'19.2', nom:'Maquillage et visage', taches:'maquillage|maquillage mariage|maquillage événement|soins du visage' },
+    { num:'19.3', nom:'Corps', taches:'soins corporels|épilation|soins des pieds' },
+  ]},
+  { num:'20', nom:'Bien-être', ic:'💆', sous:[
+    { num:'20.1', nom:'Massages', taches:'massage relaxant|massage sportif|massage de bien-être|soins spa|relaxation' },
+    { num:'20.2', nom:'Bien-être à domicile', taches:'yoga|coaching bien-être|soins corporels à domicile' },
+  ]},
+  { num:'21', nom:'Sport et coaching', ic:'🏃', sous:[
+    { num:'21.1', nom:'Coaching sportif', taches:'coach sportif|entraînement à domicile|préparation physique|fitness|musculation|remise en forme|accompagnement sportif|programme d\'entraînement' },
+    { num:'21.2', nom:'Sports', taches:'football|basketball|course' },
+  ]},
+  { num:'22', nom:'Garde et aide à la personne', ic:'👶', sous:[
+    { num:'22.1', nom:'Enfants', taches:'baby-sitting|garde ponctuelle d\'enfant|garde régulière d\'enfant|accompagnement scolaire|accompagnement école-maison' },
+    { num:'22.2', nom:'Personnes âgées', taches:'compagnie pour personne âgée|aide quotidienne personne âgée|courses pour personne âgée|accompagnement extérieur|aide non médicale' },
+    { num:'22.3', nom:'Assistance à domicile', taches:'aide aux courses|aide au rangement|aide aux tâches quotidiennes|accompagnement administratif' },
+  ]},
+  { num:'23', nom:'Cuisine et alimentation', ic:'🍳', sous:[
+    { num:'23.1', nom:'Cuisinier à domicile', taches:'cuisinier à domicile|préparation de repas|cuisine événementielle|préparation de repas familiaux|préparation de repas professionnels' },
+    { num:'23.2', nom:'Pâtisserie et boissons', taches:'pâtisserie|gâteaux|gâteaux d\'anniversaire|jus naturels|cocktails sans alcool' },
+    { num:'23.3', nom:'Traiteur', taches:'traiteur|repas pour événements' },
+  ]},
+  { num:'24', nom:'Événementiel', ic:'🎉', sous:[
+    { num:'24.1', nom:'Organisation d\'événements', taches:'organisation mariage|organisation anniversaire|organisation baptême|organisation cérémonie|organisation conférence|organisation réunion|organisation cérémonie funéraire|événement professionnel' },
+    { num:'24.2', nom:'Décoration', taches:'décoration mariage|décoration anniversaire|décoration salle|décoration extérieure|décoration table|arche de mariage|fleurs|ballons' },
+    { num:'24.3', nom:'Technique événementielle', taches:'sonorisation|éclairage événement|DJ|écran|vidéoprojecteur|scène|groupe électrogène' },
+    { num:'24.4', nom:'Personnel événementiel', taches:'serveur|hôtesse|maître de cérémonie|animateur|agent d\'accueil' },
+  ]},
+  { num:'25', nom:'Photo et vidéo', ic:'📸', sous:[
+    { num:'25.1', nom:'Photographie', taches:'photographie mariage|photographie anniversaire|photographie événement|portrait|photo professionnelle|photo produit' },
+    { num:'25.2', nom:'Vidéo', taches:'vidéo événement|vidéo mariage|vidéo promotionnelle|montage vidéo|retouche photo|drone|couverture en direct' },
+  ]},
+  { num:'26', nom:'Communication, design et numérique', ic:'💻', sous:[
+    { num:'26.1', nom:'Design graphique', taches:'création de logo|affiche|flyer|carte de visite|invitation|identité visuelle|design réseaux sociaux|animation graphique' },
+    { num:'26.2', nom:'Web et applications', taches:'création site web|création application|maintenance site web|référencement' },
+    { num:'26.3', nom:'Contenu et réseaux sociaux', taches:'community management|publicité numérique|rédaction de contenu|traduction|transcription' },
+  ]},
+  { num:'27', nom:'Cours, formation et éducation', ic:'📚', sous:[
+    { num:'27.1', nom:'Cours particuliers', taches:'cours d\'anglais|cours de français|cours de mathématiques|cours de physique|cours de chimie|cours d\'informatique|cours de musique|cours de dessin|soutien scolaire|cours à domicile|cours en ligne' },
+    { num:'27.2', nom:'Préparation examens', taches:'préparation BEPC|préparation BAC|préparation concours|préparation examens' },
+    { num:'27.3', nom:'Formation professionnelle', taches:'formation professionnelle|formation bureautique|formation informatique' },
+  ]},
+  { num:'28', nom:'Administratif et professionnel', ic:'🗂️', sous:[
+    { num:'28.1', nom:'Documents', taches:'saisie de documents|impression|photocopie|scan|reliure|numérisation de documents' },
+    { num:'28.2', nom:'Rédaction', taches:'rédaction de CV|rédaction de lettre|correction de documents|création de présentations' },
+    { num:'28.3', nom:'Assistance administrative', taches:'assistance administrative|secrétariat|classement de documents|saisie de données' },
+  ]},
+  { num:'29', nom:'Comptabilité, gestion et entreprise', ic:'📊', sous:[
+    { num:'29.1', nom:'Comptabilité', taches:'tenue de comptabilité|établissement de factures|suivi financier|gestion de paie|assistance fiscale' },
+    { num:'29.2', nom:'Création et conseil d\'entreprise', taches:'conseil en gestion|création d\'entreprise|assistance entrepreneuriale|business plan|étude de marché|gestion administrative' },
+  ]},
+  { num:'30', nom:'Immobilier', ic:'🏘️', sous:[
+    { num:'30.1', nom:'Recherche et transaction', taches:'recherche de logement|recherche de maison|recherche d\'appartement|recherche de terrain|location|vente' },
+    { num:'30.2', nom:'Gestion et visites', taches:'gestion locative|état des lieux|visite immobilière|estimation' },
+    { num:'30.3', nom:'Services immobiliers', taches:'photographie immobilière|entretien de propriété|surveillance de propriété' },
+  ]},
+  { num:'31', nom:'Stockage et logistique', ic:'🏬', sous:[
+    { num:'31.1', nom:'Stockage', taches:'garde-meuble|stockage temporaire|entreposage|inventaire' },
+    { num:'31.2', nom:'Logistique', taches:'transport|manutention logistique|emballage logistique|déménagement professionnel|déménagement particulier' },
+  ]},
+  { num:'32', nom:'Agriculture et services ruraux', ic:'🌾', sous:[
+    { num:'32.1', nom:'Travaux agricoles', taches:'préparation de terrain|débroussaillage agricole|labour|semis|plantation agricole|désherbage agricole|traitement des cultures|récolte' },
+    { num:'32.2', nom:'Exploitation et ferme', taches:'transport agricole|entretien de plantation|entretien de ferme|élevage|alimentation animale|nettoyage d\'enclos|gardiennage agricole' },
+  ]},
+  { num:'33', nom:'Élevage et services animaliers', ic:'🐐', sous:[
+    { num:'33.1', nom:'Animaux de compagnie', taches:'toilettage animal|lavage animal|promenade chien|garde animal|pension animale|transport animal|alimentation animale|nettoyage d\'espace animal|photographie animale' },
+  ]},
+  { num:'34', nom:'Couture, mode et retouches', ic:'🧵', sous:[
+    { num:'34.1', nom:'Confection', taches:'couture homme|couture femme|couture enfant|confection sur mesure|confection uniforme|confection tenue événementielle|broderie' },
+    { num:'34.2', nom:'Retouches', taches:'retouche|ourlet|ajustement taille|réparation vêtement|changement fermeture|réparation bouton' },
+  ]},
+  { num:'35', nom:'Cordonnerie et maroquinerie', ic:'👟', sous:[
+    { num:'35.1', nom:'Chaussures', taches:'réparation chaussures|changement semelle|collage chaussures|cirage|nettoyage chaussures|teinture chaussures' },
+    { num:'35.2', nom:'Maroquinerie', taches:'réparation sac|réparation ceinture|réparation portefeuille|remplacement fermeture sac' },
+  ]},
+  { num:'36', nom:'Artisanat et création', ic:'🎭', sous:[
+    { num:'36.1', nom:'Création artistique', taches:'sculpture|peinture artistique|dessin|portrait dessiné|calligraphie' },
+    { num:'36.2', nom:'Objets personnalisés', taches:'artisanat décoratif|objets personnalisés|cadeaux personnalisés|gravure|impression personnalisée' },
+  ]},
+  { num:'37', nom:'Sécurité privée', ic:'🛡️', sous:[
+    { num:'37.1', nom:'Gardiennage', taches:'agent de sécurité|gardiennage|surveillance événement|surveillance domicile|surveillance commerce|surveillance chantier|contrôle d\'accès sécurité' },
+  ]},
+  { num:'38', nom:'Services funéraires', ic:'⚱️', sous:[
+    { num:'38.1', nom:'Organisation funéraire', taches:'organisation de cérémonie funéraire|décoration funéraire|transport funéraire|photographie funéraire|impression de faire-part|sonorisation funéraire|restauration événementielle funéraire|assistance logistique funéraire' },
+  ]},
+  { num:'39', nom:'Assistance aux entreprises', ic:'🏢', sous:[
+    { num:'39.1', nom:'Entretien et maintenance de locaux', taches:'nettoyage de bureaux|maintenance de locaux|entretien climatisation entreprise|entretien électrique entreprise|plomberie entreprise|jardinage entreprise|gardiennage entreprise' },
+    { num:'39.2', nom:'Services aux entreprises', taches:'informatique entreprise|réseau informatique entreprise|maintenance équipements|déménagement de bureaux|archivage|secrétariat entreprise' },
+  ]},
+  { num:'40', nom:'Services pour commerces', ic:'🏬', sous:[
+    { num:'40.1', nom:'Aménagement de commerce', taches:'nettoyage magasin|installation étagères|décoration magasin|enseigne|vitrine' },
+    { num:'40.2', nom:'Maintenance de commerce', taches:'réparation équipements|installation caméra commerce|installation réseau commerce|maintenance électrique commerce|maintenance plomberie commerce' },
+    { num:'40.3', nom:'Logistique de commerce', taches:'livraison commerce|manutention commerce|inventaire commerce' },
+  ]},
+  { num:'41', nom:'Services pour restaurants et maquis', ic:'🍽️', sous:[
+    { num:'41.1', nom:'Personnel de restaurant', taches:'plonge|cuisinier restaurant|serveur restaurant' },
+    { num:'41.2', nom:'Entretien de restaurant', taches:'nettoyage restaurant|maintenance réfrigérateur restaurant|maintenance congélateur restaurant|climatisation restaurant|électricité restaurant|plomberie restaurant|dératisation restaurant|désinfection restaurant' },
+    { num:'41.3', nom:'Ambiance de restaurant', taches:'décoration restaurant|sonorisation restaurant' },
+  ]},
+  { num:'42', nom:'Services pour hôtels et résidences', ic:'🏨', sous:[
+    { num:'42.1', nom:'Entretien hôtelier', taches:'ménage hôtel|blanchisserie hôtel|repassage hôtel|jardinage hôtel|nettoyage spécialisé hôtel' },
+    { num:'42.2', nom:'Technique et maintenance hôtel', taches:'piscine|climatisation hôtel|plomberie hôtel|électricité hôtel|maintenance hôtel|sécurité hôtel' },
+    { num:'42.3', nom:'Services hôteliers', taches:'informatique hôtel|décoration hôtel|photographie hôtel' },
+  ]},
+  { num:'43', nom:'Urgence et dépannage immédiat', ic:'🚨', sous:[
+    { num:'43.1', nom:'Urgences maison', taches:'plombier urgent|électricien urgent|serrurier urgent|fuite d\'eau urgente|panne électrique urgente|porte bloquée|vitre cassée|canalisation bouchée urgente' },
+    { num:'43.2', nom:'Urgences véhicules', taches:'dépannage voiture|dépannage moto|batterie voiture|crevaison urgente' },
+    { num:'43.3', nom:'Urgences appareils', taches:'dépannage climatisation|dépannage réfrigérateur|dépannage électroménager|dépannage informatique' },
+  ]},
+  { num:'44', nom:'Petits travaux et bricolage', ic:'🪛', sous:[
+    { num:'44.1', nom:'Fixations et montage', taches:'accrocher une télévision|installer une étagère|monter un meuble|fixer un miroir|poser une tringle|installer un rideau|assembler un équipement' },
+    { num:'44.2', nom:'Petites réparations maison', taches:'changer une ampoule|changer une prise|changer un robinet|poser une serrure|réparer une porte|déplacer un meuble|installer une moustiquaire|petite réparation domestique' },
+  ]},
+  { num:'45', nom:'Main-d\'œuvre et journaliers', ic:'👷', sous:[
+    { num:'45.1', nom:'Aides et manœuvres', taches:'manœuvre|aide-maçon|aide-menuisier|aide-peintre|aide-électricien|aide-plombier|aide-déménageur|manutentionnaire|aide-jardinier|aide-cuisinier' },
+    { num:'45.2', nom:'Personnel de service', taches:'serveur|plongeur|aide événementiel' },
+  ]},
+  { num:'46', nom:'Services aux étudiants et jeunes', ic:'🎓', sous:[
+    { num:'46.1', nom:'Travaux scolaires', taches:'impression|photocopie|reliure|saisie|correction|traduction' },
+    { num:'46.2', nom:'Accompagnement', taches:'cours particuliers|formation informatique|conception CV|conception présentation|accompagnement numérique|photographie|montage vidéo' },
+  ]},
+  { num:'47', nom:'Services aux voyageurs et visiteurs', ic:'✈️', sous:[
+    { num:'47.1', nom:'Transport et accompagnement', taches:'chauffeur|transport local|transfert aéroport|accompagnement touristique|guide' },
+    { num:'47.2', nom:'Assistance aux visiteurs', taches:'traduction|interprétation|réservation de services locaux|livraison de bagages|assistance pratique' },
+  ]},
+  { num:'48', nom:'Je ne trouve pas mon service', ic:'🛠️', sous:[
+    { num:'48.1', nom:'Demande personnalisée', taches:'je ne trouve pas mon service|décrire mon besoin|demande sur mesure|un service qui n\'existe pas dans la liste' },
+  ]},
+];
+const CAT_METIER = {'1':'maison', '2':'blanchisserie', '3':'plomberie', '4':'electricite', '5':'clim', '6':'electro', '7':'macon', '8':'menuiserie', '9':'alu', '10':'soudure', '11':'jardinage', '12':'demen', '13':'livraison', '14':'meca_auto', '15':'meca_moto', '16':'telephone', '17':'camera', '18':'coiffure', '19':'beaute', '20':'bienetre', '21':'sport', '22':'placement', '23':'cuisine', '24':'evenement', '25':'photo', '26':'numerique', '27':'cours', '28':'documents', '29':'conseil', '30':'immobilier', '31':'demen', '32':'agriculture', '33':'elevage', '34':'couture', '35':'cordonnerie', '36':'artisanat', '37':'securite', '38':'funeraire', '39':'bureaux', '40':'bureaux', '41':'bureaux', '42':'bureaux', '43':'', '44':'bricolage', '45':'mainoeuvre', '46':'documents', '47':'chauffeur', '48':''};
+const CAT_METIER_SS = {'7.2':'carrelage', '7.3':'peinture', '7.4':'plafond', '7.5':'etancheite', '9.2':'vitrerie', '16.2':'ordinateur', '16.3':'internet', '16.4':'ordinateur', '42.1':'maison', '42.2':'piscine', '43.1':'bricolage'};
+const CAT_METIER_TACHE = {'nettoyage de canapé':'canapes', 'nettoyage de fauteuil':'canapes', 'nettoyage de vitres':'vitres', 'nettoyage de baies vitrées':'vitres', 'nettoyage de matelas':'canapes', 'nettoyage de tapis':'canapes', 'nettoyage de moquette':'canapes', 'grand ménage':'grand', 'ménage avant emménagement':'maison', 'ménage après déménagement':'maison', 'désinfection de maison':'desinfection', 'désinsectisation':'desinfection', 'dératisation':'desinfection', 'traitement contre les cafards':'desinfection', 'traitement contre les moustiques':'desinfection', 'nettoyage de bureaux':'bureaux', 'nettoyage de magasins':'bureaux', 'nettoyage de restaurants':'bureaux', 'nettoyage d\'hôtels':'bureaux', 'nettoyage d\'écoles':'bureaux', 'nettoyage de locaux professionnels':'bureaux', 'installation de chambre froide':'clim', 'réparation de chambre froide':'clim', 'plombier urgent':'plomberie', 'électricien urgent':'electricite', 'serrurier urgent':'serrurerie', 'porte bloquée':'serrurerie', 'vitre cassée':'vitrerie', 'fuite d\'eau urgente':'plomberie', 'panne électrique urgente':'electricite', 'canalisation bouchée urgente':'plomberie', 'dépannage voiture':'meca_auto', 'dépannage moto':'meca_moto', 'batterie voiture':'meca_auto', 'crevaison urgente':'meca_auto', 'dépannage climatisation':'clim', 'dépannage réfrigérateur':'electro', 'dépannage électroménager':'electro', 'dépannage informatique':'ordinateur','réparation télévision':'electro','réparation décodeur':'electro','réparation console de jeux':'electro', 'réparation de serrure de meuble':'menuiserie', 'nettoyage de chaussures':'cordonnerie', 'cirage':'cordonnerie', 'repassage de vêtements':'blanchisserie', 'nettoyage à sec':'blanchisserie', 'lavage de vêtements':'blanchisserie', 'piscine':'piscine', 'garde-meuble':'demen'};
+const SVC_NAT = {
+  blanchisserie: { ic:'🧺', nom:'Blanchisserie, linge & repassage', base:5000, desc:'Lavage, repassage, pressing', famille:'maison', mots:'blanchisserie pressing repassage linge lavage vetements draps couvertures repassage chemise costume' },
+  desinfection: { ic:'🧴', nom:'Désinfection & assainissement', base:12000, desc:'Désinfection, insectes, rongeurs', famille:'maison', mots:'desinfection assainissement desinsectisation deratisation cafards fourmis moustiques termites punaises' },
+  plafond: { ic:'🏗️', nom:'Plafonds & staff', base:15000, desc:'PVC, staff, faux plafond', famille:'bâtiment', mots:'plafond plafonds staff pvc faux plafond lambris decoration plafond reparer plafond' },
+  etancheite: { ic:'🚧', nom:'Étanchéité & toiture', base:20000, desc:'Toiture, terrasse, infiltration', famille:'bâtiment', mots:'etancheite toiture terrasse infiltration fuite toiture reparer toiture tole couverture' },
+  alu: { ic:'🪟', nom:'Aluminium & vérandas', base:15000, desc:'Portes, fenêtres, baies alu', famille:'bâtiment', mots:'aluminium alu veranda baie vitree garde corps vitrine fenetre alu porte alu' },
+  sport: { ic:'🏃', nom:'Sport & coaching', base:8000, desc:'Coach sportif, préparation physique', famille:'personne', mots:'sport coach sportif entrainement fitness musculation remise en forme football basket course athletic' },
+  bienetre: { ic:'💆', nom:'Bien-être & massages', base:10000, desc:'Massage, spa, yoga, relaxation', famille:'personne', mots:'bien etre massage massages spa relaxation yoga detente soins corps' },
+  numerique: { ic:'💻', nom:'Web, design & numérique', base:20000, desc:'Logo, site web, réseaux sociaux', famille:'services', mots:'logo site web application design graphique reseaux sociaux community management flyer affiche carte visite montage video referencement contenu traduction' },
+  securite: { ic:'🛡️', nom:'Sécurité & gardiennage', base:15000, desc:'Gardien, surveillance, contrôle d\'accès', famille:'services', mots:'securite gardien gardiennage surveillance vigile controle acces agent securite' },
+  funeraire: { ic:'⚱️', nom:'Services funéraires', base:25000, desc:'Organisation, décoration, transport', famille:'services', mots:'funeraire funerailles deces ceremonie funeraire faire part transport funeraire' },
+  mainoeuvre: { ic:'👷', nom:'Main-d\'œuvre & journaliers', base:5000, desc:'Manœuvre, aides, journaliers', famille:'bâtiment', mots:'manoeuvre journalier aide macon aide menuisier aide peintre aide electricien aide plombier manutentionnaire aide demenageur aide jardinier aide cuisinier plongeur' },
+  agriculture: { ic:'🌾', nom:'Agriculture & travaux ruraux', base:15000, desc:'Labour, semis, récolte', famille:'agri', mots:'agriculture champ labour semis plantation recolte debroussaillage agricole entretien ferme plantation culture' },
+  elevage: { ic:'🐐', nom:'Élevage & services animaliers', base:10000, desc:'Animaux, enclos, alimentation', famille:'agri', mots:'elevage animaux betail animal chien chat toilettage animal promenade chien garde animal alimentation animale enclos ferme' },
+  piscine: { ic:'🏊', nom:'Entretien de piscine', base:15000, desc:'Nettoyage, traitement, pompe', famille:'bâtiment', mots:'piscine nettoyage piscine traitement piscine pompe piscine entretien piscine filtre' },
+  artisanat: { ic:'🎭', nom:'Artisanat & créations', base:12000, desc:'Sculpture, gravure, objets personnalisés', famille:'personne', mots:'artisanat sculpture gravure dessin calligraphie peinture artistique objets personnalises cadeaux personnalises bijoux' },
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   🩺 PRESTATIONS RÉGLEMENTÉES — séparées du reste et RÉSERVÉES aux professionnels
+   légalement habilités (actes médicaux, vétérinaires, sécurité privée, gaz…).
+   Klean ne publie jamais ces prestations sans vérification du diplôme / de l'agrément,
+   et un pro non habilité NE PEUT PAS accepter une mission réglementée.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+const CAT_REGLEMENTE = [
+  { id: 'medical', ic: '🩺', nom: 'Actes médicaux et soins de santé',
+    exige: 'Diplôme reconnu + autorisation d’exercer en Côte d’Ivoire (Ordre professionnel)',
+    services: [],
+    cles: ['medecin', 'docteur en medecine', 'infirmier', 'infirmiere', 'sage femme', 'kinesitherapeute', 'kine',
+      'prise de sang', 'piqure a domicile', 'injection a domicile', 'perfusion', 'pansement a domicile',
+      'vaccination', 'vaccin', 'soins a domicile', 'soins medicaux', 'acte medical', 'ordonnance medicale', 'ambulance'],
+    note: 'Klean ne fait jamais exécuter un acte médical sans diplôme et autorisation vérifiés.' },
+  { id: 'veterinaire', ic: '🐕', nom: 'Actes vétérinaires',
+    exige: 'Diplôme de docteur vétérinaire + inscription à l’Ordre des vétérinaires',
+    services: [],
+    cles: ['veterinaire', 'docteur veterinaire', 'acte veterinaire', 'vaccination animale', 'castration'],
+    note: 'Les soins et actes sur les animaux sont réservés aux vétérinaires habilités.' },
+  { id: 'securite', ic: '🛡️', nom: 'Sécurité privée et gardiennage',
+    exige: 'Autorisation d’exercice (ministère de l’Intérieur) pour l’agent et l’entreprise',
+    services: ['37'],
+    cles: ['agent de securite', 'societe de securite', 'securite privee', 'gardien de nuit', 'garde du corps',
+      'vigile', 'gardiennage', 'maitre chien'],
+    note: 'Uniquement des professionnels autorisés lorsque la réglementation l’exige.' },
+  { id: 'gaz', ic: '🔥', nom: 'Installation et dépannage gaz',
+    exige: 'Agrément pour les installations de gaz',
+    services: [],
+    cles: ['fuite de gaz', 'odeur de gaz', 'bouteille de gaz', 'installation de gaz', 'installation gaz',
+      'chauffe bain gaz', 'compteur gaz', 'detendeur gaz'],
+    note: 'Les interventions gaz exigent un agrément : sécurité des personnes avant tout.' },
+  { id: 'electricite_habilitation', ic: '⚡', nom: 'Travaux électriques sous habilitation',
+    exige: 'Habilitation électrique (travaux sur réseau, poste, tableau général)',
+    services: [],
+    cles: ['reseau electrique', 'poste electrique', 'branchement compteur', 'haute tension', 'lcgb', 'cie branchement'],
+    note: 'Les travaux sur le réseau ou le compteur doivent être confiés à un professionnel habilité.' },
+  { id: 'transport_personnes', ic: '🚐', nom: 'Transport de personnes (taxi, VTC, scolaire)',
+    exige: 'Permis correspondant + carte professionnelle de transport',
+    services: [],
+    cles: ['taxi', 'vtc', 'transport scolaire', 'navette passagers', 'location de voiture avec chauffeur'],
+    note: 'Le transport payant de personnes est réglementé en Côte d’Ivoire.' },
+  { id: 'immobilier_carte', ic: '🏘️', nom: 'Transaction immobilière',
+    exige: 'Carte professionnelle d’agent immobilier',
+    services: [],
+    cles: ['agent immobilier', 'transaction immobiliere', 'vente immobiliere', 'commission sur vente de terrain',
+      'promotion immobiliere', 'agence immobiliere'],
+    note: 'Les transactions immobilières sont réservées aux professionnels ayant la carte.' },
+  { id: 'pharmacie', ic: '💊', nom: 'Vente de médicaments',
+    exige: 'Autorisation de pharmacie — jamais à domicile',
+    services: [],
+    cles: ['vente de medicaments', 'acheter des medicaments', 'medicaments a domicile', 'pharmacie de garde'],
+    note: 'La vente de médicaments n’est possible qu’en pharmacie autorisée.' }
+];
+function reglementeIdx(id) { return CAT_REGLEMENTE.find(r => r.id === id) || null; }
+/* 🔎 est-ce que cette demande touche une prestation réglementée ?
+   ⚠️ Règle de prudence : on ne cherche QUE des expressions précises (« infirmière », « fuite de gaz »).
+   Un mot courant (« fuite », « maison », « analyse ») ne doit JAMAIS déclencher une alerte :
+   sinon on bloquerait des demandes normales de plomberie ou de ménage. */
+function reglementePour(service, taches, texte) {
+  /* ⚠️ le service peut être un numéro du catalogue national (« 37 ») : un identifiant de métier
+     (« maison », « plomberie ») n'est PAS du texte à analyser, sinon « maison » déclencherait l'immobilier. */
+  const num = /^\d+(\.\d+)?$/.test(String(service || '').trim()) ? String(service).trim() : '';
+  const tas = Array.isArray(taches) ? taches : (taches ? [String(taches)] : []);
+  const txt = ' ' + normFr([tas.join(' '), String(texte || '')].join(' ')).replace(/\s+/g, ' ').trim() + ' ';
+  const dedans = r => {
+    if (num && (r.services || []).indexOf(num) >= 0) return true;
+    return (r.cles || []).some(c => txt.indexOf(' ' + normFr(c) + ' ') >= 0);
+  };
+  const r = CAT_REGLEMENTE.find(dedans);
+  return r ? r.id : '';
+}
+/* 🏠 où la prestation se passe · ⏱️ comment elle est facturée (le PDG peut ajuster service par service) */
+const CAT_LIEUX = [
+  { id: 'domicile', ic: '🏠', nom: 'Au domicile du client' },
+  { id: 'chez_pro', ic: '🧑‍🔧', nom: 'Chez le professionnel' },
+  { id: 'atelier', ic: '🏭', nom: 'En atelier' },
+  { id: 'distance', ic: '💻', nom: 'À distance' },
+  { id: 'chantier', ic: '🏗️', nom: 'Sur le chantier' },
+  { id: 'entreprise', ic: '🏢', nom: 'Dans l’entreprise' },
+  { id: 'commerce', ic: '🏬', nom: 'Dans le commerce / magasin' },
+  { id: 'bureau', ic: '🗂️', nom: 'Au bureau' },
+  { id: 'deplacement', ic: '🚗', nom: 'Le pro se déplace' }
+];
+const CAT_DISPO = [
+  { id: 'immediat', ic: '⚡', nom: 'Disponible immédiatement' },
+  { id: 'rdv', ic: '📅', nom: 'Sur rendez-vous' }
+];
+const CAT_TARIFS = [
+  { id: 'fixe', ic: '💰', nom: 'Prix fixe' },
+  { id: 'partir', ic: '🏷️', nom: 'À partir de' },
+  { id: 'horaire', ic: '⏱️', nom: 'À l’heure' },
+  { id: 'journalier', ic: '📆', nom: 'À la journée' },
+  { id: 'tache', ic: '✅', nom: 'Par tâche' },
+  { id: 'm2', ic: '📐', nom: 'Au m²' },
+  { id: 'devis', ic: '💬', nom: 'Sur devis' },
+  { id: 'diagnostic', ic: '🔍', nom: 'Après diagnostic' }
+];
+/* les valeurs par défaut de chaque service (modifiables au HQ, jamais supprimées) */
+const CAT_LIEUX_DEF = {
+  '1': ['domicile', 'bureau'], '2': ['domicile', 'atelier'], '3': ['domicile'], '4': ['domicile', 'chantier'],
+  '5': ['domicile'], '6': ['domicile', 'atelier'], '7': ['chantier', 'domicile'], '8': ['atelier', 'domicile'],
+  '9': ['atelier', 'domicile', 'chantier'], '10': ['atelier', 'domicile'], '11': ['domicile'],
+  '12': ['domicile', 'chantier'], '13': ['deplacement'], '14': ['atelier', 'chez_pro'], '15': ['atelier', 'chez_pro'],
+  '16': ['atelier', 'domicile', 'distance'], '17': ['domicile', 'entreprise', 'commerce'], '18': ['domicile', 'chez_pro'],
+  '19': ['domicile', 'chez_pro'], '20': ['domicile', 'chez_pro'], '21': ['domicile', 'distance'],
+  '22': ['domicile'], '23': ['domicile', 'entreprise'], '24': ['chantier', 'domicile'], '25': ['domicile', 'chantier'],
+  '26': ['distance', 'domicile'], '27': ['distance', 'domicile'], '28': ['distance', 'deplacement'],
+  '29': ['distance', 'entreprise', 'bureau'], '30': ['distance', 'deplacement'], '31': ['chez_pro', 'domicile'],
+  '32': ['deplacement', 'chantier'], '33': ['domicile', 'deplacement'], '34': ['atelier', 'domicile'],
+  '35': ['atelier'], '36': ['atelier', 'domicile'], '37': ['entreprise', 'commerce', 'chantier'],
+  '38': ['deplacement'], '39': ['entreprise', 'bureau', 'commerce'], '40': ['commerce'], '41': ['commerce'],
+  '42': ['entreprise', 'commerce'], '43': ['domicile'], '44': ['domicile'], '45': ['domicile', 'chantier', 'entreprise'],
+  '46': ['distance', 'domicile'], '47': ['deplacement'], '48': ['domicile']
+};
+const CAT_TARIFS_DEF = {
+  '1': ['partir', 'm2', 'horaire'], '2': ['tache', 'partir'], '3': ['diagnostic', 'partir'], '4': ['diagnostic', 'partir'],
+  '5': ['diagnostic', 'partir'], '6': ['diagnostic', 'partir'], '7': ['devis', 'm2'], '8': ['devis', 'partir'],
+  '9': ['devis', 'm2'], '10': ['devis', 'partir'], '11': ['partir', 'm2', 'tache'], '12': ['devis', 'horaire'],
+  '13': ['partir', 'tache'], '14': ['diagnostic', 'devis'], '15': ['diagnostic', 'devis'], '16': ['diagnostic', 'partir'],
+  '17': ['devis', 'partir'], '18': ['partir', 'tache'], '19': ['partir', 'tache'], '20': ['horaire', 'partir'],
+  '21': ['horaire', 'partir'], '22': ['horaire', 'journalier', 'fixe'], '23': ['tache', 'journalier', 'devis'],
+  '24': ['devis'], '25': ['tache', 'devis'], '26': ['devis', 'tache'], '27': ['horaire', 'tache'],
+  '28': ['tache', 'devis'], '29': ['devis', 'horaire'], '30': ['devis'], '31': ['partir', 'horaire'],
+  '32': ['devis', 'journalier'], '33': ['partir', 'devis'], '34': ['tache', 'devis'], '35': ['tache', 'partir'],
+  '36': ['devis', 'partir'], '37': ['horaire', 'journalier'], '38': ['devis'], '39': ['devis', 'horaire'],
+  '40': ['devis'], '41': ['devis', 'journalier'], '42': ['devis'], '43': ['diagnostic', 'partir'],
+  '44': ['tache', 'horaire'], '45': ['horaire', 'journalier', 'tache'], '46': ['tache', 'horaire'],
+  '47': ['journalier', 'devis'], '48': ['devis']
+};
+/* 🔁 le PDG ajuste : { numService: ['domicile','distance'] } — on garde toujours le défaut en secours */
+function catNatLieux(num) {
+  const reg = catNatReglages();
+  const perso = (reg.lieux || {})[num];
+  const d = CAT_LIEUX_DEF[String(num)] || ['domicile'];
+  return (perso && perso.length ? perso : d).map(id => CAT_LIEUX.find(x => x.id === id)).filter(Boolean);
+}
+function catNatTarifs(num) {
+  const reg = catNatReglages();
+  const perso = (reg.tarifs || {})[num];
+  const d = CAT_TARIFS_DEF[String(num)] || ['devis'];
+  return (perso && perso.length ? perso : d).map(id => CAT_TARIFS.find(x => x.id === id)).filter(Boolean);
+}
+const SVC_FAM_GROUPE_NAT = { 'maison': 'clean', 'agri': 'home' };
+for (const [id, s2] of Object.entries(SVC_NAT)) SVC_CAT.push({ id, nom: s2.nom, ic: s2.ic, base: s2.base, desc: s2.desc || '', famille: s2.famille, mots: s2.mots });
 const SVC_MOTS_IDX = SVC_CAT.map(c => ({ id: c.id, set: new Set(c.mots.split(' ')) }));
 function svcCat(id) { return SVC_CAT.find(x => x.id === id) || null; }
+
+/* ═══════════ 🔗 FUSION DES MÉTIERS SEMBLABLES ═══════════
+   Le catalogue national a fait apparaître des spécialités (« Grand ménage », « Salles de bains »,
+   « Canapés & fauteuils », « Vitres & baies », « Nettoyage bureaux », « Après déménagement »,
+   « Désinfection », « Entretien régulier ») qui sont LE MÊME MÉTIER que « Nettoyage maison » :
+   même geste, même savoir-faire, seuls le lieu ou l'objet changent. Idem pour l'informatique,
+   les appareils électroniques, la plâtrerie/étanchéité.
+   On ne SUPPRIME jamais un métier (d'anciennes commandes et des pros y sont rattachés) :
+   on le FUSIONNE. L'identifiant reste valable partout (historique, recherche, pros, missions),
+   mais il ne désigne plus qu'un seul métier :
+     · une seule ligne dans les listes (l'ancien nom n'apparaît plus comme un métier à part),
+     · un seul paquet de professionnels (le pro de « Grand ménage » reçoit les demandes de ménage),
+     · les tâches du catalogue restent précises (« nettoyage de canapé », « grand ménage »…).
+   ⚠️ Pour défaire une fusion : retirer la ligne ici — rien d'autre à toucher. */
+const SVC_FUSION = {
+  /* 🧹 le nettoyage : un seul métier, plusieurs spécialités */
+  canapes:     'maison',
+  vitres:      'maison',
+  sdb:         'maison',
+  grand:       'maison',
+  entretien:   'maison',
+  desinfection:'maison',
+  demenagement:'maison',
+  bureaux:     'maison',
+  /* 🏗️ le bâtiment : plâtrerie et étanchéité sont des travaux du bâtiment */
+  plafond:     'macon',
+  etancheite:  'macon',
+  /* 💻 l'informatique et le réseau : un seul métier */
+  internet:    'ordinateur',
+  /* 🔌 les appareils électroniques (téléphone, ordinateur, décodeur, télé) : un seul métier */
+  canal:       'telephone',
+  /* 🚗 la voiture : le mécanicien fait aussi le lavage (c'était déjà lui qui recevait ces tâches) */
+  lavageauto:  'meca_auto'
+};
+function svcCanon(id) {
+  let i = String(id == null ? '' : id);
+  for (let n2 = 0; n2 < 8 && SVC_FUSION[i]; n2++) i = SVC_FUSION[i];
+  return i;
+}
+function svcFusionne(id) { return SVC_FUSION[String(id || '')] || ''; }
+/* les métiers absorbés par celui-ci (« regroupe ») */
+function svcRegroupe(id) {
+  const c = svcCanon(id);
+  return Object.keys(SVC_FUSION).filter(k => SVC_FUSION[k] === c);
+}
+/* le nom de la spécialité, gardé pour l'explication (« fusionné dans Nettoyage maison ») */
+function svcNomBrut(id) { const c = svcCat(id); return c ? c.nom : (SVC_NAMES[id] || String(id || '')); }
+
+/* 🧩 LE CATALOGUE COMPLET — 44 métiers = les 22 d'origine + les 22 ajoutés au lot 102.
+   Une création du PDG (db.catalog) passe devant un métier du code qui porterait le même nom.
+   `cat` range le métier dans un groupe d'affichage de l'application :
+     clean (ménage) · tech (dépannage) · home (extérieur & maison) · travaux (bâtiment)
+     demarches (papiers, conseil, immobilier) · personne (beauté, photo, couture) · transport
+   `builtin: true` = métier livré avec KLEAN (donc à ne pas confondre avec une création du PDG). */
+const SVC_CAT_GROUPE = { 'bâtiment': 'travaux', 'réparation': 'tech', 'installation': 'tech', 'services': 'demarches', 'personne': 'personne', 'transport': 'transport' };
+/* 🔎 les 22 métiers d'origine gardent EXACTEMENT le rangement de l'application
+   (relevé dans index.html) : rien ne change de place à l'écran. */
+const SVC_GROUPE_ORIG = {
+  'maison': 'clean',
+  'bureaux': 'clean',
+  'canapes': 'clean',
+  'vitres': 'clean',
+  'demenagement': 'clean',
+  'sdb': 'clean',
+  'grand': 'clean',
+  'plomberie': 'tech',
+  'electricite': 'tech',
+  'clim': 'tech',
+  'serrurerie': 'tech',
+  'electro': 'tech',
+  'jardinage': 'home',
+  'lavageauto': 'home',
+  'bricolage': 'home',
+  'demen': 'home',
+  'cuisine': 'home',
+  'evenement': 'clean',
+  'entretien': 'clean',
+  'placement': 'home',
+  'cours': 'home',
+  'canal': 'home'
+};
+function catalogueComplet() {
+  const vus = new Set(); const out = [];
+  for (const s of (db.catalog || [])) {
+    if (!s || !s.id || vus.has(s.id)) continue;
+    vus.add(s.id);
+    out.push({ id: s.id, ic: s.ic || '🛠️', nom: s.nom || s.id, desc: s.desc || '', base: s.base || 5000,
+               cat: (s.cat === 'clean' || s.cat === 'tech' || s.cat === 'home' || s.cat === 'travaux' || s.cat === 'demarches' || s.cat === 'personne' || s.cat === 'transport') ? s.cat : (svcCat(s.id) ? svcGroupe(svcCat(s.id)) : 'home'),
+               opts: s.opts || [], builtin: false, creePar: s.creePar || '' });
+  }
+  for (const c of SVC_CAT) {
+    if (vus.has(c.id)) continue;
+    vus.add(c.id);
+    out.push({ id: c.id, ic: c.ic, nom: c.nom, desc: c.desc || '', base: c.base, cat: svcGroupe(c), opts: [], builtin: true,
+      fusionne: svcFusionne(c.id), fusionneNom: svcFusionne(c.id) ? svcNomBrut(svcFusionne(c.id)) : '',
+      regroupe: svcRegroupe(c.id).map(k => ({ id: k, nom: svcNomBrut(k) })) });
+  }
+  return out;
+}
+function svcGroupe(c) { return SVC_GROUPE_ORIG[c.id] || SVC_CAT_GROUPE[c.famille] || SVC_FAM_GROUPE_NAT[c.famille] || 'home'; }
 function svcNomP(id) { const c = svcCat(id); return c ? c.nom : (SVC_NAMES[id] || id); }
 function svcBaseP(id) { const c = svcCat(id); return c ? c.base : null; }
 
@@ -606,6 +1116,292 @@ const FR_VIDES = new Set(('je j ai mon ma mes ton ta tes son sa ses le la les un
   + 'svp stp merci urgemment urgent vite aujourd hui demain soir matin semaine mois annonce puis aussi bien bon bien tres peu plus '
   + 'quelqu un quelque chose nouveau nouvelle svp aide aider aidez moi meme domicile a-domicile').split(' '));
 
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   📚 LOT « KLEAN SERVICE » — LE CATALOGUE NATIONAL DANS LE MOTEUR DE RECHERCHE
+   Chaîne : CATÉGORIE → SERVICE → SOUS-SERVICE → TÂCHE → MÉTIER → PROFESSIONNELS
+   · chaque tâche du catalogue est cherchable (768 tâches)
+   · le métier qui intervient est résolu pour chaque niveau (service, sous-service, tâche)
+   · le PDG peut renommer, ajouter des mots-clés, ajouter/retirer — JAMAIS supprimer en dur
+   ═══════════════════════════════════════════════════════════════════════════════ */
+function catNatReglages() {
+  db.catNat = Object.assign({ off: [], noms: {}, mots: {}, plus: [], suggestions: [], svcPlus: [] }, db.catNat || {});
+  ['off', 'plus', 'suggestions', 'svcPlus'].forEach(k => { if (!Array.isArray(db.catNat[k])) db.catNat[k] = []; });
+  ['noms', 'mots', 'lieux', 'tarifs', 'icones'].forEach(k => { if (!db.catNat[k] || typeof db.catNat[k] !== 'object') db.catNat[k] = {}; });
+  /* 🗂️ les CATÉGORIES s'administrent aussi : nom, icône, désactivation, nouvelle catégorie, rangement des services */
+  db.catNat.fam = Object.assign({ noms: {}, icones: {}, off: [], plus: [], svc: {} }, db.catNat.fam || {});
+  ['off', 'plus'].forEach(k => { if (!Array.isArray(db.catNat.fam[k])) db.catNat.fam[k] = []; });
+  ['noms', 'icones', 'svc'].forEach(k => { if (!db.catNat.fam[k] || typeof db.catNat.fam[k] !== 'object') db.catNat.fam[k] = {}; });
+  return db.catNat;
+}
+function catNatSig() {
+  /* ⚠️ la signature doit contenir TOUT ce que le PDG peut changer (noms, icônes, mots, lieux,
+     tarifs, ajouts, désactivations) : sinon l'application garderait une ancienne version en mémoire. */
+  const c = catNatReglages();
+  return JSON.stringify([c.off, c.noms, c.mots, c.icones, c.lieux, c.tarifs, c.plus, c.fam, c.svcPlus, db.catalogVersion || 1]);
+}
+function catNatOff(num) { return catNatReglages().off.indexOf(String(num)) >= 0; }
+function catNatNom(num, defaut) { return catNatReglages().noms[num] || defaut; }
+function catNatIcone(num, defaut) { return catNatReglages().icones[num] || defaut; }
+/* ⚡ disponible tout de suite (urgence) ou 📅 sur rendez-vous */
+function catNatDispo(num) { return String(num) === '43' ? 'immediat' : 'rdv'; }
+function catNatMots(num) { return String(catNatReglages().mots[num] || ''); }
+/* 🗂️ la catégorie effective d'un service : le rangement décidé au HQ gagne, sinon le rangement national.
+   Une catégorie peut être renommée, changer d'icône, être désactivée, ou être créée par le PDG. */
+function catNatFamille(numService, force) {
+  const reg = catNatReglages();
+  const base = CAT_NAT_FAM.find(f => f.services.indexOf(String(numService)) >= 0);
+  const id = force || reg.fam.svc[String(numService)] || (base && base.id) || 'autre';
+  const def = CAT_NAT_FAM.find(f => f.id === id) || reg.fam.plus.find(f => f.id === id) || { id: 'autre', ic: '🛠️', nom: 'Autres services', populaire: false };
+  return { id, ic: reg.fam.icones[id] || def.ic, nom: reg.fam.noms[id] || def.nom, populaire: !!def.populaire };
+}
+function catNatFamOff(id) { return catNatReglages().fam.off.indexOf(String(id)) >= 0; }
+/* la liste des catégories, dans l'ordre : celles du catalogue national, puis celles créées par le PDG */
+function catNatFamillesDef() {
+  const reg = catNatReglages();
+  return CAT_NAT_FAM.concat(reg.fam.plus.filter(p => !CAT_NAT_FAM.some(f => f.id === p.id)));
+}
+/* les services créés par le PDG se glissent dans le même arbre (mêmes règles, mêmes recherches) */
+function catNatTousServices() {
+  const plus = catNatReglages().svcPlus.map(p => ({
+    num: p.id, nom: p.nom, ic: p.ic || '🛠️', ajout: true, familleForcee: p.fam || '',
+    sous: [{ num: p.id + '.1', nom: p.sousNom || 'Prestations', taches: (Array.isArray(p.taches) && p.taches.length ? p.taches : [p.nom]).join('|') }],
+    cat: p.metier || ''
+  }));
+  return CAT_NAT.concat(plus);
+}
+function catNatMetier(numService, numSous, tache) {
+  if (tache && CAT_METIER_TACHE[tache]) return CAT_METIER_TACHE[tache];
+  if (numSous && CAT_METIER_SS[numSous]) return CAT_METIER_SS[numSous];
+  return CAT_METIER[numService] || '';
+}
+/* 🔑 pour le tableau de bord : la même arborescence mais SANS filtre — le PDG doit voir
+   ce qui est désactivé pour pouvoir le rallumer (on ne supprime jamais une entrée). */
+/* 🩺 l'IA ne connaît pas la médecine : ces demandes sont traitées à part, jamais publiées telles quelles */
+function estDemandeReglementee(texte) {
+  const r = reglementePour('', [], texte);
+  return r ? reglementeIdx(r) : null;
+}
+function catNatIconeHQ(num, defaut) { return catNatReglages().icones[num] || defaut; }
+function catalogueNationalHQ() {
+  const reg = catNatReglages();
+  const plusiers = (niveau, parent) => reg.plus.filter(p => p.niveau === niveau && String(p.parent) === String(parent));
+  /* 🔎 la recherche du langage doit aussi trouver les services créés par le PDG */
+
+  return catNatTousServices().map(s => {
+    const fam = catNatFamille(s.num);
+    return { num: s.num, nom: catNatNom(s.num, s.nom), ic: catNatIcone(s.num, s.ic), off: catNatOff(s.num), ajout: false,
+      metier: (s.cat || CAT_METIER[s.num] || ''), metierCanon: svcCanon(s.cat || CAT_METIER[s.num] || ''),
+      mots: catNatMots(s.num), famille: fam.id, familleNom: fam.nom,
+      lieux: catNatLieux(s.num).map(x => x.id), tarifs: catNatTarifs(s.num).map(x => x.id), dispo: catNatDispo(s.num),
+      reglemente: reglementePour(s.num, s.sous.reduce((a, x) => a.concat(String(x.taches || '').split('|')), [])),
+      sous: s.sous.map(ss => ({ num: ss.num, nom: catNatNom(ss.num, ss.nom), off: catNatOff(ss.num), ajout: false,
+        metier: catNatMetier(s.num, ss.num), mots: catNatMots(ss.num),
+        taches: String(ss.taches || '').split('|').filter(Boolean).map(t => ({ num: ss.num + '|' + t, nom: catNatNom(ss.num + '|' + t, t), off: catNatOff(ss.num + '|' + t), ajout: false }))
+          .concat(plusiers('tache', ss.num).map(p => ({ num: p.id, nom: catNatNom(p.id, p.nom), off: catNatOff(p.id), ajout: true }))) }))
+        .concat(plusiers('sous', s.num).map(p => ({ num: p.id, nom: catNatNom(p.id, p.nom), off: catNatOff(p.id), ajout: true,
+          metier: p.metier || s.cat || CAT_METIER[s.num] || '', mots: '', taches: [] }))) };
+  });
+}
+function catNatFamillesHQ() {
+  const tous = catalogueNationalHQ();
+  return catNatFamillesDef().map(f => {
+    const eff = catNatFamille('', f.id);
+    const svcs = tous.filter(s => s.famille === f.id);
+    return { id: f.id, ic: eff.ic, nom: eff.nom, populaire: !!eff.populaire, off: catNatFamOff(f.id),
+      cree: !CAT_NAT_FAM.some(x => x.id === f.id),
+      nb: svcs.filter(s => !s.off).length, nbOff: svcs.filter(s => s.off).length,
+      nbSous: svcs.reduce((a, x) => a + x.sous.length, 0),
+      nbTaches: svcs.reduce((a, x) => a + x.sous.reduce((b, y) => b + y.taches.length, 0), 0) };
+  });
+}
+/* 📤 la réponse complète du catalogue au tableau de bord (une seule fois, pour ne rien oublier) */
+function catNatReponse() {
+  const reg = catNatReglages();
+  return Object.assign({}, catalogueNational(), {
+    servicesHQ: catalogueNationalHQ(),
+    famillesHQ: catNatFamillesHQ(),
+    off: reg.off, noms: reg.noms, mots: reg.mots, plus: reg.plus, icones: reg.icones,
+    fam: reg.fam, svcPlus: reg.svcPlus,
+    lieuxRef: CAT_LIEUX, tarifsRef: CAT_TARIFS, disposRef: CAT_DISPO, reglementes: CAT_REGLEMENTE,
+    pros: (db.agents || []).filter(a => !a.blocked && (a.status || 'approved') === 'approved').slice(0, 400)
+      .map(a => ({ id: a.id, nom: a.nom, numPro: a.numPro || '', ville: a.ville || a.villeIci || '',
+        habilitations: a.habilitations || [], habilVu: a.habilVu || {} })),
+    suggestions: (reg.suggestions || []).slice(-80).reverse(),
+    nbSuggestions: (reg.suggestions || []).filter(x => !x.vu).length,
+    metiers: SVC_CAT.map(c => ({ id: c.id, nom: c.nom, ic: c.ic, base: c.base, desc: c.desc || '',
+      famille: c.famille || 'historique', groupe: svcGroupe(c), natif: true,
+      fusionne: svcFusionne(c.id), fusionneNom: svcFusionne(c.id) ? svcNomBrut(svcFusionne(c.id)) : '',
+      regroupe: svcRegroupe(c.id).map(k => ({ id: k, nom: svcNomBrut(k) })) }))
+      .concat((db.catalog || []).map(x => ({ id: x.id, nom: x.nom, ic: x.ic || '🛠️', base: x.base || 0, desc: x.desc || '', famille: 'créé par le PDG', groupe: 'home', natif: false })))
+  });
+}
+/* l'arborescence vivante : le catalogue de base + les ajouts du PDG − les entrées désactivées */
+let _catNatArbre = null, _catNatArbreSig = '';
+function catalogueNational() {
+  const sig = catNatSig();
+  if (_catNatArbre && _catNatArbreSig === sig) return _catNatArbre;
+  const plus = catNatReglages().plus;
+  const services = [];
+  for (const s of catNatTousServices()) {
+    if (catNatOff(s.num)) continue;
+    const sous = [];
+    for (const ss of s.sous) {
+      if (catNatOff(ss.num)) continue;
+      const taches = String(ss.taches || '').split('|').filter(Boolean).filter(t => !catNatOff(ss.num + '|' + t));
+      const extra = plus.filter(p => p.niveau === 'tache' && String(p.parent) === String(ss.num) && !catNatOff(p.id))
+        .map(p => ({ num: p.id, nom: catNatNom(p.id, p.nom), ajout: true }));
+      if (!taches.length && !extra.length) continue;
+      sous.push({ num: ss.num, nom: catNatNom(ss.num, ss.nom),
+        taches: taches.map(t => ({ num: ss.num + '|' + t, nom: catNatNom(ss.num + '|' + t, t), base: t,
+          regle: reglementePour(s.num, [t]) })).concat(extra),
+        metier: (s.cat || catNatMetier(s.num, ss.num, null) || ''), mots: catNatMots(ss.num),
+        reglemente: reglementePour(s.num, taches) });
+    }
+    const sExt = plus.filter(p => p.niveau === 'sous' && String(p.parent) === String(s.num) && !catNatOff(p.id));
+    sExt.forEach(p => sous.push({ num: p.id, nom: catNatNom(p.id, p.nom), taches: [], metier: p.metier || s.cat || CAT_METIER[s.num] || '', mots: '', ajout: true }));
+    if (!sous.length) continue;
+    const metierBrut = (s.cat || CAT_METIER[s.num] || '');
+    services.push({ num: s.num, nom: catNatNom(s.num, s.nom), ic: catNatIcone(s.num, s.ic),
+      metier: metierBrut, metierCanon: svcCanon(metierBrut) || metierBrut,
+      famille: catNatFamille(s.num, s.familleForcee).id, ajout: !!s.ajout, sous,
+      lieux: catNatLieux(s.num).map(x => x.id), tarifs: catNatTarifs(s.num).map(x => x.id),
+      dispo: catNatDispo(s.num), reglemente: reglementePour(s.num, sous.reduce((a, x) => a.concat(x.taches.map(t => t.nom)), [])) });
+  }
+  /* 🗂️ les catégories : nom, icône et rangement EFFECTIFS (les services déplacés suivent) */
+  const ordre = catNatFamillesDef().map(f => f.id);
+  services.forEach(s => { if (ordre.indexOf(s.famille) < 0) ordre.push(s.famille); });
+  const familles = ordre.filter(id => !catNatFamOff(id)).map(id => {
+    const def = catNatFamille('', id);
+    const liste = services.filter(s => s.famille === id);
+    return { id, ic: def.ic, nom: def.nom, populaire: def.populaire,
+      nb: liste.length,
+      nbSous: liste.reduce((a, s) => a + s.sous.length, 0),
+      nbTaches: liste.reduce((a, s) => a + s.sous.reduce((b, x) => b + x.taches.length, 0), 0) };
+  }).filter(f => f.nb > 0);
+  const out = {
+    familles, services,
+    nbServices: services.length,
+    nbSous: services.reduce((a, s) => a + s.sous.length, 0),
+    nbTaches: services.reduce((a, s) => a + s.sous.reduce((b, x) => b + x.taches.length, 0), 0),
+    nbMetiers: SVC_CAT.length
+  };
+  _catNatArbre = out; _catNatArbreSig = sig;
+  return out;
+}
+/* 🔤 RADICAL : « nettoyer », « nettoyage », « nettoyé » doivent se reconnaître.
+   On enlève la fin des mots (le français ajoute beaucoup de suffixes) et on ramène les
+   mots populaires à leur forme savante (« clim » → « climatiseur », « frigo » → « réfrigérateur »). */
+const LANG_SYN = { clim: 'climatiseur', climatisation: 'climatiseur', split: 'climatiseur', splits: 'climatiseur',
+  frigo: 'refrigerateur', fridge: 'refrigerateur', refrigerateur: 'refrigerateur', congelo: 'congelateur',
+  tele: 'television', tv: 'television', portable: 'telephone', gsm: 'telephone', tel: 'telephone',
+  bagnole: 'voiture', caisse: 'voiture', auto: 'voiture', engin: 'moto', 'mecano': 'mecanicien',
+  menage: 'menage', menagere: 'menage', plombier: 'plomberie', electricien: 'electricite', clims: 'climatiseur' };
+function langRacine(w) {
+  let m = String(w || '');
+  if (LANG_SYN[m]) m = LANG_SYN[m];
+  if (m.length > 5) {
+    m = m.replace(/(issements|issement|ations|ation|ements|ement|ages|age|ures|ure|eurs|eur|euses|euse|iers|ier|ables|able|istes|iste|iques|ique|es|s)$/, '');
+  } else if (m.length > 3) m = m.replace(/s$/, '');
+  return m.length >= 3 ? m : String(w || '');
+}
+function motsCles(t) {
+  return normFr(String(t || '')).split(' ')
+    /* ⚠️ « tv » ne fait que 2 lettres : on garde les mots courts SEULEMENT s'ils sont des
+       mots populaires connus (tv, frigo, clim…) — les petits mots de liaison restent ignorés. */
+    .filter(w => !FR_VIDES.has(w) && (w.length > 2 || !!LANG_SYN[w]))
+    .map(langRacine)
+    .filter(w => w && w.length > 2 && !FR_VIDES.has(w));
+}
+let _catNatIdx = null, _catNatIdxSig = '';
+function catNatIndex() {
+  const sig = catNatSig();
+  if (_catNatIdx && _catNatIdxSig === sig) return _catNatIdx;
+  const arbre = catalogueNational();
+  const idx = { taches: [], sous: [], services: [] };
+  for (const s of arbre.services) {
+    /* 🗂️ la catégorie EFFECTIVE (celle de l'arbre : les services déplacés et les catégories créées suivent) */
+    const f = catNatFamille('', s.famille);
+    idx.services.push({ num: s.num, nom: s.nom, mots: motsCles(s.nom + ' ' + catNatMots(s.num)), metier: s.metier, fam: f.nom, famId: f.id });
+    for (const ss of s.sous) {
+      const metier = ss.metier || s.metier;
+      idx.sous.push({ num: ss.num, nom: ss.nom, mots: motsCles(ss.nom + ' ' + (ss.mots || '')), metier,
+        service: s.num, serviceNom: s.nom, fam: f.nom, famId: f.id });
+      for (const t of ss.taches) {
+        idx.taches.push({ num: t.num, nom: t.nom, mots: motsCles(t.nom + ' ' + (t.base || '') + ' ' + (ss.mots || '')),
+          /* ⚠️ l'ordre compte : la TÂCHE précise d'abord (« nettoyage de canapé » → canapés),
+             sinon le sous-service, sinon le service, sinon le métier du service créé par le PDG */
+          metier: (catNatMetier(s.num, ss.num, t.base || t.nom) || ss.metier || s.metier),
+          service: s.num, sous: ss.num, serviceNom: s.nom, sousNom: ss.nom, fam: f.nom, famId: f.id });
+      }
+    }
+  }
+  _catNatIdx = idx; _catNatIdxSig = sig;
+  return idx;
+}
+/* 🎯 « fuite de robinet » → tâche du catalogue + métier qui intervient */
+function catNatChercher(mots) {
+  if (!mots || !mots.length) return [];
+  const idx = catNatIndex();
+  const ens = new Set(mots);
+  const best = {};
+  const noter = (e, poids, niveau) => {
+    let inter = 0;
+    for (const w of e.mots) if (ens.has(w)) inter++;
+    if (!inter) return;
+    /* on accepte un mot fort trouvé seul quand la tâche est courte (« nettoyage de canapé »),
+       et on exige plus quand le nom de la tâche est long (évite les faux positifs) */
+    if (inter < 1) return;
+    if (e.mots.length >= 4 && inter < 2 && (inter / e.mots.length) < 0.5) return;
+    if (!e.metier) return;
+    /* un mot qui couvre presque tout le nom de la tâche est plus précis qu'un mot noyé
+       dans un nom long : « télévision » doit viser « réparation télévision » plutôt que « meuble TV ». */
+    const sc = Math.round(poids * inter) + Math.round((inter / Math.max(1, e.mots.length)) * 3);
+    const prev = best[e.metier];
+    if (!prev || sc > prev.sc) {
+      best[e.metier] = { metier: e.metier, sc: Math.min(22, sc), nom: e.nom, niveau,
+        chaine: { categorie: e.fam, famille: e.famId, service: e.serviceNom || e.nom, sous: e.sousNom || (niveau === 'sous' ? e.nom : ''), tache: niveau === 'tache' ? e.nom : '' } };
+    }
+  };
+  for (const e of idx.taches) noter(e, 7, 'tache');
+  /* 📌 le métier se résout aussi par le nom d'origine et le nom affiché de chaque tâche */
+  for (const e of idx.sous) noter(e, 8, 'sous');
+  for (const e of idx.services) noter(e, 9, 'service');
+  return Object.values(best).sort((a, b) => b.sc - a.sc);
+}
+/* la plus parlante des entrées du catalogue pour un métier (tâche > sous-service > service) */
+let _catNatParMetier = null, _catNatParMetierSig = '';
+function catNatChainePour(metier) {
+  if (!metier) return null;
+  const sig = catNatSig();
+  if (!_catNatParMetier || _catNatParMetierSig !== sig) {
+    const idx = catNatIndex(); const m = {};
+    const poser = (e, niveau) => {
+      if (!e.metier) return;
+      const note = niveau === 'tache' ? 3 : (niveau === 'sous' ? 2 : 1);
+      if (!m[e.metier] || note > m[e.metier].note) {
+        m[e.metier] = { note, chaine: { categorie: e.fam, famille: e.famId, service: e.serviceNom || e.nom,
+          sous: e.sousNom || (niveau === 'sous' ? e.nom : ''), tache: niveau === 'tache' ? e.nom : '' } };
+      }
+    };
+    for (const e of idx.taches) poser(e, 'tache');
+    for (const e of idx.sous) poser(e, 'sous');
+    for (const e of idx.services) poser(e, 'service');
+    _catNatParMetier = m; _catNatParMetierSig = sig;
+  }
+  return _catNatParMetier[metier] || null;
+}
+function catNatParNumero(num) {
+  const arbre = catalogueNational();
+  for (const s of arbre.services) {
+    if (String(s.num) === String(num)) return { niveau: 'service', service: s, nom: s.nom };
+    for (const ss of s.sous) {
+      if (String(ss.num) === String(num)) return { niveau: 'sous', service: s, sous: ss, nom: ss.nom };
+      for (const t of ss.taches) if (String(t.num) === String(num)) return { niveau: 'tache', service: s, sous: ss, tache: t, nom: t.nom };
+    }
+  }
+  return null;
+}
 /* ═══════════════════════════════════════════════════════════════════════════════
    🗣️ MOTEUR « LANGAGE SIMPLE » — le client écrit comme il parle, KLEAN comprend.
 
@@ -618,6 +1414,44 @@ const FR_VIDES = new Set(('je j ai mon ma mes ton ta tes son sa ses le la les un
    car c'est ainsi que le texte du client arrive ici (normFr).
    ═══════════════════════════════════════════════════════════════════════════════ */
 const LANG_SIMPLE = [
+  ['demenagement', 'Après déménagement', 'nettoyage apres demenagement|menage apres demenagement|apres demenagement|nettoyage avant emmenagement|menage avant emmenagement|etat des lieux avant emmenagement'],
+  ['peinture', 'Peinture', 'je cherche un peintre|un peintre|peintre en batiment|peintre pour ma maison|qui peut peindre|peinture de ma maison'],
+  ['macon', 'Maçonnerie', 'je cherche un macon|un macon|macon pour construire|qui peut construire un mur|macons pour ma maison'],
+  ['carrelage', 'Pose', 'je cherche un carreleur|un carreleur|carreleur pour ma maison|poser du carrelage|qui pose du carrelage'],
+  ['plomberie', 'Dépannage', 'je cherche un plombier|un plombier|plombier pour ma maison|qui peut reparer la plomberie'],
+  ['electricite', 'Dépannage', 'je cherche un electricien|un electricien|electricien pour ma maison|qui peut reparer l electricite'],
+  ['menuiserie', 'Fabrication', 'je cherche un menuisier|un menuisier|menuisier pour mes meubles|qui fait des meubles en bois'],
+  ['soudure', 'Fabrication', 'je cherche un soudeur|un soudeur|soudeur pour mon portail|qui peut souder'],
+  ['meca_auto', 'Mécanique', 'je cherche un mecanicien|un mecanicien|mecano pour ma voiture|mecanicien auto'],
+  ['coiffure', 'Soins', 'je cherche un coiffeur|un coiffeur|coiffeur a domicile|qui peut me coiffer'],
+  ['couture', 'Confection', 'je cherche un couturier|un couturier|une couturiere|couturier pour mes habits'],
+  ['jardinage', 'Entretien', 'je cherche un jardinier|un jardinier|jardinier pour mon jardin|qui peut entretenir mon jardin'],
+  ['alu', 'Installation', 'je cherche un vitrier|un vitrier|vitrier pour mes fenetres|posera des vitres'],
+  ['demen', 'Déménagement', 'je cherche un demenageur|un demenageur|des demenageurs|demenageurs pour mes affaires'],
+  ['chauffeur', 'Conduite', 'je cherche un chauffeur|un chauffeur|chauffeur pour mes deplacements|qui peut me conduire'],
+  ['cours', 'Cours', 'je cherche un professeur|un professeur particulier|un repetiteur|professeur pour mon enfant'],
+  ['ordinateur', 'Dépannage', 'je cherche un informaticien|un informaticien|informaticien pour mon ordinateur|technicien informatique'],
+  ['canapes', 'Nettoyage', 'nettoyer mon canape|nettoyer le canape|laver mon canape|mon canape est sale|mon canape est tache|canape tache|canape qui sent mauvais|nettoyer mes fauteuils|nettoyer mon matelas|laver mon tapis|nettoyer ma moquette'],
+  ['desinfection', 'Désinfection', 'il y a des cafards|des cafards chez moi|j ai des cafards|il y a des rats|j ai des rats|des souris chez moi|il y a des moustiques|des moustiques chez moi|il y a des punaises|des punaises de lit|il y a des termites|des fourmis chez moi|desinsectiser|desinfecter ma maison|desinfecter mon bureau'],
+  ['blanchisserie', 'Blanchisserie', 'laver mes habits|laver mon linge|laver mes vetements|repasser mes habits|repasser mes vetements|faire mon repassage|repasser mes chemises|laver mes draps|laver mes couvertures|laver mon linge de maison|nettoyage a sec|aller au pressing|mon costume doit etre nettoye'],
+  ['bienetre', 'Soins', 'massage a domicile|je veux un massage|massage relaxant|massage sportif|soins spa|faire du yoga a la maison|cours de yoga|coaching bien etre|relaxation'],
+  ['sport', 'Cours', 'coach sportif|coach personnel|entraineur personnel|je veux un coach pour le sport|preparation physique|remise en forme|entrainement a domicile|cours de fitness'],
+  ['piscine', 'Entretien', 'entretien de piscine|nettoyer ma piscine|entretien piscine|pompe de piscine|traitement de piscine|ma piscine est verte'],
+  ['securite', 'Garde', 'agent de securite|gardien de nuit|vigile|gardiennage|surveiller ma maison|surveillance de chantier|gardien pour mon commerce'],
+  ['alu', 'Installation', 'poser une fenetre en aluminium|porte en aluminium|veranda|baie vitree|garde corps en aluminium|vitrine de magasin'],
+  ['plafond', 'Installation', 'poser un plafond|plafond en pvc|faux plafond|plafond en staff|reparer mon plafond|plafond qui tombe'],
+  ['etancheite', 'Travaux', 'reparer ma toiture|ma toiture fuit|infiltration d eau au plafond|etancheite de la terrasse|ma terrasse prend l eau|refaire la toiture'],
+  ['detartrage', 'Entretien', 'detartrer ma salle de bain|detartrage|la douche est entartree|ma douche est bouchée par le calcaire'],
+  ['repassage', 'Blanchisserie', 'repasser du linge|repassage a domicile|repasser mes robes|repasser mes pantalons'],
+  ['ordinateur', 'Dépannage', 'mon ordinateur est lent|mon ordinateur ne demarre plus|il faut installer windows|reparer mon ordinateur|mon pc est en panne|virus sur mon ordinateur|changer mon disque dur'],
+  ['internet', 'Installation', 'installer la wifi|la wifi ne marche pas|ma connexion est lente|configurer ma box|le reseau ne marche pas'],
+  ['camera', 'Installation', 'installer des cameras|poser des cameras|installer une alarme|camera de surveillance|interphone qui ne marche pas'],
+  ['agriculture', 'Travaux', 'labourer mon champ|preparer mon champ|semer mon champ|cultiver mon terrain|entretien de ma plantation|recolte de mon champ'],
+  ['elevage', 'Soins', 's occuper de mes animaux|nourrir mes animaux|nettoyer l enclos|toiletter mon chien|promener mon chien|garde de mon animal'],
+  ['funeraire', 'Événement', 'organisation d un deces|pompes funebres|ceremonie funeraire|faire part de deces|transport d un defunt'],
+  ['immobilier', 'Recherche', 'je cherche une maison a louer|trouver un appartement|recherche de terrain|je veux acheter une maison|visiter une maison|estimer mon loyer'],
+  ['fixation', 'Travaux', 'accrocher un tableau|fixer une etagere|installer un ventilateur au plafond|poser un portemanteau|fixer une tv au mur'],
+  ['soudure', 'Fabrication', 'souder mon portail|souder un portail|souder|portail casse|reparer mon portail|ma grille est cassee|grille cassee|ferronnerie|travaux de fer'],
   /* ── 🧹 NETTOYAGE ── */
   ['maison', 'Nettoyage', 'nettoyer ma maison|nettoyer la maison|nettoyer chez moi|faire le menage|femme de menage|menagere|une femme de menage|quelqu un pour nettoyer|quelqu un pour le menage|personne pour nettoyer|ma maison est sale|maison est sale|nettoyer mon salon|nettoyer ma chambre|nettoyer ma cuisine|nettoyer mes toilettes|nettoyer ma salle de bain|nettoyer toute la maison|je viens de demenager|nettoyer avant de rentrer|besoin de menage|je veux faire nettoyer'],
   ['canapes', 'Nettoyage', 'canape est sale|canape sale|laver mon canape|qui lave les canapes|nettoyage canape|faire nettoyer mon canape|nettoyer mon canape|nettoyer les canapes|nettoyer mon fauteuil|mon tapis est sale|nettoyer mon tapis'],
@@ -766,7 +1600,8 @@ function langCorriger(texte) {
 /* la TÂCHE dit ce que le client veut faire : dépannage, installation, entretien, fabrication… */
 function langScore(c) {
   if (!c) return -1;
-  return c.hits.reduce((n, h) => n + h.sc, 0) + Object.values(c.parMot).reduce((a, b) => a + b, 0);
+  return c.hits.reduce((n, h) => n + h.sc, 0) + Object.values(c.parMot).reduce((a, b) => a + b, 0)
+    + (c.nat || []).reduce((n, x) => n + x.sc, 0);
 }
 function langLire(texte) {
   const urgence = LANG_URGENCE.test(texte);
@@ -780,7 +1615,8 @@ function langLire(texte) {
     if (meilleur) hits.push({ id: e[0], tache: e[1], sc: 40 + meilleur * 2 });
   }
   /* mots-clés du catalogue (repli + confirmation) */
-  const mots = texte.split(' ').filter(w => w.length > 2 && !FR_VIDES.has(w));
+  /* ⚠️ on garde aussi les mots courts très courants (« tv ») : sinon « tv » ne trouve rien */
+  const mots = texte.split(' ').filter(w => !FR_VIDES.has(w) && (w.length > 2 || !!LANG_SYN[w]));
   const parMot = {};
   for (const c of SVC_CAT) {
     const idx = SVC_MOTS_IDX.find(x => x.id === c.id);
@@ -795,7 +1631,9 @@ function langLire(texte) {
   /* ⚠️ les 21 nouveaux métiers sont DÉJÀ dans SVC_CAT (poussés au chargement) :
      on ne les recompte pas ici, sinon ils marquaient double et volaient la place de métiers
      plus justes (ex. « reparateur frigo » partait en Réparation téléphone). */
-  return { ok: hits.length > 0 || Object.keys(parMot).length > 0, texte, corriges: {}, urgence, hits, mots, parMot };
+  /* 📚 le catalogue national : la tâche précise et le métier qui intervient */
+  const nat = catNatChercher(mots.map(langRacine));
+  return { ok: hits.length > 0 || Object.keys(parMot).length > 0 || nat.length > 0, texte, corriges: {}, urgence, hits, mots, parMot, nat };
 }
 /* 🧠 DEUX LECTURES, LA MEILLEURE GAGNE :
    ① le texte tel que le client l'a écrit (les mots français valides restent intacts)
@@ -810,7 +1648,7 @@ function langComprendre(q) {
   const l2 = (cor.texte !== base) ? langLire(cor.texte) : l1;
   const garde = (langScore(l2) > langScore(l1)) ? l2 : l1;
   const corriges = (garde === l2) ? cor.corriges : {};
-  return { ok: garde.ok, texte: garde.texte, corriges, urgence: garde.urgence, hits: garde.hits, mots: garde.mots, parMot: garde.parMot };
+  return { ok: garde.ok, texte: garde.texte, corriges, urgence: garde.urgence, hits: garde.hits, mots: garde.mots, parMot: garde.parMot, nat: garde.nat || [] };
 }
 /* 🔗 un seul classement : les phrases pèsent plus que les mots isolés */
 function langClasser(c) {
@@ -822,6 +1660,8 @@ function langClasser(c) {
     if (!tache[h.id] || h.sc > (tache[h.id].sc || 0)) tache[h.id] = { tache: h.tache, sc: h.sc };
   }
   for (const id of Object.keys(c.parMot)) sc[id] = (sc[id] || 0) + c.parMot[id];
+  /* 📚 tâches du catalogue national : poids modéré, elles complètent sans écraser les phrases */
+  for (const x of (c.nat || [])) sc[x.metier] = (sc[x.metier] || 0) + x.sc;
   return Object.keys(sc).map(id => ({ id, sc: sc[id], tache: (tache[id] || {}).tache || '' }))
     .sort((a, b) => b.sc - a.sc);
 }
@@ -830,6 +1670,11 @@ function comprendreDemande(q) {
   const brut = String(q || '').trim();
   const kp = codeKpDe(brut);
   if (kp) return { type: 'kp', code: kp, compris: 'Code professionnel ' + kp, ids: [], tache: '', corriges: {}, urgence: false };
+  /* 🩺 AVANT toute autre analyse : une demande qui touche un acte médical, vétérinaire, du gaz,
+     de la sécurité privée… est traitée à part (jamais comme un service ordinaire, jamais « inconnue »). */
+  const rglAvant = estDemandeReglementee(brut);
+  if (rglAvant) return { type: 'reglemente', reglemente: rglAvant, principal: '', ids: [], compris: rglAvant.nom,
+    tache: '', corriges: {}, urgence: false, suggestions: [], alternatives: [], aide: rglAvant.exige };
   const c = langComprendre(brut);
   if (!c.ok) return { type: 'inconnu', ids: [], principal: '', compris: '', tache: '', corriges: c.corriges, urgence: c.urgence, suggestions: [], aide: LANG_AIDE };
   const cl = langClasser(c);
@@ -841,8 +1686,20 @@ function comprendreDemande(q) {
   const idsCherches = [principal.id].concat(cl.filter(x => x.id !== principal.id && x.sc >= 4).slice(0, 2).map(x => x.id));
   const nm = id => svcNomP(id);
   const ic = id => { const s = svcCat(id); return s ? s.ic : (SVC_NOUVEAUX[id] ? SVC_NOUVEAUX[id].ic : '🛠️'); };
+  /* 📚 la chaîne CATÉGORIE → SERVICE → SOUS-SERVICE → TÂCHE : on la donne dès qu'on la connaît,
+     même si c'est le dictionnaire de phrases qui a reconnu le métier. */
+  /* 🩺 actes médicaux, vétérinaires, sécurité privée, gaz… : on répond franchement au client.
+     Ces prestations sont séparées et réservées aux professionnels légalement habilités. */
+  const rgl = estDemandeReglementee(brut) || (principal ? reglementeIdx(reglementePour(String((svcCat(principal.id) || {}).num || ''), [], brut)) : null);
+  if (rgl) return {
+    type: 'reglemente', reglemente: rgl, principal: principal.id, ids: [principal.id],
+    compris: rgl.nom, tache: principal.tache || '', corriges: c.corriges, urgence: c.urgence, alternatives: [],
+    aide: rgl.exige
+  };
+  const natX = (c.nat || []).find(x => x.metier === principal.id) || catNatChainePour(principal.id);
   return {
     type: 'service',
+    chaine: natX ? (natX.chaine || natX) : null,
     ids: idsCherches,
     principal: principal.id,
     tache: principal.tache || '',
@@ -942,11 +1799,36 @@ function nearestVille(lat, lng) {
   }
   return bd < 90 ? best : 'En déplacement';
 }
+/* ✅ le pro a coché les tâches qu'il maîtrise ; si sa liste est vide, on ne le pénalise pas
+   (les professionnels déjà inscrits continuent de recevoir leur métier comme avant). */
+function agentMaitrise(ag, taches) {
+  const dem = (Array.isArray(taches) ? taches : []).map(t => normFr(t)).filter(Boolean);
+  if (!dem.length) return true;
+  const sait = (Array.isArray(ag.taches) ? ag.taches : []).map(t => normFr(t)).filter(Boolean);
+  if (!sait.length) return true;
+  return dem.every(t => sait.indexOf(t) >= 0);
+}
+/* 🩺 prestation réglementée : seuls les pros habilités peuvent recevoir et accepter la mission */
+function agentHabilite(ag, reg) { return !reg || (Array.isArray(ag.habilitations) && ag.habilitations.indexOf(reg) >= 0); }
 function agentHasService(ag, svc) {
   if (!svc) return true;
   const list = Array.isArray(ag.services) ? ag.services : [];
   if (!list.length) return true;
-  return list.includes(svc);
+  /* 🔗 FUSION : « Grand ménage » et « Nettoyage maison » sont le même métier — le pro de l'un
+     reçoit les demandes de l'autre (et de toutes les spécialités fusionnées). */
+  const cible = svcCanon(svc);
+  return list.some(x => svcCanon(x) === cible);
+}
+/* ⚠️ MÉTIERS VOISINS (union bornée à 3) : eux sont comparés à l'IDENTIQUE.
+   Exemple : pour « clim », le moteur devine aussi « Électricité » et « Nettoyage de bureaux »
+   (ils ont des tâches autour du climatiseur). Sans cette règle, l'équivalence de fusion
+   (« grand ménage » = « nettoyage maison ») ferait remonter un pro du ménage sur une demande
+   de climatisation — le client verrait un professionnel hors sujet. */
+function agentHasServiceVo (ag, svc) {
+  if (!svc) return true;
+  const list = Array.isArray(ag.services) ? ag.services : [];
+  if (!list.length) return true;
+  return list.indexOf(svc) >= 0;
 }
 function reachKm() {
   const n = db.config && typeof db.config.reachKm === 'number' ? db.config.reachKm : 15;
@@ -1060,10 +1942,16 @@ function issueAgentJeton(ag) {
   if (!ag.jeton) ag.jeton = crypto.randomBytes(16).toString('hex');
   return ag.jeton;
 }
-function agentJetonOk(req, ag, body) {
+/* 🔒 `mint` : le jeton est FABRIQUÉ au premier envoi du téléphone (écriture) — une simple LECTURE
+   ne doit jamais en fabriquer un en douce, sinon le téléphone du pro se retrouve bloqué (401)
+   parce qu'un inconnu a ouvert une liste avec son identifiant. */
+function agentJetonOk(req, ag, body, mint) {
   const h = (req.headers && (req.headers['x-agent-token'] || req.headers['X-Agent-Token'])) || '';
   const tok = String(h || (body && body.jeton) || '').trim();
-  if (!ag.jeton) { issueAgentJeton(ag); return { ok: true, nouveau: true, legacy: true }; }
+  if (!ag.jeton) {
+    if (mint === false) return { ok: true, nouveau: false, legacy: true };
+    issueAgentJeton(ag); return { ok: true, nouveau: true, legacy: true };
+  }
   if (tok && tok === ag.jeton) return { ok: true, legacy: false };
   return { ok: false, nouveau: false, legacy: false };
 }
@@ -1441,7 +2329,11 @@ function recherchePro(o) {
   /* métiers demandés : un seul (ancien appel) ou plusieurs (phrase comprise → union bornée) */
   let svcIds = Array.isArray(o.services) && o.services.length ? o.services.filter(Boolean).slice(0, 3)
     : (svc && svc !== 'custom' ? [svc] : []);
-  if (svc && svc !== 'custom' && !svcIds.includes(svc)) svcIds = [svc, ...svcIds].slice(0, 3);
+  /* ⚠️ le métier choisi EXPLICITEMENT par le client (`?service=…`) est toujours le premier :
+     la phrase comprise peut ajouter des voisins, jamais rétrograder son choix. Exemple : l'app
+     demande « maison » et le moteur lit « maison » → Immobilier — le métier du catalogue
+     (« Nettoyage maison ») doit rester la demande principale. */
+  if (svc && svc !== 'custom' && svcIds[0] !== svc) svcIds = [svc, ...svcIds.filter(x => x !== svc)].slice(0, 3);
   /* mots utiles de la demande (pour confronter aux compétences déclarées) */
   const motsDem = normFr(o.q || '').split(' ').filter(w => w.length > 2 && !FR_VIDES.has(w)).slice(0, 8);
   const qN = String(o.quartier || '').trim().toLowerCase();
@@ -1454,7 +2346,11 @@ function recherchePro(o) {
   for (const ag of (db.agents || [])) {
     if (!ag || ag.blocked || (ag.status || 'approved') !== 'approved') continue;   // statut actif uniquement
     /* filtre DUR : le pro doit faire l'un des métiers compris (jamais de pro hors métier) */
-    let metierFait = svcIds.length ? svcIds.filter(id => agentHasService(ag, id)) : [];
+    /* 🔗 le 1er métier = celui que le client a vraiment demandé (ou le ?service= explicite) → fusion OK.
+       Les suivants = voisins devinés par le moteur → comparaison à l'identique (voir agentHasServiceVo). */
+    let metierFait = svcIds.length
+      ? svcIds.filter((id, i) => (i === 0 ? agentHasService(ag, id) : agentHasServiceVo(ag, id)))
+      : [];
     if (svcIds.length && !metierFait.length) continue;
     /* fiche non publique = carte inutilisable : on ne la propose pas */
     if (!privacyOf(ag).publieFiche) continue;
@@ -1613,6 +2509,8 @@ function missionTargets(m) {
     const ag = db.agents.find(a => a.id === (s.meta && s.meta.agentId));
     if (!ag) continue;
     if (m.service && m.service !== 'custom' && !agentHasService(ag, m.service)) continue;
+    if (!agentMaitrise(ag, m.taches)) continue;
+    if (!agentHabilite(ag, m.reglemente)) continue;
     const r = rankPro(m, ag);
     s._dist = r.dist; s._ring = r.ring; s._mode = r.mode;
     scored.push(s);
@@ -2640,7 +3538,7 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/agents/veille' && req.method === 'GET') {
     const ag = db.agents.find(a => a.id === String(url.searchParams.get('agentId') || ''));
     if (!ag) return sendJson(res, 404, { error: 'pro introuvable' });
-    const jtV = agentJetonOk(req, ag, { jeton: url.searchParams.get('jeton') });   // 🔒 veille de SON téléphone
+    const jtV = agentJetonOk(req, ag, { jeton: url.searchParams.get('jeton') }, false);   // 🔒 veille de SON téléphone
     if (!jtV.ok) return sendJson(res, 401, { error: 'Jeton du professionnel requis', code: 'jeton' });
     if (jtV.nouveau) saveDb();
     const gpsAge = agentHasGps(ag) ? Math.round((Date.now() - posAtMs(ag.pos)) / 1000) : null;
@@ -2682,11 +3580,20 @@ const server = http.createServer(async (req, res) => {
     if (b.tel) ag.tel = ag.tel1 = String(b.tel).replace(/\D/g, '').slice(0, 16);
     if (b.ville !== undefined) ag.ville = String(b.ville).slice(0, 60);
     if (b.villeService !== undefined) ag.villeService = String(b.villeService).slice(0, 60);
+    /* 🛠️ PLUSIEURS métiers à la fois (jamais un seul) */
+    if (Array.isArray(b.services)) {
+      const liste = b.services.map(x => String(x).trim().slice(0, 40)).filter(Boolean).slice(0, 30);
+      const garde = liste.filter(id => svcCat(id) || SVC_NOUVEAUX[id] || (db.catalog || []).some(s => s.id === id));
+      if (garde.length) ag.services = garde;      /* on ne garde que des métiers qui existent vraiment */
+    }
+    /* ✅ PLUSIEURS tâches maîtrisées (elles viennent du catalogue national) */
+    if (Array.isArray(b.taches)) ag.taches = b.taches.map(x => String(x).trim().slice(0, 80)).filter(Boolean).slice(0, 400);
     ensureNumPro(ag);
     saveDb();
     return sendJson(res, 200, {
       ok: true, villeService: ag.villeService || ag.ville || '', numPro: ag.numPro,
       zoneKm: zoneOfAgent(ag).km, privacy: privacyOf(ag), telPro: ag.telPro || '', pause: !!ag.pause,
+      services: ag.services || [], taches: ag.taches || [], habilitations: ag.habilitations || [],
       jeton: jtMe.nouveau ? ag.jeton : undefined
     });
   }
@@ -2741,6 +3648,8 @@ const server = http.createServer(async (req, res) => {
     const c = comprendreDemande(q);
     if (c.type === 'kp') return sendJson(res, 200, { ok: true, mode: 'kp', code: c.code, compris: c.compris, comprisLong: '🎫 ' + c.compris });
     if (c.type === 'vide') return sendJson(res, 200, { ok: true, mode: 'vide', compris: '', aide: LANG_AIDE });
+    if (c.type === 'reglemente') return sendJson(res, 200, { ok: true, mode: 'reglemente', compris: c.compris,
+      comprisLong: (c.reglemente.ic || '🩺') + ' ' + c.compris, reglemente: c.reglemente, aide: c.reglemente.exige, tache: '', corriges: {} });
     if (c.type === 'inconnu')
       return sendJson(res, 200, { ok: true, mode: 'inconnu', compris: '', corriges: c.corriges || {}, urgence: !!c.urgence, aide: LANG_AIDE, suggestions: [] });
     if (url.searchParams.get('debug') === '1') {
@@ -2750,6 +3659,9 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, {
       ok: true, mode: 'service', principal: c.principal, service: c.compris, compris: c.compris,
       comprisLong: c.comprisLong, tache: c.tache, categorie: c.categorie, urgence: !!c.urgence,
+      /* 📚 la chaîne du catalogue national (catégorie → service → sous-service → tâche) :
+         c'est elle qui permet à l'app d'afficher la tâche précise au client */
+      chaine: c.chaine || null, reglemente: c.reglemente || null,
       corriges: c.corriges, alternatives: c.alternatives || [], suggestions: c.suggestions || []
     });
   }
@@ -2802,6 +3714,9 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 429, { error: 'Trop de recherches en une minute — patientez un instant', code: 'plafond' });
     const service = String(url.searchParams.get('service') || '').slice(0, 40);
     const q = String(url.searchParams.get('q') || '').slice(0, 120);
+    /* 📋 plusieurs tâches demandées d'un coup — chacune doit être maîtrisée par le pro choisi */
+    const taches = String(url.searchParams.get('taches') || '').split('|').map(x => x.trim()).filter(Boolean).slice(0, 8).map(x => x.slice(0, 80));
+    const reglemente = reglementePour(service, taches, q);
     const ville = String(url.searchParams.get('ville') || (cli && cli.ville) || '').slice(0, 60);
     const quartier = String(url.searchParams.get('quartier') || (cli && cli.quartier) || '').slice(0, 60);
     const lat = parseFloat(url.searchParams.get('lat'));
@@ -2899,11 +3814,81 @@ const server = http.createServer(async (req, res) => {
     resu.lieu = prest && prest.ok ? { ville: prest.ville, quartier: prest.quartier, precis: !!prest.precis, texte: prest.texte } : null;
     resu.zoneElargie = zoneElargie;
     resu.suggestions = comp.suggestions || [];
+      resu.taches = taches;
+      resu.reglemente = reglemente ? { id: reglemente, ...(reglementeIdx(reglemente) || {}) } : null;
     resu.quartier = resu.quartier || quartierR;
     resu.client = cli ? { id: cli.id, nom: cli.nom } : null;
     return sendJson(res, 200, resu);
   }
 
+  /* ═══════════════ 📚 CATALOGUE NATIONAL (client) ═══════════════ */
+  if (p === '/api/catalogue' && req.method === 'GET') {
+    const arbre = catalogueNational();
+    const q = normFr(String(url.searchParams.get('q') || '')).trim();
+    const fam = String(url.searchParams.get('fam') || '');
+    const svc = String(url.searchParams.get('service') || '');
+    let services = arbre.services;
+    if (fam) services = services.filter(s => s.famille === fam);
+    if (svc) services = services.filter(s => String(s.num) === svc);
+    if (q) {
+      services = services.map(s => {
+        const gardeSous = s.sous.map(ss => {
+          /* ⚠️ une tâche est un objet { num, nom } : on cherche sur son NOM (et sur son nom d'origine,
+             pour qu'un renommage du PDG ne casse pas les habitudes du client) */
+          const taches = ss.taches.filter(t => normFr(t.nom).indexOf(q) >= 0 || normFr(t.base || '').indexOf(q) >= 0);
+          const lui = normFr(ss.nom).indexOf(q) >= 0;
+          return (lui || taches.length) ? { num: ss.num, nom: ss.nom, metier: ss.metier, taches: lui ? ss.taches : taches } : null;
+        }).filter(Boolean);
+        const lui = normFr(s.nom).indexOf(q) >= 0;
+        return (lui || gardeSous.length) ? { num: s.num, nom: s.nom, ic: s.ic, metier: s.metier, famille: s.famille, sous: lui ? s.sous : gardeSous } : null;
+      }).filter(Boolean);
+    }
+    return sendJson(res, 200, {
+      ok: true, q, fam, services,
+      familles: arbre.familles, accueil: arbre.familles.filter(f => f.populaire),
+      lieux: CAT_LIEUX, tarifs: CAT_TARIFS, dispos: CAT_DISPO, reglementes: CAT_REGLEMENTE,
+      nbServices: arbre.nbServices, nbSous: arbre.nbSous, nbTaches: arbre.nbTaches, nbMetiers: arbre.nbMetiers
+    });
+  }
+  /* 🎯 « Voici mon besoin » → la chaîne complète comprise (4 niveaux + métier) */
+  if (p === '/api/catalogue/recherche' && req.method === 'GET') {
+    const q = String(url.searchParams.get('q') || '').slice(0, 160);
+    const c = comprendreDemande(q);
+    const arbre = catalogueNational();
+    const nat = (c.type === 'service' && c.chaine) ? c.chaine : null;
+    /* les tâches voisines, pour aider le client à préciser sans connaître le métier */
+    const idx = catNatIndex();
+    const mots = motsCles(q);
+    const proches = mots.length ? idx.taches.filter(t => t.metier === c.principal && t.mots.some(w => mots.indexOf(w) >= 0)).slice(0, 8)
+      .map(t => ({ nom: t.nom, sous: t.sousNom, service: t.serviceNom })) : [];
+    return sendJson(res, 200, {
+      ok: true, question: q, mode: c.type, principal: c.principal || '', compris: c.compris || '',
+      tache: c.tache || '', corriges: c.corriges || {}, urgence: !!c.urgence,
+      chaine: nat || null, proches,
+      metier: c.principal ? { id: c.principal, nom: c.compris, ic: (svcCat(c.principal) || {}).ic || '🛠️' } : null,
+      alternatives: c.alternatives || [], aide: c.aide || '',
+      reglemente: c.reglemente || null,
+      catalogue: { nbServices: arbre.nbServices, nbSous: arbre.nbSous, nbTaches: arbre.nbTaches, nbMetiers: arbre.nbMetiers }
+    });
+  }
+  /* 🙋 §48/§55 — « je ne trouve pas mon service » : le client décrit, on garde pour le PDG */
+  if (p === '/api/catalogue/idee' && req.method === 'POST') {
+    const b = await readBody(req);
+    const texte = String(b.texte || '').slice(0, 300).trim();
+    if (texte.length < 5) return sendJson(res, 400, { error: 'Décrivez votre besoin en quelques mots' });
+    const cli = findClientByToken(req);
+    const reg = catNatReglages();
+    const deja = reg.suggestions.find(x => normFr(x.texte) === normFr(texte));
+    if (deja) { deja.n = (deja.n || 1) + 1; deja.dernier = nowISO(); }
+    else reg.suggestions.push({ id: uid('ID'), texte, at: nowISO(), par: cli ? (cli.nom || cli.id) : 'visiteur', n: 1, vu: false });
+    if (reg.suggestions.length > 500) reg.suggestions = reg.suggestions.slice(-400);
+    saveDb();
+    emitAdmin('catalogue', '🙋 Nouvelle demande hors catalogue : « ' + texte.slice(0, 60) + ' »');
+    /* on répond quand même avec la meilleure piste trouvée — le client n'est jamais laissé sans rien */
+    const c = comprendreDemande(texte);
+    return sendJson(res, 200, { ok: true, message: 'Merci ! Votre demande est transmise à KLEAN. Nous vous rappelons quelle catégorie s’en rapproche le plus.',
+      mode: c.type, principal: c.principal || '', compris: c.compris || '', comprisLong: c.comprisLong || '', tache: c.tache || '', alternatives: c.alternatives || [] });
+  }
   /* ════════ 🎮 FLIP FIZZ — configuration publique (le jeu est INVISIBLE par défaut) ════════ */
   if (p === '/api/flip' && req.method === 'GET') {
     const cli = findClientByToken(req);
@@ -3317,6 +4302,34 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, resu);
   }
 
+  /* ✅ ce que le pro peut cocher : les tâches de ses métiers, avec le libellé simple du catalogue */
+  if (p === '/api/pros/taches' && req.method === 'GET') {
+    const ag = db.agents.find(a => a.id === String(url.searchParams.get('agentId') || ''));
+    if (!ag) return sendJson(res, 404, { error: 'pro introuvable' });
+    const jt = agentJetonOk(req, ag, url.searchParams, false);   /* lecture : jamais de jeton fabriqué ici */
+    if (!jt.ok) return sendJson(res, 401, { error: 'Jeton du professionnel requis', code: 'jeton' });
+    const arbre = catalogueNational();
+    /* 🔗 FUSION : « Grand ménage » voit les tâches de « Nettoyage maison » (même métier) */
+    const mes = [...new Set((Array.isArray(ag.services) ? ag.services : []).map(svcCanon).filter(Boolean))];
+    const out = [];
+    for (const s of arbre.services) {
+      for (const ss of s.sous) {
+        const metier = ss.metier || s.metier;
+        if (mes.length && mes.indexOf(svcCanon(metier)) < 0) continue;
+        for (const t of ss.taches) {
+          if (out.some(x => x.nom === t.nom)) continue;
+          if (ss.reglemente && !agentHabilite(ag, ss.reglemente)) continue;   /* 🩺 réservé aux habilités */
+          out.push({ nom: t.nom, service: s.nom, sous: ss.nom, metier, reglemente: ss.reglemente || '' });
+        }
+      }
+    }
+    if (!out.length) for (const s of arbre.services) for (const ss of s.sous) for (const t of ss.taches)
+      if (!out.some(x => x.nom === t.nom)) out.push({ nom: t.nom, service: s.nom, sous: ss.nom, metier: ss.metier || s.metier, reglemente: ss.reglemente || '' });
+    return sendJson(res, 200, {
+      ok: true, metiers: (ag.services || []).map(id => ({ id, nom: svcNomP(id), ic: (svcCat(id) || SVC_NOUVEAUX[id] || {}).ic || '🛠️' })),
+      habilitations: ag.habilitations || [], taches: out.slice(0, 900), choisies: ag.taches || []
+    });
+  }
   if (p === '/api/pros/peers' && req.method === 'GET') {
     const svc = String(url.searchParams.get('service') || '').trim();
     const self = String(url.searchParams.get('self') || '');
@@ -3343,6 +4356,11 @@ const server = http.createServer(async (req, res) => {
       photos: Array.isArray(b.photos) ? b.photos.filter(x => typeof x === 'string' && x.length < 600000).slice(0, 3) : [],
       budget: Math.max(0, parseInt(b.budget) || 0),
       quote: !!(b.quote || b.service === 'custom'),
+      /* 📚 la chaîne comprise (catégorie → service → sous-service → tâche) et les tâches multiples */
+      taches: Array.isArray(b.taches) ? b.taches.filter(x => typeof x === 'string' && x).slice(0, 8).map(x => x.slice(0, 80)) : [],
+      chaine: (b.chaine && typeof b.chaine === 'object') ? { categorie: String(b.chaine.categorie || '').slice(0, 60),
+        service: String(b.chaine.service || '').slice(0, 80), sous: String(b.chaine.sous || '').slice(0, 80), tache: String(b.chaine.tache || '').slice(0, 80) } : null,
+      reglemente: reglementePour(b.service, b.taches, b.desc || ''),
       lat: typeof b.lat === 'number' ? b.lat : null,
       lng: typeof b.lng === 'number' ? b.lng : null,
       ville: String(b.ville || b.cityNom || b.city || '').slice(0, 60),
@@ -3381,6 +4399,14 @@ const server = http.createServer(async (req, res) => {
     if (!ag) return sendJson(res, 404, { error: 'agent inconnu' });
     if (m.status !== 'pending') return sendJson(res, 409, { error: 'déjà prise', status: m.status });
     if ((m.exclAg || []).includes(ag.id)) return sendJson(res, 409, { error: 'Cette mission vous a été retirée — le gestionnaire l’a réattribuée' });
+    /* 🩺 prestation réglementée : seuls les professionnels HABILITÉS (diplôme/agrément vérifié) peuvent accepter */
+    if (m.reglemente) {
+      const habil = (ag.habilitations || []);
+      if (habil.indexOf(m.reglemente) < 0) {
+        const r = reglementeIdx(m.reglemente) || {};
+        return sendJson(res, 403, { error: 'Prestation réglementée (' + (r.nom || m.reglemente) + ') : réservée aux professionnels habilités. Envoyez votre diplôme ou agrément au HQ pour être vérifié.', reglemente: m.reglemente, habilitationRequise: r.exige || '' });
+      }
+    }
     m.status = 'accepted'; m.agentId = ag.id; invaliderStats(ag.id); saveDb();
     // informer les autres agents que la mission est prise
     broadcast(onlineAgents().filter(s => s.meta.agentId !== ag.id), { type: 'mission_taken', missionId: m.id });
@@ -3654,6 +4680,171 @@ const server = http.createServer(async (req, res) => {
       .map(m => ({ id: m.id, service: m.service, quartier: m.quartier, time: m.time, date: m.date, status: m.status, prixTotal: m.prixTotal, note: m.note, at: m.createdAt })));
   }
 
+  /* ═══════════════ 📚 CATALOGUE NATIONAL (tableau de bord) ═══════════════ */
+  if (p === '/api/admin/catalogue' && req.method === 'GET') {
+    return sendJson(res, 200, Object.assign({ ok: true }, catNatReponse()));
+  }
+  if (p === '/api/admin/catalogue' && req.method === 'POST') {
+    const b = await readBody(req);
+    const reg = catNatReglages();
+    const action = String(b.action || '');
+    const num = String(b.num || '');
+    /* 🔁 actif / inactif — on ne supprime jamais une entrée utilisée dans d'anciennes commandes */
+    if (action === 'basculer') {
+      const i = reg.off.indexOf(num);
+      if (i >= 0) reg.off.splice(i, 1); else reg.off.push(num);
+      const quoi = catNatParNumero(num);
+      auditLog('catalogue_bascule', { num, nom: quoi ? quoi.nom : num, actif: i >= 0, par: act(req) });
+    }
+    else if (action === 'renommer') {
+      const nom = String(b.nom || '').trim().slice(0, 80);
+      if (nom.length < 2) return sendJson(res, 400, { error: 'Nom trop court' });
+      reg.noms[num] = nom;
+      auditLog('catalogue_renomme', { num, nom, par: act(req) });
+    }
+    else if (action === 'mot') {
+      const mot = normFr(String(b.mot || '')).slice(0, 60).trim();
+      if (mot.length < 2) return sendJson(res, 400, { error: 'Mot trop court' });
+      const avant = catNatMots(num);
+      const liste = new Set(String(avant).split(' ').filter(Boolean));
+      liste.add(mot);
+      reg.mots[num] = [...liste].join(' ');
+      auditLog('catalogue_mot', { num, mot, par: act(req) });
+    }
+    else if (action === 'ajouter') {
+      const niveau = String(b.niveau || 'tache');
+      const parent = String(b.parent || '');
+      const nom = String(b.nom || '').trim().slice(0, 80);
+      if (nom.length < 2) return sendJson(res, 400, { error: 'Nom trop court' });
+      if (!['sous', 'tache'].includes(niveau)) return sendJson(res, 400, { error: 'Niveau non modifiable ici (utilisez « Ajouter un service créé »)' });
+      const parentOk = niveau === 'tache' ? catalogueNational().services.some(s => s.sous.some(x => String(x.num) === parent)) : CAT_NAT.some(s => String(s.num) === parent);
+      if (!parentOk) return sendJson(res, 400, { error: 'Parent introuvable' });
+      reg.plus.push({ id: 'P' + Date.now().toString(36), niveau, parent, nom, at: nowISO(), par: act(req) });
+      auditLog('catalogue_ajout', { niveau, parent, nom, par: act(req) });
+    }
+    else if (action === 'icone') {
+      const ic = String(b.ic || '').trim().slice(0, 6);
+      if (ic.length < 1) return sendJson(res, 400, { error: 'Choisissez une icône' });
+      reg.icones[num] = ic;
+      auditLog('catalogue_icone', { num, ic, par: act(req) });
+    }
+    /* 🗂️ LES CATÉGORIES : renommer · icône · nouvelle · désactiver · y ranger un service */
+    else if (['fam-renommer', 'fam-icone', 'fam-ajouter', 'fam-service', 'fam-basculer'].includes(action)) {
+      const F = reg.fam;
+      const connue = id => CAT_NAT_FAM.some(f => f.id === id) || F.plus.some(f => f.id === id);
+      if (action === 'fam-ajouter') {
+        const nom = String(b.nom || '').trim().slice(0, 60);
+        if (nom.length < 2) return sendJson(res, 400, { error: 'Nom de catégorie trop court' });
+        const nid = 'f' + Date.now().toString(36);
+        F.plus.push({ id: nid, ic: String(b.ic || '📂').trim().slice(0, 6) || '📂', nom, at: nowISO(), par: act(req) });
+        auditLog('catalogue_fam_ajout', { id: nid, nom, par: act(req) });
+        saveDb(); bcAll({ type: 'catalogue_maj', action, num: nid });
+        return sendJson(res, 200, Object.assign({ ok: true, id: nid }, catNatReponse()));
+      }
+      const idF = String(b.id || '').trim();
+      if (!connue(idF)) return sendJson(res, 404, { error: 'Catégorie introuvable' });
+      if (action === 'fam-renommer') {
+        const nom = String(b.nom || '').trim().slice(0, 60);
+        if (nom.length < 2) return sendJson(res, 400, { error: 'Nom trop court' });
+        F.noms[idF] = nom;
+        auditLog('catalogue_fam_renomme', { id: idF, nom, par: act(req) });
+      }
+      else if (action === 'fam-icone') {
+        const ic = String(b.ic || '').trim().slice(0, 6);
+        if (!ic) return sendJson(res, 400, { error: 'Choisissez une icône' });
+        F.icones[idF] = ic;
+        auditLog('catalogue_fam_icone', { id: idF, ic, par: act(req) });
+      }
+      else if (action === 'fam-service') {
+        const num = String(b.num || '').trim();
+        const existe = catalogueNationalHQ().some(s => String(s.num) === num);
+        if (!existe) return sendJson(res, 404, { error: 'Service introuvable' });
+        F.svc[num] = idF;
+        auditLog('catalogue_fam_service', { num, fam: idF, par: act(req) });
+      }
+      else {   /* fam-basculer : jamais une catégorie qui contient encore des services actifs (sinon ils disparaîtraient) */
+        const svcsActifs = catalogueNational().services.filter(s => s.famille === idF).length;
+        if (!catNatFamOff(idF) && svcsActifs) {
+          return sendJson(res, 400, { error: 'Cette catégorie contient encore ' + svcsActifs + ' service(s) actif(s) : rangez-les ailleurs ou désactivez-les d’abord. Rien n’est supprimé.' });
+        }
+        const i = F.off.indexOf(idF);
+        if (i >= 0) F.off.splice(i, 1); else F.off.push(idF);
+        auditLog('catalogue_fam_bascule', { id: idF, actif: i >= 0, par: act(req) });
+      }
+      saveDb(); bcAll({ type: 'catalogue_maj', action, num: idF });
+      return sendJson(res, 200, Object.assign({ ok: true }, catNatReponse()));
+    }
+    /* 🆕 UN SERVICE ENTIER créé par le PDG (il entre dans le même arbre, les mêmes recherches et les mêmes filtres) */
+    else if (action === 'svc-ajouter') {
+      const nom = String(b.nom || '').trim().slice(0, 70);
+      const famId = String(b.fam || '').trim();
+      if (nom.length < 2) return sendJson(res, 400, { error: 'Nom du service trop court' });
+      if (!CAT_NAT_FAM.some(f => f.id === famId) && !reg.fam.plus.some(f => f.id === famId))
+        return sendJson(res, 400, { error: 'Choisissez la catégorie qui contiendra ce service' });
+      const metier = String(b.metier || '').trim().slice(0, 40);
+      if (metier && !svcCat(metier) && !SVC_NOUVEAUX[metier] && !(db.catalog || []).some(x => x.id === metier))
+        return sendJson(res, 400, { error: 'Métier inconnu — créez-le d’abord dans « Créer / déployer un service »' });
+      const id = 'S' + Date.now().toString(36);
+      reg.svcPlus.push({ id, nom, ic: String(b.ic || '🛠️').trim().slice(0, 6) || '🛠️', fam: famId, metier,
+        sousNom: String(b.sousNom || 'Prestations').trim().slice(0, 60) || 'Prestations',
+        taches: [String(b.tache || nom).trim().slice(0, 80) || nom], at: nowISO(), par: act(req) });
+      auditLog('catalogue_service_ajout', { id, nom, fam: famId, metier, par: act(req) });
+      saveDb(); bcAll({ type: 'catalogue_maj', action, num: id });
+      return sendJson(res, 200, Object.assign({ ok: true, id }, catNatReponse()));
+    }
+    /* 🏠 type d'intervention : le PDG coche / décoche (les valeurs de départ restent en secours) */
+    else if (action === 'lieu' || action === 'tarif') {
+      const id = String(b.id || '').trim();
+      const ref = action === 'lieu' ? CAT_LIEUX : CAT_TARIFS;
+      if (!ref.some(x => x.id === id)) return sendJson(res, 400, { error: 'Valeur inconnue' });
+      const cle = action === 'lieu' ? 'lieux' : 'tarifs';
+      const def = (action === 'lieu' ? CAT_LIEUX_DEF : CAT_TARIFS_DEF)[num] || (action === 'lieu' ? ['domicile'] : ['devis']);
+      /* (un service créé par le PDG n'a pas de valeurs de départ : domicile / devis) */
+      const actuel = (reg[cle][num] && reg[cle][num].length) ? reg[cle][num].slice() : def.slice();
+      const i = actuel.indexOf(id);
+      if (i >= 0) actuel.splice(i, 1); else actuel.push(id);
+      if (!actuel.length) return sendJson(res, 400, { error: 'Gardez au moins une valeur — sinon le client ne saura pas quoi choisir' });
+      reg[cle][num] = actuel;
+      auditLog('catalogue_' + cle, { num, id, retire: i >= 0, valeurs: actuel, par: act(req) });
+    }
+    /* 🩺 habiliter un professionnel (diplôme / agrément vérifié par le PDG) */
+    else if (action === 'habiliter') {
+      const ag = (db.agents || []).find(a => a.id === String(b.pro || ''));
+      const rgl = reglementeIdx(String(b.id || ''));
+      if (!ag) return sendJson(res, 404, { error: 'Professionnel introuvable' });
+      if (!rgl) return sendJson(res, 400, { error: 'Prestation réglementée inconnue' });
+      ag.habilitations = Array.isArray(ag.habilitations) ? ag.habilitations : [];
+      ag.habilVu = ag.habilVu || {};
+      const i = ag.habilitations.indexOf(rgl.id);
+      if (i >= 0) { ag.habilitations.splice(i, 1); delete ag.habilVu[rgl.id]; }
+      else { if (!String(b.doc || '').trim()) return sendJson(res, 400, { error: 'Indiquez la référence du document vérifié (diplôme, agrément…)' });
+        ag.habilitations.push(rgl.id); ag.habilVu[rgl.id] = { doc: String(b.doc).trim().slice(0, 120), at: nowISO(), par: act(req) }; }
+      auditLog('habilitation_' + (i >= 0 ? 'retiree' : 'ajoutee'), { pro: ag.nom, proId: ag.id, reglemente: rgl.id, doc: String(b.doc || '').slice(0, 120), par: act(req) });
+      emitAdmin('habilitation', (i >= 0 ? '🚫 Habilitation retirée à ' : '🩺 Professionnel habilité : ') + ag.nom + ' — ' + rgl.nom);
+    }
+    /* ⛔ le PDG ne supprime JAMAIS une entrée : elle est utilisée dans des commandes passées */
+    else if (['supprimer', 'effacer', 'delete', 'remove'].includes(action)) {
+      const quoi = catNatParNumero(num);
+      return sendJson(res, 400, { error: 'Une entrée ne se supprime jamais : désactivez-la (⏸). Elle disparaît chez les clients mais reste lisible dans les commandes passées, et vous pouvez la réactiver quand vous voulez.',
+        conseil: 'basculer', entree: quoi ? quoi.nom : num });
+    }
+    else if (action === 'idee-vue' || action === 'idee-tout-vu') {
+      if (action === 'idee-tout-vu') reg.suggestions.forEach(x => x.vu = true);
+      else { const x = reg.suggestions.find(y => y.id === String(b.id)); if (x) x.vu = true; }
+    }
+    else if (action === 'idee-creer') {
+      const x = reg.suggestions.find(y => y.id === String(b.id));
+      if (!x) return sendJson(res, 404, { error: 'Demande introuvable' });
+      const niveau = String(b.niveau || 'tache'), parent = String(b.parent || ''), nom = String(b.nom || x.texte).trim().slice(0, 80);
+      reg.plus.push({ id: 'P' + Date.now().toString(36), niveau, parent, nom, at: nowISO(), par: act(req), idee: x.id });
+      x.vu = true; x.creeLe = nowISO(); x.cree = { niveau, parent, nom };
+      auditLog('catalogue_idee_creee', { nom, niveau, parent, par: act(req) });
+    }
+    else return sendJson(res, 400, { error: 'Action inconnue' });
+    saveDb();
+    bcAll({ type: 'catalogue_maj', action, num });
+    return sendJson(res, 200, Object.assign({ ok: true }, catNatReponse()));
+  }
   /* --- DOSSIERS AGENTS (candidature vérifiée par le propriétaire) --- */
   if (p === '/api/agents/apply' && req.method === 'POST') {
     const b = await readBody(req);
@@ -4074,9 +5265,11 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/admin/cities' && req.method === 'GET') return sendJson(res, 200, { cities: db.cities || [] });
   if (p === '/api/services' && req.method === 'GET')
     return sendJson(res, 200, {
-      ok: true, services: db.catalog || [],
+      /* 🧩 on envoie TOUT le catalogue (métiers Klean + créations du PDG) : c'est ce que voient
+         le client et le professionnel dans leurs listes. */
+      ok: true, services: catalogueComplet(),
       version: db.catalogVersion || 1, deployAt: db.catalogDeployAt || null, deployBy: db.catalogDeployBy || '',
-      dirty: !!db.catalogDirty
+      dirty: !!db.catalogDirty, nbMetiers: SVC_CAT.length, nbCrees: (db.catalog || []).length
     });
   /* 🚀 DÉPLOYER les services créés vers les écrans clients ET pros (instantané) */
   if (p === '/api/admin/services/deploy' && req.method === 'POST') {
@@ -4099,6 +5292,8 @@ const server = http.createServer(async (req, res) => {
     const id = String(b.id || nom).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
     db.catalog = db.catalog || [];
     if (db.catalog.some(s => s.id === id)) return sendJson(res, 409, { error: 'Ce service existe déjà' });
+    /* 🧩 si le métier existe déjà dans le catalogue Klean, on le dit clairement (pas de doublon) */
+    if (svcCat(id)) return sendJson(res, 409, { error: 'Ce métier existe déjà dans le catalogue Klean (' + svcNomP(id) + ')', existant: id, builtin: true });
     const opts = Array.isArray(b.opts) ? b.opts.map(o => ({
       id: String(o.id || o.nom || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').slice(0, 30),
       nom: String(o.nom || '').slice(0, 60),
@@ -4110,7 +5305,9 @@ const server = http.createServer(async (req, res) => {
     emitAdmin('admin', '🛠️ Service créé : ' + nom + ' — touchez 🚀 Déployer pour l’envoyer aux clients et aux pros');
     return sendJson(res, 201, { ok: true, service: svc });
   }
-  if (p === '/api/admin/services' && req.method === 'GET') return sendJson(res, 200, { services: db.catalog || [] });
+  /* le HQ voit les 44 métiers (builtin) PLUS ses propres créations */
+  if (p === '/api/admin/services' && req.method === 'GET')
+    return sendJson(res, 200, { services: catalogueComplet(), nbMetiers: SVC_CAT.length, nbCrees: (db.catalog || []).length });
   if (p === '/api/admin/services/pros' && req.method === 'GET') {
     const sid = String(url.searchParams.get('id') || '').trim();
     const onIds = onlineAgentIds();

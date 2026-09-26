@@ -508,8 +508,11 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
   <div id="accueil-pop" style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 6px"></div>
 
   <div class="wrap">
-    <h3 class="sect-title">Tous nos services <small>Prix transparents, affichés avant de réserver</small></h3>
-    <button type="button" id="home-svc-toggle" onclick="accueilToggleSvc()" style="width:100%;border:1.5px solid var(--line);background:var(--card);color:var(--pd);font:inherit;font-weight:900;padding:12px;border-radius:13px;cursor:pointer;margin-bottom:10px">📂 Voir les 17 services et leurs prix ▾</button>
+    <h3 class="sect-title">📚 Nos services <small id="catnat-sous">Le catalogue national — touchez une catégorie</small></h3>
+    <button type="button" onclick="catNatOuvrir()" style="width:100%;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;padding:14px;border-radius:14px;cursor:pointer;margin-bottom:10px;box-shadow:0 5px 14px rgba(232,93,4,.28)">📚 Voir tous les services <span id="catnat-n"></span> →</button>
+    <div id="catnat-pop" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px"></div>
+    <button type="button" onclick="catNatOuvrir()" style="width:100%;margin-top:9px;border:1.5px solid var(--line);background:var(--card);color:var(--pd);font:inherit;font-weight:900;padding:11px;border-radius:13px;cursor:pointer">➕ Toutes les catégories (entreprises, artisans, étudiants, voyageurs…)</button>
+    <button type="button" id="home-svc-toggle" onclick="accueilToggleSvc()" style="width:100%;margin-top:9px;border:1.5px solid var(--line);background:var(--card);color:var(--muted);font:inherit;font-weight:800;padding:11px;border-radius:13px;cursor:pointer;font-size:12.5px">📂 Voir la liste des métiers et leurs prix ▾</button>
     <div class="svc-grid" id="home-svc" style="display:none"></div>
 
     <h3 class="sect-title">📞 Vos pros les plus proches <small>Par quartier ou GPS — appelez ou réservez</small></h3>
@@ -526,13 +529,14 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     <h3 class="sect-title">KLEAN partout en Côte d'Ivoire 🇨🇮 <small>Activez votre ville depuis le menu 📍 en haut</small></h3>
     <div class="city-road" id="home-road"></div>
 
-    <h3 class="sect-title">Demain sur KLEAN 🚀 <small>Ces services seront activés prochainement</small></h3>
+    <h3 class="sect-title">Bientôt : les prestations réglementées 🩺 <small>Ouverture réservée aux professionnels légalement habilités</small></h3>
     <div class="mini-grid">
-      <div class="mini-card"><span class="ic">👶</span><b>Garde d'enfants</b></div>
-      <div class="mini-card"><span class="ic">🩺</span><b>Soins seniors</b></div>
-      <div class="mini-card"><span class="ic">🛵</span><b>Livraison</b></div>
-      <div class="mini-card"><span class="ic">🐕</span><b>Garde animaux</b></div>
+      <div class="mini-card"><span class="ic">🩺</span><b>Actes médicaux à domicile</b><small>Diplôme + autorisation vérifiés par Klean</small></div>
+      <div class="mini-card"><span class="ic">🐕</span><b>Vétérinaire à domicile</b><small>Diplôme de vétérinaire vérifié</small></div>
+      <div class="mini-card"><span class="ic">🚐</span><b>Transport de personnes</b><small>Permis + carte professionnelle</small></div>
+      <div class="mini-card"><span class="ic">🔐</span><b>Sécurité privée agréée</b><small>Agrément du ministère de l'Intérieur</small></div>
     </div>
+    <p class="note" style="margin-top:8px">Ces métiers ne sont <b>jamais</b> confiés à un professionnel sans diplôme ou agrément vérifié. En attendant, garde d'enfants, aide aux seniors, livraison et garde d'animaux sont <b>déjà disponibles</b> dans « 📚 Voir tous les services ».</p>
 
     <div class="banner">
       <b>🧑‍💼 Devenez professionnel KLEAN</b>
@@ -849,6 +853,13 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
         <div id="prof-vs-actuelle" style="font-size:15px;font-weight:900;margin-bottom:8px">—</div>
         <button type="button" class="btn-main" style="width:100%;flex:none" onclick="ouvrirChoixVilleService()">🏙️ Choisir / changer ma ville de service</button>
       </div>
+      <div style="background:var(--pl);border:1.5px solid rgba(194,65,12,.35);border-radius:14px;padding:12px;margin:0 0 12px">
+        <b style="display:block;font-size:14px;margin-bottom:5px">🛠️ Mes métiers et mes tâches</b>
+        <p class="note" style="margin:0 0 8px">Choisissez <b>plusieurs métiers</b> et, dans chacun, <b>les tâches que vous maîtrisez</b>. Vous ne recevez que les demandes qui vous correspondent.</p>
+        <div id="prof-metiers" style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px">—</div>
+        <button type="button" class="btn-line" style="width:100%;margin-top:9px" onclick="proChargerTaches()">✅ Choisir mes tâches (catalogue national)</button>
+        <div id="prof-taches" style="margin-top:9px"></div>
+      </div>
       <button class="btn-main" style="width:100%;flex:none" onclick="saveProfile()">💾 Enregistrer</button>
       <button class="btn-line" style="width:100%;margin-top:10px" onclick="openKleanService()">📞 Contactez Klean-Service</button>
     </div>
@@ -1080,21 +1091,42 @@ window.kleanOnCitiesDeploy = function(msg){
   try{ if(typeof renderChoixVilleService==='function') renderChoixVilleService(); }catch(e){}
 };
 let _svcVersion = 0, _svcDeployAt = '';
+/* 🔗 métiers fusionnés : { idAncien: idPrincipal } — fourni par le serveur (voir SVC_FUSION) */
+let FUSION = {};
+try{ window.FUSION = FUSION; }catch(e){}
+const SVCCATS_OK = ['clean','tech','home','travaux','demarches','personne','transport'];
 function absorbServerServices(list, version, deployAt){
   if(!Array.isArray(list)) return false;
   let change = false;
+  /* 🔗 FUSION : le serveur dit quels métiers ne font qu'un (« Grand ménage » → « Nettoyage maison »).
+     On garde tout (rien n'est perdu pour l'historique) mais on n'affiche plus deux fois le même métier. */
+  const fus = {};
+  list.forEach(x=>{ if(x && x.id && x.fusionne) fus[x.id] = x.fusionne; });
+  FUSION = fus;
   list.forEach(s=>{
     if(!s || !s.id) return;
     const i = SERVICES.findIndex(x=>x.id===s.id);
-    const cat = (s.cat==='clean'||s.cat==='tech'||s.cat==='home') ? s.cat : (i>=0 ? SERVICES[i].cat : 'home');
-    const propre = {id:s.id, ic:s.ic||'🛠️', nom:s.nom||s.id, desc:s.desc||'', base:s.base||5000, cat:cat, opts:s.opts||[]};
-    if(i<0){ SERVICES.push(propre); change = true; }
-    else{
-      const a = SERVICES[i];
-      if(a.nom!==propre.nom || a.ic!==propre.ic || a.desc!==propre.desc || a.base!==propre.base
+    const a = i >= 0 ? SERVICES[i] : null;
+    const cat = SVCCATS_OK.includes(s.cat) ? s.cat : (a ? a.cat : 'home');
+    /* 🛡️ ON N'ÉCRASE RIEN : si le serveur ne donne pas une information, on garde celle de l'app.
+       (« plomberie » garde sa description et ses prestations robinet/fuite/débouchage…) */
+    const propre = {
+      id: s.id,
+      ic: s.ic || (a ? a.ic : '🛠️'),
+      nom: s.nom || (a ? a.nom : s.id),
+      desc: s.desc || (a ? a.desc : ''),
+      base: s.base || (a ? a.base : 5000),
+      cat: cat,
+      opts: (Array.isArray(s.opts) && s.opts.length) ? s.opts : (a ? (a.opts || []) : []),
+      nouveau: s.builtin === false ? false : undefined,  /* marqueur : création du PDG ou métier Klean */
+      fusionne: s.fusionne || '',                       /* 🔗 ce métier a été fusionné dans un autre */
+      fusionneNom: s.fusionneNom || '',
+      regroupe: Array.isArray(s.regroupe) ? s.regroupe : (a ? (a.regroupe || []) : [])
+    };
+    if(!a){ SERVICES.push(propre); change = true; }
+    else if(a.nom!==propre.nom || a.ic!==propre.ic || a.desc!==propre.desc || a.base!==propre.base
          || JSON.stringify(a.opts||[])!==JSON.stringify(propre.opts||[])){
-        SERVICES[i] = Object.assign({}, a, propre); change = true;
-      }
+      SERVICES[i] = Object.assign({}, a, propre); change = true;
     }
   });
   try{ if(typeof renderSvcGrids==='function') renderSvcGrids(); }catch(e){}
@@ -1623,21 +1655,27 @@ function updatePriceBar(){
 }
 function renderSvcGrids(){
   const GROUPS = [
-    ['clean', '🧹 Ménage & nettoyage'],
-    ['tech',  '🔧 Dépannage & technique'],
-    ['home',  '🏡 Extérieur & maison']
+    ['clean',     '🧹 Ménage & nettoyage'],
+    ['tech',      '🔧 Dépannage & technique'],
+    ['travaux',   '🛠️ Travaux & rénovation'],
+    ['home',      '🏡 Extérieur & maison'],
+    ['personne',  '💇 Beauté & personne'],
+    ['transport', '📦 Transport & accompagnement'],
+    ['demarches', '📄 Démarches & services']
   ];
   const _q = normT((document.querySelector('#svc-search')||{}).value || '');
   const _match = s => !_q || normT(s.nom+' '+s.desc+' '+(s.opts||[]).map(o=>o.nom).join(' ')).includes(_q);
   const build = onclick => GROUPS.map(([cat, label])=>{
-    const items = SERVICES.filter(s=>s.cat===cat && _match(s));
+    /* 🔗 un métier fusionné ne s'affiche plus à part : il est regroupé sous son métier principal */
+    const items = SERVICES.filter(s=>s.cat===cat && _match(s) && !FUSION[s.id]);
     if(!items.length) return '';
     return `<div class="svc-cat">${label}</div>` +
-      items.map(s=>`<button class="svc ${c.service===s.id?'sel':''}" onclick="${onclick}('${s.id}')"><span class="ic">${s.ic}</span><b>${s.nom}</b><span>${s.desc}</span><i>${s.base ? 'dès '+fmt(s.base) : '💬 devis'}</i></button>`).join('');
+      items.map(s=>`<button class="svc ${c.service===s.id?'sel':''}" onclick="${onclick}('${s.id}')"><span class="ic">${s.ic}</span><b>${s.nom}</b><span>${s.desc}${(s.regroupe&&s.regroupe.length)?('<br>🔗 regroupe : '+s.regroupe.map(x=>x.nom).join(', ')):''}</span><i>${s.base ? 'dès '+fmt(s.base) : '💬 devis'}</i></button>`).join('');
   }).join('');
   $('#book-svc').innerHTML = build('pickSvc');
   $('#home-svc').innerHTML = build('quickSvc');
 }
+try{ window.SERVICES = SERVICES; }catch(e){}   /* la liste des métiers, visible dans la console */
 /* 🛠️ Demande sur mesure (service hors catalogue, avec photos) */
 const CSVC = {id:'custom', ic:'🛠️', nom:'Demande sur mesure', desc:'Vous décrivez, le professionnel évalue et propose un prix', base:0, cat:'custom', opts:[], descLabel:'📝 Décrivez précisément votre besoin *'};
 /* 🔍 Recherche de service depuis l'accueil (barre visible) */
@@ -3309,6 +3347,53 @@ function renderAgentHist(){
       <div class="amt"><b>+${fmt(h.gain)}</b><small>−${fmt(h.comm)} KLEAN</small></div>
     </div>`;
   }).join('');
+}
+/* 🛠️ le professionnel coche PLUSIEURS services et PLUSIEURS tâches (catalogue national) */
+let PRCAT = { taches:[], choisies:[], metiers:[], charge:false, note:'' };
+function proSvcIc(id){ try{ const s = (typeof SERVICES!=='undefined'?SERVICES:[]).find(x=>x.id===id); return (s&&s.ic)||'🛠️'; }catch(e){ return '🛠️'; } }
+async function proChargerTaches(){
+  const box = document.getElementById('prof-taches'); if(!box) return;
+  box.innerHTML = '<small style="color:var(--muted)">Chargement des tâches…</small>';
+  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
+  if(!id){ box.innerHTML = '<small style="color:var(--amber)">Connectez-vous comme professionnel pour choisir vos tâches.</small>'; return; }
+  try{
+    const d = await fetch('/api/pros/taches?agentId='+encodeURIComponent(id), { headers: jetonProHeaders(), cache:'no-store' }).then(r=>r.json());
+    if(!d || !d.ok){ box.innerHTML = '<small style="color:var(--amber)">'+langEch(d && d.error || 'Chargement impossible')+'</small>'; return; }
+    PRCAT.taches = d.taches || []; PRCAT.choisies = d.choisies || []; PRCAT.metiers = d.metiers || []; PRCAT.charge = true;
+    proPeindreTaches();
+  }catch(e){ box.innerHTML = '<small style="color:var(--amber)">📡 Serveur injoignable — réessayez.</small>'; }
+}
+function proPeindreTaches(){
+  const box = document.getElementById('prof-taches'); if(!box) return;
+  const parSvc = {};
+  PRCAT.taches.forEach(t => { (parSvc[t.service] = parSvc[t.service] || []).push(t); });
+  const mes = PRCAT.choisies || [];
+  box.innerHTML = '<div style="font-size:12px;font-weight:900;margin-bottom:6px">✅ '+mes.length+' tâche(s) choisie(s) — touchez pour ajouter ou retirer</div>'
+    + Object.keys(parSvc).map(s => '<details style="border:1.5px solid var(--line);border-radius:11px;padding:7px 9px;margin-bottom:6px;background:var(--card)">'
+      + '<summary style="cursor:pointer;font-size:12.5px;font-weight:800">'+langEch(s)+' <small style="color:var(--muted)">'+parSvc[s].length+' tâche(s)</small></summary>'
+      + '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:7px">'
+      + parSvc[s].map(t => {
+          const on = mes.indexOf(t.nom) >= 0;
+          return '<button type="button" onclick="proBasculeTache(\''+langEch(t.nom).replace(/'/g,"\\'")+'\')" style="cursor:pointer;font:inherit;font-weight:800;font-size:11.5px;padding:7px 10px;border-radius:99px;border:1.5px solid '+(on?'var(--pd)':'var(--line)')+';background:'+(on?'#FFF4E8':'#fff')+';color:'+(on?'var(--pd)':'#33433c')+'">'+(on?'✅ ':'➕ ')+langEch(t.nom)+(t.reglemente?' 🩺':'')+'</button>';
+        }).join('') + '</div></details>').join('')
+    + '<button type="button" class="btn-main" style="width:100%;flex:none;margin-top:7px" onclick="proSaveTaches()">💾 Enregistrer mes tâches</button>'
+    + ((mes.length?'':'<small style="display:block;margin-top:6px;color:var(--muted)">Vous n’avez rien coché : vous recevez pour l’instant toutes les demandes de vos métiers.</small>'));
+}
+function proBasculeTache(nom){
+  const i = PRCAT.choisies.indexOf(nom);
+  if(i >= 0) PRCAT.choisies.splice(i, 1); else PRCAT.choisies.push(nom);
+  proPeindreTaches();
+}
+async function proSaveTaches(){
+  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
+  if(!id) return toast('Connectez-vous comme professionnel');
+  try{
+    const r = await fetch('/api/agents/me', { method:'PUT', headers: jetonProHeaders(), body: JSON.stringify({ agentId:id, taches:PRCAT.choisies }) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok) return toast('⚠️ '+(d.error||'Enregistrement impossible'));
+    if(typeof agent !== 'undefined' && agent) agent.taches = PRCAT.choisies.slice();
+    saveAll(); toast('✅ Vos tâches sont enregistrées ('+PRCAT.choisies.length+')');
+  }catch(e){ toast('📡 Serveur injoignable — réessayez'); }
 }
 function fillProfile(){
   $('#prof-nom').value = agent.nom; $('#prof-quartier').value = agent.quartier; $('#prof-tel').value = agent.tel;
@@ -5111,10 +5196,14 @@ function accueilToggleSvc(){
   if(!g) return;
   const ouvert = g.style.display !== 'none';
   g.style.display = ouvert ? 'none' : 'grid';
-  if(b) b.innerHTML = ouvert ? '📂 Voir les 17 services et leurs prix ▾' : '📁 Masquer la liste des services ▴';
+  const nbSvc = (typeof CATU !== 'undefined' && CATU.charge && CATU.nbServices) ? CATU.nbServices : 17;
+  if(b) b.innerHTML = ouvert ? ('📂 Voir les ' + nbSvc + ' services et leurs prix ▾') : '📁 Masquer la liste des services ▴';
 }
 function accueilInit(){
   try{ accueilPop(); }catch(e){}
+  /* 📚 le catalogue national arrive juste après (même bloc) : on le remplit dès que possible,
+     jamais pendant l'exécution du bloc (sinon la constante CATU n'existe pas encore). */
+  try{ setTimeout(()=>{ try{ catNatAccueil(); }catch(e){} }, 0); }catch(e){}
   try{
     if(!RECH.lieu) RECH.lieu = { mode: 'ville', ville: rechVille(), quartier: rechQuartier() };
     if(RECH.lieu.mode === 'ville'){ RECH.lieu.ville = rechVille(); RECH.lieu.quartier = rechQuartier(); }
@@ -5174,6 +5263,319 @@ function rechEtapes(et){
     + '</div>';
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════════
+   📚 LOT « KLEAN SERVICE » — LE CATALOGUE NATIONAL DANS L'APPLICATION
+   CATÉGORIE → SERVICE → SOUS-SERVICE → TÂCHE → PROFESSIONNELS
+   · le client n'a jamais besoin du nom du métier : il reconnaît ce qu'il veut faire
+   · « Autre » et « Je ne trouve pas mon service » à chaque niveau
+   · l'IA propose, l'administrateur valide — rien n'est publié tout seul
+   ═══════════════════════════════════════════════════════════════════════════════ */
+const CATU = { charge:false, ok:false, err:'', familles:[], accueil:[], services:[], nbServices:0, nbSous:0, nbTaches:0, nbMetiers:0,
+  fam:null, svc:null, sous:null, q:'', sel:[], idee:false, ideeTxt:'', ideeRep:null, ideeEnvoi:false, note:'' };
+try{ window.CATU = CATU; }catch(e){}
+/* 🔄 le PDG vient de changer le catalogue : l'app le recharge aussitôt (sans toucher à la demande en cours) */
+window.kleanOnCatalogueMaj = function(){
+  try{
+    CATU.charge = false;
+    const b = document.getElementById('catnat-box');
+    if(b && b.style.display === 'block') catNatCharger();
+    else catNatAccueil();
+  }catch(e){}
+};
+function catNatBox(){
+  let b = document.getElementById('catnat-box');
+  if(b) return b;
+  b = document.createElement('div'); b.id = 'catnat-box';
+  b.style.cssText = 'display:none;position:fixed;inset:0;z-index:74;background:#f4f7f6;overflow-y:auto;-webkit-overflow-scrolling:touch';
+  document.body.appendChild(b); return b;
+}
+function catNatOuvrir(){
+  const b = catNatBox(); if(!b) return;
+  b.style.display = 'block'; document.body.style.overflow = 'hidden';
+  if(!CATU.charge) catNatCharger(); else catNatPeindre();
+  try{ window.scrollTo(0,0); }catch(e){}
+}
+function catNatFermer(){
+  const b = catNatBox(); if(b) b.style.display = 'none';
+  document.body.style.overflow = '';
+}
+async function catNatCharger(){
+  const b = catNatBox(); if(!b) return;
+  b.innerHTML = '<div style="max-width:640px;margin:0 auto;padding:20px;font-weight:800;color:#6b7c73">📚 Chargement du catalogue des services…</div>';
+  try{
+    const d = await fetch('/api/catalogue', { cache:'no-store' }).then(r=>r.json());
+    if(!d || !d.ok) throw new Error('reponse');
+    CATU.charge = true; CATU.ok = true; CATU.err = '';
+    ['familles','accueil','services'].forEach(k => { CATU[k] = d[k] || []; });
+    CATU.nbServices = d.nbServices || 0; CATU.nbSous = d.nbSous || 0; CATU.nbTaches = d.nbTaches || 0; CATU.nbMetiers = d.nbMetiers || 0;
+    CATU.reglementes = d.reglementes || [];
+    CATU.lieux = d.lieux || []; CATU.tarifs = d.tarifs || []; CATU.dispos = d.dispos || [];
+    catNatPeindre();
+  }catch(e){
+    CATU.err = '📡 Le catalogue n’a pas pu être chargé — vérifiez votre connexion puis réessayez.';
+    catNatPeindre();
+  }
+}
+/* 🏠 les grandes catégories populaires sur l'accueil (jamais les ~50 services d'un coup) */
+async function catNatAccueil(){
+  const box = document.getElementById('catnat-pop'); if(!box) return;
+  if(CATU.encours) return; CATU.encours = true;
+  try{
+    if(!CATU.charge){
+      const d = await fetch('/api/catalogue', { cache:'no-store' }).then(r=>r.json());
+      if(!d || !d.ok) return;
+      CATU.charge = true; CATU.ok = true;
+      ['familles','accueil','services'].forEach(k => { CATU[k] = d[k] || []; });
+      CATU.nbServices = d.nbServices || 0; CATU.nbSous = d.nbSous || 0; CATU.nbTaches = d.nbTaches || 0; CATU.nbMetiers = d.nbMetiers || 0;
+      CATU.reglementes = d.reglementes || [];
+    CATU.lieux = d.lieux || []; CATU.tarifs = d.tarifs || []; CATU.dispos = d.dispos || [];
+    }
+    const n = document.getElementById('catnat-n'); if(n) n.textContent = '(' + CATU.nbServices + ' services)';
+    const s = document.getElementById('catnat-sous');
+    if(s) s.textContent = CATU.nbServices + ' services · ' + CATU.nbTaches + ' tâches — touchez une catégorie';
+    const heroSvc = document.querySelector('#hero-agents-n') ? document.querySelectorAll('.wrap')[0] : null;
+    try{ document.querySelectorAll('div[style*="text-align:center"] b').forEach(b => { if((b.textContent||'').trim() === '17') b.textContent = String(CATU.nbServices); }); }catch(e){}
+    box.innerHTML = (CATU.accueil || []).map(f =>
+      '<button type="button" onclick="catNatOuvrirFamille(\''+f.id+'\')" style="cursor:pointer;text-align:left;border:1.5px solid var(--line);background:var(--card);border-radius:14px;padding:11px 12px;font:inherit">'
+      + '<span style="font-size:22px">'+f.ic+'</span>'
+      + '<b style="display:block;font-size:12.5px;margin-top:4px;line-height:1.25">'+catNatEch(f.nom)+'</b>'
+      + '<small style="color:var(--muted);font-weight:700">'+f.nb+' service(s)</small></button>').join('');
+  }catch(e){}
+  CATU.encours = false;
+}
+function catNatEch(t){ return (typeof langEch === 'function') ? langEch(t) : String(t==null?'':t).replace(/[&<>"']/g, k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k])); }
+function catNatOuvrirFamille(id){ CATU.fam = id; CATU.svc = null; CATU.sous = null; CATU.q = ''; catNatOuvrir(); }
+function catNatFam(id){ return (CATU.familles || []).find(f => f.id === id) || null; }
+function catNatSvc(id){ return (CATU.services || []).find(s => String(s.num) === String(id)) || null; }
+function catNatSous(svc, id){ return svc ? (svc.sous || []).find(x => String(x.num) === String(id)) || null : null; }
+function catNatAutreFam(){ /* 🛠️ la catégorie « Je ne trouve pas mon service » du catalogue */ return (CATU.familles || []).find(f => f.id === 'autre') || null; }
+/* ── le fil d'Ariane : le client sait toujours où il est ── */
+function catNatFil(){
+  const f = catNatFam(CATU.fam), s = catNatSvc(CATU.svc), x = catNatSous(s, CATU.sous);
+  const parts = [['Tous les services', 'catNatRacine()']];
+  if(f) parts.push([f.ic + ' ' + f.nom, 'catNatNiveau(\'fam\')']);
+  if(s) parts.push([s.ic + ' ' + s.nom, 'catNatNiveau(\'svc\')']);
+  if(x) parts.push([x.nom, 'catNatNiveau(\'sous\')']);
+  return parts.map((p, i) => i === parts.length - 1
+    ? '<b style="font-size:12.5px">'+catNatEch(p[0])+'</b>'
+    : '<button type="button" onclick="'+p[1]+'" style="cursor:pointer;border:none;background:rgba(255,255,255,.2);color:#fff;font:inherit;font-weight:800;font-size:11.5px;padding:4px 9px;border-radius:99px">'+catNatEch(p[0])+'</button>'
+  ).join('<span style="opacity:.6"> › </span>');
+}
+function catNatRacine(){ CATU.fam = null; CATU.svc = null; CATU.sous = null; CATU.q = ''; catNatPeindre(); }
+function catNatNiveau(ou){
+  if(ou === 'fam'){ CATU.svc = null; CATU.sous = null; }
+  else if(ou === 'svc'){ CATU.sous = null; }
+  catNatPeindre();
+}
+function catNatPeindre(){
+  const b = catNatBox(); if(!b) return;
+  const tete = '<div style="position:sticky;top:0;z-index:5;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:12px 15px">'
+    + '<div style="display:flex;align-items:center;gap:10px">'
+    + '<div style="flex:1;min-width:0"><b style="font-size:15.5px;display:block">📚 Tous les services</b>'
+    + '<small style="opacity:.92;font-size:11.5px">'+CATU.nbServices+' services · '+CATU.nbTaches+' tâches — parlez comme vous parlez</small></div>'
+    + '<button onclick="catNatFermer()" style="border:none;background:rgba(255,255,255,.22);color:#fff;font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">✕</button></div>'
+    + '<div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:9px">'+catNatFil()+'</div></div>';
+  b.innerHTML = tete + '<div style="max-width:640px;margin:0 auto;padding:13px 14px 90px">' + catNatCorps() + '</div>';
+  try{ window.scrollTo(0,0); }catch(e){}
+}
+function catNatCherche(texte, o){   /* un mot simple doit retrouver la tâche : canapé, fuite, gazon… */
+  const q = normT(texte);
+  if(!q) return false;
+  return normT(o).indexOf(q) >= 0;
+}
+function catNatCorps(){
+  if(CATU.err) return '<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:13px;padding:12px;font-weight:800">'+catNatEch(CATU.err)+'</div>'
+    + '<button type="button" onclick="catNatCharger()" style="width:100%;margin-top:9px;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;padding:13px;border-radius:13px;cursor:pointer">🔄 Réessayer</button>';
+  const out = [];
+  out.push('<input id="catnat-q" value="'+catNatEch(CATU.q)+'" oninput="CATU.q=this.value;catNatPeintCorps()" placeholder="🔍 Cherchez avec vos mots : canapé, fuite, gazon, frigo cassé…" autocomplete="off" style="width:100%;box-sizing:border-box;padding:12px;border-radius:12px;border:1.5px solid var(--line);background:#fff;font:inherit;font-weight:700">');
+  out.push('<button type="button" onclick="CATU.idee=true;CATU.ideeRep=null;catNatPeintCorps()" style="width:100%;margin-top:8px;border:1.5px dashed #F6D9BE;background:#FFF4E8;color:var(--pd);font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer">🤔 Je ne trouve pas mon service — décrivez-le</button>');
+  if(CATU.idee) return out.join('') + catNatIdeeHTML();
+  if(CATU.q && normT(CATU.q).length >= 2) return out.join('') + catNatResultats();
+  out.push(catNatNiveauHTML());
+  if(CATU.sel.length) out.push(catNatBarreSel());
+  return out.join('');
+}
+function catNatPeintCorps(){
+  const b = catNatBox(); if(!b) return;
+  const z = b.querySelector('div[style*="max-width:640px"]'); if(!z) return catNatPeindre();
+  z.innerHTML = catNatCorps();
+  const i = document.getElementById('catnat-q');
+  if(i && !CATU.recree){ try{ i.focus(); i.setSelectionRange(i.value.length, i.value.length); }catch(e){} }
+}
+function catNatLib(cle, id){                       /* 🏠 💰 📅 : on écrit les mots du client, pas des identifiants */
+  const l = ((cle === 'lieux' ? CATU.lieux : cle === 'tarifs' ? CATU.tarifs : CATU.dispos) || []).find(x => x.id === id);
+  return l ? ((l.ic ? l.ic + ' ' : '') + l.nom) : '';
+}
+function catNatInfos(v){
+  const lieux = (v.lieux || []).map(x => catNatLib('lieux', x)).filter(Boolean).slice(0, 2);
+  const tarifs = (v.tarifs || []).map(x => catNatLib('tarifs', x)).filter(Boolean).slice(0, 2);
+  const dispo = catNatLib('dispos', v.dispo);
+  return [lieux.join(' · '), tarifs.join(' · '), dispo].filter(Boolean).join('  —  ');
+}
+function catNatNiveauHTML(){
+  const f = catNatFam(CATU.fam), s = catNatSvc(CATU.svc), x = catNatSous(s, CATU.sous);
+  const T = (nom, act, sous, extra, extra2) => '<button type="button" onclick="'+act+'" style="display:flex;align-items:center;gap:11px;width:100%;text-align:left;cursor:pointer;border:1.5px solid var(--line);background:#fff;border-radius:14px;padding:12px;margin-bottom:7px;font:inherit">'
+    + '<span style="font-size:23px">'+sous+'</span><span style="flex:1;min-width:0"><b style="display:block;font-size:13.5px;line-height:1.3">'+catNatEch(nom)+'</b>'
+    + (extra?'<small style="color:var(--muted);font-weight:700;display:block">'+catNatEch(extra)+'</small>':'')
+    + (extra2?'<small style="color:#8a6100;font-weight:700;display:block;font-size:11px;margin-top:2px">'+catNatEch(extra2)+'</small>':'')+'</span><span style="color:var(--pd);font-weight:900">›</span></button>';
+  const AUTRE = '<button type="button" onclick="CATU.idee=true;CATU.ideeRep=null;catNatPeintCorps()" style="display:flex;align-items:center;gap:11px;width:100%;text-align:left;cursor:pointer;border:1.5px dashed #F6D9BE;background:#FFF8EE;border-radius:14px;padding:12px;margin-bottom:7px;font:inherit">'
+    + '<span style="font-size:22px">🛠️</span><span style="flex:1"><b style="display:block;font-size:13.5px">Autre chose — je ne trouve pas mon service</b>'
+    + '<small style="color:#8a6100;font-weight:700">Décrivez-le : Klean cherche pour vous</small></span></button>';
+  /* ① les 12 catégories populaires, puis les autres */
+  if(!f){
+    const pop = CATU.accueil || [], autres = (CATU.familles || []).filter(x2 => !pop.some(p => p.id === x2.id));
+    const carte = (c) => '<button type="button" onclick="CATU.fam=\''+c.id+'\';CATU.svc=null;CATU.sous=null;catNatPeintCorps()" style="cursor:pointer;text-align:left;border:1.5px solid var(--line);background:#fff;border-radius:14px;padding:11px;font:inherit">'
+      + '<span style="font-size:22px">'+c.ic+'</span><b style="display:block;font-size:12.5px;margin-top:4px;line-height:1.25">'+catNatEch(c.nom)+'</b>'
+      + '<small style="color:var(--muted);font-weight:700">'+c.nb+' service(s)</small></button>';
+    return '<div style="font-size:13px;font-weight:900;margin:10px 0 7px">⭐ Les plus demandés</div>'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'+pop.map(carte).join('')+'</div>'
+      + (autres.length ? '<div style="font-size:13px;font-weight:900;margin:16px 0 7px">📂 Toutes les catégories</div>'
+        + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">'+autres.map(carte).join('')+'</div>' : '')
+      + '<div style="margin-top:14px">'+AUTRE+'</div>';
+  }
+  /* ② les services de la catégorie */
+  if(!s){
+    const l = (CATU.services || []).filter(v => v.famille === f.id);
+    return '<div style="font-size:13px;font-weight:900;margin:10px 0 7px">'+f.ic+' '+catNatEch(f.nom)+'</div>'
+      + (l.length ? l.map(v => T(v.nom, 'CATU.svc=\''+v.num+'\';CATU.sous=null;catNatPeintCorps()', v.ic, v.sous.length + ' sous-service(s)', catNatInfos(v))).join('')
+        : '<small style="color:var(--muted)">Aucun service actif dans cette catégorie pour le moment.</small>')
+      + AUTRE;
+  }
+  /* ③ les sous-services du service */
+  if(!x){
+    return '<div style="font-size:13px;font-weight:900;margin:10px 0 7px">'+s.ic+' '+catNatEch(s.nom)+'</div>'
+      + (s.reglemente ? '<div style="background:#FFF8EE;border:1.5px solid #F6D9BE;border-radius:12px;padding:9px 11px;font-size:12px;font-weight:800;color:#8a3d00;margin-bottom:8px">🩺 Certaines tâches de ce service sont réglementées : elles sont réservées aux professionnels habilités (diplôme ou agrément vérifié par Klean).</div>' : '')
+      + s.sous.map(v => T(v.nom, 'CATU.sous=\''+v.num+'\';catNatPeintCorps()', '🗂️', v.taches.length + ' tâche(s)')).join('')
+      + AUTRE;
+  }
+  /* ④ les tâches : on coche ce qu'on veut faire (plusieurs si besoin) */
+  const tas = x.taches || [];
+  return '<div style="font-size:13px;font-weight:900;margin:10px 0 4px">'+s.ic+' '+catNatEch(s.nom)+' › '+catNatEch(x.nom)+'</div>'
+    + '<small style="color:var(--muted);font-weight:700;display:block;margin-bottom:9px">Touchez ce que vous voulez faire — vous pouvez en choisir plusieurs.</small>'
+    + (x.reglemente ? '<div style="background:#FFF8EE;border:1.5px solid #F6D9BE;border-radius:12px;padding:9px 11px;font-size:12px;font-weight:800;color:#8a3d00;margin-bottom:8px">🩺 Certaines de ces tâches sont réglementées : seuls les professionnels habilités peuvent les accepter.</div>' : '')
+    + (tas.length ? tas.map(t => {
+        const on = CATU.sel.some(k => k.nom === t.nom);
+        return '<button type="button" onclick="catNatBasculer(\''+catNatEch(t.nom).replace(/'/g,"\\'")+'\')" style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;border:1.5px solid '+(on?'var(--pd)':'var(--line)')+';background:'+(on?'#FFF4E8':'#fff')+';border-radius:12px;padding:11px;margin-bottom:6px;font:inherit">'
+          + '<span style="font-size:19px">'+(on?'✅':'⭕')+'</span><span style="flex:1;min-width:0"><b style="display:block;font-size:13px;font-weight:800">'+catNatEch(t.nom)+(t.regle?' 🩺':'')+'</b>'
+          + (t.regle?'<small style="color:#8a6100;font-weight:700;font-size:11px">Réservée aux professionnels habilités (diplôme ou agrément vérifié)</small>':'')+'</span></button>';
+      }).join('') : '<small style="color:var(--muted)">Aucune tâche détaillée pour l’instant — utilisez « Autre chose » ci-dessous.</small>')
+    + (CATU.sel.length ? catNatBarreSel() : '') + AUTRE;
+}
+/* 📋 tout ce que le client a coché part dans la demande (le pro doit maîtriser chaque tâche) */
+function catNatBasculer(nom){
+  const i = CATU.sel.findIndex(k => k.nom === nom);
+  if(i >= 0){ CATU.sel.splice(i, 1); return catNatPeintCorps(); }
+  const s = catNatSvc(CATU.svc), x = catNatSous(s, CATU.sous), f = catNatFam(CATU.fam);
+  CATU.sel.push({ nom, metier: (x && x.metier) || (s && s.metier) || '', fam: f ? f.nom : '', service: s ? s.nom : '', sous: x ? x.nom : '', tache: nom });
+  catNatPeintCorps();
+}
+function catNatBarreSel(){
+  return '<div style="position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1.5px solid var(--line);padding:11px 14px;box-shadow:0 -4px 14px rgba(0,0,0,.07);z-index:6">'
+    + '<div style="max-width:640px;margin:0 auto">'
+    + '<div style="font-size:12px;font-weight:800;color:#41544c;margin-bottom:7px">🧾 Vous avez choisi : '+CATU.sel.map(k => catNatEch(k.nom)).join(' + ')+'</div>'
+    + '<button type="button" onclick="catNatValider()" style="width:100%;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;padding:14px;border-radius:13px;cursor:pointer;font-size:15px">✅ Afficher les professionnels disponibles</button>'
+    + '<button type="button" onclick="CATU.sel=[];catNatPeintCorps()" style="width:100%;margin-top:6px;border:none;background:transparent;color:#6b7c73;font:inherit;font-weight:800;padding:6px;cursor:pointer;font-size:12px">Effacer mes choix</button>'
+    + '</div></div>';
+}
+/* 🔍 la recherche du catalogue : elle traverse les 4 niveaux (le client écrit « canapé ») */
+function catNatResultats(){
+  const q = CATU.q, res = [];
+  for(const s of (CATU.services || [])){
+    const fam = catNatFam(s.famille);
+    for(const ss of (s.sous || [])){
+      for(const t of (ss.taches || [])){
+        if(catNatCherche(q, t.nom) || catNatCherche(q, ss.nom) || catNatCherche(q, s.nom))
+          if(!res.some(r => r.nom === t.nom)) res.push({ nom:t.nom, metier: ss.metier || s.metier, fam: fam?fam.nom:'', service: s.nom, sous: ss.nom, tache: t.nom, reglemente: ss.reglemente || '' });
+      }
+      if(catNatCherche(q, ss.nom)) { /* le sous-service lui-même reste atteignable */ }
+    }
+  }
+  const svcs = (CATU.services || []).filter(s => catNatCherche(q, s.nom));
+  const out = [];
+  if(res.length) out.push('<div style="font-size:12.5px;font-weight:900;margin:12px 0 6px">✅ '+res.length+' tâche(s) trouvée(s) pour « '+catNatEch(q)+' » — touchez pour confirmer</div>'
+    + res.slice(0, 30).map(r => {
+      const on = CATU.sel.some(k => k.nom === r.nom);
+      return '<button type="button" onclick="catNatBasculerRes('+JSON.stringify(r).replace(/"/g,'&quot;')+')" style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;border:1.5px solid '+(on?'var(--pd)':'var(--line)')+';background:'+(on?'#FFF4E8':'#fff')+';border-radius:12px;padding:11px;margin-bottom:6px;font:inherit">'
+        + '<span style="font-size:19px">'+(on?'✅':'⭕')+'</span><span style="flex:1;min-width:0"><b style="display:block;font-size:13px">'+catNatEch(r.nom)+'</b>'
+        + '<small style="color:var(--muted);font-weight:700">'+catNatEch([r.fam, r.service, r.sous].filter(Boolean).join(' › '))+(r.reglemente?' · 🩺 pro habilité':'')+'</small></span></button>';
+    }).join(''));
+  if(svcs.length) out.push('<div style="font-size:12.5px;font-weight:900;margin:14px 0 6px">📂 Services correspondants</div>'
+    + svcs.slice(0, 24).map(s => '<button type="button" onclick="CATU.fam=\''+s.famille+'\';CATU.svc=\''+s.num+'\';CATU.sous=null;CATU.q=\'\';catNatPeintCorps()" style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:11px;margin-bottom:6px;font:inherit">'
+      + '<span style="font-size:20px">'+s.ic+'</span><b style="flex:1;font-size:13px">'+catNatEch(s.nom)+'</b><span style="color:var(--pd);font-weight:900">›</span></button>').join(''));
+  if(!out.length) out.push('<div style="background:#FFF8EE;border:1.5px solid #F6D9BE;border-radius:13px;padding:12px;font-size:12.5px;font-weight:800;color:#8a3d00;margin-top:12px">🤔 Rien trouvé avec ce mot — ce n’est pas grave : touchez « Je ne trouve pas mon service », décrivez avec vos mots et Klean cherchera pour vous.</div>');
+  if(CATU.sel.length) out.push(catNatBarreSel());
+  out.push('<button type="button" onclick="CATU.q=\'\';catNatPeintCorps()" style="width:100%;margin-top:12px;border:1.5px solid var(--line);background:#fff;color:#33433c;font:inherit;font-weight:800;padding:10px;border-radius:12px;cursor:pointer">← Revenir à la liste complète</button>');
+  return out.join('');
+}
+function catNatBasculerRes(r){
+  const i = CATU.sel.findIndex(k => k.nom === r.nom);
+  if(i >= 0) CATU.sel.splice(i, 1); else CATU.sel.push({ nom:r.nom, metier:r.metier, fam:r.fam, service:r.service, sous:r.sous, tache:r.tache });
+  catNatPeintCorps();
+}
+/* 🛠️ « Je ne trouve pas mon service » : l'IA propose, l'ADMINISTRATEUR valide (jamais de publication automatique) */
+function catNatIdeeHTML(){
+  const r = CATU.ideeRep;
+  const out = ['<div style="background:#fff;border-radius:16px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.05);margin-top:11px">'
+    + '<b style="display:block;font-size:14.5px">🤔 Je ne trouve pas mon service</b>'
+    + '<small style="color:var(--muted);font-weight:700;display:block;margin-top:3px">Décrivez avec vos mots. Klean cherche dans tout le catalogue, puis transmet votre demande à l’équipe — aucun service n’est créé automatiquement.</small>'
+    + '<textarea id="catnat-idee" rows="3" placeholder="Ex : je cherche un gars pour déplacer mes affaires à Bouaké" style="width:100%;box-sizing:border-box;margin-top:9px;padding:11px;border-radius:12px;border:1.5px solid var(--line);font:inherit;font-weight:700">'+catNatEch(CATU.ideeTxt)+'</textarea>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+    + '<button type="button" onclick="catNatEnvoyerIdee()" style="cursor:pointer;font:inherit;font-weight:900;font-size:13.5px;padding:12px 15px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff">📨 Envoyer ma demande</button>'
+    + '<button type="button" onclick="CATU.idee=false;catNatPeintCorps()" style="cursor:pointer;font:inherit;font-weight:900;font-size:13px;padding:11px 13px;border-radius:12px;border:1.5px solid var(--line);background:#fff;color:#33433c">← Revenir</button>'
+    + '</div><div style="font-size:11.5px;color:#7A6A5E;margin-top:7px">Pas besoin du nom du métier : écrivez ce que vous voulez faire, comme vous le diriez à un ami.</div></div>'];
+  if(r){
+    out.push('<div style="background:#EAF7F0;border:1.5px solid #B9E3CB;border-radius:13px;padding:12px;margin-top:10px">'
+      + '<div style="font-size:12px;font-weight:900;color:#0f5132">🧠 Klean a compris :</div>'
+      + '<div style="font-size:15px;font-weight:900;margin-top:3px">'+(r.comprisLong || r.compris || '—')+'</div>'
+      + (r.tache ? '<div style="font-size:12.5px;font-weight:800;color:#37624f;margin-top:2px">Tâche la plus proche : '+catNatEch(r.tache)+'</div>' : '')
+      + '<div style="font-size:11.5px;color:#37624f;margin-top:5px">'+catNatEch(r.message||'')+'</div>'
+      + (r.principal ? '<button type="button" onclick="catNatDepuisIdee(\''+r.principal+'\',\''+catNatEch(r.compris||'').replace(/'/g,"\\'")+'\',\''+catNatEch(r.tache||'').replace(/'/g,"\\'")+'\')" style="width:100%;margin-top:9px;border:none;background:#0f5132;color:#fff;font:inherit;font-weight:900;padding:12px;border-radius:12px;cursor:pointer">✅ Oui, c’est ça — voir les professionnels</button>' : '')
+      + '<div style="font-size:11.5px;color:#37624f;margin-top:6px">📋 Votre demande est transmise à l’équipe Klean. Elle ne devient un nouveau service qu’après validation.</div></div>');
+  }
+  return out.join('');
+}
+async function catNatEnvoyerIdee(){
+  const t = document.getElementById('catnat-idee');
+  CATU.ideeTxt = (t ? t.value : '').trim();
+  if(CATU.ideeTxt.length < 5){ CATU.note = '✍️ Écrivez quelques mots de plus'; return catNatPeintCorps(); }
+  CATU.ideeEnvoi = true; catNatPeintCorps();
+  const headers = { 'Content-Type': 'application/json' };
+  try{ if(typeof client !== 'undefined' && client && client.token) headers['X-Client-Token'] = client.token; }catch(e){}
+  let d = null;
+  try{ d = await fetch('/api/catalogue/idee', { method:'POST', headers, body: JSON.stringify({ texte: CATU.ideeTxt }) }).then(r => r.json()); }catch(e){}
+  CATU.ideeEnvoi = false;
+  if(!d || !d.ok){ CATU.note = '📡 Envoi impossible pour le moment — réessayez dans un instant.'; delete CATU.ideeRep; return catNatPeintCorps(); }
+  CATU.ideeRep = d; CATU.note = ''; catNatPeintCorps();
+}
+function catNatDepuisIdee(svc, nom, tache){
+  RECH.svc = svc; RECH.q = (tache || nom || '');
+  RECH.chaine = null; RECH.autres = [];
+  catNatFermer();
+  try{ rechercherDepuisAccueil(); }catch(e){ try{ ouvrirRecherche(); }catch(e2){} }
+}
+/* ✅ le client a choisi : on part chercher les professionnels avec la chaîne complète */
+function catNatValider(){
+  const sel = CATU.sel.slice(); if(!sel.length) return;
+  const p = sel[0];
+  RECH.q = sel.map(k => k.nom).join(' + ');
+  RECH.svc = p.metier || RECH.svc || '';
+  RECH.chaine = { categorie: p.fam, service: p.service, sous: p.sous, tache: p.tache || p.nom };
+  RECH.autres = sel.slice(1).map(k => k.nom);
+  RECH.compris = sel.map(k => k.nom).join(' + ');
+  RECH.quand = RECH.quand || 'maintenant';
+  CATU.sel = [];
+  catNatFermer();
+  RECH.etape = RECH.svc ? 'pos' : 'q'; RECH.msgErr = '';
+  try{ ouvrirRecherche(); }catch(e){}
+}
+try{ window.catNatOuvrir = catNatOuvrir; window.catNatValider = catNatValider; window.catNatAccueil = catNatAccueil; window.catNatPeindre = catNatPeindre; }catch(e){}
+/* 🏠 l'accueil est rempli dès que la page est prête (le catalogue vit dans son propre bloc :
+   on ne dépend pas de l'ordre des scripts, et si le serveur est lent l'accueil reste utilisable). */
+try{
+  const remplirAccueil = () => { try{ catNatAccueil(); }catch(e){} };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', remplirAccueil);
+  else setTimeout(remplirAccueil, 0);
+}catch(e){}
 /* ═══════════ 🗣️ LOT 102 — « JE DÉCRIS, KLEAN COMPREND » ═══════════
    Le client écrit (ou parle, ou montre une photo). Sa phrase part au serveur (/api/comprendre)
    et Klean lui répond : « 🧠 Nous avons compris que vous cherchez : … ».
@@ -5252,6 +5654,8 @@ function langHTML(){
     /* on affiche EXACTEMENT ce que le serveur a compris (icône comprise) — une seule vérité */
     const joli = c.comprisLong || (langIc(c.principal)+' '+(c.compris||'')+(c.tache ? ' · '+c.tache : ''));
     out.push('<div style="font-size:15.5px;font-weight:900;margin-top:3px">'+langEch(joli)+'</div>');
+    if(c.chaine) out.push('<div style="font-size:11.5px;color:#37624f;margin-top:4px">📚 '+langEch([c.chaine.categorie, c.chaine.service, c.chaine.sous, c.chaine.tache].filter(Boolean).join(' › '))+'</div>');
+
     const corr = c.corriges ? Object.keys(c.corriges) : [];
     if(corr.length) out.push('<div style="font-size:11.5px;color:#37624f;margin-top:3px">✏️ Nous avons corrigé : '+corr.map(k=>langEch(k)+' → '+langEch(c.corriges[k])).join(' · ')+'</div>');
     if(LANG.ok) out.push('<div style="font-size:11.5px;color:#0f5132;font-weight:800;margin-top:6px">👍 Parfait. Indiquez le lieu, puis « ✅ Afficher les professionnels disponibles ».</div>');
@@ -5260,6 +5664,17 @@ function langHTML(){
       + '<button type="button" onclick="langChanger()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12.5px;padding:9px 12px;border-radius:99px;border:1.5px solid #B9E3CB;background:#fff;color:#0f5132">✏️ Ce n’est pas ça</button></div>');
     const alt = (c.alternatives || []).filter(a => a.id !== c.principal);
     if(alt.length && !LANG.ok) out.push('<div style="font-size:11.5px;color:#37624f;margin-top:9px">Ou peut-être :</div>' + langChips(alt));
+    out.push('</div>');
+  } else if(c && c.mode === 'reglemente'){
+    const r = c.reglemente || {};
+    out.push('<div style="background:#FFF8EE;border:1.5px solid #F6D9BE;border-radius:13px;padding:11px 12px">');
+    out.push('<div style="font-size:12.5px;font-weight:900;color:#8a3d00">🩺 '+(r.ic||'')+' '+langEch(r.nom||'Prestation réglementée')+'</div>');
+    out.push('<div style="font-size:12px;color:#7A6A5E;margin-top:3px">Cette prestation est <b>séparée</b> chez Klean : elle est réservée aux professionnels <b>légalement habilités</b> — nous vérifions le diplôme ou l’agrément avant toute mise en relation.</div>');
+    if(r.exige) out.push('<div style="font-size:12px;font-weight:800;color:#8a3d00;margin-top:5px">📄 Ce qu’il faut fournir : '+langEch(r.exige)+'</div>');
+    if(r.note) out.push('<div style="font-size:11.5px;color:#7A6A5E;margin-top:4px">'+langEch(r.note)+'</div>');
+    out.push('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">'
+      + '<button type="button" onclick="LANG.ok=true;langPeindre();langAfficherPros(\''+LANG.ou+'\')" style="cursor:pointer;font:inherit;font-weight:900;font-size:12.5px;padding:9px 12px;border-radius:99px;border:none;background:#8a3d00;color:#fff">🔎 Voir les professionnels habilités</button>'
+      + '<button type="button" onclick="langChanger()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12.5px;padding:9px 12px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:#8a3d00">✏️ Décrire autre chose</button></div>');
     out.push('</div>');
   } else if(c && c.mode === 'kp'){
     out.push('<div style="background:#FFF4E8;border:1.5px solid #F6D9BE;border-radius:13px;padding:11px 12px;font-size:12.5px;font-weight:800;color:#8a3d00">🎫 Code '+langEch(c.code||'')+' détecté — appuyez sur « ✅ Afficher les professionnels disponibles » pour ouvrir sa fiche.</div>');
@@ -5571,7 +5986,8 @@ function rechLancerSansGps(){
 
 /* ═══════════ ÉTAPE 1 : QUEL SERVICE ? ═══════════ */
 function rechVueSvc(){
-  const svcs = (typeof SERVICES!=='undefined'?SERVICES:[]).filter(s=>s.id!=='custom');
+  /* 🔗 un métier fusionné ne se choisit plus à part (il partage les pros de son métier principal) */
+  const svcs = (typeof SERVICES!=='undefined'?SERVICES:[]).filter(s=>s.id!=='custom' && !FUSION[s.id]);
   const q = (RECH.q||'').toLowerCase();
   const list = q ? svcs.filter(s=>normT(s.nom+' '+(s.desc||'')).includes(normT(q))) : svcs;
   return '<div style="background:#fff;border-radius:16px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.05)">'
@@ -5601,13 +6017,15 @@ function rechPeintCorps(){
 /* ═══════════ ÉTAPE 2 : AUTORISATION GPS ═══════════ */
 function rechSetSvc(id){
   RECH.svc = id; RECH.etape = 'pos'; RECH.msgErr = '';
+  RECH.chaine = null; RECH.autres = []; RECH.tachesDemandees = []; RECH.reglementeRep = null;
   rechPeindre();
 }
 function rechVuePos(){
   const gpsOk = (typeof navigator!=='undefined' && navigator.geolocation);
   return '<div style="background:#fff;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,.05)">'
     + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:30px">'+rechSvcIc(RECH.svc)+'</span>'
-    + '<div><b style="display:block;font-size:16px">'+rechEch(rechSvcNom(RECH.svc))+'</b>'
+    + '<div><b style="display:block;font-size:16px">'+rechEch(RECH.chaine ? (RECH.chaine.tache || RECH.chaine.sous || RECH.chaine.service) : rechSvcNom(RECH.svc))+'</b>'
+    + (RECH.chaine ? '<small style="color:#6b7c73;display:block">📚 '+rechEch([RECH.chaine.categorie, RECH.chaine.service, RECH.chaine.sous].filter(Boolean).join(' › '))+'</small>' : '')
     + '<small style="color:#6b7c73">Ville : <b>'+rechEch(rechVille()||'—')+'</b>'+(rechQuartier()?(' · quartier '+rechEch(rechQuartier())):'')+'</small></div></div>'
     + (RECH.msgErr ? ('<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:12px;padding:11px 12px;font-size:13px;font-weight:700;margin-bottom:12px">'+RECH.msgErr+'</div>') : '')
     + '<p style="margin:0 0 12px;font-size:13.5px;color:#33433c">Pour vous montrer les professionnels <b>les plus proches</b>, Klean a besoin de votre position. '
@@ -5662,6 +6080,11 @@ async function rechChercher(avecGps){
   }
   if(avecGps && RECH.lat != null && lieuMode === 'moi') qs += '&lat=' + RECH.lat + '&lng=' + RECH.lng + '&acc=' + (RECH.acc || 0);
   /* 🕒 « Quand ? » choisi par le client : maintenant = demande urgente (priorité des pros disponibles) */
+  /* 📋 plusieurs tâches cochées dans le catalogue : elles partent avec la demande */
+  if(RECH.autres && RECH.autres.length){
+    const tas = [ (RECH.chaine && RECH.chaine.tache) || '' ].concat(RECH.autres).filter(Boolean).slice(0, 8);
+    if(tas.length > 1) qs += '&taches=' + encodeURIComponent(tas.join('|'));
+  }
   if((RECH.quand || (typeof LANG !== 'undefined' && LANG.quand)) === 'maintenant') qs += '&urgent=1';
   if(RECH.elargir) qs += '&horsLigne=1';
   if(RECH.zoneElargie) qs += '&zoneElargie=' + RECH.zoneElargie;
@@ -5693,6 +6116,8 @@ async function rechChercher(avecGps){
       RECH.enLigne = d.enLigne || 0; RECH.libres = d.libres || 0;
       RECH.prixIndicatif = d.prixIndicatif || null;
       RECH.serviceNom = d.serviceNom || '';
+      RECH.tachesDemandees = d.taches || [];
+      RECH.reglementeRep = d.reglemente || null;
     }
   }catch(e){ RECH.busy = false; RECH.liste = []; RECH.msgErr = '📡 Serveur injoignable — vérifiez votre connexion.'; }
   rechPeindre();
@@ -5732,6 +6157,8 @@ function rechVueListe(){
     + '<b style="display:block;font-size:15.5px;color:var(--pd);line-height:1.3">Professionnels disponibles pour votre demande</b>'
     + '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px"><span style="font-size:13px;font-weight:800">🔎 '+(RECH.compris?rechEch(RECH.compris):rechEch(RECH.q||'Recherche'))+'</span>'
     + '<button type="button" onclick="RECH.etape=\'q\';RECH.msgErr=\'\';rechPeindre()" style="margin-left:auto;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd);font:inherit;font-weight:900;padding:6px 10px;border-radius:99px;cursor:pointer;font-size:11.5px">✏️ Modifier</button></div>'
+    + ((RECH.tachesDemandees && RECH.tachesDemandees.length > 1) ? '<div style="margin-top:7px;background:#FFF8EE;border:1.5px solid #F6D9BE;border-radius:11px;padding:8px 10px;font-size:12px;font-weight:800;color:#8a3d00">🧾 Vous avez demandé : '+RECH.tachesDemandees.map(rechEch).join(' + ')+'<br><span style="font-weight:700">Le professionnel qui accepte maîtrise chaque tâche de la liste.</span></div>' : '')
+    + (RECH.reglementeRep ? '<div style="margin-top:7px;background:#FFF8EE;border:1.5px solid #F6D9BE;border-radius:11px;padding:8px 10px;font-size:12px;font-weight:800;color:#8a3d00">🩺 '+rechEch(RECH.reglementeRep.nom||'Prestation réglementée')+' : réservée aux professionnels habilités ('+rechEch(RECH.reglementeRep.exige||'diplôme ou agrément vérifié')+').</div>' : '')
     + '<div style="margin-top:5px;font-size:12.5px;color:#41544c">'+posTxt+((RECH.lieuOk === false)?' <span style="color:#b36b00;font-weight:800">(lieu non reconnu : recherche élargie à votre ville)</span>':'')+'</div>'
     + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">'
     + '<span style="font-size:11px;font-weight:900;background:#FFF4E8;color:var(--pd);padding:4px 9px;border-radius:99px">'+(RECH.libres||0)+' disponible(s)</span>'

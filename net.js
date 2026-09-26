@@ -137,6 +137,16 @@ async function netLaunchSearch(){
   c.desc = (_bd ? _bd.value : '').trim().slice(0,280);
   c.photos = (window._customPhotos || []).slice(0, 3);
   if(document.querySelector('#inp-budget')) c.budget = parseInt((document.querySelector('#inp-budget').value||'').replace(/\D/g,'')) || 0;
+  /* 📚 catalogue national : la chaîne comprise (catégorie → service → sous-service → tâche)
+     et TOUTES les tâches cochées partent avec la demande — le pro doit les maîtriser. */
+  try{
+    if(c && typeof RECH !== 'undefined' && RECH && RECH.chaine && (!c.service || c.service === RECH.svc || RECH.svc === '')){
+      c.chaine = RECH.chaine;
+      const tas = [RECH.chaine.tache].concat(RECH.autres || []).filter(Boolean).slice(0, 8);
+      if(tas.length) c.taches = tas;
+    }
+    if(c && typeof RECH !== 'undefined' && RECH && RECH.tachesDemandees && RECH.tachesDemandees.length > 1) c.taches = RECH.tachesDemandees.slice(0, 8);
+  }catch(e){}
   if(c.service==='cours' && !c.desc) return toast('📖 Précisez la matière ou le domaine du coach');
   if(c.service==='custom' && (!c.desc || c.desc.length < 8)) return toast('📝 Décrivez votre besoin en quelques mots');
   if(!c.nom) return toast('Indiquez votre nom 👤');
@@ -440,6 +450,10 @@ function routeNet(msg){
       try { if (window.kleanOnServicesDeploy) window.kleanOnServicesDeploy(msg); } catch (e) { }
       break;
 
+    case 'catalogue_maj':             // → TOUS : le PDG a touché au catalogue national
+      try { if (window.kleanOnCatalogueMaj) window.kleanOnCatalogueMaj(msg); } catch (e) { }
+      break;
+
     case 'cities_deploy':             // → TOUS : le HQ a publié une ville
       try { if (window.kleanOnCitiesDeploy) window.kleanOnCitiesDeploy(msg); } catch (e) { }
       break;
@@ -612,6 +626,9 @@ function netShowRequest(m){
     <div class="rline"><span>🛏️ ${m.pieces} pièce(s) · ${m.depth}</span><span></span></div>
     <div class="rline"><span>🕐 ${formatDate(m.date||'')} à ${m.time}</span><span></span></div>
     ${m.desc ? `<div class=\"rline\" style=\"background:var(--pl);border-radius:8px;padding:6px 8px\"><span>📝 ${m.desc}</span><span></span></div>` : ''}
+    ${(m.taches && m.taches.length) ? `<div class=\"rline\" style=\"background:#FFF8EE;border-radius:8px;padding:6px 8px\"><span>🧾 Tâches demandées : ${m.taches.join(' + ')}</span><span></span></div>` : ''}
+    ${m.chaine ? `<div class=\"rline\"><span>📚 ${[m.chaine.categorie, m.chaine.service, m.chaine.sous].filter(Boolean).join(' › ')}</span><span></span></div>` : ''}
+    ${m.reglemente ? `<div class=\"rline\" style=\"background:#FFF8EE;border-radius:8px;padding:6px 8px\"><span>🩺 Prestation réglementée — réservée aux professionnels habilités</span><span></span></div>` : ''}
     ${m.budget ? `<div class=\"rline\"><span>💰 Budget client indicatif</span><span>${fmt(m.budget)}</span></div>` : ''}
     <div class="rline"><span>📍 Distance${gpsTag}</span><span>${distShown.toFixed(1)} km</span></div>
     <div class="rline total"><span>Montant mission</span><span>${fmt(p.total)}</span></div>`;
