@@ -336,6 +336,71 @@
       <div id="partner-list" style="margin-top:8px"></div>
     </div>
   </div>
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-pay">
+    <h3>💳 Moyens de paiement <span class="cnt" id="pm-cnt">PDG</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <div id="pm-kpi" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <div id="pm-table"></div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:11px">
+        <button class="btn-main" style="flex:1;min-width:170px" onclick="pmForm(true, null)">➕ Ajouter un numéro de paiement</button>
+        <button onclick="chargerPaiements()" style="flex:none;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px 14px;border-radius:10px;cursor:pointer;font-family:inherit">🔄 Recharger</button>
+      </div>
+      <div id="pm-form" style="display:none;border:1.5px dashed var(--line);border-radius:13px;padding:12px;margin-top:12px">
+        <b id="pm-titre" style="display:block;margin-bottom:8px">➕ Ajouter un moyen de paiement</b>
+        <input type="hidden" id="pm-edit-id">
+        <input id="pm-libelle" placeholder="Nom affiché (ex : Orange Money)" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:7px">
+        <input id="pm-numero" placeholder="Numéro de réception (ex : 0709076130)" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:7px">
+        <select id="pm-operateur" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:7px">
+          <option value="auto">Opérateur détecté automatiquement (préfixe du numéro)</option>
+          <option value="orange">Orange Money (07…)</option>
+          <option value="moov">Moov Money (01…)</option>
+          <option value="mtn">MTN MoMo (05…)</option>
+          <option value="wave">Wave (compte marchand)</option>
+          <option value="autre">Autre / carte bancaire</option>
+        </select>
+        <input id="pm-titulaire" placeholder="Titulaire du compte (facultatif)" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:7px">
+        <input id="pm-note" placeholder="Note interne (facultatif)" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:8px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;font-size:12.5px;font-weight:700">
+          <label style="display:flex;gap:7px;align-items:center"><input type="checkbox" id="pm-actif" checked> 🟢 Paiement activé</label>
+          <label style="display:flex;gap:7px;align-items:center"><input type="checkbox" id="pm-client" checked> 👤 Visible client</label>
+          <label style="display:flex;gap:7px;align-items:center"><input type="checkbox" id="pm-pro" checked> 🛠️ Visible pro</label>
+          <label style="display:flex;gap:7px;align-items:center"><input type="checkbox" id="pm-principal"> ⭐ Principal</label>
+        </div>
+        <button class="btn-main" style="width:100%;margin-top:9px" onclick="pmEnregistrer()">💾 Enregistrer</button>
+        <button onclick="pmForm(false)" style="width:100%;margin-top:7px;background:var(--card2);border:1px solid var(--line);color:var(--muted);font:inherit;font-weight:800;padding:10px;border-radius:10px;cursor:pointer">Annuler</button>
+      </div>
+      <small id="pm-state" style="display:block;margin-top:8px;font-weight:800;color:var(--amber)">État : —</small>
+      <small id="pm-note" style="display:block;margin-top:5px;color:var(--muted);font-size:11.5px"></small>
+      <hr style="border:none;border-top:1.5px dashed var(--line);margin:13px 0">
+      <b style="font-size:12.5px">🔌 Intégrations officielles (pour encaisser automatiquement)</b>
+      <div id="pm-integr" style="margin-top:8px"></div>
+      <hr style="border:none;border-top:1.5px dashed var(--line);margin:13px 0">
+      <b style="font-size:12.5px">🔌 Agrégateur de paiement — CinetPay (un seul contrat)</b>
+      <div id="cp-etat" style="margin-top:8px;font-size:12.5px;font-weight:800">Chargement…</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:9px">
+        <label style="font-size:11.5px;font-weight:800">Site ID CinetPay<input id="cp-site" placeholder="ex : 123456" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        <label style="font-size:11.5px;font-weight:800">Canaux affichés<select id="cp-canaux" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"><option value="ALL">Tous (Wave, Orange, MTN, Moov, carte)</option><option value="MOBILE_MONEY">Mobile Money seulement</option><option value="CREDIT_CARD">Carte bancaire seulement</option></select></label>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:12.5px;font-weight:700"><input type="checkbox" id="cp-actif"> Encaissement en ligne activé (les clients peuvent payer par CinetPay)</label>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">
+        <button class="btn-main" style="flex:1;min-width:140px" onclick="sauverProviderPay()">💾 Enregistrer</button>
+        <button onclick="testerProviderPay()" style="flex:1;min-width:140px;background:linear-gradient(135deg,#4aa3ff,#1f6fd0);border:none;color:#fff;font-weight:900;padding:11px;border-radius:10px;cursor:pointer;font-family:inherit">🔍 Tester la connexion CinetPay</button>
+      </div>
+      <div id="cp-out" style="margin-top:9px;font-size:12px"></div>
+      <div id="cp-urls" style="margin-top:9px"></div>
+      <div id="cp-docs" style="margin-top:9px;font-size:11.5px;color:var(--muted);line-height:1.5"></div>
+
+      <hr style="border:none;border-top:1.5px dashed var(--line);margin:13px 0">
+      <b style="font-size:12.5px">🧾 Transactions — historique des paiements</b>
+      <div style="overflow:auto;margin-top:8px"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <thead><tr style="text-align:left;color:var(--muted);font-size:11px">
+          <th style="padding:6px 4px">Référence</th><th style="padding:6px 4px">Quand</th><th style="padding:6px 4px">Client</th>
+          <th style="padding:6px 4px">Montant</th><th style="padding:6px 4px">Moyen</th><th style="padding:6px 4px">Statut</th><th></th></tr></thead>
+        <tbody id="pm-tx"><tr><td colspan="7" style="padding:10px;color:var(--muted)">Chargement…</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px;display:none" id="panel-paydest">
     <h3>💳 Numéros de paiement</h3>
     <div class="body" style="padding:12px 14px">
@@ -695,6 +760,7 @@ const HQ_GO = [
   ['panel-cands','🛡️ Vérification pros'],
   ['panel-hqchat','🟠 Fil PDG'],
   ['panel-promo','🎟️ Promos & partenaires'],
+  ['panel-pay','💳 Moyens de paiement (PDG)'],
   ['panel-paydest','💳 Numéros de paiement'],
   ['panel-demande-comptes','🟠 Demandes blocage/suppression'],
   ['panel-trash','♻️ Comptes supprimés'],
@@ -723,9 +789,13 @@ function jumpPanel(id){
   const el=document.getElementById(id);
   if(!el) return;
   el.style.display='';
-  el.scrollIntoView({behavior:'smooth', block:'start'});
+  try{ if(el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
   el.style.outline='2px solid var(--p)';
   setTimeout(()=>{ el.style.outline=''; }, 1600);
+  /* 🔄 ouverture de la fenêtre » : on rafraîchit les données de ce panneau */
+  try{
+    if(id==='panel-pay'){ try{ chargerPaiements(); }catch(e){} try{ chargerProviderPay(); }catch(e){} }
+  }catch(e){}
 }
 async function runSearchHQ(){
   const q=((document.getElementById('hq-q')||{}).value||'').trim();
@@ -761,6 +831,237 @@ function fermerFenetreVilles(){
   const w=document.getElementById('win-villes');
   if(w) w.style.display='none';
   document.body.style.overflow='';
+}
+
+
+
+/* ═══════════ 🔌 AGRÉGATEUR CINETPAY (un seul contrat pour tout) ═══════════ */
+let PAY_PROV = null;
+async function chargerProviderPay(){
+  try{
+    const d = await fetchJ('/api/admin/pay/provider');
+    PAY_PROV = d;
+    document.getElementById('cp-site').value = d.provider.siteIdEnBase || d.provider.siteId || '';
+    document.getElementById('cp-canaux').value = d.provider.canaux || 'ALL';
+    document.getElementById('cp-actif').checked = d.provider.actif !== false;
+    document.getElementById('cp-etat').innerHTML = d.pret
+      ? '<span class="pill" style="background:rgba(21,201,138,.16);color:#0a8a62">🟢 CinetPay prêt — encaissement automatique actif</span>'
+      : '<span class="pill" style="background:rgba(255,183,3,.18);color:#8a6100">🟠 CinetPay à configurer — confirmation manuelle en attendant</span>';
+    document.getElementById('cp-out').innerHTML = d.pret
+      ? '<div style="color:#0a8a62;font-weight:800">Clé d’API détectée ✓ — les paiements seront vérifiés automatiquement chez CinetPay.</div>'
+      : '<b style="color:#8a6100">Il manque :</b><ul style="margin:5px 0 0 16px;padding:0">' + (d.manque||[]).map(k=>'<li>'+k+'</li>').join('') + '</ul>';
+    document.getElementById('cp-urls').innerHTML = '<b style="font-size:12px">À copier dans le back-office CinetPay (page Intégration) :</b>'
+      + '<div style="font-size:11.5px;margin-top:5px;line-height:1.7">URL de notification : <code>'+d.urls.notify+'</code> <button onclick="copyText(\''+d.urls.notify+'\',\'📋 URL copiée\')" style="border:none;background:var(--card2);border-radius:7px;padding:3px 7px;cursor:pointer;font:inherit;font-size:11px">copier</button>'
+      + '<br>URL de retour : <code>'+d.urls.retour+'</code> <button onclick="copyText(\''+d.urls.retour+'\',\'📋 URL copiée\')" style="border:none;background:var(--card2);border-radius:7px;padding:3px 7px;cursor:pointer;font:inherit;font-size:11px">copier</button></div>';
+    document.getElementById('cp-docs').innerHTML = '<b>📄 Dossier d’ouverture du compte marchand CinetPay :</b><ul style="margin:5px 0 0 16px;padding:0">'
+      + (d.docs||[]).map(k=>'<li>'+k+'</li>').join('') + '</ul><div style="margin-top:5px">'+d.delai+'</div>';
+  }catch(e){ document.getElementById('cp-etat').innerHTML = '<span style="color:var(--red)">Chargement impossible</span>'; }
+}
+async function sauverProviderPay(){
+  const body = { siteId: document.getElementById('cp-site').value, canaux: document.getElementById('cp-canaux').value, actif: document.getElementById('cp-actif').checked };
+  try{
+    const r = await fetch('/api/admin/pay/provider', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json(); if(!r.ok) throw new Error(d.error||'refusé');
+    document.getElementById('pm-state').textContent = 'État : ✅ réglages CinetPay enregistrés';
+    await chargerProviderPay(); await chargerPaiements();
+  }catch(e){ document.getElementById('pm-state').textContent = 'État : ⚠️ ' + e.message; }
+}
+async function testerProviderPay(){
+  document.getElementById('cp-out').innerHTML = '⏳ Test en cours auprès de CinetPay…';
+  try{
+    const r = await fetch('/api/admin/pay/provider/test', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d = await r.json();
+    document.getElementById('cp-out').innerHTML = (d.ok ? '<div style="color:#0a8a62;font-weight:800">✅ ' : '<div style="color:var(--amber);font-weight:800">⚠️ ')
+      + (d.message||'') + '</div>' + (d.manque?('<ul style="margin:5px 0 0 16px;padding:0">'+d.manque.map(k=>'<li>'+k+'</li>').join('')+'</ul>'):'');
+    await chargerProviderPay();
+  }catch(e){ document.getElementById('cp-out').innerHTML = '<b style="color:var(--red)">Test impossible</b>'; }
+}
+
+/* ═══════════ 💳 MOYENS DE PAIEMENT (PDG) + TRANSACTIONS ═══════════ */
+let PAY_REGLAGES = null;
+async function chargerPaiements(){
+  try{
+    const d = await fetchJ('/api/admin/pay-methods');
+    PAY_REGLAGES = d;
+    document.getElementById('pm-kpi').innerHTML =
+      '<span class="pill" style="background:rgba(21,201,138,.14);color:#0a8a62">💰 Encaissé : '+fmt(d.totaux.encaisse)+'</span>'
+      + '<span class="pill" style="background:rgba(255,183,3,.16);color:#8a6100">⏳ En attente : '+fmt(d.totaux.enAttente)+'</span>'
+      + '<span class="pill" style="background:rgba(74,163,255,.16);color:#1f6fd0">🔎 À vérifier : '+d.totaux.aVerifier+'</span>'
+      + '<span class="pill">🧾 '+d.totaux.transactions+' transaction(s)</span>';
+    /* ── le tableau demandé : Moyen · Numéro · Visible Client · Visible Pro · Paiement · Statut ── */
+    const oui = v => v ? '<span style="color:#0a8a62;font-weight:900">✅ Oui</span>' : '<span style="color:var(--red);font-weight:900">❌ Non</span>';
+    document.getElementById('pm-table').innerHTML = '<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+      + '<thead><tr style="text-align:left;color:var(--muted);font-size:11px">'
+      + '<th style="padding:6px 4px">Moyen de paiement</th><th style="padding:6px 4px">Numéro</th>'
+      + '<th style="padding:6px 4px">Visible Client</th><th style="padding:6px 4px">Visible Pro</th>'
+      + '<th style="padding:6px 4px">Paiement</th><th style="padding:6px 4px">Statut</th><th></th></tr></thead><tbody>'
+      + (d.methods.length ? d.methods.map((m,i)=>
+          '<tr style="border-top:1px solid var(--line)">'
+          + '<td style="padding:7px 4px"><b>'+(m.ic||'💳')+' '+m.libelle+'</b>'+(m.principal?' <span class="pill" style="background:rgba(21,201,138,.16);color:#0a8a62;font-size:10px">⭐ Principal</span>':'')+(m.titulaire?('<br><small style="color:var(--muted)">'+m.titulaire+'</small>'):'')+'</td>'
+          + '<td style="padding:7px 4px;font-weight:800;white-space:nowrap">'+m.numeroAffiche+'</td>'
+          + '<td style="padding:7px 4px"><button onclick="pmToggle(\''+m.id+'\',\'visibleClient\')" style="background:none;border:none;cursor:pointer;font:inherit">'+oui(m.visibleClient)+'</button></td>'
+          + '<td style="padding:7px 4px"><button onclick="pmToggle(\''+m.id+'\',\'visiblePro\')" style="background:none;border:none;cursor:pointer;font:inherit">'+oui(m.visiblePro)+'</button></td>'
+          + '<td style="padding:7px 4px">'+(m.actif?'<span style="color:#0a8a62;font-weight:900">🟢 Activé</span>':'<span style="color:var(--red);font-weight:900">⚪ Désactivé</span>')+'</td>'
+          + '<td style="padding:7px 4px">'+(m.actif?'<span class="pill" style="background:rgba(21,201,138,.14);color:#0a8a62">Actif</span>':'<span class="pill" style="background:rgba(255,107,107,.14);color:var(--red)">Inactif</span>')+'</td>'
+          + '<td style="padding:7px 4px;white-space:nowrap">'
+          + '<button title="Définir comme principal" onclick="pmPrincipal(\''+m.id+'\')" style="border:none;background:var(--card2);border-radius:8px;padding:5px 7px;cursor:pointer;font:inherit">⭐</button> '
+          + '<button title="Modifier" onclick="pmEditer(\''+m.id+'\')" style="border:none;background:var(--card2);border-radius:8px;padding:5px 7px;cursor:pointer;font:inherit">✏️</button> '
+          + '<button title="'+(m.actif?'Désactiver':'Réactiver')+'" onclick="pmToggle(\''+m.id+'\',\'actif\')" style="border:none;background:var(--card2);border-radius:8px;padding:5px 7px;cursor:pointer;font:inherit">'+(m.actif?'⏸️':'▶️')+'</button> '
+          + '<button title="Supprimer" onclick="pmSupprimer(\''+m.id+'\')" style="border:none;background:rgba(255,107,107,.12);border-radius:8px;padding:5px 7px;cursor:pointer;font:inherit">🗑️</button>'
+          + '</td></tr>').join('') : '<tr><td colspan="7" style="padding:10px;color:var(--muted)">Aucun moyen de paiement — ajoutez-en un ci-dessous.</td></tr>')
+      + '</tbody></table></div>';
+    document.getElementById('pm-note').textContent = d.notice || '';
+    /* ── intégrations officielles : ce qui manque exactement ── */
+    document.getElementById('pm-integr').innerHTML = (d.integrations||[]).map(x=>
+      '<div style="border:1px solid var(--line);border-radius:11px;padding:9px 11px;margin-bottom:7px">'
+      + '<b style="font-size:12.5px">'+x.ic+' '+x.nom+' — '+(x.apiOfficielle?'🟢 API détectée':'🟠 Encaissement manuel (déclaration + vérification)')+'</b>'
+      + '<div style="margin-top:5px;font-size:11.5px;color:var(--muted);line-height:1.5">Il manque pour encaisser automatiquement :'
+      + '<ul style="margin:5px 0 0 16px;padding:0">'+x.manque.map(k=>'<li>'+k+'</li>').join('')+'</ul>'
+      + 'URL de notification à déclarer : <code style="font-size:11px">'+x.webhookUrl+'</code></div></div>').join('')
+      + '<small style="color:var(--muted);font-size:11.5px">Tant que ces éléments manquent, <b>aucun paiement n’est marqué réussi automatiquement</b> : vous confirmez après vérification (avec votre mot de passe et le n° de transaction de l’opérateur).</small>';
+    /* ── journal des transactions ── */
+    const ap = await fetchJ('/api/admin/paiements');
+    document.getElementById('pm-tx').innerHTML = (ap.paiements||[]).length ? ap.paiements.map(x=>
+      '<tr style="border-top:1px solid var(--line)">'
+      + '<td style="padding:6px 4px;font-weight:800;white-space:nowrap">'+x.ref+'</td>'
+      + '<td style="padding:6px 4px">'+hhmm(x.createdAt)+'<br><small style="color:var(--muted)">'+(x.missionId||'—')+'</small></td>'
+      + '<td style="padding:6px 4px">'+(x.clientNom||'—')+'</td>'
+      + '<td style="padding:6px 4px;font-weight:800">'+fmt(x.montant)+'</td>'
+      + '<td style="padding:6px 4px">'+(x.moyen?((x.moyen.libelle||'')+'<br><small style="color:var(--muted)">'+x.numeroAffiche+'</small>'):'—')+'</td>'
+      + '<td style="padding:6px 4px">'+pmBadge(x.statut)+(x.txOperateur?('<br><small style="color:var(--muted)">tx '+x.txOperateur+'</small>'):'')+'</td>'
+      + '<td style="padding:6px 4px;white-space:nowrap">'+(['en_attente','declare'].includes(x.statut)
+          ? '<button onclick="pmConfirmer(\''+x.id+'\')" style="border:none;background:rgba(21,201,138,.16);color:#0a8a62;font-weight:900;border-radius:8px;padding:6px 9px;cursor:pointer;font:inherit">✅ Confirmer</button> '
+            + '<button onclick="pmRefuser(\''+x.id+'\')" style="border:none;background:rgba(255,107,107,.13);color:var(--red);font-weight:900;border-radius:8px;padding:6px 9px;cursor:pointer;font:inherit">❌ Refuser</button>'
+          : (x.confirmePar?('<small style="color:var(--muted)">'+x.confirmePar+'</small>'):'—'))+'</td></tr>').join('')
+      : '<tr><td colspan="7" style="padding:10px;color:var(--muted)">Aucune transaction pour le moment.</td></tr>';
+  }catch(e){ document.getElementById('pm-kpi').innerHTML = '<span class="pill" style="color:var(--red)">Chargement impossible</span>'; }
+}
+function pmBadge(st){
+  const T = { en_attente:['#8a6100','rgba(255,183,3,.16)','⏳ En attente'], declare:['#1f6fd0','rgba(74,163,255,.16)','📨 Déclaré — à vérifier'],
+    reussi:['#0a8a62','rgba(21,201,138,.16)','✅ Réussi'], echoue:['var(--red)','rgba(255,107,107,.14)','❌ Échoué'], annule:['var(--muted)','rgba(120,120,120,.14)','🚫 Annulé'] };
+  const t = T[st] || ['var(--muted)','var(--card2)',st];
+  return '<span class="pill" style="background:'+t[1]+';color:'+t[0]+';white-space:nowrap">'+t[2]+'</span>';
+}
+function pmFind(id){ return ((PAY_REGLAGES||{}).methods||[]).find(x=>x.id===id); }
+function pmForm(ouvrir, m){
+  const el = document.getElementById('pm-form');
+  if(!ouvrir){ el.style.display='none'; return; }
+  document.getElementById('pm-edit-id').value = m ? m.id : '';
+  document.getElementById('pm-titre').textContent = m ? ('✏️ Modifier : ' + m.libelle) : '➕ Ajouter un moyen de paiement';
+  document.getElementById('pm-libelle').value = m ? m.libelle : '';
+  document.getElementById('pm-numero').value  = m ? m.numero  : '';
+  document.getElementById('pm-operateur').value = m ? m.operateur : 'auto';
+  document.getElementById('pm-titulaire').value = m ? (m.titulaire||'') : '';
+  document.getElementById('pm-note').value = m ? (m.note||'') : '';
+  document.getElementById('pm-actif').checked = m ? !!m.actif : true;
+  document.getElementById('pm-client').checked = m ? !!m.visibleClient : true;
+  document.getElementById('pm-pro').checked = m ? !!m.visiblePro : true;
+  document.getElementById('pm-principal').checked = m ? !!m.principal : false;
+  el.style.display = 'block';
+  try{ if(el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'center'}); }catch(e){}
+}
+function pmEditer(id){ const m = pmFind(id); if(m) pmForm(true, m); }
+async function pmEnregistrer(){
+  const id = document.getElementById('pm-edit-id').value;
+  const op = document.getElementById('pm-operateur').value;
+  const body = {
+    libelle: document.getElementById('pm-libelle').value,
+    numero: document.getElementById('pm-numero').value,
+    titulaire: document.getElementById('pm-titulaire').value,
+    note: document.getElementById('pm-note').value,
+    actif: document.getElementById('pm-actif').checked,
+    visibleClient: document.getElementById('pm-client').checked,
+    visiblePro: document.getElementById('pm-pro').checked,
+    principal: document.getElementById('pm-principal').checked
+  };
+  if(op !== 'auto') body.operateur = op;
+  try{
+    const r = await fetch(id ? ('/api/admin/pay-methods/'+id) : '/api/admin/pay-methods', {
+      method: id ? 'PUT' : 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'refusé');
+    pmForm(false);
+    await chargerPaiements();
+    document.getElementById('pm-state').textContent = 'État : ✅ enregistré — visible tout de suite dans les applications';
+  }catch(e){ document.getElementById('pm-state').textContent = 'État : ⚠️ ' + e.message; }
+}
+async function pmToggle(id, champ){
+  const m = pmFind(id); if(!m) return;
+  const body = {}; body[champ] = !m[champ];
+  try{
+    const r = await fetch('/api/admin/pay-methods/'+id, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json(); if(!r.ok) throw new Error(d.error||'refusé');
+    await chargerPaiements();
+    document.getElementById('pm-state').textContent = 'État : ✅ mis à jour (' + champ + ')';
+  }catch(e){ document.getElementById('pm-state').textContent = 'État : ⚠️ ' + e.message; }
+}
+async function pmPrincipal(id){
+  const m = pmFind(id); if(!m) return;
+  try{
+    const r = await fetch('/api/admin/pay-methods/'+id, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({principal:true})});
+    const d = await r.json(); if(!r.ok) throw new Error(d.error||'refusé');
+    await chargerPaiements();
+    document.getElementById('pm-state').textContent = 'État : ⭐ ' + m.libelle + ' est le moyen principal';
+  }catch(e){ document.getElementById('pm-state').textContent = 'État : ⚠️ ' + e.message; }
+}
+async function pmSupprimer(id){
+  const m = pmFind(id); if(!m) return;
+  if(!confirm('Supprimer définitivement « ' + m.libelle + ' — ' + m.numeroAffiche + ' » ?\n\nAstuce : si des transactions y sont rattachées, Klean refusera et vous proposera de le désactiver.')) return;
+  try{
+    let r = await fetch('/api/admin/pay-methods/'+id, {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})});
+    let d = await r.json();
+    if(r.status === 409){
+      if(!confirm(d.error + '\n\nSupprimer quand même (l’historique gardera le numéro) ?')) return;
+      r = await fetch('/api/admin/pay-methods/'+id, {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({force:true})});
+      d = await r.json();
+    }
+    if(!r.ok) throw new Error(d.error||'refusé');
+    await chargerPaiements();
+    document.getElementById('pm-state').textContent = 'État : 🗑️ moyen supprimé';
+  }catch(e){ document.getElementById('pm-state').textContent = 'État : ⚠️ ' + e.message; }
+}
+/* ── ✅ Confirmer un paiement : mot de passe PDG + n° de transaction obligatoires ── */
+function pmDemanderPw(titre, placeholder, cb){
+  const old = document.getElementById('pm-pw-modal'); if(old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'pm-pw-modal';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:18px';
+  ov.innerHTML = '<div style="background:var(--card);border-radius:16px;padding:16px;max-width:420px;width:100%">'
+    + '<b style="display:block;margin-bottom:8px">'+titre+'</b>'
+    + '<input id="pm-pw-1" type="password" placeholder="Mot de passe PDG" style="width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:8px">'
+    + '<input id="pm-pw-2" placeholder="'+placeholder+'" style="width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:10px">'
+    + '<button class="btn-main" style="width:100%" onclick="pmValiderPw()">Valider</button>'
+    + '<button onclick="document.getElementById(\'pm-pw-modal\').remove()" style="width:100%;margin-top:8px;background:var(--card2);border:1px solid var(--line);color:var(--muted);font:inherit;font-weight:800;padding:10px;border-radius:10px;cursor:pointer">Annuler</button></div>';
+  document.body.appendChild(ov);
+  window._pmCb = cb;
+}
+async function pmValiderPw(){
+  const pw = (document.getElementById('pm-pw-1')||{}).value || '';
+  const v2 = (document.getElementById('pm-pw-2')||{}).value || '';
+  const cb = window._pmCb;
+  document.getElementById('pm-pw-modal').remove();
+  if(cb) await cb(pw, v2);
+}
+async function pmConfirmer(id){
+  const ap = await fetchJ('/api/admin/paiements');
+  const x = (ap.paiements||[]).find(y=>y.id===id);
+  pmDemanderPw('✅ Confirmer le paiement ' + (x?x.ref:'') + ' (' + (x?fmt(x.montant):'') + ')',
+    'N° de transaction de l’opérateur (SMS)', async (pw, tx)=>{
+    const r = await fetch('/api/admin/paiements/'+id+'/confirmer', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password:pw, txOperateur:tx})});
+    const d = await r.json();
+    document.getElementById('pm-state').textContent = r.ok
+      ? 'État : ✅ paiement confirmé (réussi) — le client est prévenu'
+      : 'État : ⚠️ ' + (d.error||'échec');
+    await chargerPaiements();
+  });
+}
+async function pmRefuser(id){
+  pmDemanderPw('❌ Refuser ce paiement', 'Motif (ex : aucun reçu reçu)', async (pw, motif)=>{
+    const r = await fetch('/api/admin/paiements/'+id+'/refuser', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password:pw, motif:motif||'Paiement non reçu'})});
+    const d = await r.json();
+    document.getElementById('pm-state').textContent = r.ok ? 'État : ❌ paiement refusé (échoué)' : 'État : ⚠️ ' + (d.error||'échec');
+    await chargerPaiements();
+  });
 }
 
 /* ═══════════ 🎯 MISE EN RELATION : réglages PDG + test du classement ═══════════ */
@@ -881,6 +1182,8 @@ async function creerVilleHQ(){
   alert('🏙️ Ville « '+d.city.nom+' » créée — elle s’affiche chez clients et pros.');
   loadVillesHQ();
   try{ chargerMatchCfg(); }catch(e){}
+  try{ chargerPaiements(); }catch(e){}
+  try{ chargerProviderPay(); }catch(e){}
 }
 async function loadVillesHQ(){
   try{
@@ -1464,7 +1767,7 @@ function openAffichePanel(){
   p.style.display='block';
   p.classList.remove('folded');
   const ic=p.querySelector('.fold-ic'); if(ic){ ic.textContent='▾'; ic.style.transform=''; }
-  p.scrollIntoView({behavior:'smooth', block:'start'});
+  try{ if(p.scrollIntoView) p.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
   const sel=document.getElementById('ann-type'); if(sel) sel.focus();
 }
 function applyRole(){
@@ -1923,7 +2226,7 @@ async function loadHqChat(){
       let b=document.getElementById('hq-bubble');
       if(!b){ b=document.createElement('button'); b.id='hq-bubble'; b.textContent='🟠 '+n; b.title='Messages gestionnaires';
         b.style.cssText='position:fixed;right:16px;bottom:18px;z-index:90;background:#ff8a00;color:#fff;font-weight:900;border:none;border-radius:99px;padding:12px 16px;cursor:pointer;box-shadow:0 6px 18px rgba(255,138,0,.4);font-family:inherit';
-        b.onclick=()=>{ document.getElementById('panel-hqchat').scrollIntoView({behavior:'smooth'}); b.remove(); };
+        b.onclick=()=>{ try{ const _c=document.getElementById('panel-hqchat'); if(_c&&_c.scrollIntoView) _c.scrollIntoView({behavior:'smooth'}); }catch(e){} b.remove(); };
         document.body.appendChild(b);
       } else b.textContent='🟠 '+n;
     }
@@ -1972,7 +2275,7 @@ async function retirerAd(){
   alert('✕ Pub retirée.');
 }
 async function loadPdgExtras(){
-  ['panel-promo','panel-paydest','panel-trash','panel-demande-comptes'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display=''; });
+  ['panel-promo','panel-pay','panel-paydest','panel-trash','panel-demande-comptes'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display=''; });
   try{
     const dm = await fetchJ('/api/admin/account-request/voir');
     const enA = (dm && dm.enAttente) || [], hist = (dm && dm.historique) || [];

@@ -1572,12 +1572,23 @@ function renderQuartiers(){
   const prof = $('#prof-quartier'); if(prof) prof.innerHTML = qs.map(q=>`<option ${agent.quartier===q?'selected':''}>${q}</option>`).join('');
   const dlap = $('#dl-ap-quartier'); if(dlap) dlap.innerHTML = qs.map(q=>`<option value="${q}">`).join('');
 }
+function paysListe(){
+  /* 💳 liste pilotée par le TABLEAU DE BORD du PDG (repli sur les numéros connus si le serveur est muet) */
+  if(MOYENS_PAY && MOYENS_PAY.length){
+    const cols = {orange:'#FF7900', moov:'#0072BC', mtn:'#FFCC00', wave:'#1DC4F2', autre:'#6b7c73'};
+    const blocs = MOYENS_PAY.map(m=>({id:m.id, nom:m.libelle, sub:'📱 '+m.numeroAffiche+(m.principal?' · principal':''), bg:cols[m.operateur]||'#6b7c73', txt:PAY_IC[m.operateur]||'💳'}));
+    blocs.push({id:'cash', nom:'Espèces', sub:'Remise au pro à la fin', bg:'#27ae60', txt:'💵'});
+    return blocs;
+  }
+  return PAYS;
+}
 function renderPays(){
-  $('#pay-grid').innerHTML = PAYS.map(p=>`<button class="pay ${c.paiement===p.id?'sel':''}" onclick="c.paiement='${p.id}';renderPays()"><span class="bd" style="background:${p.bg}">${p.txt}</span><span><b>${p.nom}</b><span>${p.sub}</span></span></button>`).join('');
+  const liste = paysListe();
+  $('#pay-grid').innerHTML = liste.map(p=>`<button class="pay ${c.paiement===p.id?'sel':''}" onclick="c.paiement='${p.id}';renderPays()"><span class="bd" style="background:${p.bg}">${p.txt}</span><span><b>${p.nom}</b><span>${p.sub}</span></span></button>`).join('');
 }
 function renderRecap(){
   const p = calcPrice(c);
-  const pay = PAYS.find(x=>x.id===c.paiement);
+  const pay = paysListe().find(x=>x.id===c.paiement) || paysListe()[0];
   const ex = extraListOf(p.svc).filter(e=>c.extras[e.id]);
   const unitLine = usePieces(p.svc)
     ? `<div class="rline"><span>🛏️ ${c.pieces} ${p.svc.piecesLabel||'pièce(s)'} · ${depthLabel(p.svc,c.depth).replace(/\+.*/,'').trim()}</span><span>${fmt(p.baseSvc)}</span></div>`
@@ -1789,7 +1800,7 @@ function renderTrack(){
   }
 }
 function renderPayRate(){
-  const pay = PAYS.find(p=>p.id===mission.paiement);
+  const pay = paysListe().find(p=>p.id===mission.paiement) || {nom:'Paiement', bg:'#6b7c73', txt:'💳'};
   const dest = payDestOf(mission.paiement);
   const alt  = mission.paiement==='wave' ? PAY_DEST.wave[1] : null;
   let payBlock;
@@ -1803,10 +1814,20 @@ function renderPayRate(){
   } else {
     payBlock = `<p>Remettez <b>${fmt(mission.prix.total)}</b> en espèces à ${mission.agent.nom} 🤝</p>`;
   }
+  /* 💳 paiement en ligne : référence unique + vérification par Klean (jamais de succès automatique) */
+  const blocEnLigne = (MOYENS_PAY && MOYENS_PAY.length)
+    ? `<div style="border-top:1px dashed var(--line);margin:12px 0;padding-top:12px">
+        <b style="font-size:14px">💳 Ou payez en ligne (safe)</b>
+        <p class="note" style="margin:5px 0 8px">Klean vous donne un <b>numéro</b> et une <b>référence unique</b>. Vous payez dans votre application Mobile Money, puis vous appuyez sur « J'ai payé ». Le statut reste <b>« En attente »</b> jusqu'à vérification de la réception — jamais de validation automatique.</p>
+        <button class="btn-main" style="width:100%" onclick="payerMission()">💳 Payer ${fmt(mission.prix.total)} avec Mobile Money</button>
+        <button onclick="mesPaiements()" style="width:100%;margin-top:7px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font:inherit;font-weight:800;padding:11px;border-radius:11px;cursor:pointer">🧾 Mes paiements / historique</button>
+      </div>`
+    : '';
   $('#rate-wrap').innerHTML = `<div class="rate-box">
     <span class="pay-chip" style="background:${pay.bg}22;color:${pay.bg}">${pay.txt} Paiement : ${pay.nom}</span>
     <h3>Total : ${fmt(mission.prix.total)}</h3>
     ${payBlock}
+    ${blocEnLigne}
     <div style="border-top:1px dashed var(--line);margin:10px 0;padding-top:12px">
       <p style="margin-bottom:8px;font-weight:800;font-size:13px;color:var(--ink)">Comment s'est passée la prestation ?</p>
       <div class="stars-big" id="rate-stars">${[1,2,3,4,5].map(n=>`<button data-r="${n}" onclick="setRate(${n})">★</button>`).join('')}</div>
@@ -2422,6 +2443,7 @@ function openProOrb(){
     '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#E85D04,#C2410C);color:#fff;font-weight:900;display:flex;align-items:center;justify-content:center">'+(nom[0]||'P').toUpperCase()+'</div><div style="flex:1"><b style="display:block">'+nom+'</b><small style="color:#6b7c73">'+(on?'🟢 En ligne — détectable':'⚪ Hors ligne')+'</small></div><button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove()" style="border:1px solid #e4eae7;background:#f3f6f5;border-radius:9px;padding:6px 9px;font-weight:800;cursor:pointer">✕</button></div>'+
     '<button type="button" onclick="goProView(\'profil\')" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #e4eae7;background:#fff;font:inherit;font-weight:800;margin-bottom:7px;cursor:pointer">👤 Voir mon profil</button>'+
     '<button type="button" onclick="goProView(\'dash\')" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #e4eae7;background:#fff;font:inherit;font-weight:800;margin-bottom:7px;cursor:pointer">📊 Tableau de bord</button>'+
+    '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); mesPaiementsPro();" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #cdeee0;background:#f7fdfb;font:inherit;font-weight:900;margin-bottom:7px;cursor:pointer">💳 Paiements & encaissements</button>'+
     '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); ouvrirVisibilite();" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #cdeee0;background:#f2fbf8;font:inherit;font-weight:900;margin-bottom:7px;cursor:pointer">🎫 Numéro pro · visibilité &amp; zone</button>'+
     '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); toggleOnline(); setTimeout(refreshProOrb,200);" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid '+(on?'#E85D04':'#ff8a00')+';background:'+(on?'#FFF4E8':'#fff4e5')+';font:inherit;font-weight:900;margin-bottom:7px;cursor:pointer">'+(on?'⚪ Passer hors ligne':'🟢 Passer en ligne (GPS + sonnerie)')+'</button>'+
     '<button type="button" onclick="document.getElementById(\'pro-orb-modal\').remove(); agentLogout();" style="width:100%;text-align:left;padding:11px 12px;border-radius:12px;border:1.5px solid #f5c6c7;background:#fff;color:#e5484d;font:inherit;font-weight:800;cursor:pointer">🚪 Se déconnecter</button>'+
@@ -2730,6 +2752,7 @@ function renderAccount(){
     </div>` : ''}
     <button class="btn-line" onclick="goBookings()">📋 <span>Mes réservations & mes anciennes missions</span></button>
     <button class="btn-line" onclick="startBooking()">🧹 <span>Nouvelle réservation</span></button>
+    <button class="btn-line" onclick="mesPaiements()">🧾 <span>Mes paiements & reçus</span></button>
     <button class="btn-line" onclick="clientChangePw()">🔑 <span>Changer mon mot de passe</span></button>
     <button class="btn-line" onclick="openKleanService()">📞 <span>Contactez Klean-Service</span></button>
     <button class="btn-line" style="color:var(--danger)" onclick="clientLogout()">⏻ <span>Se déconnecter</span></button>`;
@@ -3037,10 +3060,29 @@ function fallbackCopy(txt, done){
 }
 
 /* ══════════ INIT ══════════ */
+/* retour depuis la page de paiement CinetPay : on reprend le suivi automatiquement */
+(function apresPaiementCinetpay(){
+  try{
+    const ref = new URLSearchParams(location.search).get('paiement');
+    if(!ref) return;
+    setTimeout(async ()=>{
+      try{
+        const d = await fetch('/api/paiements/'+encodeURIComponent(ref), {headers:payHeaders(), cache:'no-store'}).then(r=>r.json());
+        if(!d.paiement) return;
+        if(['en_attente','declare'].includes(d.paiement.statut)){
+          await fetch('/api/paiements/'+d.paiement.id+'/verifier', {method:'POST', headers:payHeaders(), body:'{}'}).catch(()=>{});
+        }
+        toast('💳 Paiement ' + ref + ' — suivez son statut dans « Mes paiements »');
+        mesPaiements();
+      }catch(e){}
+    }, 900);
+  }catch(e){}
+})();
 (function init(){
   c.quartier = currentQuartiers()[0];
   setTimeout(demarrerProches, 1500);
   renderSvcGrids(); renderExtras(); renderTimes(); renderPays();
+  setTimeout(function(){ try{ chargerMoyensPaiement('client', true); }catch(e){} }, 700);   // 💳 moyens pilotés par le tableau de bord
   setCity(c.city, true);
   const d = new Date(); const iso = d.toISOString().split('T')[0];
   $('#inp-date').min = iso; $('#inp-date').value = iso; c.date = iso;
@@ -3780,6 +3822,280 @@ function rechAnnulerCible(){
   try{ delete c.cible; }catch(e){}
   rechBandeauCible();
   toast('Demande ouverte à tous les pros du métier');
+}
+
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   💳 PAIEMENTS (client + pro) — pilotés par le tableau de bord du PDG
+   ---------------------------------------------------------------------------
+   • Seuls les moyens ACTIFS et VISIBLES pour l'application sont proposés.
+   • Chaque paiement reçoit une RÉFÉRENCE UNIQUE ; le client la met dans le
+     motif du transfert Mobile Money.
+   • « J'ai payé » = DÉCLARATION. Le statut ne passe à « Réussi » QUE quand
+     Klean (PDG) ou le fournisseur officiel a vérifié la réception.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var MOYENS_PAY = null;          // cache des moyens de paiement (client)  (var : lu dès l'init)
+var PAY_SUIVI = null;           // paiement en cours de suivi
+var PAY_IV = null;
+
+function payHeaders(){
+  const h = {'Content-Type':'application/json'};
+  try{ if(typeof client!=='undefined' && client && client.token) h['X-Client-Token'] = client.token; }catch(e){}
+  return h;
+}
+var PAY_IC = { orange:'🟠', moov:'🔵', mtn:'🟡', wave:'🌊', autre:'💳' };
+
+async function chargerMoyensPaiement(role, silencieux){
+  try{
+    const d = await fetch('/api/pay-methods?role='+(role==='pro'?'pro':'client'), {cache:'no-store'}).then(r=>r.json());
+    if(role !== 'pro'){ MOYENS_PAY = d.methods || []; try{ renderPays(); }catch(e){} }
+    return d.methods || [];
+  }catch(e){ if(!silencieux) console.log('paiements : serveur injoignable'); return null; }
+}
+
+/* ═══════════ ÉCRAN DE RÈGLEMENT D'UNE MISSION ═══════════ */
+async function payerMission(){
+  if(!mission) return toast('Aucune mission en cours');
+  const m = MOYENS_PAY || [];
+  if(!m.length){ await chargerMoyensPaiement('client'); }
+  const liste = MOYENS_PAY || [];
+  const total = Math.round((mission.prix && mission.prix.total) || 0);
+  const choisi = liste.find(x=>x.id===mission.paiement) || liste.find(x=>x.principal) || liste[0];
+  const ov = document.createElement('div');
+  ov.id = 'pay-flow';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:flex-end;justify-content:center';
+  ov.innerHTML = '<div style="background:var(--card);width:100%;max-width:540px;border-top-left-radius:20px;border-top-right-radius:20px;padding:16px;max-height:92vh;overflow-y:auto">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b>💳 Payer la mission '+mission.id+'</b>'
+    + '<button onclick="document.getElementById(\'pay-flow\').remove()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer">✕</button></div>'
+    + '<div style="background:var(--pl);border-radius:12px;padding:11px 12px;margin-bottom:11px"><small style="color:var(--muted);font-weight:800">MONTANT À PAYER</small>'
+    + '<div style="font-size:24px;font-weight:900;color:var(--pd)">'+fmt(total)+'</div>'
+    + '<small style="color:var(--muted)">Montant exact — ne payez pas un autre montant.</small></div>'
+    + (liste.length ? ('<b style="font-size:13px">Choisissez votre moyen de paiement</b><div id="pf-moyens" style="margin-top:8px">'
+        + liste.map(x=>'<button onclick="payerChoix(\''+x.id+'\')" data-pm="'+x.id+'" style="width:100%;text-align:left;display:flex;gap:9px;align-items:center;border:1.5px solid '+(choisi&&choisi.id===x.id?'var(--p)':'var(--line)')+';background:'+(choisi&&choisi.id===x.id?'var(--pl)':'var(--card)')+';border-radius:12px;padding:10px 11px;margin-bottom:7px;cursor:pointer;font:inherit">'
+          + '<span style="font-size:20px">'+(PAY_IC[x.operateur]||'💳')+'</span><span style="flex:1;min-width:0"><b style="display:block;font-size:13.5px">'+x.libelle+(x.principal?' ⭐':'')+'</b>'
+          + '<small style="color:var(--muted)">reçoit sur '+x.numeroAffiche+'</small></span><b>›</b></button>').join('')
+        + '</div><small style="color:var(--muted)">🏠 Vous pourrez aussi régler en espèces au pro à la fin.</small>')
+      : '<div style="background:#fff9e6;border:1.5px solid #ffe6a3;border-radius:12px;padding:11px;font-size:12.5px;color:#8a6100;font-weight:700">Aucun moyen de paiement n’est activé pour l’instant côté clients. Payez en espèces au professionnel, ou réessayez plus tard : le paiement en ligne sera bientôt disponible.</div>');
+  document.body.appendChild(ov);
+  window._payChoisi = choisi ? choisi.id : null;
+}
+function payerChoix(id){
+  window._payChoisi = id;
+  document.querySelectorAll('#pf-moyens button').forEach(b=>{
+    const on = b.getAttribute('data-pm') === id;
+    b.style.borderColor = on ? 'var(--p)' : 'var(--line)';
+    b.style.background  = on ? 'var(--pl)' : 'var(--card)';
+  });
+  payerValider();
+}
+/* confirmation AVANT tout paiement (exigence : confirmation avant paiement) */
+async function payerValider(){
+  const id = window._payChoisi;
+  const m = (MOYENS_PAY||[]).find(x=>x.id===id);
+  if(!m) return toast('Choisissez d’abord un moyen de paiement');
+  const total = Math.round((mission.prix && mission.prix.total) || 0);
+  if(!confirm('Confirmez-vous payer ' + fmt(total) + ' via ' + m.libelle + ' (' + m.numeroAffiche + ') ?\n\nAucun argent n’est prélevé ici : le paiement se fait dans votre application Mobile Money, avec la référence Klean.')) return;
+  try{
+    const r = await fetch('/api/paiements', {method:'POST', headers:payHeaders(), body: JSON.stringify({missionId: mission.id, payMethodId: m.id, montant: total})});
+    const d = await r.json();
+    if(!r.ok) return toast('⚠️ '+(d.error||'Paiement refusé'));
+    PAY_SUIVI = d.paiement;
+    payerEcranConsigne(d.paiement);
+  }catch(e){ toast('📵 Réseau fragile — réessayez'); }
+}
+function payerEcranConsigne(pa){
+  const ov = document.getElementById('pay-flow');
+  if(!ov) return;
+  const ic = PAY_IC[pa.moyen.operateur] || '💳';
+  ov.innerHTML = '<div style="background:var(--card);width:100%;max-width:540px;border-top-left-radius:20px;border-top-right-radius:20px;padding:16px;max-height:92vh;overflow-y:auto">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b>'+ic+' Payer avec '+pa.moyen.libelle+'</b>'
+    + '<button onclick="payFermer()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer">✕</button></div>'
+    + '<div style="background:#f2fbf8;border:1.5px solid #cdeee0;border-radius:12px;padding:11px 12px;margin-bottom:10px">'
+    + '<small style="color:#41544c;font-weight:800">MONTANT EXACT</small>'
+    + '<div style="font-size:22px;font-weight:900;color:var(--pd)">'+fmt(pa.montant)+' <button class="btn-copy" style="padding:4px 9px" onclick="copyText(\''+pa.montant+'\',\'📋 Montant copié\')">copier</button></div></div>'
+    + '<b style="font-size:13px">1️⃣ Envoyez au numéro '+pa.moyen.libelle+' :</b>'
+    + '<div style="display:flex;align-items:center;gap:9px;background:var(--card2);border:1.5px solid var(--line);border-radius:12px;padding:11px 12px;margin:6px 0 10px">'
+    + '<b style="font-size:17px;letter-spacing:.5px">'+pa.numeroAffiche+'</b>'
+    + '<button class="btn-copy" style="margin-left:auto;padding:6px 11px" onclick="copyText(\''+pa.moyen.numero+'\',\'📋 Numéro copié\')">Copier</button></div>'
+    + '<b style="font-size:13px">2️⃣ Mettez cette RÉFÉRENCE dans le motif :</b>'
+    + '<div style="display:flex;align-items:center;gap:9px;background:#fff9e6;border:1.5px solid #ffe6a3;border-radius:12px;padding:11px 12px;margin:6px 0 10px">'
+    + '<b style="font-size:17px;letter-spacing:1px;color:#8a6100">'+pa.ref+'</b>'
+    + '<button class="btn-copy" style="margin-left:auto;padding:6px 11px" onclick="copyText(\''+pa.ref+'\',\'📋 Référence copiée\')">Copier</button></div>'
+    + '<div style="background:var(--pl);border-radius:11px;padding:10px 11px;font-size:12px;color:#25513f;margin-bottom:11px">🔒 Klean ne vous demandera <b>jamais</b> votre code PIN Mobile Money. Le numéro et la référence ci-dessus suffisent.</div>'
+    + '<div id="pf-ligne" style="margin-bottom:11px"></div>'
+    + '<label style="font-size:12.5px;font-weight:800;display:block;margin-bottom:5px">3️⃣ Après avoir payé, indiquez le n° de transaction reçu par SMS</label>'
+    + '<input class="inp" id="pf-tx" placeholder="ex : OM260926.1234.A56789" style="margin-bottom:6px">'
+    + '<button class="btn-main" style="width:100%;padding:12px" onclick="payerDeclarer()">✅ J’ai payé — envoyer pour vérification</button>'
+    + '<div id="pf-etat" style="margin-top:9px"></div>'
+    + '<small style="display:block;margin-top:9px;color:var(--muted);font-size:11.5px">Statut actuel : <b>En attente</b>. Klean vérifie la réception : le paiement ne passe à <b>« Réussi »</b> qu’après confirmation officielle. Vous pouvez payer en espèces si vous préférez.</small>'
+    + '</div>';
+  payerProposerEnLigne();
+}
+/* 🔌 paiement en ligne : on tente CinetPay ; si le compte marchand n'est pas encore validé,
+   on garde le mode manuel (numéro + référence) sans rien casser ni simuler. */
+async function payerProposerEnLigne(){
+  const box = document.getElementById('pf-ligne');
+  if(!box || !PAY_SUIVI) return;
+  box.innerHTML = '<div style="font-size:12px;color:var(--muted)">🔌 Vérification du paiement en ligne…</div>';
+  try{
+    const r = await fetch('/api/paiements/'+PAY_SUIVI.id+'/initier', {method:'POST', headers:payHeaders(), body:'{}'});
+    const d = await r.json();
+    if(r.ok && d.checkoutUrl){
+      box.innerHTML = '<button onclick="payerOuvrirCinetpay()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,#1f6fd0,#4aa3ff);color:#fff;padding:13px;border-radius:13px;font-size:14.5px">🔗 Payer en ligne maintenant (Wave · Orange · MTN · Moov · carte)</button>'
+        + '<div style="font-size:11.5px;color:var(--muted);text-align:center;margin-top:6px">Paiement sécurisé par CinetPay — vous revenez automatiquement dans Klean après le paiement.</div>';
+      PAY_SUIVI.checkoutUrl = d.checkoutUrl;
+      return;
+    }
+    throw new Error(d.error || 'indisponible');
+  }catch(e){
+    box.innerHTML = '<div style="background:#fff9e6;border:1.5px solid #ffe6a3;border-radius:11px;padding:10px 11px;font-size:11.5px;color:#8a6100;font-weight:700">💡 Le paiement en ligne (CinetPay) n’est pas encore activé : le compte marchand est en cours de validation. Utilisez le numéro + la référence ci-dessus, ou payez en espèces.</div>';
+  }
+}
+function payerOuvrirCinetpay(){
+  if(!PAY_SUIVI || !PAY_SUIVI.checkoutUrl) return;
+  window.open(PAY_SUIVI.checkoutUrl, '_blank');
+  toast('🔗 Complétez le paiement sur la page CinetPay — Klean confirmera automatiquement la réception');
+  payerSuivre(PAY_SUIVI.id);
+}
+async function payerDeclarer(){
+  if(!PAY_SUIVI) return;
+  const tx = ((document.getElementById('pf-tx')||{}).value||'').trim();
+  if(tx.replace(/\s/g,'').length < 4) return toast('Indiquez le n° de transaction reçu par SMS 📩');
+  try{
+    const r = await fetch('/api/paiements/'+PAY_SUIVI.id+'/declare', {method:'POST', headers:payHeaders(), body: JSON.stringify({txOperateur: tx, payeurTel: (typeof client!=='undefined'&&client?client.tel:'')})});
+    const d = await r.json();
+    if(!r.ok) return toast('⚠️ '+(d.error||'Envoi impossible'));
+    PAY_SUIVI = d.paiement;
+    const e = document.getElementById('pf-etat');
+    if(e) e.innerHTML = '<div style="background:rgba(74,163,255,.12);border:1.5px solid rgba(74,163,255,.35);border-radius:12px;padding:11px;font-size:12.5px;font-weight:700;color:#1f6fd0">📨 Déclaration envoyée.<br>'+rechEch(d.message||'')+'</div>';
+    toast('📨 Envoyé — statut : En attente de vérification');
+    payerSuivre(PAY_SUIVI.id);
+  }catch(e){ toast('📵 Réseau fragile — réessayez'); }
+}
+function payFermer(){ payStopSuivi(); const ov=document.getElementById('pay-flow'); if(ov) ov.remove(); }
+function payerSuivre(id){
+  payStopSuivi();
+  PAY_IV = setInterval(async ()=>{
+    try{
+      const r = await fetch('/api/paiements/'+id, {headers:payHeaders(), cache:'no-store'});
+      if(!r.ok) return;
+      let d = await r.json();
+      /* 🔎 si CinetPay est branché, on demande au serveur de revérifier chez le fournisseur */
+      if(d.paiement && ['en_attente','declare'].includes(d.paiement.statut) && PAY_SUIVI && PAY_SUIVI.checkoutUrl){
+        try{
+          const rv = await fetch('/api/paiements/'+id+'/verifier', {method:'POST', headers:payHeaders(), body:'{}'});
+          if(rv.ok){ const dv = await rv.json(); if(dv.paiement) d = dv; }
+        }catch(e){}
+      }
+      payerMaj(d.paiement);
+    }catch(e){}
+  }, 10000);
+}
+function payStopSuivi(){ if(PAY_IV) clearInterval(PAY_IV); PAY_IV = null; }
+function payerMaj(pa){
+  if(!pa) return;
+  PAY_SUIVI = pa;
+  const e = document.getElementById('pf-etat');
+  if(!e) return;
+  if(pa.statut === 'reussi'){
+    e.innerHTML = '<div style="background:#e6fbf3;border:1.5px solid #cdeee0;border-radius:12px;padding:12px;font-weight:800;color:#0a8a62">✅ Paiement confirmé — merci !</div>';
+    toast('✅ Paiement confirmé par Klean');
+    payStopSuivi();
+  } else if(pa.statut === 'echoue'){
+    e.innerHTML = '<div style="background:rgba(255,107,107,.12);border:1.5px solid rgba(255,107,107,.35);border-radius:12px;padding:12px;font-weight:800;color:var(--red)">❌ Paiement refusé : '+rechEch(pa.motif||'non reçu')+'<br><small>Réessayez ou payez en espèces au pro.</small></div>';
+    payStopSuivi();
+  } else if(pa.statut === 'annule'){
+    e.innerHTML = '<div style="background:var(--card2);border-radius:12px;padding:12px;font-weight:800;color:var(--muted)">🚫 Paiement annulé.</div>';
+    payStopSuivi();
+  } else {
+    e.innerHTML = '<div style="background:rgba(255,183,3,.12);border:1.5px solid rgba(255,183,3,.35);border-radius:12px;padding:11px;font-size:12.5px;font-weight:700;color:#8a6100">⏳ '+rechEch(pa.explication||'En attente de vérification')+'</div>';
+  }
+}
+
+/* ═══════════ MES PAIEMENTS (historique client) ═══════════ */
+async function mesPaiements(){
+  const old = document.getElementById('pay-hist'); if(old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'pay-hist';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:flex-end;justify-content:center';
+  ov.innerHTML = '<div style="background:var(--card);width:100%;max-width:560px;border-top-left-radius:20px;border-top-right-radius:20px;padding:16px;max-height:90vh;overflow-y:auto">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b>🧾 Mes paiements</b>'
+    + '<button onclick="document.getElementById(\'pay-hist\').remove()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer">✕</button></div>'
+    + '<div id="ph-body" style="font-size:13px;color:var(--muted)">Chargement…</div></div>';
+  document.body.appendChild(ov);
+  if(!client || !client.token){
+    document.getElementById('ph-body').innerHTML = '<div class="empty" style="padding:12px"><b>Compte requis</b><p>Connectez-vous à votre compte client pour voir l’historique de vos paiements.</p></div>';
+    return;
+  }
+  try{
+    const d = await fetch('/api/clients/paiements', {headers:payHeaders(), cache:'no-store'}).then(r=>r.json());
+    const list = d.paiements || [];
+    const B = { en_attente:['#8a6100','⏳ En attente'], declare:['#1f6fd0','📨 En vérification'], reussi:['#0a8a62','✅ Réussi'], echoue:['var(--red)','❌ Échoué'], annule:['var(--muted)','🚫 Annulé'] };
+    document.getElementById('ph-body').innerHTML =
+      '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">'
+      + '<span class="pill" style="background:rgba(21,201,138,.14);color:#0a8a62">💰 Confirmé : '+fmt(d.totalReussi||0)+'</span>'
+      + '<span class="pill">🧾 '+list.length+' paiement(s)</span></div>'
+      + (list.length ? list.map(x=>{
+          const b = B[x.statut] || ['var(--muted)', x.statut];
+          return '<div style="border:1.5px solid var(--line);border-radius:12px;padding:10px 11px;margin-bottom:8px">'
+            + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b>'+fmt(x.montant)+'</b>'
+            + '<span class="pill" style="background:'+b[0]+'22;color:'+b[0]+'">'+b[1]+'</span>'
+            + '<small style="margin-left:auto;color:var(--muted)">'+String(x.createdAt||'').slice(0,10)+'</small></div>'
+            + '<small style="display:block;color:var(--muted)">'+(x.moyen?x.moyen.libelle:'')+' · réf <b>'+x.ref+'</b>'+(x.missionId?(' · '+x.missionId):'')+'</small>'
+            + (x.statut==='en_attente' ? ('<button onclick="payerReprendre(\''+x.id+'\')" style="margin-top:7px;border:none;background:var(--pl);color:var(--pd);font:inherit;font-weight:900;padding:8px 11px;border-radius:9px;cursor:pointer">Reprendre / j’ai payé</button>') : '')
+            + '</div>';
+        }).join('') : '<div class="empty" style="padding:12px"><b>Aucun paiement</b><p>Vos paiements apparaîtront ici avec leur référence et leur statut.</p></div>');
+  }catch(e){ document.getElementById('ph-body').innerHTML = '<b style="color:var(--red)">Serveur injoignable</b>'; }
+}
+async function payerReprendre(id){
+  const h = document.getElementById('pay-hist'); if(h) h.remove();
+  try{
+    const d = await fetch('/api/paiements/'+id, {headers:payHeaders(), cache:'no-store'}).then(r=>r.json());
+    if(!d.paiement) return toast('Paiement introuvable');
+    PAY_SUIVI = d.paiement;
+    const ov = document.createElement('div'); ov.id='pay-flow'; document.body.appendChild(ov);
+    payerEcranConsigne(d.paiement);
+    payerSuivre(d.paiement.id);
+  }catch(e){ toast('📵 Réessayez'); }
+}
+
+/* ═══════════ BLOC « OÙ MES CLIENTS PAIENT » (pro) ═══════════ */
+async function mesPaiementsPro(){
+  const jeton = (typeof jetonPro==='function') ? jetonPro() : '';
+  const old = document.getElementById('pay-pro'); if(old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'pay-pro';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:flex-end;justify-content:center';
+  ov.innerHTML = '<div style="background:var(--card);width:100%;max-width:560px;border-top-left-radius:20px;border-top-right-radius:20px;padding:16px;max-height:90vh;overflow-y:auto">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b>💳 Paiements & encaissements</b>'
+    + '<button onclick="document.getElementById(\'pay-pro\').remove()" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer">✕</button></div>'
+    + '<div id="pp-body" style="font-size:13px;color:var(--muted)">Chargement…</div></div>';
+  document.body.appendChild(ov);
+  try{
+    const d = await fetch('/api/agents/paiements?jeton='+encodeURIComponent(jeton), {cache:'no-store'}).then(r=>r.json());
+    const mp = await fetch('/api/agents/moyens-paiement?jeton='+encodeURIComponent(jeton), {cache:'no-store'}).then(r=>r.json());
+    const B = { en_attente:['#8a6100','⏳ En attente'], declare:['#1f6fd0','📨 En vérification'], reussi:['#0a8a62','✅ Réussi'], echoue:['var(--red)','❌ Échoué'], annule:['var(--muted)','🚫 Annulé'] };
+    let h = '<b style="color:var(--ink);display:block;margin-bottom:6px">🏦 Où vos clients paient</b>';
+    h += (mp.methods||[]).length ? mp.methods.map(x=>'<div style="display:flex;align-items:center;gap:9px;border:1.5px solid var(--line);border-radius:11px;padding:9px 11px;margin-bottom:7px">'
+        + '<span style="font-size:19px">'+(PAY_IC[x.operateur]||'💳')+'</span><div style="flex:1"><b style="color:var(--ink)">'+x.libelle+'</b><br><small>'+x.numeroAffiche+(x.principal?' · principal':'')+'</small></div>'
+        + '<button class="btn-copy" style="padding:5px 10px" onclick="copyText(\''+x.numero+'\',\'📋 Numéro copié\')">copier</button></div>').join('')
+      : '<div class="empty" style="padding:10px">Aucun moyen de paiement ne vous est montré pour l’instant.</div>';
+    h += '<hr style="border:none;border-top:1.5px dashed var(--line);margin:12px 0">'
+      + '<b style="color:var(--ink);display:block;margin-bottom:6px">🧾 Paiements de vos missions</b>'
+      + '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:9px">'
+      + '<span class="pill" style="background:rgba(21,201,138,.14);color:#0a8a62">💰 Confirmé : '+fmt(d.encaisse||0)+'</span>'
+      + '<span class="pill" style="background:rgba(255,183,3,.16);color:#8a6100">⏳ En attente : '+fmt(d.enAttente||0)+'</span></div>';
+    h += (d.paiements||[]).length ? d.paiements.map(x=>{
+        const b = B[x.statut] || ['var(--muted)', x.statut];
+        return '<div style="border:1.5px solid var(--line);border-radius:11px;padding:9px 11px;margin-bottom:7px">'
+          + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="color:var(--ink)">'+fmt(x.montant)+'</b>'
+          + '<span class="pill" style="background:'+b[0]+'22;color:'+b[0]+'">'+b[1]+'</span>'
+          + '<small style="margin-left:auto">'+String(x.createdAt||'').slice(0,10)+'</small></div>'
+          + '<small>'+((x.moyen||{}).libelle||'')+' · réf <b>'+x.ref+'</b>'+(x.missionId?(' · '+x.missionId):'')+'</small></div>';
+      }).join('') : '<div class="empty" style="padding:10px"><b>Aucun paiement pour l’instant</b><p>Les paiements de vos missions apparaîtront ici avec leur statut.</p></div>';
+    document.getElementById('pp-body').innerHTML = h;
+  }catch(e){ document.getElementById('pp-body').innerHTML = '<b style="color:var(--red)">Serveur injoignable</b>'; }
 }
 
 </script>

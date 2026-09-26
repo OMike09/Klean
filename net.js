@@ -395,6 +395,17 @@ function routeNet(msg){
       } else toast('💰 Nouveau prix proposé pour une demande sur mesure');
       break;
 
+    case 'paiement_update':           // 💳 statut d'un paiement (client & pro)
+      try{
+        if(typeof PAY_SUIVI !== 'undefined' && PAY_SUIVI && msg.paiement && msg.paiement.id === PAY_SUIVI.id){
+          if(typeof payerMaj === 'function') payerMaj(msg.paiement);
+        }
+        const st = msg.paiement && msg.paiement.statut;
+        if(st === 'reussi') toast('✅ Paiement ' + ((msg.paiement||{}).ref||'') + ' confirmé par Klean');
+        else if(st === 'echoue') toast('❌ Paiement ' + ((msg.paiement||{}).ref||'') + ' refusé — voyez le motif');
+      }catch(e){}
+      break;
+
     case 'mission_request':            // → AGENT : nouvelle demande
       if(!agent.online || !agent.nom) break;
       if(incomingReq || activeMission) break;

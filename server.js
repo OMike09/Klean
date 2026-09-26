@@ -630,6 +630,312 @@ function fichePublique(ag, o) {
     ficheOuverte: p.publieFiche
   };
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🔌 CINETPAY — agrégateur unique retenu par le PDG
+   Un seul contrat couvre Orange Money CI, Moov Money CI, MTN MoMo, Wave et
+   les cartes. Rien n'est stocké ici : la clé d'API et le site_id vivent dans
+   les variables d'environnement Render (KLEAN_CINETPAY_API_KEY / SITE_ID).
+   Un paiement n'est déclaré « réussi » qu'après vérification du statut
+   DIRECTEMENT chez CinetPay (appel serveur à serveur) + contrôle du montant.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const CINETPAY_BASE = () => (process.env.KLEAN_CINETPAY_BASE || 'https://api-checkout.cinetpay.com');
+function cinetpayCfg() {
+  const cfg = payCfg();
+  cfg.provider = cfg.provider || { nom: 'cinetpay', siteId: '', actif: true, canaux: 'ALL', dernierTest: null };
+  if (!cfg.provider.nom) cfg.provider.nom = 'cinetpay';
+  return cfg.provider;
+}
+function cinetpaySiteId() { return String(process.env.KLEAN_CINETPAY_SITE_ID || cinetpayCfg().siteId || '').trim(); }
+function cinetpayApiKey() { return String(process.env.KLEAN_CINETPAY_API_KEY || '').trim(); }
+function basePublique(req) {
+  if (process.env.KLEAN_PUBLIC_URL) return String(process.env.KLEAN_PUBLIC_URL).replace(/\/+$/, '');
+  try {
+    const host = req && req.headers && req.headers.host;
+    const proto = (req && req.headers && (req.headers['x-forwarded-proto'] || '')) || 'https';
+    if (host) return proto + '://' + host;
+  } catch (e) {}
+  return '';
+}
+/* ce qui manque exactement pour que CinetPay encaisse */
+function cinetpayManque(req) {
+  const manque = [];
+  if (!cinetpayApiKey()) manque.push('Clé d’API CinetPay (back-office CinetPay → Intégration → « API Key ») à mettre dans la variable Render KLEAN_CINETPAY_API_KEY');
+  if (!cinetpaySiteId()) manque.push('Site ID CinetPay (page Intégration) — à saisir ci-dessous ou dans KLEAN_CINETPAY_SITE_ID');
+  const pub = basePublique(req);
+  if (!pub || /localhost|127\.0\.0\.1/.test(pub)) manque.push('Adresse publique de l’application (variable KLEAN_PUBLIC_URL, ex : https://klean-service.onrender.com) pour recevoir les notifications CinetPay');
+  return manque;
+}
+/* 🛡️ sécurité supplémentaire, mais NON bloquante */
+function cinetpayRecommande() {
+  const out = [];
+  if (!process.env.KLEAN_CINETPAY_HMAC_KEY) out.push('Clé HMAC CinetPay (protection anti-fausse notification) → KLEAN_CINETPAY_HMAC_KEY. La vérification serveur à serveur protège déjà, mais la signature est un plus.');
+  return out;
+}
+function cinetpayPret(req) { return cinetpayManque(req).length === 0; }
+function urlsCinetpay(req) {
+  const b = basePublique(req);
+  return { notify: b + '/api/pay/webhook/cinetpay', retour: b + '/api/paiement/retour', base: b };
+}
+/* appel HTTP JSON vers CinetPay (natif Node, aucune dépendance) */
+function httpJson(url, body, timeoutMs) {
+  return new Promise((resolve) => {
+    let fini = false;
+    const done = (v) => { if (!fini) { fini = true; resolve(v); } };
+    try {
+      const u = new URL(url);
+      const payload = JSON.stringify(body || {});
+      const mod = u.protocol === 'http:' ? require('http') : require('https');
+      const req = mod.request({
+        hostname: u.hostname, port: u.port || (u.protocol === 'http:' ? 80 : 443), path: u.pathname + u.search,
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+      }, (res) => {
+        let d = '';
+        res.on('data', c => { d += c; });
+        res.on('end', () => { let j = null; try { j = JSON.parse(d); } catch (e) {} done({ ok: true, status: res.statusCode, json: j, texte: d.slice(0, 800) }); });
+      });
+      req.on('error', (e) => done({ ok: false, error: e.message }));
+      req.setTimeout(timeoutMs || 15000, () => { try { req.destroy(); } catch (e) {} done({ ok: false, error: 'délai dépassé' }); });
+      req.write(payload); req.end();
+    } catch (e) { done({ ok: false, error: e.message }); }
+  });
+}
+/* 1️⃣ initier un paiement : on demande à CinetPay un lien de paiement sécurisé */
+async function cinetpayInitier(pa, req) {
+  const u = urlsCinetpay(req);
+  const r = await httpJson(CINETPAY_BASE() + '/v2/payment', {
+    apikey: cinetpayApiKey(), site_id: cinetpaySiteId(),
+    transaction_id: pa.ref,                 // 🆔 notre référence unique = identifiant CinetPay
+    amount: pa.montant, currency: 'XOF',
+    description: 'KLEAN Service — mission ' + (pa.missionId || pa.ref),
+    notify_url: u.notify, return_url: u.retour,
+    channels: cinetpayCfg().canaux || 'ALL', lang: 'fr',
+    customer_id: pa.clientId || pa.id,
+    customer_name: String(pa.clientNom || 'Client KLEAN').slice(0, 60),
+    customer_surname: '',
+    customer_phone_number: pa.payeurTel ? ('+225' + pa.payeurTel) : '',
+    customer_country: 'CI',
+    metadata: JSON.stringify({ ref: pa.ref, mission: pa.missionId || '', klean: 'KLEAN Service' })
+  }, 20000);
+  if (!r.ok) return { ok: false, error: 'CinetPay injoignable (' + (r.error || 'réseau') + ')' };
+  const d = r.json || {};
+  const data = d.data || {};
+  const code = String(d.code || (data && data.code) || '');
+  const lien = data.payment_url || (data.paymentUrl) || '';
+  if (lien && (code === '201' || r.status === 200 || r.status === 201)) {
+    return { ok: true, url: lien, token: data.payment_token || data.paymentToken || '', brut: d };
+  }
+  return { ok: false, error: (d.message || d.description || 'refus CinetPay') + (code ? (' [code ' + code + ']') : ''), brut: d };
+}
+/* 2️⃣ vérifier une transaction CHEZ CinetPay (source de vérité) */
+async function cinetpayVerifier(ref) {
+  const r = await httpJson(CINETPAY_BASE() + '/v2/payment/check', {
+    apikey: cinetpayApiKey(), site_id: cinetpaySiteId(), transaction_id: ref
+  }, 20000);
+  if (!r.ok) return { ok: false, error: 'CinetPay injoignable (' + (r.error || 'réseau') + ')' };
+  const d = r.json || {};
+  const data = d.data || {};
+  const statut = String(data.status || '').toUpperCase();
+  const code = String(d.code || '');
+  return {
+    ok: true, statut, code, message: d.message || '', montant: parseInt(data.amount, 10) || 0,
+    devise: data.currency || '', moyen: data.payment_method || '', operateur: data.operator_id || '',
+    quand: data.payment_date || '', tx: data.cpm_trans_id || data.transaction_id || '', metadata: data.metadata || ''
+  };
+}
+/* 3️⃣ appliquer le verdict du fournisseur sur notre transaction (jamais sur parole) */
+function cinetpayAppliquer(pa, v) {
+  const st = String(v.statut || '').toUpperCase();
+  if (st === 'ACCEPTED') {
+    if (v.montant && Math.round(v.montant) !== Math.round(pa.montant)) {
+      pa.statut = 'echoue';
+      pa.motif = 'Montant reçu (' + v.montant + ' F) différent du montant attendu (' + pa.montant + ' F)';
+      tracePaiement(pa, '⚠️ ' + pa.motif + ' — paiement refusé par sécurité', 'CinetPay');
+      return { ok: true, statut: 'echoue' };
+    }
+    pa.statut = 'reussi';
+    pa.confirmePar = 'Fournisseur CinetPay';
+    pa.confirmeAt = nowISO();
+    pa.txOperateur = v.tx || pa.txOperateur || '';
+    pa.txFourniPar = 'CinetPay (vérifié serveur à serveur)';
+    pa.moyenPaiement = v.moyen || '';
+    tracePaiement(pa, '✅ Confirmation FOURNISSEUR CinetPay — statut ACCEPTED vérifié (' + (v.moyen || '') + (v.tx ? (', tx ' + v.tx) : '') + ')', 'CinetPay');
+    return { ok: true, statut: 'reussi' };
+  }
+  if (st === 'REFUSED' || st === 'CANCELED' || st === 'CANCELLED') {
+    pa.statut = 'echoue';
+    pa.motif = v.message || 'Paiement refusé par CinetPay';
+    tracePaiement(pa, '❌ CinetPay : ' + pa.motif, 'CinetPay');
+    return { ok: true, statut: 'echoue' };
+  }
+  return { ok: true, statut: pa.statut };   // PENDING / INITCHECK : on ne change rien
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   💳 MOTEUR PAIEMENT — moyens de paiement + transactions vérifiées
+   ---------------------------------------------------------------------------
+   Règles absolues :
+   • Aucun secret (PIN Mobile Money, mot de passe, clé d'API) n'est stocké ici.
+   • Un paiement n'est JAMAIS « réussi » parce que l'utilisateur l'affirme :
+     il faut la confirmation du fournisseur (webhook signé) ou du PDG (avec
+     son mot de passe + le numéro de transaction de l'opérateur).
+   ═══════════════════════════════════════════════════════════════════════════ */
+function payCfg() {
+  db.config = db.config || {};
+  db.config.pay = db.config.pay || {
+    providers: {
+      orange: { mode: 'declaration', merchantConfigure: false },
+      moov:   { mode: 'declaration', merchantConfigure: false },
+      wave:   { mode: 'aucun',       merchantConfigure: false }
+    }
+  };
+  const cfg = db.config.pay;
+  cfg.providers = cfg.providers || {};
+  return cfg;
+}
+/* 📞 opérateur déduit du préfixe ivoirien (10 chiffres) */
+function operateurDeNumero(num) {
+  const n = String(num || '').replace(/\D/g, '');
+  if (/^07/.test(n)) return 'orange';      // Orange CI
+  if (/^05/.test(n)) return 'mtn';         // MTN CI
+  if (/^01/.test(n)) return 'moov';        // Moov Africa CI
+  if (/^21/.test(n)) return 'moov';        // fixe Moov
+  if (/^27/.test(n)) return 'orange';      // fixe Orange
+  if (/^25/.test(n)) return 'mtn';         // fixe MTN
+  return 'autre';
+}
+const OPERATEURS = {
+  orange: { nom: 'Orange Money',      ic: '🟠', ussd: '#144#',   env: 'KLEAN_ORANGE_API_SECRET', doc: 'API Orange Money (merchant_key + Bearer Orange)' },
+  moov:   { nom: 'Moov Money',        ic: '🔵', ussd: '*155#',   env: 'KLEAN_MOOV_API_SECRET',   doc: 'API Moov Money (contrat marchand Moov Africa CI)' },
+  mtn:    { nom: 'MTN MoMo',          ic: '🟡', ussd: '*133#',   env: 'KLEAN_MTN_API_SECRET',    doc: 'API MTN MoMo CI' },
+  wave:   { nom: 'Wave',              ic: '🌊', ussd: '',        env: 'KLEAN_WAVE_API_SECRET',   doc: 'Wave Business API (compte marchand Wave)' },
+  autre:  { nom: 'Autre',             ic: '💳', ussd: '',        env: '',                        doc: 'Aucune API officielle connue pour ce moyen' }
+};
+function operateurInfo(op) { return OPERATEURS[op] || OPERATEURS.autre; }
+function fmtNumeroCI(num) {
+  const n = String(num || '').replace(/\D/g, '');
+  return n.replace(/(\d{2})(?=\d)/g, '$1 ').trim();
+}
+function nouveauIdPayMethod() { return uid('PM'); }
+function payMethods() {
+  db.payMethods = Array.isArray(db.payMethods) ? db.payMethods : [];
+  return db.payMethods;
+}
+/* 🏁 premier démarrage : les deux numéros déjà utilisés par l'application deviennent gérables */
+function seedPayMethods() {
+  const list = payMethods();
+  if (list.length) return false;
+  const now = nowISO();
+  list.push({
+    id: nouveauIdPayMethod(), libelle: 'Orange Money', operateur: 'orange', numero: '0709076130', titulaire: 'KLEAN SERVICE',
+    note: 'Numéro principal', principal: true, actif: true, visibleClient: true, visiblePro: true,
+    createdAt: now, updatedAt: now, updatedBy: 'Système (reprise des numéros existants)'
+  });
+  list.push({
+    id: nouveauIdPayMethod(), libelle: 'Moov Money', operateur: 'moov', numero: '0100277521', titulaire: 'KLEAN SERVICE',
+    note: '', principal: false, actif: true, visibleClient: true, visiblePro: true,
+    createdAt: now, updatedAt: now, updatedBy: 'Système (reprise des numéros existants)'
+  });
+  saveDb();
+  console.log('💳 Moyens de paiement initialisés : 0709076130 (Orange Money, principal) + 0100277521 (Moov Money)');
+  return true;
+}
+/* ce qui MANQUE pour encaisser en automatique — affiché tel quel dans le HQ (exigence 7) */
+function integrationsPay() {
+  const cfg = payCfg();
+  const vus = new Set();
+  const out = [];
+  for (const m of payMethods()) {
+    if (vus.has(m.operateur)) continue;
+    vus.add(m.operateur);
+    const info = operateurInfo(m.operateur);
+    /* 🔌 Agrégateur UNIQUE retenu par le PDG : CinetPay (Orange + Moov + Wave + cartes) */
+    const viaCinetpay = cinetpayCfg().nom === 'cinetpay' && ['orange', 'moov', 'mtn', 'wave'].includes(m.operateur);
+    const manque = [];
+    if (viaCinetpay) {
+      for (const k of cinetpayManque(null)) manque.push(k);
+      if (cinetpayCfg().actif === false) manque.push('Encaissement en ligne désactivé (interrupteur PDG)');
+    } else if (!['orange', 'moov', 'mtn', 'wave'].includes(m.operateur)) {
+      manque.push('Passerelle de paiement officielle (aucune API standard pour ce moyen)');
+    } else {
+      manque.push(info.doc);
+      if (!process.env.KLEAN_PAY_API_KEY) manque.push('Clé d’API marchande (KLEAN_PAY_API_KEY)');
+    }
+    out.push({
+      operateur: m.operateur, nom: info.nom, ic: info.ic,
+      via: viaCinetpay ? 'CinetPay' : 'direct',
+      mode: (viaCinetpay && cinetpayPret(null)) ? 'api' : 'declaration',
+      apiOfficielle: viaCinetpay ? cinetpayPret(null) : !!process.env.KLEAN_PAY_API_KEY,
+      webhookPret: viaCinetpay ? !!process.env.KLEAN_CINETPAY_HMAC_KEY : !!process.env.KLEAN_PAY_WEBHOOK_SECRET,
+      webhookUrl: viaCinetpay ? '/api/pay/webhook/cinetpay' : ('/api/pay/webhook/' + m.operateur),
+      manque
+    });
+  }
+  return out;
+}
+/* 🔒 on ne renvoie JAMAIS un moyen non actif ou non visible */
+function payMethodsPubliques(role) {
+  const champ = role === 'pro' ? 'visiblePro' : 'visibleClient';
+  return payMethods()
+    .filter(m => m.actif && m[champ])
+    .sort((a, b) => Number(!!b.principal) - Number(!!a.principal) || String(a.libelle).localeCompare(String(b.libelle), 'fr'))
+    .map(m => {
+      const info = operateurInfo(m.operateur);
+      return {
+        id: m.id, libelle: m.libelle, operateur: m.operateur, nomOperateur: info.nom, ic: info.ic,
+        numero: m.numero, numeroAffiche: fmtNumeroCI(m.numero), ussd: info.ussd,
+        principal: !!m.principal,
+        mode: (payCfg().providers[m.operateur] && payCfg().providers[m.operateur].mode) || 'declaration',
+        /* ℹ️ on dit franchement au client comment ça se passe */
+        instructions: 'Envoyez le montant exact via ' + m.libelle + ' au ' + fmtNumeroCI(m.numero) + ' en mettant la RÉFÉRENCE dans le motif.'
+      };
+    });
+}
+/* 🆔 identifiant unique de transaction : KL-AAAAMMJJ-XXXX (aucun doublon possible) */
+function nouvelleRefPaiement() {
+  const d = new Date();
+  const j = d.getFullYear().toString() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+  let ref;
+  do { ref = 'KL-' + j + '-' + crypto.randomBytes(2).toString('hex').toUpperCase(); }
+  while ((db.paiements || []).some(x => x.ref === ref));
+  return ref;
+}
+function paiements() { db.paiements = Array.isArray(db.paiements) ? db.paiements : []; return db.paiements; }
+const PAY_STATUTS = { en_attente: 'En attente', declare: 'En attente', reussi: 'Réussi', echoue: 'Échoué', annule: 'Annulé' };
+function paiementStatutTxt(st) { return PAY_STATUTS[st] || st; }
+function paiementPublic(pa) {
+  return {
+    id: pa.id, ref: pa.ref, montant: pa.montant, statut: pa.statut, statutTxt: paiementStatutTxt(pa.statut),
+    moyen: pa.moyen, missionId: pa.missionId || '', createdAt: pa.createdAt, updatedAt: pa.updatedAt,
+    declareAt: pa.declareAt || '', confirmeAt: pa.confirmeAt || '', confirmePar: pa.confirmePar || '',
+    txOperateur: pa.txOperateur || '', txFourniPar: pa.txFourniPar || '', motif: pa.motif || '', numeroAffiche: fmtNumeroCI((pa.moyen || {}).numero || ''),
+    enLigne: !!(pa.checkoutUrl || pa.mode === 'api'), paiementLibelle: pa.moyenPaiement || '',
+    /* 🔎 on explique au client pourquoi c'est encore en attente */
+    explication: pa.statut === 'en_attente' ? (pa.checkoutUrl ? 'En attente : terminez le paiement sur la page sécurisée CinetPay (référence ' + pa.ref + ').' : 'En attente : payez avec la référence ' + pa.ref + ' puis appuyez sur « J’ai payé ».')
+      : pa.statut === 'declare' ? 'Vous avez déclaré le paiement. Klean vérifie la réception auprès de l’opérateur — le statut passera à « Réussi » après confirmation.'
+      : pa.statut === 'reussi' ? 'Paiement confirmé' + (pa.confirmePar ? ' par ' + pa.confirmePar : '') + '. Merci !'
+      : pa.statut === 'echoue' ? ('Paiement refusé' + (pa.motif ? ' : ' + pa.motif : ''))
+      : 'Paiement annulé.'
+  };
+}
+/* qui a le droit de voir/modifier un paiement */
+function paiementProprietaire(req, pa) {
+  const cl = findClientByToken(req);
+  if (cl && cl.id === pa.clientId) return { role: 'client', id: cl.id, nom: cl.nom };
+  const aid = req.headers['x-agent-token'] || '';
+  if (aid) {
+    const ag = db.agents.find(a => a.jeton && a.jeton === aid);
+    if (ag && (ag.id === pa.proId || ag.id === pa.agentId)) return { role: 'pro', id: ag.id, nom: ag.nom };
+  }
+  return null;
+}
+function tracePaiement(pa, ev, by) {
+  pa.hist = pa.hist || [];
+  pa.hist.push({ at: Date.now(), by: by || 'système', ev });
+  pa.updatedAt = nowISO();
+}
+
 /* ═══════════ 🔎 LE MOTEUR : recherche intelligente (proximité + service + dispo + zone) ═══════════
    Proximité GPS = critère MAJEUR, mais jamais de pro hors métier, hors zone ou compte inactif. */
 function recherchePro(o) {
@@ -937,6 +1243,14 @@ function readBody(req) {
     let d = '';
     req.on('data', c => { d += c; if (d.length > 8e6) req.destroy(); });
     req.on('end', () => { try { r(JSON.parse(d || '{}')); } catch (e) { r({}); } });
+  });
+}
+/* corps BRUT (nécessaire pour vérifier la signature HMAC des webhooks de paiement) */
+function readBodyRaw(req) {
+  return new Promise(r => {
+    let d = '';
+    req.on('data', c => { d += c; if (d.length > 2e6) req.destroy(); });
+    req.on('end', () => r(d || ''));
   });
 }
 function agentStats(ag) {
@@ -2048,6 +2362,404 @@ const server = http.createServer(async (req, res) => {
     const jetonL = issueAgentJeton(ag);
     saveDb();
     return sendJson(res, 200, { ok: true, agentId: ag.id, nom: ag.nom, numPro: ag.numPro, jeton: jetonL, zoneKm: zoneOfAgent(ag).km });
+  }
+
+
+
+  /* ══════════════ 🔌 CINETPAY (agrégateur unique) ══════════════ */
+  /* ── le client demande à payer en ligne : le serveur crée le lien CinetPay ── */
+  const pInit = p.match(/^\/api\/paiements\/([^/]+)\/initier$/);
+  if (pInit && req.method === 'POST') {
+    const pa = paiements().find(x => x.id === pInit[1] || x.ref === pInit[1]);
+    if (!pa) return sendJson(res, 404, { error: 'Paiement introuvable' });
+    const q = paiementProprietaire(req, pa);
+    if (!q) return sendJson(res, 403, { error: 'Accès refusé' });
+    if (pa.statut === 'reussi') return sendJson(res, 409, { error: 'Ce paiement est déjà confirmé' });
+    const manque = cinetpayManque(req);
+    if (manque.length) return sendJson(res, 503, {
+      error: 'Paiement en ligne non encore activé : le compte marchand CinetPay doit être validé.', code: 'non_configure', manque
+    });
+    const r = await cinetpayInitier(pa, req);
+    if (!r.ok) {
+      tracePaiement(pa, '⚠️ CinetPay a refusé la création du lien : ' + r.error, 'CinetPay');
+      saveDb();
+      return sendJson(res, 502, { error: 'CinetPay : ' + r.error });
+    }
+    pa.checkoutUrl = r.url; pa.checkoutToken = r.token; pa.checkoutAt = nowISO(); pa.mode = 'api';
+    tracePaiement(pa, '🔗 Lien de paiement CinetPay généré — le client paie sur la page sécurisée CinetPay', 'système');
+    saveDb();
+    return sendJson(res, 200, { ok: true, checkoutUrl: r.url, token: r.token, paiement: paiementPublic(pa) });
+  }
+  /* ── revérifier maintenant (si la notification tarde) ── */
+  const pVerif = p.match(/^\/api\/paiements\/([^/]+)\/verifier$/);
+  if (pVerif && req.method === 'POST') {
+    const pa = paiements().find(x => x.id === pVerif[1] || x.ref === pVerif[1]);
+    if (!pa) return sendJson(res, 404, { error: 'Paiement introuvable' });
+    const q = paiementProprietaire(req, pa);
+    if (!q) return sendJson(res, 403, { error: 'Accès refusé' });
+    if (['reussi', 'annule'].includes(pa.statut)) return sendJson(res, 200, { ok: true, paiement: paiementPublic(pa) });
+    if (!cinetpayPret(req)) return sendJson(res, 503, { error: 'CinetPay non configuré', code: 'non_configure', manque: cinetpayManque(req) });
+    const v = await cinetpayVerifier(pa.ref);
+    if (!v.ok) return sendJson(res, 502, { error: v.error });
+    const ap = cinetpayAppliquer(pa, v);
+    saveDb();
+    if (ap.statut === 'reussi') { emitAdmin('pay', '✅ ' + pa.ref + ' — paiement confirmé par CinetPay (' + pa.montant.toLocaleString('fr-FR') + ' F)'); bcAll({ type: 'paiement_update', paiement: paiementPublic(pa) }); }
+    return sendJson(res, 200, { ok: true, statutFournisseur: v.statut, paiement: paiementPublic(pa) });
+  }
+  /* ── 🔔 NOTIFICATION CinetPay : on ne fait JAMAIS confiance au contenu reçu.
+        On re-vérifie la transaction chez CinetPay puis on compare le montant. ── */
+  if (p === '/api/pay/webhook/cinetpay' && (req.method === 'POST' || req.method === 'GET')) {
+    if (!cinetpayPret(req)) return sendJson(res, 503, { error: 'CinetPay non configuré — aucune validation possible', code: 'non_configure', manque: cinetpayManque(req) });
+    const corps = await readBodyRaw(req);
+    let d = {}; try { d = JSON.parse(corps || '{}'); } catch (e) {}
+    const q2 = Object.fromEntries(new URLSearchParams(corps || ''));
+    const ref = String(d.cpm_trans_id || d.transaction_id || q2.cpm_trans_id || q2.transaction_id || url.searchParams.get('cpm_trans_id') || url.searchParams.get('transaction_id') || '');
+    /* signature HMAC (optionnelle) : si la clé est configurée, elle est exigée */
+    const hmacKey = process.env.KLEAN_CINETPAY_HMAC_KEY || '';
+    if (hmacKey) {
+      const recu = String(req.headers['x-token'] || d.x_token || '');
+      const attendu = crypto.createHmac('sha256', hmacKey).update(corps || '').digest('hex');
+      if (!recu || recu.toLowerCase() !== attendu.toLowerCase())
+        return sendJson(res, 401, { error: 'Signature HMAC invalide', code: 'signature' });
+    }
+    if (!ref) return sendJson(res, 400, { error: 'transaction_id manquant' });
+    const pa = paiements().find(x => x.ref === ref || x.id === ref);
+    if (!pa) return sendJson(res, 404, { error: 'Transaction inconnue : ' + ref });
+    if (pa.statut === 'reussi') return sendJson(res, 200, { ok: true, message: 'déjà confirmé' });
+    const v = await cinetpayVerifier(pa.ref);
+    if (!v.ok) { console.log('⚠️ CinetPay check impossible : ' + v.error); return sendJson(res, 502, { error: v.error }); }
+    const ap = cinetpayAppliquer(pa, v);
+    saveDb();
+    console.log('🔔 CinetPay ' + pa.ref + ' → ' + v.statut + ' (notre statut : ' + pa.statut + ')');
+    emitAdmin('pay', (ap.statut === 'reussi' ? '✅ Paiement ' + pa.ref + ' confirmé par CinetPay' : 'ℹ️ CinetPay ' + pa.ref + ' : ' + v.statut));
+    bcAll({ type: 'paiement_update', paiement: paiementPublic(pa) });
+    return sendJson(res, 200, { ok: true, statut: pa.statut });
+  }
+  /* ── page de retour après paiement (le client revient ici) ── */
+  if (p === '/api/paiement/retour' && req.method === 'GET') {
+    const ref = String(url.searchParams.get('cpm_trans_id') || url.searchParams.get('transaction_id') || '');
+    try {
+      if (ref && cinetpayPret(req)) {
+        const pa = paiements().find(x => x.ref === ref);
+        if (pa && pa.statut !== 'reussi') { const v = await cinetpayVerifier(ref); if (v.ok) { cinetpayAppliquer(pa, v); saveDb(); } }
+      }
+    } catch (e) {}
+    res.writeHead(302, { Location: '/?paiement=' + encodeURIComponent(ref) + '#accueil' });
+    return res.end();
+  }
+  /* ── HQ : configurer / tester l'agrégateur (PDG) ── */
+  if (p === '/api/admin/pay/provider' && req.method === 'GET') {
+    if (!pdgOnly(req, res)) return;
+    const c = cinetpayCfg(), u = urlsCinetpay(req);
+    return sendJson(res, 200, {
+      ok: true, provider: { nom: c.nom, siteId: cinetpaySiteId(), siteIdEnBase: c.siteId || '', canaux: c.canaux || 'ALL', actif: c.actif !== false, dernierTest: c.dernierTest || null },
+      cleApiPresente: !!cinetpayApiKey(), hmacPresent: !!process.env.KLEAN_CINETPAY_HMAC_KEY,
+      base: CINETPAY_BASE(), pret: cinetpayPret(req), manque: cinetpayManque(req), recommande: cinetpayRecommande(), urls: u,
+      docs: ['Extrait RCCM (ou CNI + attestation de résidence si activité individuelle)', 'NIF / IDU / DFE (identifiant fiscal)', 'CNI ou passeport du gérant', 'RIB bancaire ivoirien (SGBCI, BICICI, Ecobank…)', 'Justificatif de domicile professionnel', 'Formulaire de souscription CinetPay rempli (nom commercial, forme juridique, RCCM, coordonnées du représentant légal)'],
+      delai: 'Activation du compte marchand : 24 à 72 h (jusqu’à 7 jours ouvrés selon le dossier) — inscription gratuite, sandbox disponible immédiatement'
+    });
+  }
+  if (p === '/api/admin/pay/provider' && req.method === 'PUT') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const c = cinetpayCfg();
+    if (b.siteId !== undefined) { c.siteId = String(b.siteId).replace(/[^0-9A-Za-z\-_]/g, '').slice(0, 40); }
+    if (b.canaux !== undefined) c.canaux = ['ALL', 'MOBILE_MONEY', 'CREDIT_CARD'].includes(String(b.canaux)) ? String(b.canaux) : 'ALL';
+    if (b.actif !== undefined) c.actif = !!b.actif;
+    saveDb();
+    auditLog('pay_provider_update', { provider: c.nom, siteId: c.siteId, canaux: c.canaux, actif: c.actif, par: 'PDG' });
+    return sendJson(res, 200, { ok: true, provider: { nom: c.nom, siteId: cinetpaySiteId(), siteIdEnBase: c.siteId, canaux: c.canaux, actif: c.actif }, pret: cinetpayPret(req), manque: cinetpayManque(req) });
+  }
+  if (p === '/api/admin/pay/provider/test' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const manque = cinetpayManque(req);
+    if (manque.length) return sendJson(res, 200, { ok: false, message: 'Configuration incomplète', manque });
+    /* vrai appel de test : on interroge une transaction fictive.
+       CinetPay répond « transaction introuvable » = identifiants VALIDES ; « apikey incorrecte » = à corriger. */
+    const r = await httpJson(CINETPAY_BASE() + '/v2/payment/check', { apikey: cinetpayApiKey(), site_id: cinetpaySiteId(), transaction_id: 'KLEAN-TEST-' + Date.now() }, 20000);
+    const c = cinetpayCfg();
+    const d = (r && r.json) || {};
+    const code = String(d.code || '');
+    const authOk = r.ok && !['AUTH_NOT_FOUND', '600', '624', '401'].includes(code) && !/apikey|api key|incorrect/i.test(String(d.message || '') + String(d.description || ''));
+    c.dernierTest = { at: nowISO(), ok: !!authOk, code, message: d.message || d.description || (r.ok ? '' : r.error || '') };
+    saveDb();
+    auditLog('pay_provider_test', { ok: !!authOk, code, par: 'PDG' });
+    return sendJson(res, 200, {
+      ok: !!authOk,
+      message: authOk
+        ? 'Identifiants CinetPay ACCEPTÉS — les vrais paiements peuvent partir (réponse CinetPay : ' + (d.message || code || 'OK') + ')'
+        : 'Identifiants refusés par CinetPay : ' + (d.message || d.description || r.error || 'vérifiez la clé d’API et le Site ID'),
+      reponse: { code, message: d.message || '', statut: r.status || 0 }
+    });
+  }
+
+  /* ══════════════ 💳 MOYENS DE PAIEMENT & TRANSACTIONS ══════════════ */
+  /* ── public / connecté : uniquement les moyens ACTIFS + VISIBLES pour ce rôle ── */
+  if (p === '/api/pay-methods' && req.method === 'GET') {
+    const role = url.searchParams.get('role') === 'pro' ? 'pro' : 'client';
+    return sendJson(res, 200, { ok: true, role, methods: payMethodsPubliques(role), cash: true });
+  }
+  /* ── créer un paiement (en attente) : le montant et la référence sont calculés ICI ── */
+  if (p === '/api/paiements' && req.method === 'POST') {
+    const b = await readBody(req);
+    const cl = findClientByToken(req);
+    const jtBody = req.headers['x-agent-token'] || b.jeton || '';
+    const agPay = jtBody ? db.agents.find(a => a.jeton && a.jeton === jtBody) : null;
+    if (!cl && !agPay) return sendJson(res, 401, { error: 'Connexion requise pour enregistrer un paiement' });
+    const m = db.payMethods.find(x => x.id === b.payMethodId);
+    if (!m) return sendJson(res, 404, { error: 'Moyen de paiement introuvable' });
+    const role = (cl && !agPay) ? 'client' : 'pro';
+    if (!m.actif) return sendJson(res, 409, { error: 'Ce moyen de paiement est désactivé' });
+    if (role === 'client' && !m.visibleClient) return sendJson(res, 409, { error: 'Ce moyen de paiement n’est pas proposé aux clients' });
+    if (role === 'pro' && !m.visiblePro) return sendJson(res, 409, { error: 'Ce moyen de paiement n’est pas proposé aux professionnels' });
+    let montant = Math.round(parseInt(b.montant, 10) || 0);
+    let mission = null;
+    if (b.missionId) {
+      mission = db.missions.find(x => x.id === b.missionId);
+      if (!mission) return sendJson(res, 404, { error: 'Mission introuvable' });
+      if (cl && mission.clientId && mission.clientId !== cl.id) return sendJson(res, 403, { error: 'Cette mission n’est pas la vôtre' });
+      if (!montant) montant = Math.round(mission.prixTotal || 0);
+    }
+    if (montant <= 0) return sendJson(res, 400, { error: 'Montant invalide' });
+    if (montant > 5000000) return sendJson(res, 400, { error: 'Montant trop élevé — contactez Klean-Service' });
+    const dejaPaye = paiements().find(x => x.missionId && x.missionId === b.missionId && x.statut === 'reussi');
+    if (dejaPaye) return sendJson(res, 409, { error: 'Cette mission est déjà réglée (' + dejaPaye.ref + ')' });
+    const now = nowISO();
+    const pa = {
+      id: uid('PAY'), ref: nouvelleRefPaiement(), missionId: mission ? mission.id : '', clientId: cl ? cl.id : '',
+      clientNom: cl ? cl.nom : (agPay ? agPay.nom : ''), proId: mission ? (mission.agentId || '') : (agPay ? agPay.id : ''),
+      montant, payMethodId: m.id, moyen: { libelle: m.libelle, operateur: m.operateur, numero: m.numero },
+      statut: 'en_attente', txOperateur: '', payeurTel: '', motif: '', hist: [],
+      createdAt: now, updatedAt: now, source: role
+    };
+    tracePaiement(pa, '🧾 Paiement créé (' + montant.toLocaleString('fr-FR') + ' F) via ' + m.libelle + ' — en attente', role === 'client' ? 'client ' + pa.clientNom : 'pro ' + pa.clientNom);
+    paiements().push(pa); saveDb();
+    emitAdmin('pay', '💳 Nouveau paiement ' + pa.ref + ' — ' + montant.toLocaleString('fr-FR') + ' F · ' + m.libelle + ' (' + pa.clientNom + ')');
+    return sendJson(res, 201, { ok: true, paiement: paiementPublic(pa) });
+  }
+  /* ── suivi du statut ── */
+  const pGet = p.match(/^\/api\/paiements\/([^/]+)$/);
+  if (pGet && req.method === 'GET') {
+    const pa = paiements().find(x => x.id === pGet[1] || x.ref === pGet[1]);
+    if (!pa) return sendJson(res, 404, { error: 'Paiement introuvable' });
+    const q = paiementProprietaire(req, pa);
+    if (!q && !(hqIdentity(req))) return sendJson(res, 403, { error: 'Accès refusé' });
+    return sendJson(res, 200, { ok: true, paiement: paiementPublic(pa) });
+  }
+  /* ── « J'ai payé » : on enregistre une DÉCLARATION, jamais un succès ── */
+  const pDec = p.match(/^\/api\/paiements\/([^/]+)\/declare$/);
+  if (pDec && req.method === 'POST') {
+    const b = await readBody(req);
+    const pa = paiements().find(x => x.id === pDec[1] || x.ref === pDec[1]);
+    if (!pa) return sendJson(res, 404, { error: 'Paiement introuvable' });
+    const q = paiementProprietaire(req, pa);
+    if (!q) return sendJson(res, 403, { error: 'Accès refusé' });
+    if (pa.statut === 'reussi') return sendJson(res, 409, { error: 'Ce paiement est déjà confirmé' });
+    if (pa.statut === 'annule') return sendJson(res, 409, { error: 'Ce paiement est annulé — créez-en un nouveau' });
+    const tx = String(b.txOperateur || '').replace(/[^A-Za-z0-9\-\.\/]/g, '').slice(0, 40);
+    if (!tx) return sendJson(res, 400, { error: 'Indiquez le numéro de transaction reçu par SMS de l’opérateur' });
+    pa.payeurTel = String(b.payeurTel || '').replace(/\D/g, '').slice(0, 16);
+    pa.txOperateur = tx;
+    pa.declareAt = nowISO();
+    pa.statut = 'declare';
+    tracePaiement(pa, '📨 Client déclare avoir payé — n° de transaction opérateur : ' + tx + ' (en attente de vérification)', q.role + ' ' + q.nom);
+    saveDb();
+    emitAdmin('pay', '📨 ' + pa.ref + ' — paiement déclaré (' + pa.montant.toLocaleString('fr-FR') + ' F) · txn ' + tx + ' — à vérifier');
+    return sendJson(res, 200, { ok: true, paiement: paiementPublic(pa), message: 'Déclaration enregistrée. Klean vérifie la réception auprès de l’opérateur : le statut passera à « Réussi » après confirmation.' });
+  }
+  /* ── annulation par le client (uniquement avant confirmation) ── */
+  const pAnn = p.match(/^\/api\/paiements\/([^/]+)\/annuler$/);
+  if (pAnn && req.method === 'POST') {
+    const pa = paiements().find(x => x.id === pAnn[1] || x.ref === pAnn[1]);
+    if (!pa) return sendJson(res, 404, { error: 'Paiement introuvable' });
+    const q = paiementProprietaire(req, pa);
+    if (!q) return sendJson(res, 403, { error: 'Accès refusé' });
+    if (pa.statut === 'reussi') return sendJson(res, 409, { error: 'Impossible d’annuler un paiement confirmé' });
+    pa.statut = 'annule';
+    tracePaiement(pa, '🚫 Annulé par ' + q.role + ' ' + q.nom, q.role + ' ' + q.nom);
+    saveDb();
+    return sendJson(res, 200, { ok: true, paiement: paiementPublic(pa) });
+  }
+  /* ── historique du client connecté ── */
+  if (p === '/api/clients/paiements' && req.method === 'GET') {
+    const cl = findClientByToken(req);
+    if (!cl) return sendJson(res, 401, { error: 'Connexion requise' });
+    const list = paiements().filter(x => x.clientId === cl.id).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const totalReussi = list.filter(x => x.statut === 'reussi').reduce((s, x) => s + x.montant, 0);
+    return sendJson(res, 200, { ok: true, n: list.length, totalReussi, paiements: list.slice(0, 100).map(paiementPublic) });
+  }
+  /* ── historique du pro connecté (ses missions) ── */
+  if (p === '/api/agents/paiements' && req.method === 'GET') {
+    const tk = url.searchParams.get('jeton') || req.headers['x-agent-token'] || '';
+    const ag = db.agents.find(a => a.jeton && a.jeton === tk);
+    if (!ag) return sendJson(res, 401, { error: 'Jeton du professionnel requis', code: 'jeton' });
+    const miens = new Set(db.missions.filter(m => m.agentId === ag.id).map(m => m.id));
+    const list = paiements().filter(x => miens.has(x.missionId) || x.proId === ag.id).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return sendJson(res, 200, {
+      ok: true, n: list.length,
+      encaisse: list.filter(x => x.statut === 'reussi').reduce((s, x) => s + x.montant, 0),
+      enAttente: list.filter(x => ['en_attente', 'declare'].includes(x.statut)).reduce((s, x) => s + x.montant, 0),
+      paiements: list.slice(0, 100).map(paiementPublic)
+    });
+  }
+  /* ── où mes clients paient (pro) : moyens visibles côté pro ── */
+  if (p === '/api/agents/moyens-paiement' && req.method === 'GET') {
+    const tk = url.searchParams.get('jeton') || req.headers['x-agent-token'] || '';
+    const ag = db.agents.find(a => a.jeton && a.jeton === tk);
+    if (!ag) return sendJson(res, 401, { error: 'Jeton du professionnel requis', code: 'jeton' });
+    return sendJson(res, 200, { ok: true, methods: payMethodsPubliques('pro') });
+  }
+  /* ── HQ : tableau des moyens de paiement (PDG) ── */
+  if (p === '/api/admin/pay-methods' && req.method === 'GET') {
+    if (!pdgOnly(req, res)) return;
+    return sendJson(res, 200, {
+      ok: true,
+      methods: payMethods().map(m => Object.assign({}, m, { numeroAffiche: fmtNumeroCI(m.numero), nomOperateur: operateurInfo(m.operateur).nom, ic: operateurInfo(m.operateur).ic })),
+      integrations: integrationsPay(),
+      totaux: {
+        transactions: paiements().length,
+        encaisse: paiements().filter(x => x.statut === 'reussi').reduce((s, x) => s + x.montant, 0),
+        enAttente: paiements().filter(x => ['en_attente', 'declare'].includes(x.statut)).reduce((s, x) => s + x.montant, 0),
+        aVerifier: paiements().filter(x => x.statut === 'declare').length
+      },
+      notice: 'Les numéros d’un encaissement automatique par API exigent un compte marchand : voir « Intégrations officielles ».'
+    });
+  }
+  if (p === '/api/admin/pay-methods' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const numero = String(b.numero || '').replace(/\D/g, '');
+    if (numero.length < 8) return sendJson(res, 400, { error: 'Numéro invalide (10 chiffres en Côte d’Ivoire)' });
+    if (payMethods().some(m => m.numero === numero && String(m.operateur) === String(b.operateur || operateurDeNumero(numero))))
+      return sendJson(res, 409, { error: 'Ce numéro est déjà enregistré pour cet opérateur' });
+    const now = nowISO();
+    const m = {
+      id: nouveauIdPayMethod(), libelle: String(b.libelle || '').trim() || operateurInfo(b.operateur || operateurDeNumero(numero)).nom,
+      operateur: String(b.operateur || operateurDeNumero(numero)), numero, titulaire: String(b.titulaire || '').slice(0, 60),
+      note: String(b.note || '').slice(0, 120),
+      principal: !!b.principal, actif: b.actif !== false,
+      visibleClient: b.visibleClient !== false, visiblePro: b.visiblePro !== false,
+      createdAt: now, updatedAt: now, updatedBy: 'PDG'
+    };
+    if (m.principal) payMethods().forEach(x => x.principal = false);
+    payMethods().push(m); saveDb();
+    auditLog('pay_method_create', { numero, operateur: m.operateur, par: 'PDG' });
+    emitAdmin('pay', '💳 Moyen de paiement ajouté : ' + m.libelle + ' — ' + fmtNumeroCI(numero));
+    return sendJson(res, 201, { ok: true, method: m });
+  }
+  const pmPut = p.match(/^\/api\/admin\/pay-methods\/([^/]+)$/);
+  if (pmPut && req.method === 'PUT') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const m = db.payMethods.find(x => x.id === pmPut[1]);
+    if (!m) return sendJson(res, 404, { error: 'Moyen de paiement introuvable' });
+    if (b.numero !== undefined) {
+      const numero = String(b.numero).replace(/\D/g, '');
+      if (numero.length < 8) return sendJson(res, 400, { error: 'Numéro invalide' });
+      if (payMethods().some(x => x.id !== m.id && x.numero === numero)) return sendJson(res, 409, { error: 'Ce numéro est déjà utilisé par un autre moyen de paiement' });
+      m.numero = numero;
+      if (b.operateur === undefined) m.operateur = operateurDeNumero(numero);
+    }
+    if (b.operateur !== undefined) m.operateur = String(b.operateur);
+    if (b.libelle !== undefined) m.libelle = String(b.libelle).slice(0, 60) || m.libelle;
+    if (b.titulaire !== undefined) m.titulaire = String(b.titulaire).slice(0, 60);
+    if (b.note !== undefined) m.note = String(b.note).slice(0, 120);
+    if (b.actif !== undefined) m.actif = !!b.actif;
+    if (b.visibleClient !== undefined) m.visibleClient = !!b.visibleClient;
+    if (b.visiblePro !== undefined) m.visiblePro = !!b.visiblePro;
+    if (b.principal !== undefined) { m.principal = !!b.principal; if (m.principal) payMethods().forEach(x => { if (x.id !== m.id) x.principal = false; }); }
+    if (m.principal && !m.actif) return sendJson(res, 409, { error: 'Un moyen de paiement inactif ne peut pas être principal — activez-le d’abord' });
+    m.updatedAt = nowISO(); m.updatedBy = 'PDG';
+    saveDb();
+    auditLog('pay_method_update', { id: m.id, numero: m.numero, actif: m.actif, client: m.visibleClient, pro: m.visiblePro, principal: m.principal, par: 'PDG' });
+    return sendJson(res, 200, { ok: true, method: m });
+  }
+  if (pmPut && req.method === 'DELETE') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req).catch(() => ({}));
+    const i = db.payMethods.findIndex(x => x.id === pmPut[1]);
+    if (i < 0) return sendJson(res, 404, { error: 'Moyen de paiement introuvable' });
+    const usage = paiements().filter(x => x.payMethodId === db.payMethods[i].id).length;
+    if (usage && !b.force) return sendJson(res, 409, { error: 'Ce moyen a ' + usage + ' transaction(s) : désactivez-le au lieu de le supprimer (ou confirmez la suppression)', usage });
+    const [suppr] = db.payMethods.splice(i, 1);
+    if (suppr.principal && db.payMethods.length) db.payMethods[0].principal = true;
+    saveDb();
+    auditLog('pay_method_delete', { numero: suppr.numero, par: 'PDG' });
+    emitAdmin('pay', '🗑️ Moyen de paiement supprimé : ' + suppr.libelle + ' — ' + fmtNumeroCI(suppr.numero));
+    return sendJson(res, 200, { ok: true, deleted: suppr.id });
+  }
+  /* ── HQ : journal des transactions ── */
+  if (p === '/api/admin/paiements' && req.method === 'GET') {
+    if (!pdgOnly(req, res)) return;
+    const st = url.searchParams.get('statut') || '';
+    let list = paiements().slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    if (st) list = list.filter(x => x.statut === st);
+    return sendJson(res, 200, {
+      ok: true, n: list.length,
+      totaux: {
+        encaisse: paiements().filter(x => x.statut === 'reussi').reduce((s, x) => s + x.montant, 0),
+        enAttente: paiements().filter(x => ['en_attente', 'declare'].includes(x.statut)).reduce((s, x) => s + x.montant, 0),
+        aVerifier: paiements().filter(x => x.statut === 'declare').length
+      },
+      paiements: list.slice(0, 200).map(paiementPublic)
+    });
+  }
+  /* ── HQ : CONFIRMER un paiement — mot de passe PDG + n° de transaction obligatoires.
+        C'est la SEULE voie manuelle vers « réussi » : jamais sur simple déclaration. ── */
+  const pConf = p.match(/^\/api\/admin\/paiements\/([^/]+)\/(confirmer|refuser)$/);
+  if (pConf && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    if (!db.admin || hashPassword(db.admin.salt, b.password || '') !== db.admin.passHash)
+      return sendJson(res, 401, { error: 'Mot de passe PDG requis pour confirmer un paiement' });
+    const pa = paiements().find(x => x.id === pConf[1] || x.ref === pConf[1]);
+    if (!pa) return sendJson(res, 404, { error: 'Paiement introuvable' });
+    if (pa.statut === 'reussi') return sendJson(res, 409, { error: 'Paiement déjà confirmé' });
+    if (pConf[2] === 'confirmer') {
+      const txSaisi = String(b.txOperateur || '').replace(/[^A-Za-z0-9\-\.\/]/g, '').slice(0, 40);
+      const tx = txSaisi || pa.txOperateur || '';
+      if (!tx) return sendJson(res, 400, { error: 'Indiquez le numéro de transaction lu chez l’opérateur (SMS ou application) — aucune confirmation sans preuve' });
+      pa.txOperateur = tx;
+      pa.txFourniPar = txSaisi ? 'PDG (saisi au moment de la confirmation)' : 'client (déclaré) — à vérifier sur le SMS de l’opérateur';
+      pa.statut = 'reussi'; pa.confirmeAt = nowISO(); pa.confirmePar = 'PDG';
+      tracePaiement(pa, '✅ Confirmation PDG — n° transaction opérateur ' + tx + ' (' + pa.txFourniPar + ')', 'PDG');
+      saveDb(); auditLog('paiement_confirme', { ref: pa.ref, montant: pa.montant, tx, par: 'PDG' });
+      emitAdmin('pay', '✅ Paiement ' + pa.ref + ' CONFIRMÉ — ' + pa.montant.toLocaleString('fr-FR') + ' F');
+      bcAll({ type: 'paiement_update', paiement: paiementPublic(pa) });
+      return sendJson(res, 200, { ok: true, paiement: paiementPublic(pa) });
+    }
+    pa.statut = 'echoue'; pa.motif = String(b.motif || 'Paiement non reçu').slice(0, 140); pa.confirmePar = 'PDG'; pa.confirmeAt = nowISO();
+    tracePaiement(pa, '❌ Refusé par le PDG — ' + pa.motif, 'PDG');
+    saveDb(); auditLog('paiement_refuse', { ref: pa.ref, motif: pa.motif, par: 'PDG' });
+    bcAll({ type: 'paiement_update', paiement: paiementPublic(pa) });
+    return sendJson(res, 200, { ok: true, paiement: paiementPublic(pa) });
+  }
+  /* ── 🔌 WEBHOOK fournisseur (quand l'API marchande sera branchée) :
+        sans secret configuré, on REFUSE de valider — impossible de « simuler » un succès ── */
+  const wHook = p.match(/^\/api\/pay\/webhook\/([a-z]+)$/);
+  if (wHook && req.method === 'POST') {
+    const op = wHook[1];
+    const secret = process.env.KLEAN_PAY_WEBHOOK_SECRET || '';
+    const body = await readBodyRaw(req);
+    const sig = String(req.headers['x-klean-signature'] || req.headers['x-pay-signature'] || '');
+    const attendu = secret ? crypto.createHmac('sha256', secret).update(body).digest('hex') : '';
+    if (!secret) return sendJson(res, 503, { error: 'Intégration ' + operateurInfo(op).nom + ' non configurée : secret de webhook manquant (KLEAN_PAY_WEBHOOK_SECRET). Aucun paiement ne sera validé.', code: 'non_configure' });
+    if (!sig || sig.toLowerCase() !== attendu.toLowerCase()) return sendJson(res, 401, { error: 'Signature invalide', code: 'signature' });
+    let d = {}; try { d = JSON.parse(body || '{}'); } catch (e) {}
+    const pa = paiements().find(x => x.ref === d.ref || x.txOperateur === d.txOperateur);
+    if (!pa) return sendJson(res, 404, { error: 'Transaction inconnue' });
+    if (String(d.statut || '').toLowerCase() === 'reussi' || d.success === true) {
+      pa.statut = 'reussi'; pa.confirmePar = 'Fournisseur ' + operateurInfo(op).nom; pa.confirmeAt = nowISO();
+      if (d.txOperateur) pa.txOperateur = String(d.txOperateur).slice(0, 40);
+      tracePaiement(pa, '✅ Confirmation FOURNISSEUR ' + operateurInfo(op).nom + ' (webhook signé)', 'webhook');
+      saveDb(); bcAll({ type: 'paiement_update', paiement: paiementPublic(pa) });
+      console.log('✅ Webhook ' + op + ' : paiement ' + pa.ref + ' confirmé');
+      return sendJson(res, 200, { ok: true });
+    }
+    pa.statut = 'echoue'; pa.motif = String(d.motif || 'Refus du fournisseur').slice(0, 140); pa.confirmePar = 'Fournisseur ' + operateurInfo(op).nom;
+    tracePaiement(pa, '❌ Refus FOURNISSEUR : ' + pa.motif, 'webhook');
+    saveDb(); bcAll({ type: 'paiement_update', paiement: paiementPublic(pa) });
+    return sendJson(res, 200, { ok: true });
   }
 
   /* --- 💬 Support interne : utilisateur (client OU pro) ↔ équipe KLEAN --- */
@@ -3501,5 +4213,11 @@ server.listen(PORT, '0.0.0.0', () => {
   initStorage().then(() => {
     console.log('  🔑 Mot de passe HQ : ' + (db.admin ? 'déjà configuré ✓' : 'à créer à /admin'));
     console.log('  💰 Commission  : ' + (feePct() * 100) + '% par mission');
+    try {
+      const cree = seedPayMethods();   // 💳 reprise des numéros existants au premier démarrage
+      const n = payMethods().filter(m => m.actif).length;
+      console.log('  💳 Moyens de paiement : ' + n + ' actif(s)' + (cree ? ' (initialisés depuis les numéros existants)' : ''));
+      console.log('  🔌 CinetPay (agrégateur) : ' + (cinetpayPret(null) ? 'configuré ✓ — paiement en ligne + vérification automatique' : 'non configuré → ' + cinetpayManque(null).length + ' élément(s) manquant(s), confirmation par le PDG (aucun succès automatique)'));
+    } catch (e) { console.error('Paiement :', e); }
   }).catch(e => { console.error('Stockage :', e); });
 });
