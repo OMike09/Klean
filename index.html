@@ -457,9 +457,12 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     <p style="margin:7px 0 13px;font-size:14px;line-height:1.4;font-weight:600;opacity:.98">Le service dont vous avez besoin, <b>où vous en avez besoin</b>.</p>
 
     <div style="background:#fff;border-radius:17px;padding:13px;color:var(--ink)">
-      <label style="display:block;font-size:12.5px;font-weight:900;color:var(--pd);margin-bottom:6px">🔎 Que recherchez-vous ?</label>
-      <input id="home-svc-search" oninput="accueilSug(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();rechercherDepuisAccueil();}" placeholder="Ex. nettoyage, plomberie, cours à domicile…" style="width:100%;box-sizing:border-box;padding:12px;border-radius:12px;border:1.5px solid var(--line);background:#fff;font:inherit;font-weight:700" autocomplete="off">
+      <label style="display:block;font-size:12.5px;font-weight:900;color:var(--pd);margin-bottom:6px">🔎 De quoi avez-vous besoin ?</label>
+      <input id="home-svc-search" oninput="accueilSug(this.value);langSaisie(this.value,'accueil')" onkeydown="if(event.key==='Enter'){event.preventDefault();langAfficherPros('accueil');}" placeholder="Écrivez comme vous parlez — ex. ma clim ne refroidit plus" style="width:100%;box-sizing:border-box;padding:12px;border-radius:12px;border:1.5px solid var(--line);background:#fff;font:inherit;font-weight:700" autocomplete="off">
+      <div style="font-size:11.5px;color:#7A6A5E;margin-top:5px">Pas besoin de connaître le nom du métier — décrivez le problème, montrez une photo ou parlez 🙂</div>
       <div id="accueil-sug" style="margin-top:8px"></div>
+      <div id="lang-boite" style="margin-top:9px"></div>
+      <div id="lang-barre-accueil"></div>
 
       <div style="font-size:12.5px;font-weight:900;color:var(--pd);margin:13px 0 7px">📍 Où le service doit-il être effectué ?</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -469,7 +472,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
       </div>
       <div id="accueil-lieu" style="margin-top:8px"></div>
 
-      <button type="button" onclick="rechercherDepuisAccueil()" style="width:100%;margin-top:12px;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:15px;border-radius:14px;font-size:16px;box-shadow:0 5px 14px rgba(232,93,4,.35)">🔍 Rechercher un service</button>
+      <button type="button" onclick="langAfficherPros('accueil')" style="width:100%;margin-top:12px;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:15px;border-radius:14px;font-size:16px;box-shadow:0 5px 14px rgba(232,93,4,.35)">✅ Afficher les professionnels disponibles</button>
       <div id="accueil-msg" style="margin-top:9px"></div>
     </div>
 
@@ -489,6 +492,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     <button type="button" class="cat-chip" onclick="ouvrirRubrique('urgence')" style="display:flex;align-items:center;gap:5px;border-color:#f3c9c9"><span>🆘</span><b style="color:#c62828">Urgence</b></button>
     <button type="button" class="cat-chip" onclick="ouvrirRubrique('points')" style="display:flex;align-items:center;gap:5px"><span>🪙</span><b>Klean Points</b><span id="rap-pts" style="opacity:.75"></span></button>
     <button type="button" class="cat-chip" onclick="ouvrirRubrique('quiz')" style="display:flex;align-items:center;gap:5px"><span>🧠</span><b>Quiz</b></button>
+    <button type="button" class="cat-chip" id="rap-jeux" onclick="ouvrirRubrique('jeux')" style="display:none;align-items:center;gap:5px"><span>🎮</span><b>Jeux</b></button>
     <button type="button" class="cat-chip" onclick="ouvrirRubrique('infos')" style="display:flex;align-items:center;gap:5px"><span>ℹ️</span><b>Infos</b></button>
     <button type="button" class="cat-chip" onclick="ouvrirRubrique('options')" style="display:flex;align-items:center;gap:5px"><span>⚙️</span><b>Options</b></button>
   </div>
@@ -764,6 +768,14 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
 </div>
 
 <!-- ══════════════════ CLIENT : KLEAN POINTS ══════════════════ -->
+<div class="view" id="view-jeux">
+  <div class="wrap">
+    <h3 class="sect-title" style="margin-top:6px">🎮 Jeux Klean</h3>
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 11px">Jeux en direct : tout le monde répond à la même question en même temps, une mauvaise réponse élimine, et le nombre de joueurs encore en course descend en direct. Les points du gagnant sont des <b>Klean Points</b> (jamais de l'argent).</p>
+    <div id="jeux-corps"></div>
+  </div>
+</div>
+
 <div class="view" id="view-points">
   <div class="wrap">
     <h3 class="sect-title" style="margin-top:6px">🪙 Mes Klean Points</h3>
@@ -1517,8 +1529,10 @@ const RUBRIQUES = {
   infos:   { v:'view-infos',   f:'renderInfos',    t:'Informations' },
   urgence: { v:'view-urgence', f:'renderUrgence',  t:'Urgence' },
   quiz:    { v:'view-quiz',    f:'renderQuiz',     t:'Quiz Klean' },
+  jeux:    { v:'view-jeux',    f:'renderJeux',     t:'Jeux Klean' },
   points:  { v:'view-points',  f:'renderPoints',   t:'Mes Klean Points' }
 };
+try{ window.RUBRIQUES = RUBRIQUES; }catch(e){}     /* lisible aussi par les contrôles et les outils */
 function ouvrirRubrique(r){
   const x = RUBRIQUES[r]; if(!x) return;
   if(mode === 'agent'){ toast('Ces rubriques sont côté client'); return; }
@@ -3033,6 +3047,7 @@ function renderAccount(){
     <button class="btn-line" onclick="clientChangePw()">🔑 <span>Changer mon mot de passe</span></button>
     <button class="btn-line" onclick="openKleanService()">📞 <span>Contactez Klean-Service</span></button>
     <button class="btn-line" style="color:var(--danger)" onclick="clientLogout()">⏻ <span>Se déconnecter</span></button>`;
+    openIn1s(function(){ try{ paintJeu(); }catch(e){} });   /* 🎮 le jeu apparaît aussi dans le profil (si le PDG l'a choisi) */
     openIn1s(verifierMonCompte);
     return;
   }
@@ -3514,7 +3529,11 @@ function quizMyPick(qid){
 function loadAffiche(){
   const _w=(function(){ try{ return quizWho(); }catch(e){ return {accountId:'',nom:''}; } })();
   fetch('/api/annonce?screen='+(mode==='agent'?'agent':'client')+'&who='+encodeURIComponent(_w.accountId||'')+'&nom='+encodeURIComponent(_w.nom||''),{cache:'no-store'}).then(r=>r.json()).then(d=>{
-    if(!d || !d.annonce){
+    /* 🛡️ règle d'or : on ne ferme QUE si le serveur a répondu clairement « rien à afficher ».
+       Une erreur (bouclier, coupure réseau, serveur occupé) ne doit JAMAIS faire disparaître
+       le quiz ni le bandeau — c'est ce qui donnait l'impression que « tout se referme ». */
+    if(!d || d.error || !('annonce' in d)) return;
+    if(!d.annonce){
       const qb=document.getElementById('quiz-box'); if(qb){ qb.classList.add('hidden'); qb.innerHTML=''; }
       const bar=document.getElementById('aff-bar'); if(bar){ bar.classList.add('hidden'); bar.style.display='none'; }
       const rx=document.getElementById('aff-react'); if(rx) rx.classList.add('hidden');
@@ -3678,7 +3697,10 @@ function pubObserver(){
 async function loadAd(){
   try{
     const _w=quizWho();
-    const d=await fetch('/api/ads?screen='+(mode==='agent'?'agent':'client')+'&who='+encodeURIComponent(_w.accountId||'')+'&nom='+encodeURIComponent(_w.nom||''),{cache:'no-store'}).then(r=>r.json());
+    const r=await fetch('/api/ads?screen='+(mode==='agent'?'agent':'client')+'&who='+encodeURIComponent(_w.accountId||'')+'&nom='+encodeURIComponent(_w.nom||''),{cache:'no-store'});
+    const d=await r.json();
+    /* 🛡️ une réponse en erreur ne doit pas effacer la publicité déjà à l'écran */
+    if(!d || d.error || !('ad' in d)) return;
     paintAd(d.ad||null, d.views||0);
   }catch(e){}
 }
@@ -3726,13 +3748,8 @@ function jeuEnCoursPourMoi(){
   const e = JEU_ETAT; if(!e || !e.partie) return false;
   return e.partie.status === 'en_cours' && !!(e.moi && e.moi.inscrit && !e.moi.elimine && !e.moi.repondu);
 }
-function jeuAfficher(){
-  const b = document.getElementById('jeu-box'); if(!b) return;
-  let visible = !!JEU_ETAT && !JEU_MASQUE;
-  if(visible && !jeuEnCoursPourMoi()){ try{ visible = pubSurAccueil(); }catch(e){ visible = true; } }
-  b.classList.toggle('hidden', !visible);
-  b.style.display = visible ? 'block' : 'none';
-}
+/* (conservé pour compatibilité : l'affichage est désormais géré par paintJeu) */
+function jeuAfficher(){ try{ paintJeu(); }catch(e){} }
 function jeuCd(txt){
   let ms = txt ? Date.parse(txt) : NaN;
   if(!isFinite(ms)) return '';
@@ -3746,38 +3763,39 @@ async function chargerJeux(){
   let d;
   try{ d = await fetch('/api/jeux?who=' + encodeURIComponent(w.accountId||''), { cache:'no-store', headers: jeuHdrs() }).then(r => r.json()); }
   catch(e){ return; }
-  if(!d || !d.jeux || !d.jeux.length){ JEU_ETAT = null; paintJeu(); return; }
+  /* 🛡️ seuls une VRAIE liste vide (ou l'absence volontaire) ferment le jeu — jamais une erreur serveur */
+  if(!d || d.error || !Array.isArray(d.jeux)) return;
+  if(!d.jeux.length){ JEU_ETAT = null; paintJeu(); return; }
   const j = d.jeux.find(x => x.enCours) || d.jeux.find(x => x.peutJouer) || d.jeux[0];
   let e = null;
   try{ e = await fetch('/api/jeux/etat?id=' + encodeURIComponent(j.id) + '&who=' + encodeURIComponent(w.accountId||''), { cache:'no-store', headers: jeuHdrs() }).then(r => r.json()); }
   catch(err){ return; }
-  if(!e || !e.jeu) return;
-  const autre = !JEU_ETAT || !JEU_ETAT.partie || (e.partie && JEU_ETAT.partie && e.partie.id !== JEU_ETAT.partie.id);
-  JEU_ETAT = e;
+  if(!e || e.error || !e.jeu) return;
+  /* 🔗 on garde ce que la LISTE dit (peutJouer, emplacements choisis par le PDG, restriction)
+     et on ajoute ce que l'ÉTAT EN DIRECT dit (partie, question, moi) : jamais d'écran vide */
+  const fusion = Object.assign({}, j, e, { jeu: Object.assign({}, j, e.jeu || {}) });
+  const autre = !JEU_ETAT || !JEU_ETAT.partie || (fusion.partie && JEU_ETAT.partie && fusion.partie.id !== JEU_ETAT.partie.id);
+  JEU_ETAT = fusion;
   if(autre) JEU_FEEDBACK = '';
   if(e.partie) JEU_SEC = e.partie.secondes || 0;
   paintJeu();
 }
-function paintJeu(){
-  const b = document.getElementById('jeu-box'); if(!b) return;
+/* 🎮 le contenu de la bulle (une seule vérité, réutilisée aux 3 emplacements autorisés par le PDG) */
+function jeuContenu(){
   const e = JEU_ETAT;
-  if(!e || !e.partie){ if(!e){ JEU_MASQUE=false; b.innerHTML=''; b.classList.add('hidden'); b.style.display='none'; return; } }
+  if(!e) return '';
   if(!e.partie){
-    /* le jeu existe mais rien n'est lancé : on annonce l'heure + un compte à rebours avant le début */
-    if(!e.peutJouer){ b.innerHTML=''; b.classList.add('hidden'); b.style.display='none'; return; }
+    if(!e.peutJouer) return '<div class="empty" style="padding:14px"><b>Aucun jeu ouvert pour vous</b><p>Les jeux publiés par KLEAN apparaîtront ici, avec un compte à rebours avant le début.</p></div>';
     const cd = jeuCd(e.jeu.debutAt);
-    b.innerHTML = '<b style="font-size:15px">🎮 ' + pubEsc(e.jeu.nom) + '</b>'
+    return '<b style="font-size:15px">🎮 ' + pubEsc(e.jeu.nom) + '</b>'
       + '<p style="margin:7px 0 4px;font-size:13.5px;font-weight:700;line-height:1.4">' + pubEsc(e.jeu.regle || 'Le jeu n’a pas encore commencé. Vous pouvez déjà vous inscrire.') + '</p>'
       + '<p style="font-size:13px;color:var(--muted);margin:0 0 8px">' + (e.jeu.pointsGagnant ? ('🏆 Le gagnant reçoit <b>' + e.jeu.pointsGagnant + ' Klean Points</b>. ') : '') + (cd ? ('Début dans <b>' + cd + '</b>.') : 'Le PDG lance la partie quand il veut.') + '</p>'
       + '<button type="button" onclick="jeuInscrire(\'' + pubEsc(e.jeu.id) + '\')" style="width:100%;background:var(--p);border:none;color:#04231a;font-weight:900;padding:12px;border-radius:12px;cursor:pointer;font:inherit;font-size:14px">🙋 Participer au jeu</button>';
-    jeuAfficher();
-    return;
   }
   const p = e.partie, moi = e.moi || {}, jeu = e.jeu || {};
   const tete = '<b style="font-size:15px">🎮 ' + pubEsc(jeu.nom || 'Jeu KLEAN') + '</b>';
   const surv = '<div class="jeu-surv"><span>👥 ' + (p.inscrits || 0) + ' participant(s)</span><span style="background:rgba(21,201,138,.16)">🟢 ' + (p.restants || 0) + ' encore en course</span>' + ((p.elimines||0) ? ('<span style="background:rgba(255,107,107,.14)">✕ ' + p.elimines + ' éliminé(s)</span>') : '') + '</div>';
   let corps = '';
-
   if(p.status === 'inscription'){
     if(moi.inscrit){
       const cd = jeuCd(p.debutAt);
@@ -3806,7 +3824,7 @@ function paintJeu(){
       corps = '<p style="margin:7px 0 8px;font-size:15.5px;font-weight:800;line-height:1.35">' + pubEsc(p.question.q) + '</p>'
         + '<div id="jeu-cd">' + Math.max(0, JEU_SEC || p.secondes || 0) + '</div>'
         + '<p style="text-align:center;font-size:11.5px;color:var(--muted);margin:2px 0 9px">secondes pour répondre' + (p.niveauTxt ? (' · ' + pubEsc(p.niveauTxt)) : '') + ' — une mauvaise réponse élimine</p>'
-        + (p.question.choix || []).map((c, i) => '<button type="button" class="jeu-choix" onclick="jeuRepondre(\'' + pubEsc(jeu.id) + '\',' + i + ')"><span class="k">' + 'ABCD'[i] + '</span><span>' + pubEsc(c) + '</span></button>').join('')
+        + (p.question.choix || []).map((cc, i) => '<button type="button" class="jeu-choix" onclick="jeuRepondre(\'' + pubEsc(jeu.id) + '\',' + i + ')"><span class="k">' + 'ABCD'[i] + '</span><span>' + pubEsc(cc) + '</span></button>').join('')
         + surv;
     } else {
       corps = '<p style="margin:7px 0 6px;font-size:13.5px;font-weight:700">La question suivante arrive…</p>' + surv;
@@ -3829,10 +3847,48 @@ function paintJeu(){
         + '<button type="button" onclick="jeuMasquer()" style="width:100%;margin-top:9px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:11px;cursor:pointer;font:inherit;font-size:12.5px">Masquer</button>';
     }
   }
-  b.innerHTML = tete + corps + (moi.inscrit ? '' : '');
-  jeuAfficher();
+  return tete + corps;
 }
-function jeuMasquer(){ JEU_MASQUE = true; jeuAfficher(); }
+/* 🖐️ le joueur a masqué la bulle de l'accueil (uniquement l'accueil : la rubrique Jeux reste) */
+function jeuMasquer(){ JEU_MASQUE = true; paintJeu(); }
+/* 📍 trois emplacements : accueil · rubrique Jeux · profil (Compte) — selon ce que le PDG a choisi */
+function jeuEmplacements(){
+  const j = (JEU_ETAT && JEU_ETAT.jeu) || {};
+  const pl = j.placement || {};
+  return { accueil: pl.accueil !== false, rubrique: pl.autres !== false, profil: !!pl.profils };
+}
+function paintJeu(){
+  const html = jeuContenu();
+  const pl = jeuEmplacements();
+  const toutDeSuite = jeuEnCoursPourMoi();
+  let surAccueil = false;
+  try{ surAccueil = (typeof pubSurAccueil === 'function') && pubSurAccueil(); }catch(e){ surAccueil = true; }
+
+  /* 1. l'accueil : bloc fixe au-dessus de la publicité */
+  const b = document.getElementById('jeu-box');
+  if(b){
+    const visible = !!html && pl.accueil && !JEU_MASQUE && (toutDeSuite || surAccueil);
+    b.innerHTML = html;
+    b.classList.toggle('hidden', !visible);
+    b.style.display = visible ? 'block' : 'none';
+  }
+  /* 2. la rubrique 🎮 Jeux (emplacement « rubrique Jeux » du HQ) */
+  const r = document.getElementById('jeux-corps');
+  if(r){
+    r.innerHTML = pl.rubrique ? (html || '<div class="empty" style="padding:14px"><b>Aucun jeu pour l’instant</b><p>KLEAN publiera ici les prochains jeux en direct : compte à rebours, questions, éliminations et gagnant.</p></div>')
+      : '<div class="empty" style="padding:14px"><b>Cette rubrique est masquée</b><p>Le compte principal n’a pas choisi d’afficher les jeux ici.</p></div>';
+  }
+  /* 3. le profil / espace Compte (emplacement « profil ») */
+  const c2 = document.getElementById('jeu-compte');
+  if(c2){
+    c2.innerHTML = (html && pl.profil) ? ('<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:13px;margin-bottom:11px">' + html + '</div>') : '';
+  }
+  /* 4. le raccourci « Jeux » de l'accueil : visible seulement si un jeu est proposé */
+  const chip = document.getElementById('rap-jeux');
+  if(chip) chip.style.display = (JEU_ETAT && pl.rubrique) ? 'flex' : 'none';
+  try{ if(typeof placerPub === 'function') placerPub(); }catch(e){}
+}
+function jeuMasquer(){ JEU_MASQUE = true; paintJeu(); }
 async function jeuInscrire(id){
   const w = jeuQui();
   try{
@@ -3915,9 +3971,13 @@ setInterval(() => {
     }
     /* compte à rebours avant le début, ou avant la fermeture des inscriptions */
     const p = JEU_ETAT.partie;
-    if(p.status === 'inscription' && !JEU_MASQUE){
-      const cible = p.debutAt || null;
-      if(cible){ const box = document.getElementById('jeu-box'); if(box && box.classList.contains('hidden') === false) paintJeu(); }
+    if(p.status === 'inscription'){
+      /* ⏳ le compte à rebours avant le début est mis à jour (accueil ET rubrique Jeux) */
+      const vue = (document.getElementById('view-jeux') || {});
+      const surRubrique = vue.classList && vue.classList.contains('active');
+      const box = document.getElementById('jeu-box');
+      const bulleVisible = !!(box && !box.classList.contains('hidden'));
+      if((surRubrique || bulleVisible) && (p.debutAt || p.inscriptionFinAt)) paintJeu();
     }
   }catch(e){}
 }, 1000);
@@ -3935,10 +3995,20 @@ function hubRubriquesHTML(){
   return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
     + [['options','⚙️','Options','Réglages'],['infos','ℹ️','Informations','Actualités'],
        ['urgence','🆘','Urgence','Aide immédiate'],['quiz','🧠','Quiz','Apprendre'],
-       ['points','🪙','Klean Points','Solde & récompenses'],['flip','🎮','Flip Fizz','Jeu Klean']]
+       ['points','🪙','Klean Points','Solde & récompenses'],['jeux','🎮','Jeux','En direct'],
+       ['flip','🎮','Flip Fizz','Jeu Klean']]
       .map(x=>'<button type="button" onclick="'+(x[0]==='flip'?'flipOuvrir()':'ouvrirRubrique(\''+x[0]+'\')')+'" style="text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:11px;cursor:pointer;font:inherit;color:var(--ink)">'
         + '<div style="font-size:21px">'+x[1]+'</div><b style="display:block;font-size:13px;margin-top:3px">'+x[2]+'</b><small style="color:var(--muted);font-size:11px">'+x[3]+'</small></button>').join('')
-    + '</div>';
+    + '</div>'
+    /* 🎮 le bloc Jeux du profil est PLEINE LARGEUR (hors de la grille des rubriques) */
+    + '<div id="jeu-compte"></div>';
+}
+/* 🎮 la rubrique Jeux : ce que le PDG a publié (emplacement « rubrique Jeux » dans le HQ) */
+function renderJeux(){
+  const box = document.getElementById('jeux-corps'); if(!box) return;
+  box.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted)">Chargement…</div>';
+  chargerJeux().then(() => { if(!JEU_ETAT) paintJeu(); }).catch(() => paintJeu());
+  setTimeout(() => paintJeu(), 400);
 }
 function accModale(titre, corps, large){
   const m = document.createElement('div');
@@ -4824,6 +4894,9 @@ refreshStats();
    le GPS du téléphone n'est jamais cru sur parole (vérifié côté serveur).
    ═══════════════════════════════════════════════════════════════════════════ */
 const RECH = { svc:'', q:'', lat:null, lng:null, acc:0, source:'', exact:false, liste:[], fiche:null, num:'', etape:'q', msgErr:'', mode:'service', compris:'', suggestions:[], tri:'score', elargir:false, busy:false, lieu:null, lieuTxt:'', lieuOk:true, posSource:'', zoneElargie:0 };
+/* 🗣️ lot 102 : l'état de la recherche et de la compréhension est visible depuis la console
+   (utile au PDG et aux tests) — aucune donnée privée n'y figure. */
+try{ window.RECH = RECH; }catch(e){}
 
 function rechEch(t){ return String(t==null?'':t).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 function rechSvcNom(id){ const s=(typeof SERVICES!=='undefined'?SERVICES:[]).find(x=>x.id===id); return s?s.nom:(id||''); }
@@ -5013,7 +5086,8 @@ function rechercherDepuisAccueil(){
   if(!q){ accueilMsg('✍️ Écrivez ou choisissez le service recherché (ex. nettoyage, plomberie, cours à domicile).'); return; }
   const kp = rechKpDetect(q);
   if(kp) return accueilKpGo(kp);
-  if(RECH.svc && normT(q) !== normT(rechSvcNom(RECH.svc))) RECH.svc = '';
+    /* 🗣️ lot 102 : le métier confirmé par le client est conservé (voir l'accueil) */
+  if(!LANG.ok && RECH.svc && normT(q) !== normT(rechSvcNom(RECH.svc))) RECH.svc = '';
   if(!RECH.lieu || !RECH.lieu.mode){ accueilLieu('ville'); }
   if(!accueilLieuValider()){ accueilMsg('📍 Indiquez où le service doit être effectué (votre position, votre ville, ou un autre lieu).'); return; }
   accueilMsg('');
@@ -5100,6 +5174,278 @@ function rechEtapes(et){
     + '</div>';
 }
 
+/* ═══════════ 🗣️ LOT 102 — « JE DÉCRIS, KLEAN COMPREND » ═══════════
+   Le client écrit (ou parle, ou montre une photo). Sa phrase part au serveur (/api/comprendre)
+   et Klean lui répond : « 🧠 Nous avons compris que vous cherchez : … ».
+   §41 : il n'a JAMAIS besoin de connaître le nom du métier. */
+const LANG = { q:'', ou:'accueil', c:null, ok:false, timer:0, quand:'', photo:'', rep:null, note:'' };
+/* les problèmes que les clients décrivent le plus souvent (ils touchent, et on comprend) */
+const LANG_SOUVENT = [
+  ['🧊 Mon frigo ne fait plus froid'], ['❄️ Ma clim ne refroidit plus'], ['🚰 Il y a une fuite d’eau sous l’évier'],
+  ['💡 Ça fait disjoncter'], ['🚪 Ma porte est coincée'], ['🧺 Je veux faire nettoyer ma maison'],
+  ['🛋️ Mon canapé est sale'], ['🌿 Je veux quelqu’un pour couper l’herbe'], ['👶 Je cherche quelqu’un pour garder mon enfant'],
+  ['💇 Je cherche quelqu’un pour faire mes cheveux'], ['📱 Mon téléphone ne s’allume plus'], ['🚚 Je veux déplacer mes affaires']
+];
+try{ window.LANG = LANG; }catch(e){}          /* visible dans la console (et par les tests) */
+function langEch(x){ return (typeof rechEch === 'function') ? rechEch(x) : String(x==null?'':x).replace(/[&<>"']/g, k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k])); }
+function langChamp(ou){ return document.getElementById(ou === 'rech' ? 'rech-q' : 'home-svc-search'); }
+function langZones(){ return ['lang-boite','rech-compris'].map(id=>document.getElementById(id)).filter(Boolean); }
+function langIc(id){ try{ const s = (typeof SERVICES!=='undefined'?SERVICES:[]).find(x=>x.id===id); return (s && s.ic) || '🔧'; }catch(e){ return '🔧'; } }
+function langNote(m){ LANG.note = m || ''; langPeindre(); }
+/* la barre de secours : parler · photo · position · « je ne sais pas » */
+function langBarre(ou){
+  const b = (ic, txt, act) => '<button type="button" onclick="'+act+'" style="cursor:pointer;font:inherit;font-weight:900;font-size:12.5px;padding:9px 12px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">'+ic+' '+txt+'</button>';
+  return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">'
+    + b('🎤','Parler',"langMicro('"+ou+"')")
+    + b('📷','Ajouter une photo',"langPhoto('"+ou+"')")
+    + b('📍','Ma position',"langLieuRapide('"+ou+"')")
+    + '</div>'
+    + '<button type="button" onclick="langJeNeSaisPas()" style="width:100%;margin-top:8px;border:1.5px dashed #DCD2FA;background:#F7F4FF;color:#4a2ea8;font:inherit;font-weight:900;padding:10px;border-radius:12px;cursor:pointer;font-size:12.5px">🤔 Je ne sais pas quel service choisir</button>';
+}
+function langLieuRapide(ou){
+  if(typeof accueilLieu === 'function') accueilLieu('moi');
+  if(ou === 'rech' && typeof rechLieuPeindre === 'function') rechLieuPeindre();
+  langNote('📍 Nous utiliserons votre position pour trouver le professionnel le plus proche (avec votre autorisation).');
+}
+/* ── la saisie : à chaque frappe, on demande au serveur ce qu'il comprend (petit délai) ── */
+function langSaisie(v, ou){
+  LANG.q = String(v==null?'':v); if(ou) LANG.ou = ou;
+  clearTimeout(LANG.timer);
+  LANG.ok = false;                       /* nouvelle phrase → on redemande au client de confirmer */
+  if(LANG.q.trim().length < 3){ LANG.c = null; LANG.note = ''; langZones().forEach(z=>{ z.innerHTML=''; }); return; }
+  LANG.timer = setTimeout(()=>langVoir(LANG.q, LANG.ou), 380);
+}
+async function langVoir(q, ou){
+  q = String(q==null?'':q).trim(); if(ou) LANG.ou = ou;
+  if(!q){ LANG.c = null; LANG.ok = false; return langPeindre(); }
+  const headers = {};
+  try{ if(typeof client !== 'undefined' && client && client.token) headers['X-Client-Token'] = client.token; }catch(e){}
+  try{
+    const r = await fetch('/api/comprendre?q=' + encodeURIComponent(q), { headers: headers, cache:'no-store' });
+    const d = await r.json();
+    if(d && d.ok){ LANG.c = d; LANG.ok = false; }        /* « compris » ne veut pas dire « confirmé » : c'est le client qui tranche */
+    else { LANG.c = { ok:false, mode:'inconnu' }; LANG.ok = false; }
+  }catch(e){ LANG.c = { ok:false, mode:'inconnu' }; LANG.ok = false; }
+  langPeindre();
+  return LANG.c;
+}
+function langChips(liste){
+  return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + liste.map(x =>
+    '<button type="button" onclick="langChoisir(\''+x.id+'\')" style="cursor:pointer;font:inherit;font-weight:800;font-size:12px;padding:8px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#FFF4E8;color:#8a3d00">'+(x.ic?x.ic+' ':'')+langEch(x.nom)+'</button>').join('') + '</div>';
+}
+function langChipsProblemes(){
+  return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + LANG_SOUVENT.map((x,i) =>
+    '<button type="button" onclick="langExempleIdx('+i+')" style="cursor:pointer;font:inherit;font-weight:800;font-size:12px;padding:8px 11px;border-radius:99px;border:1.5px solid #DCD2FA;background:#fff;color:#4a2ea8">'+langEch(x[0])+'</button>').join('') + '</div>';
+}
+/* ── ce que le client VOIT ── */
+function langPeindre(){
+  const zones = langZones(); if(!zones.length) return;
+  const html = langHTML();
+  zones.forEach(z => { z.innerHTML = html; });
+}
+function langHTML(){
+  const c = LANG.c, out = [];
+  /* ① 🧠 ce que nous avons compris */
+  if(c && c.mode === 'service'){
+    out.push('<div style="background:#EAF7F0;border:1.5px solid #B9E3CB;border-radius:13px;padding:11px 12px">');
+    out.push('<div style="font-size:12px;font-weight:900;color:#0f5132">🧠 Nous avons compris que vous cherchez :</div>');
+    /* on affiche EXACTEMENT ce que le serveur a compris (icône comprise) — une seule vérité */
+    const joli = c.comprisLong || (langIc(c.principal)+' '+(c.compris||'')+(c.tache ? ' · '+c.tache : ''));
+    out.push('<div style="font-size:15.5px;font-weight:900;margin-top:3px">'+langEch(joli)+'</div>');
+    const corr = c.corriges ? Object.keys(c.corriges) : [];
+    if(corr.length) out.push('<div style="font-size:11.5px;color:#37624f;margin-top:3px">✏️ Nous avons corrigé : '+corr.map(k=>langEch(k)+' → '+langEch(c.corriges[k])).join(' · ')+'</div>');
+    if(LANG.ok) out.push('<div style="font-size:11.5px;color:#0f5132;font-weight:800;margin-top:6px">👍 Parfait. Indiquez le lieu, puis « ✅ Afficher les professionnels disponibles ».</div>');
+    else out.push('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">'
+      + '<button type="button" onclick="langOui()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12.5px;padding:9px 12px;border-radius:99px;border:none;background:#0f5132;color:#fff">👍 Oui, c’est ça</button>'
+      + '<button type="button" onclick="langChanger()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12.5px;padding:9px 12px;border-radius:99px;border:1.5px solid #B9E3CB;background:#fff;color:#0f5132">✏️ Ce n’est pas ça</button></div>');
+    const alt = (c.alternatives || []).filter(a => a.id !== c.principal);
+    if(alt.length && !LANG.ok) out.push('<div style="font-size:11.5px;color:#37624f;margin-top:9px">Ou peut-être :</div>' + langChips(alt));
+    out.push('</div>');
+  } else if(c && c.mode === 'kp'){
+    out.push('<div style="background:#FFF4E8;border:1.5px solid #F6D9BE;border-radius:13px;padding:11px 12px;font-size:12.5px;font-weight:800;color:#8a3d00">🎫 Code '+langEch(c.code||'')+' détecté — appuyez sur « ✅ Afficher les professionnels disponibles » pour ouvrir sa fiche.</div>');
+  } else if(c && (c.mode === 'inconnu' || !c.ok)){
+    out.push('<div style="background:#FFF8EE;border:1.5px solid #F6D9BE;border-radius:13px;padding:11px 12px">');
+    out.push('<div style="font-size:12.5px;font-weight:900;color:#8a3d00">🤔 Nous n’avons pas encore reconnu votre phrase — ce n’est pas grave :</div>');
+    out.push('<div style="font-size:12px;color:#7A6A5E;margin-top:3px">'+langEch(c.aide || 'Décrivez le problème avec vos mots, ajoutez une photo ou parlez au micro.')+'</div>');
+    out.push(langChipsProblemes());
+    out.push('</div>');
+  }
+  /* ② 📷 ce que la photo a donné */
+  const r = LANG.rep;
+  if(r && r.ok){
+    out.push('<div style="background:#F3F7FF;border:1.5px solid #C9DCFA;border-radius:13px;padding:11px 12px;margin-top:9px">');
+    out.push('<div style="display:flex;gap:9px;align-items:flex-start">');
+    if(LANG.photo) out.push('<img src="'+LANG.photo+'" alt="votre photo" style="width:56px;height:56px;object-fit:cover;border-radius:11px;border:1.5px solid #C9DCFA">');
+    out.push('<div style="flex:1;min-width:0">');
+    out.push('<div style="font-size:12.5px;font-weight:900;color:#12446e">📷 Photo reçue</div>');
+    if(r.propose) out.push('<div style="font-size:14.5px;font-weight:900;margin-top:2px">'+r.propose.ic+' '+langEch(r.propose.nom)+(r.propose.tache ? ' · '+langEch(r.propose.tache) : '')+'</div>');
+    out.push('<div style="font-size:11.5px;color:#3f5f80;margin-top:3px">'+langEch(r.message||'')+'</div>');
+    if(r.propose && !LANG.ok) out.push('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+      + '<button type="button" onclick="langPhotoOk()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12.5px;padding:9px 12px;border-radius:99px;border:none;background:#12446e;color:#fff">👍 Oui, c’est ça</button>'
+      + '<button type="button" onclick="LANG.rep=null;LANG.photo=\'\';langPeindre()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12.5px;padding:9px 12px;border-radius:99px;border:1.5px solid #C9DCFA;background:#fff;color:#12446e">✏️ Changer</button></div>');
+    out.push('</div></div>');
+    if(!r.propose && r.candidats) out.push(langChips(r.candidats));
+    out.push('<div style="font-size:11px;color:#7A6A5E;margin-top:7px">🙏 C’est vous qui confirmez : nous ne choisissons jamais à votre place.</div>');
+    out.push('</div>');
+  }
+  /* ③ 🕒 quand ? */
+  if(c && c.mode === 'service' && LANG.ok){
+    const q = LANG.quand;
+    const b = (id, txt) => '<button type="button" onclick="langQuand(\''+id+'\')" style="cursor:pointer;font:inherit;font-weight:800;font-size:12px;padding:8px 11px;border-radius:99px;border:1.5px solid '+(q===id?'var(--pd)':'#e4eae7')+';background:'+(q===id?'#FFF4E8':'#fff')+';color:#33433c">'+txt+'</button>';
+    out.push('<div style="margin-top:9px">');
+    out.push('<div style="font-size:12.5px;font-weight:900;color:var(--pd);margin-bottom:6px">🕒 Quand ?</div>');
+    out.push('<div style="display:flex;gap:6px;flex-wrap:wrap">'+b('maintenant','⚡ Maintenant (urgent)')+b('aujourdhui','📅 Aujourd’hui')+b('semaine','🗓️ Cette semaine')+b('plus-tard','🕓 Plus tard')+'</div>');
+    if(q === 'maintenant') out.push('<div style="font-size:11.5px;color:#b03a1a;font-weight:800;margin-top:6px">⚡ Votre demande passera en priorité auprès des professionnels disponibles.</div>');
+    out.push('</div>');
+  }
+  if(LANG.note) out.push('<div style="background:#FFF4E8;border:1.5px solid #F6D9BE;border-radius:11px;padding:9px 10px;font-size:12px;font-weight:800;color:#8a3d00;margin-top:9px">'+langEch(LANG.note)+'</div>');
+  return out.join('');
+}
+/* ── les actions du client ── */
+function langOui(){
+  if(!LANG.c || LANG.c.mode !== 'service') return;
+  RECH.svc = LANG.c.principal || ''; RECH.q = LANG.q || '';
+  LANG.ok = true; LANG.note = '👍 C’est noté ! Choisissez le lieu, puis « ✅ Afficher les professionnels disponibles ».';
+  langPeindre();
+}
+function langChoisir(id){
+  RECH.svc = id; RECH.q = LANG.q || '';
+  LANG.c = { ok:true, mode:'service', principal:id, compris:(typeof rechSvcNom === 'function' ? rechSvcNom(id) : id), tache:'', corriges:{}, alternatives:[] };
+  LANG.ok = true; LANG.note = '👍 Nous chercherons : ' + (typeof rechSvcNom === 'function' ? rechSvcNom(id) : id);
+  const i = langChamp(LANG.ou); if(i) i.value = LANG.q || '';
+  langPeindre();
+}
+function langChanger(){
+  LANG.ok = false; LANG.c = null; LANG.rep = null;
+  const i = langChamp(LANG.ou); if(i) try{ i.focus(); }catch(e){}
+  langNote('✏️ Dites-le avec vos mots — ou touchez un problème courant ci-dessus.');
+  langJeNeSaisPas();
+}
+function langExempleIdx(i){
+  const e = LANG_SOUVENT[i]; if(!e) return;
+  const t = e[0];
+  const i2 = langChamp(LANG.ou); if(i2) i2.value = t;
+  LANG.q = t; LANG.note = '';
+  langVoir(t, LANG.ou);
+}
+function langQuand(id){
+  LANG.quand = (LANG.quand === id) ? '' : id;
+  RECH.quand = LANG.quand;
+  langPeindre();
+}
+function langJeNeSaisPas(){
+  const zones = langZones(); if(!zones.length) return;
+  const html = '<div style="background:#F7F4FF;border:1.5px solid #DCD2FA;border-radius:13px;padding:11px 12px">'
+    + '<div style="font-size:13px;font-weight:900;color:#4a2ea8">🤔 Pas de souci — vous n’avez pas besoin de connaître le nom du métier.</div>'
+    + '<div style="font-size:12px;color:#5b5570;margin-top:5px">① 📷 <b>Ajoutez une photo</b> du problème &nbsp;·&nbsp; ② 🎤 <b>Parlez</b> normalement &nbsp;·&nbsp; ③ 👇 ou touchez ce qui ressemble le plus :</div>'
+    + langChipsProblemes()
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">'
+    + '<button type="button" onclick="langPhoto(LANG.ou)" style="cursor:pointer;font:inherit;font-weight:900;font-size:12.5px;padding:9px 12px;border-radius:99px;border:1.5px solid #DCD2FA;background:#fff;color:#4a2ea8">📷 Ajouter une photo</button>'
+    + '<button type="button" onclick="langMicro(LANG.ou)" style="cursor:pointer;font:inherit;font-weight:900;font-size:12.5px;padding:9px 12px;border-radius:99px;border:1.5px solid #DCD2FA;background:#fff;color:#4a2ea8">🎤 Parler</button>'
+    + '</div></div>';
+  zones.forEach(z => { z.innerHTML = html; });
+}
+/* ── 🎤 la voix ── */
+function langMicro(ou){
+  LANG.ou = ou || LANG.ou || 'accueil';
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR) return langNote('🎤 La dictée n’est pas disponible sur ce navigateur. Écrivez la phrase, ou ajoutez une photo 🙂');
+  try{
+    const r = new SR();
+    r.lang = 'fr-FR'; r.interimResults = false; r.maxAlternatives = 1;
+    langNote('🎤 Je vous écoute… parlez normalement.');
+    r.onresult = ev => {
+      const t = (ev.results && ev.results[0] && ev.results[0][0] && ev.results[0][0].transcript) || '';
+      if(!t) return;
+      const i = langChamp(LANG.ou); if(i) i.value = t;
+      LANG.q = t; LANG.note = '';
+      langVoir(t, LANG.ou);
+    };
+    r.onerror = e => langNote((e && e.error === 'not-allowed') ? '🎤 Micro non autorisé — écrivez la phrase ou ajoutez une photo 🙏' : '🎤 Je n’ai pas bien entendu — réessayez, ou écrivez.');
+    r.start();
+  }catch(e){ langNote('🎤 Dictée indisponible — écrivez la phrase ou ajoutez une photo.'); }
+}
+/* ── 📷 la photo : le client montre, Klean propose, le client confirme ou modifie ── */
+function langPhoto(ou){
+  LANG.ou = ou || LANG.ou || 'accueil';
+  try{
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture','environment');
+    inp.style.display = 'none'; document.body.appendChild(inp);
+    inp.onchange = () => { const f = inp.files && inp.files[0]; if(f) langPhotoEnvoyer(f, LANG.ou); try{ inp.remove(); }catch(e){} };
+    inp.click();
+  }catch(e){ langNote('📷 Impossible d’ouvrir l’appareil photo sur cet appareil.'); }
+}
+function langReduire(f){
+  return new Promise(res => {
+    let fini = false, brut = '';
+    const rendre = v => { if(!fini){ fini = true; try{ clearTimeout(secours); }catch(e){} res(v); } };
+    /* 🛡️ filet de sécurité : si le navigateur n'arrive pas à réduire la photo (téléphone lent,
+       fichier bizarre), on envoie la photo telle quelle au bout de 1,5 s — jamais d'attente infinie. */
+    const secours = setTimeout(()=>rendre(brut), 1500);
+    try{
+      const fr = new FileReader();
+      fr.onload = () => {
+        brut = String(fr.result || '');
+        try{
+          const img = new Image();
+          img.onload = () => {
+            try{
+              const max = 900, sc = Math.min(1, max / Math.max(img.width || 1, img.height || 1));
+              const cv = document.createElement('canvas');
+              cv.width = Math.max(1, Math.round((img.width || 1) * sc));
+              cv.height = Math.max(1, Math.round((img.height || 1) * sc));
+              cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+              rendre(cv.toDataURL('image/jpeg', 0.72));
+            }catch(e){ rendre(brut); }
+          };
+          img.onerror = () => rendre(brut);
+          img.src = brut;
+        }catch(e){ rendre(brut); }
+      };
+      fr.onerror = () => rendre('');
+      fr.readAsDataURL(f);
+    }catch(e){ rendre(''); }
+  });
+}
+async function langPhotoEnvoyer(f, ou){
+  LANG.ou = ou || LANG.ou;
+  langNote('📷 Un instant, nous préparons votre photo…');
+  const petit = await langReduire(f);
+  if(!petit || petit.length < 40) return langNote('📷 Nous n’avons pas pu lire cette photo — réessayez.');
+  LANG.photo = petit;
+  const headers = { 'Content-Type': 'application/json' };
+  try{ if(typeof client !== 'undefined' && client && client.token) headers['X-Client-Token'] = client.token; }catch(e){}
+  let d = null;
+  try{
+    const r = await fetch('/api/comprendre/photo', { method:'POST', headers: headers, body: JSON.stringify({ image: petit, texte: LANG.q || '' }) });
+    d = await r.json();
+  }catch(e){}
+  if(!d || !d.ok){ LANG.rep = null; return langNote('📷 ' + ((d && d.error) || 'La photo n’a pas pu être envoyée — réessayez.')); }
+  LANG.rep = d; LANG.note = '';
+  if(d.propose){ LANG.c = { ok:true, mode:'service', principal:d.propose.id, compris:d.propose.nom, tache:d.propose.tache || '', corriges:{}, alternatives:[] }; }
+  langPeindre();
+}
+function langPhotoOk(){
+  const r = LANG.rep; if(!r || !r.propose) return;
+  RECH.svc = r.propose.id; RECH.q = LANG.q || '';
+  LANG.ok = true; LANG.note = '👍 C’est noté ! Choisissez le lieu, puis « ✅ Afficher les professionnels disponibles ».';
+  langPeindre();
+}
+/* ── ✅ le bouton principal : comprendre, puis chercher ── */
+async function langAfficherPros(ou){
+  LANG.ou = ou || LANG.ou || 'accueil';
+  const i = langChamp(LANG.ou);
+  const q = ((i && i.value) || LANG.q || '').trim();
+  if(q && (!LANG.c || LANG.q !== q)) await langVoir(q, LANG.ou);
+  if(LANG.c && LANG.c.mode === 'service' && LANG.c.principal){ RECH.svc = LANG.c.principal; RECH.q = q; LANG.ok = true; }
+  if(RECH.quand === undefined) RECH.quand = '';
+  RECH.quand = LANG.quand || RECH.quand || '';
+  if(LANG.ou === 'rech') return rechLancer();
+  return rechercherDepuisAccueil();
+}
+try{ const zb = document.getElementById('lang-barre-accueil'); if(zb) zb.innerHTML = langBarre('accueil'); }catch(e){}
+
 /* ═══════════ L'ÉCRAN UNIQUE : « De quoi avez-vous besoin ? » ═══════════ */
 const RECH_POP = ['cours','maison','clim','plomberie','electricite','jardinage','cuisine','placement','grand','placement'];
 function rechChips(){
@@ -5120,18 +5466,20 @@ function rechVueQ(){
   return '<div style="background:#fff;border-radius:16px;padding:15px;box-shadow:0 2px 10px rgba(0,0,0,.05)">'
     + '<h3 style="margin:0 0 4px;font-size:16.5px">De quoi avez-vous besoin ?</h3>'
     + '<p style="margin:0 0 11px;color:#7A6A5E;font-size:12.5px">Écrivez-le simplement : <b>nettoyage</b>, <b>fuite d’eau</b>, <b>cours à domicile</b>… Klean comprend et cherche autour du <b>lieu de la prestation</b>.</p>'
-    + '<input class="inp" id="rech-q" placeholder="Ex. cours à domicile" value="'+rechEch(RECH.q||'')+'" oninput="RECH.q=this.value;rechMajChamp()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();rechLancer();}" style="margin-bottom:9px;font-size:15px;font-weight:700" autocomplete="off">'
+    + '<input class="inp" id="rech-q" placeholder="Écrivez comme vous parlez — ex. ma clim ne refroidit plus" value="'+rechEch(RECH.q||'')+'" oninput="RECH.q=this.value;rechMajChamp();langSaisie(this.value,\'rech\')" onkeydown="if(event.key===\'Enter\'){event.preventDefault();langAfficherPros(\'rech\');}" style="margin-bottom:9px;font-size:15px;font-weight:700" autocomplete="off">'
     + '<div id="rech-aide">'+(kp
         ? ('<div style="background:#FFF4E8;border:1.5px solid #F6D9BE;border-radius:12px;padding:10px 11px;font-size:12.5px;font-weight:800;color:#8a3d00;margin-bottom:10px">🎫 Code détecté : '+rechEch(kp)+' <button type="button" onclick="rechParNumCode(\''+kp+'\')" style="margin-left:6px;border:none;background:var(--p);color:#fff;font:inherit;font-weight:900;padding:6px 10px;border-radius:9px;cursor:pointer;font-size:12px">Afficher ce pro</button></div>')
         : rechAideSvc())+'</div>'
-    + '<div style="font-size:12.5px;font-weight:900;color:var(--pd);margin:4px 0 7px">📍 Où le service doit-il être effectué ?</div>'
+    + '<div id="rech-compris" style="margin-top:10px"></div>'
+    + langBarre('rech')
+    + '<div style="font-size:12.5px;font-weight:900;color:var(--pd);margin:12px 0 7px">📍 Où le service doit-il être effectué ?</div>'
     + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
     + '<button type="button" id="r-lieu-moi" onclick="accueilLieu(\'moi\');rechLieuPeindre()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12px;padding:9px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">📍 Ma position</button>'
     + '<button type="button" id="r-lieu-ville" onclick="accueilLieu(\'ville\');rechLieuPeindre()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12px;padding:9px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">🏙️ Ma ville</button>'
     + '<button type="button" id="r-lieu-autre" onclick="accueilLieu(\'autre\');rechLieuPeindre()" style="cursor:pointer;font:inherit;font-weight:900;font-size:12px;padding:9px 11px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">✍️ Un autre lieu</button>'
     + '</div><div id="rech-lieu-box" style="margin-top:8px"></div>'
     + (RECH.msgErr ? ('<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:12px;padding:11px 12px;font-size:12.5px;font-weight:700;margin-top:10px">'+RECH.msgErr+'</div>') : '')
-    + '<button type="button" onclick="rechLancer()" style="width:100%;margin-top:12px;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:14px;border-radius:14px;font-size:15px">🔍 Rechercher un service</button>'
+    + '<button type="button" onclick="langAfficherPros(\'rech\')" style="width:100%;margin-top:12px;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:14px;border-radius:14px;font-size:15px">✅ Afficher les professionnels disponibles</button>'
     + '<div style="margin-top:12px;padding-top:11px;border-top:1.5px dashed #F6D9BE">'
     + '<div style="font-size:12px;font-weight:900;color:var(--pd)">🎫 Vous connaissez déjà votre professionnel ?</div>'
     + '<button type="button" onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;margin-top:7px;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd);font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer;font-size:12.5px">Entrer son code KP (ex. KP015842)</button></div>'
@@ -5189,7 +5537,9 @@ function rechChipSet(id){
 function rechLancer(){
   const i = document.getElementById('rech-q');
   RECH.q = (i ? i.value : RECH.q || '').trim();
-  if(RECH.q && RECH.svc && normT(RECH.q) !== normT(rechSvcNom(RECH.svc))) RECH.svc = '';
+  /* 🗣️ lot 102 : si le client a CONFIRMÉ ce que Klean a compris, on garde ce métier même si
+     sa phrase ne ressemble pas au nom du métier (c'est tout l'intérêt de la compréhension). */
+  if(!LANG.ok && RECH.q && RECH.svc && normT(RECH.q) !== normT(rechSvcNom(RECH.svc))) RECH.svc = '';
   RECH.msgErr = '';
   if(!RECH.q){ RECH.msgErr = '✍️ Écrivez ce dont vous avez besoin (ex. nettoyage, cours à domicile).'; return rechPeindre(); }
   const kp = rechKpDetect(RECH.q);
@@ -5208,7 +5558,9 @@ function rechLancer(){
 function rechLancerSansGps(){
   const i = document.getElementById('rech-q');
   RECH.q = (i ? i.value : RECH.q || '').trim();
-  if(RECH.q && RECH.svc && normT(RECH.q) !== normT(rechSvcNom(RECH.svc))) RECH.svc = '';
+  /* 🗣️ lot 102 : si le client a CONFIRMÉ ce que Klean a compris, on garde ce métier même si
+     sa phrase ne ressemble pas au nom du métier (c'est tout l'intérêt de la compréhension). */
+  if(!LANG.ok && RECH.q && RECH.svc && normT(RECH.q) !== normT(rechSvcNom(RECH.svc))) RECH.svc = '';
   if(!RECH.q){ RECH.msgErr = '✍️ Écrivez ce dont vous avez besoin (ex. nettoyage, cours à domicile).'; return rechPeindre(); }
   const kp = rechKpDetect(RECH.q);
   if(kp) return rechParNumCode(kp);
@@ -5309,6 +5661,8 @@ async function rechChercher(avecGps){
     qs += '&ville=' + encodeURIComponent(rechVille());
   }
   if(avecGps && RECH.lat != null && lieuMode === 'moi') qs += '&lat=' + RECH.lat + '&lng=' + RECH.lng + '&acc=' + (RECH.acc || 0);
+  /* 🕒 « Quand ? » choisi par le client : maintenant = demande urgente (priorité des pros disponibles) */
+  if((RECH.quand || (typeof LANG !== 'undefined' && LANG.quand)) === 'maintenant') qs += '&urgent=1';
   if(RECH.elargir) qs += '&horsLigne=1';
   if(RECH.zoneElargie) qs += '&zoneElargie=' + RECH.zoneElargie;
   const headers = {};

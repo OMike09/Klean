@@ -1415,8 +1415,7 @@ const HQ_MENU = [
   { g:'🏠 Tableau de bord', items:[
     ['panel-home','🏠 Vue générale','résumé chiffres clients pros revenus paiements alertes à traiter aujourd hui'],
     ['panel-search','🔎 Recherche rapide','chercher nom téléphone mission compte code client pro'],
-    ['kpis','📊 Vue en direct','pros en ligne missions du jour chiffre commission direct kpi'],
-    ['panel-ca7','📈 Revenus 7 jours','chiffre affaires graphique courbe semaine revenus', true]
+    ['kpis','📊 Vue en direct','pros en ligne missions du jour chiffre commission direct kpi']
   ]},
   { g:'👥 Utilisateurs', items:[
     ['people','👥 Clients & personnes inscrites','liste clients pros fiches bloquer supprimer recherche'],
@@ -1425,7 +1424,7 @@ const HQ_MENU = [
     ['panel-cands','🛡️ Dossiers pros à vérifier','candidatures validation nouveaux professionnels'],
     ['panel-team','👑 Gestionnaires & agents de terrain','équipe dirigeante créer administrateur rôle'],
     ['panel-roles','🪪 Rôles & permissions','qui peut faire quoi droits accès pdg gestionnaire agent client professionnel'],
-    ['people','🎟️ Comptes & codes d’accès','créer compte remettre code accès mot de passe client pro', false, "ouvrirFenetreComptes('codes')"]
+    ['people','⚡ Comptes & codes d’accès (action)','créer compte remettre code accès mot de passe client pro', false, "ouvrirFenetreComptes('codes')"]
   ]},
   { g:'🧰 Services & territoires', items:[
     ['panel-svc-browse','📂 Services & professionnels','catalogue catégories tarifs pros par service'],
@@ -1469,7 +1468,7 @@ const HQ_MENU = [
     ['panel-cfg','⚙️ Réglages plateforme','commission configuration GPS national', true],
     ['panel-vitesse','⚙️ Vitesses d’affichage','vitesse défilement publicités jeux urgence informations rythme annonces', true],
     ['panel-entreprise','🏢 Profil de l’entreprise','identité klean pays devise commission villes services moyens de paiement'],
-    ['panel-cfg','🔑 Mot de passe & sécurité HQ','changer mot de passe PDG', false, 'changePwd()']
+    ['panel-cfg','⚡ Changer le mot de passe PDG (action)','mot de passe sécurité HQ', false, 'changePwd()']
   ]},
   { g:'🚨 Sécurité & modération — actions sensibles', items:[
     ['panel-freeze','⛔ Bloquer l’entreprise','bloquer entreprise suspendre les écritures urgence modération tout arrêter', true]
@@ -1479,11 +1478,13 @@ const HQ_MENU = [
 const HQ_GO = [];
 HQ_MENU.forEach(g => g.items.forEach(it => { if(!HQ_GO.some(x => x[0] === it[0] && x[1] === it[1])) HQ_GO.push([it[0], it[1], it[2]]); }));
 /* ordre d'affichage du tableau de bord (du plus utile au plus rare) */
-const HQ_ORDER = ['panel-home','panel-search','kpis','substrip','panel-ca7',
+/* ⚠️ l'ordre physique doit suivre les catégories du menu, sinon une catégorie apparaîtrait deux fois :
+   les « Revenus » (panel-ca7) sont rangés avec les Paiements & finances, leur vraie catégorie. */
+const HQ_ORDER = ['panel-home','panel-search','kpis','substrip',
   'people','panel-online-cli','panel-pros','panel-cands','panel-team','panel-roles',
   'panel-svc-browse','panel-svc-create','panel-villes','panel-match',
   'panel-missions','panel-quotes','panel-litiges',
-  'panel-pay','panel-paydest',
+  'panel-ca7','panel-pay','panel-paydest',
   'panel-ann','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
   'panel-flip','panel-quizbank','panel-jeux','panel-promo',
   'panel-urgences','panel-demande-comptes','panel-trash','panel-shield','panel-audit','panel-sauvegardes',
@@ -1863,6 +1864,7 @@ async function viEnregistrer(){
 
 /* ═══════════ 📂 SECTIONS REPLIABLES (lot 101) ═══════════ */
 function hqPliage(){
+  try{ hqEtatsInitiaux(); }catch(e){}
   const cle = 'klean_hq_plies';
   let plies = {};
   try{ plies = JSON.parse(localStorage.getItem(cle) || '{}'); }catch(e){ plies = {}; }
@@ -1907,7 +1909,10 @@ function hqPliageAppliquer(){
     while(el && !el.classList.contains('hq-sec')){
       if(!el.dataset || el.id === 'hq-erreur'){ el = el.nextElementSibling; continue; }
       if(el.dataset.d0 === undefined) el.dataset.d0 = el.style.display || '';
-      el.style.display = ferme ? 'none' : el.dataset.d0;
+      /* 🖐️ une fenêtre ouverte par l'utilisateur ne se referme jamais toute seule */
+      el.style.display = ferme ? 'none' : (el.dataset.ouvert === '1' ? '' : el.dataset.d0);
+      /* 🔐 …sauf si le rôle n'y a pas droit : la permission prime sur l'affichage */
+      if(window._hqMasquesRole && window._hqMasquesRole[el.id]) el.style.display = 'none';
       nb++;
       el = el.nextElementSibling;
     }
@@ -1915,7 +1920,19 @@ function hqPliageAppliquer(){
   });
   window._hqPlies = secs.filter(x => x.classList.contains('hq-sec-ferme')).length;
 }
+/* 🧠 état d'origine de chaque fenêtre, mémorisé une seule fois, au tout début :
+   ainsi aucune fenêtre ne peut rester ouverte par accident (un chargement tardif ne fausse plus la mémoire) */
+function hqEtatsInitiaux(){
+  if(window._hqD0Pris) return;
+  window._hqD0Pris = 1;
+  const w = document.querySelector('.wrap'); if(!w) return;
+  [...w.children].forEach(el => {
+    if(!el.dataset || el.id === 'hq-erreur') return;
+    el.dataset.d0 = el.style.display || '';
+  });
+}
 function hqPliageTout(fermer){
+  if(fermer && !confirm('Replier toutes les catégories du tableau de bord ?\n(Vos fenêtres restent mémorisées et reviendront au dépliage.)') ) return;
   const cle = 'klean_hq_plies';
   let p = {};
   [...document.querySelectorAll('.wrap > .hq-sec')].forEach(t => {
@@ -2471,10 +2488,25 @@ function paletteChoisirAction(f, p){
   try{ jumpPanel(p); }catch(e){}
   if(f){ try{ (f.indexOf('(') >= 0) ? (new Function(f))() : window[f](); }catch(e){} }
 }
+/* 🔓 une fenêtre ouverte depuis le menu RESTE ouverte : le rafraîchissement automatique
+   (toutes les 12 s et à chaque message du serveur) ne la referme plus. */
+function hqSectionOuvrirPour(id){
+  const el = document.getElementById(id); if(!el) return;
+  let t = el.previousElementSibling;
+  while(t && !t.classList.contains('hq-sec')) t = t.previousElementSibling;
+  if(!t || !t.classList.contains('hq-sec-ferme')) return;
+  t.classList.remove('hq-sec-ferme');
+  let p = {}; try{ p = JSON.parse(localStorage.getItem('klean_hq_plies') || '{}'); }catch(e){ p = {}; }
+  p[t.dataset.nom || ''] = 0;
+  try{ localStorage.setItem('klean_hq_plies', JSON.stringify(p)); }catch(e){}
+  try{ hqPliageAppliquer(); }catch(e){}
+}
 function jumpPanel(id){
   const el=document.getElementById(id);
   if(!el) return;
   try{ hqNavMarque(id); }catch(e){}
+  try{ el.dataset.ouvert = '1'; }catch(e){}        /* 🖐️ ouverte par l'utilisateur */
+  try{ hqSectionOuvrirPour(id); }catch(e){}        /* 📂 sa catégorie se déplie si besoin */
   el.style.display='';
   try{ if(el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
   el.style.outline='2px solid var(--p)';
@@ -2484,6 +2516,7 @@ function jumpPanel(id){
     if(id==='panel-pay'){ try{ chargerPaiements(); }catch(e){} try{ chargerProviderPay(); }catch(e){} }
     if(id==='panel-flip' || id==='panel-quizbank' || id==='panel-infos' || id==='panel-urgences'){ try{ chargerHQ96(); }catch(e){} }
     if(id==='panel-jeux'){ try{ loadJeux(); }catch(e){} }
+    if(id==='panel-vitesse' || id==='panel-cfg'){ try{ loadJeux(); }catch(e){} }
     if(id==='panel-vitesse'){ try{ loadJeux(); paintVitesses(); }catch(e){} }
   }catch(e){}
 }
@@ -3467,10 +3500,16 @@ function openAffichePanel(){
   const sel=document.getElementById('ann-type'); if(sel) sel.focus();
 }
 function applyRole(){
-  const pan=document.getElementById('panel-ann'); if(pan) pan.style.display='block';
+  /* ⚠️ AVANT : cette fonction rouvrait la fenêtre « Affiche » à chaque rafraîchissement (toutes les 12 s),
+     ce qui faisait « clignoter » toutes les fenêtres du PDG. On ne gère plus que les DROITS ici. */
+  if(!ME || ME.role === 'pdg'){ window._hqMasquesRole = {}; return; }   /* PDG : plus rien de forcé */
   if(ME && ME.role !== 'pdg'){
     document.body.classList.add('role-gest');
-    ['panel-cfg','panel-audit','panel-ca7','panel-shield'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display='none'; });
+    window._hqMasquesRole = window._hqMasquesRole || {};
+    ['panel-cfg','panel-audit','panel-ca7','panel-shield'].forEach(id=>{
+      window._hqMasquesRole[id] = 1;
+      const p=document.getElementById(id); if(p) p.style.display='none';
+    });
     ['k-ca','k-comm','c-ca','c-comm','c-gains'].forEach(id=>{
       const el=document.getElementById(id); if(!el) return;
       const card=el.closest('.kpi') || el.closest('.chip') || el.parentElement;
@@ -3513,8 +3552,16 @@ async function loadTeam(){
   try{ window.ME = ME; }catch(e){}
   document.querySelector('#team-gate').style.display = ME && ME.role==='pdg' ? 'none' : 'block';
   document.querySelector('#team-form').style.display = ME && ME.role==='pdg' ? 'block' : 'none';
-  const frz=document.getElementById('panel-freeze'); if(frz) frz.style.display = (ME && ME.role==='pdg') ? '' : 'none';
-  const sh=document.getElementById('panel-shield'); if(sh) sh.style.display = (ME && ME.role==='pdg') ? '' : 'none';
+  /* ⚠️ AVANT : ces deux fenêtres étaient rouvertes de force à chaque rafraîchissement pour le PDG.
+     Un gestionnaire ne doit pas les voir (permissions conservées) ; pour le PDG, on ne touche à RIEN :
+     c'est lui qui ouvre ses fenêtres, et elles doivent rester dans l'état où il les a laissées. */
+  if(ME && ME.role !== 'pdg'){
+    window._hqMasquesRole = window._hqMasquesRole || {};
+    ['panel-freeze','panel-shield'].forEach(id => {
+      window._hqMasquesRole[id] = 1;
+      const p=document.getElementById(id); if(p) p.style.display='none';
+    });
+  }
   if(ME && ME.role==='pdg') loadShield();
   const st=document.getElementById('frz-state');
   if(st && ME) st.textContent = ME.gestFrozen ? '⛔ Écritures actuellement coupées (tous)' : '✅ Écritures actuellement actives';
@@ -3980,6 +4027,7 @@ async function sendHqChat(){
    (mêmes couleurs/polices que l'accueil : l'aperçu est le rendu réel)
    ═══════════════════════════════════════════════════════════════════════════ */
 const PUB_FONDS = {
+  media:    ['#14181a','#0b0e10'],   /* 🖼️ sans fond vert : la photo / vidéo prend toute la place (même teinte que dans l'application) */
   emeraude: ['#0e8a4c','#075f34'], foret: ['#0f7a4a','#08432a'], menthe: ['#2fa96b','#137950'],
   lagon: ['#0d9488','#0b5f56'], ananas: ['#57a814','#2f6b0c']
 };
@@ -4239,7 +4287,9 @@ async function chargerPub(){
   }catch(e){ const e2=document.getElementById('pub-etat'); if(e2) e2.textContent='Serveur injoignable.'; }
 }
 async function loadPdgExtras(){
-  ['panel-promo','panel-pay','panel-paydest','panel-trash','panel-demande-comptes'].forEach(id=>{ const p=document.getElementById(id); if(p) p.style.display=''; });
+  /* ⚠️ AVANT : 5 fenêtres (Codes promo, Moyens de paiement, Numéros, Corbeille, Demandes de blocage)
+     s'ouvraient de force à chaque rafraîchissement. Elles s'ouvrent maintenant UNIQUEMENT quand le PDG
+     clique dessus dans le menu — rien n'est supprimé, elles sont toutes dans le menu. */
   try{
     const dm = await fetchJ('/api/admin/account-request/voir');
     const enA = (dm && dm.enAttente) || [], hist = (dm && dm.historique) || [];
@@ -5355,7 +5405,7 @@ async function ugStatut(id, statut){
     document.addEventListener('keydown', e => { if(e.key === 'Escape') hqNavClose(); });
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else setTimeout(boot, 0);
-  window.addEventListener('load', () => { try{ hqReorganiser(); paintHqNav(); paintHome(); paintEntreprise(); hqPliage(); }catch(e){} });
+  window.addEventListener('load', () => { try{ hqEtatsInitiaux(); hqReorganiser(); paintHqNav(); paintHome(); paintEntreprise(); hqPliage(); }catch(e){} });
   try{ if(location.hash === '#recherche') paletteHQ(true); }catch(e){}
   /* 🔴 le suivi de la partie en direct se rafraîchit toutes les 3 s */
   if(!window._jxPoll) window._jxPoll = setInterval(() => { try{ jxLiveTick(); }catch(e){} }, 3000);

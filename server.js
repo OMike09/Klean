@@ -502,6 +502,36 @@ const SVC_CAT = [
   {id:'cours',        nom:'Cours ou formation à domicile', ic:'📚', base:15000, mots:'cours soutien scolaire formation professeur prof repetiteur eleve eleves mathematiques maths physique chimie svt francais anglais espagnol philosophie philo histoire geographie lecture ecriture primaire college lycee bac instituteur institutrice coach coaching informatique bureautique langue langues musique piano guitare devoirs'},
   {id:'canal',        nom:'Canal+ domicile',             ic:'📡', base:5000,  mots:'canal canal+ decodeur parabole satellite tv television antenne installation tv abonnement chaines'},
 ];
+/* ═══════════ 🆕 MÉTIERS AJOUTÉS PAR LA RECHERCHE EN LANGAGE SIMPLE (lot 102) ═══════════
+   Le PDG a demandé que le client n'ait jamais besoin de connaître le nom professionnel du service.
+   Ces métiers complètent le catalogue : AUCUN métier existant n'a été supprimé ni renommé.
+   « famille » sert à ranger/expliquer · « mots » sont les mots-clés (synonymes ET fautes courantes). */
+const SVC_NOUVEAUX = {
+  peinture:   { ic:'🎨', nom:'Peinture & façades',      base:15000, famille:'bâtiment',   mots:'peinture peintre repeindre badigeon mur murs plafond facade laque vernis enduit couleur ' },
+  carrelage:  { ic:'🧱', nom:'Carrelage & faïence',     base:18000, famille:'bâtiment',   mots:'carrelage carreleur carreau faience dalle sol murale joint pose ' },
+  macon:      { ic:'🏗️', nom:'Maçonnerie & clôtures',   base:20000, famille:'bâtiment',   mots:'macon maconnerie cloture portail mur dalle ciment beton crepissage fondation ' },
+  menuiserie: { ic:'🪵', nom:'Menuiserie & meubles',    base:15000, famille:'bâtiment',   mots:'menuisier menuiserie bois meuble placard armoire table lit porte charniere sur mesure ebeniste ' },
+  vitrerie:   { ic:'🪞', nom:'Vitrerie & miroirs',      base:8000,  famille:'bâtiment',   mots:'vitrier vitrerie vitre glace miroir verre cassure ' },
+  soudure:    { ic:'🔥', nom:'Soudure & ferronnerie',   base:10000, famille:'bâtiment',   mots:'soudeur soudure fer ferronnerie grille barriere metallique ' },
+  meca_auto:  { ic:'🚙', nom:'Mécanique auto',          base:15000, famille:'réparation', mots:'mecanicien mecanicien mecano meca garagiste voiture auto vehicule panne batterie pneu creve vidange freins moteur courroie demarrage ' },
+  meca_moto:  { ic:'🏍️', nom:'Mécanique moto',          base:8000,  famille:'réparation', mots:'moto motocyclette scooter mecanicien panne chaine huile ' },
+  telephone:  { ic:'📱', nom:'Réparation téléphone',    base:8000,  famille:'réparation', mots:'telephone portable smartphone ecran tactile batterie reparateur vitre arriere connecteur ' },
+  ordinateur: { ic:'💻', nom:'Ordinateur & informatique',base:10000, famille:'réparation', mots:'ordinateur pc laptop portable informaticien windows logiciel fichier imprimante lent virus ' },
+  internet:   { ic:'📶', nom:'Internet & wifi',         base:10000, famille:'installation', mots:'internet wifi connexion routeur box fibre reseau lente debit ' },
+  camera:     { ic:'📹', nom:'Caméras & alarmes',       base:25000, famille:'installation', mots:'camera cameras surveillance videosurveillance alarme securite interphone portail surveillance ' },
+  cordonnerie:{ ic:'👟', nom:'Cordonnerie (chaussures, sacs)', base:3000, famille:'réparation', mots:'cordonnier chaussure chaussures sac talon semelle couture cuir ' },
+  documents:  { ic:'🖨️', nom:'Documents, CV & impression', base:3000, famille:'services', mots:'cv impression imprimer photocopie scanner taper document affiche flyer logo carte visite brocure reluire ' },
+  conseil:    { ic:'💼', nom:'Conseil & entreprise',    base:25000, famille:'services',   mots:'comptable comptabilite business plan entreprise etude marche fiscal declaration community manager publicite communication marketing ' },
+  immobilier: { ic:'🏘️', nom:'Immobilier',              base:15000, famille:'services',   mots:'immobilier maison chambre appartement terrain location louer vendre locataire visite agence ' },
+  coiffure:   { ic:'💈', nom:'Coiffure à domicile',     base:5000,  famille:'personne',   mots:'coiffeur coiffeuse coiffure cheveux tresses nattes degrade barbe raser perruque meches ' },
+  beaute:     { ic:'💅', nom:'Beauté & soins',          base:6000,  famille:'personne',   mots:'ongles manucure pedicure maquillage maquilleuse beaute soin visage cils epilation esthetique ' },
+  photo:      { ic:'📸', nom:'Photo & vidéo',           base:25000, famille:'personne',   mots:'photographe photo video videaste cameraman film montage retouche mariage shooting ' },
+  couture:    { ic:'🧵', nom:'Couture & retouches',     base:8000,  famille:'personne',   mots:'couturier couturiere couture robe chemise pantalon tenue retouche fermeture tailleur sur mesure ' },
+  livraison:  { ic:'🛵', nom:'Livraison & coursier',    base:3000,  famille:'transport',  mots:'livreur livraison colis coursier paquet document deplacement envoi transport express ' },
+  chauffeur:  { ic:'🚕', nom:'Chauffeur',               base:15000, famille:'transport',  mots:'chauffeur voiture avec conducteur deplacement trajet conduire ' }
+};
+/* on AJOUTE ces métiers au catalogue existant (les 22 d'origine restent intacts) */
+for (const [id, s2] of Object.entries(SVC_NOUVEAUX)) SVC_CAT.push({ id, nom: s2.nom, ic: s2.ic, base: s2.base, famille: s2.famille, mots: s2.mots });
 const SVC_MOTS_IDX = SVC_CAT.map(c => ({ id: c.id, set: new Set(c.mots.split(' ')) }));
 function svcCat(id) { return SVC_CAT.find(x => x.id === id) || null; }
 function svcNomP(id) { const c = svcCat(id); return c ? c.nom : (SVC_NAMES[id] || id); }
@@ -574,51 +604,277 @@ function poidsMot(kw) { return 3 / (SVC_MOT_NB[kw] || 1); }
 const FR_VIDES = new Set(('je j ai mon ma mes ton ta tes son sa ses le la les un une des du de d au aux a et ou pour en sur dans avec '
   + 'chez moi toi nous vous ils elles il elle faire fait faire faire besoin veux voudrais voudrai souhaite cherche trouver trouver '
   + 'svp stp merci urgemment urgent vite aujourd hui demain soir matin semaine mois annonce puis aussi bien bon bien tres peu plus '
-  + 'quelqu un quelque chose nouveau nouvelle svp aide aider aidez moi meme').split(' '));
+  + 'quelqu un quelque chose nouveau nouvelle svp aide aider aidez moi meme domicile a-domicile').split(' '));
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   🗣️ MOTEUR « LANGAGE SIMPLE » — le client écrit comme il parle, KLEAN comprend.
+
+   Chaîne : PROBLÈME DU CLIENT → INTENTION → CATÉGORIE → SERVICE → TÂCHE → PROS.
+   Le client n'a JAMAIS besoin de connaître le nom professionnel du métier :
+   « mon frigo ne fait plus froid », « sa robe est trop grande », « j'ai crevé »…
+   fautes comprises (« plomblier », « eletricien », « coifeuse »).
+
+   Les expressions sont écrites DÉJÀ normalisées (sans accents, sans apostrophes)
+   car c'est ainsi que le texte du client arrive ici (normFr).
+   ═══════════════════════════════════════════════════════════════════════════════ */
+const LANG_SIMPLE = [
+  /* ── 🧹 NETTOYAGE ── */
+  ['maison', 'Nettoyage', 'nettoyer ma maison|nettoyer la maison|nettoyer chez moi|faire le menage|femme de menage|menagere|une femme de menage|quelqu un pour nettoyer|quelqu un pour le menage|personne pour nettoyer|ma maison est sale|maison est sale|nettoyer mon salon|nettoyer ma chambre|nettoyer ma cuisine|nettoyer mes toilettes|nettoyer ma salle de bain|nettoyer toute la maison|je viens de demenager|nettoyer avant de rentrer|besoin de menage|je veux faire nettoyer'],
+  ['canapes', 'Nettoyage', 'canape est sale|canape sale|laver mon canape|qui lave les canapes|nettoyage canape|faire nettoyer mon canape|nettoyer mon canape|nettoyer les canapes|nettoyer mon fauteuil|mon tapis est sale|nettoyer mon tapis'],
+  ['vitres', 'Nettoyage', 'mes vitres sont sales|vitres sont sales|laver mes vitres|nettoyer mes fenetres|nettoyage vitre|laver les fenetres|ma vitre est sale|nettoyer les baies'],
+  ['grand', 'Nettoyage', 'un grand menage|menage complet|de fond en comble|remise a neuf'],
+  ['sdb', 'Nettoyage', 'detartrer|les joints de la douche|nettoyer la douche|nettoyer le wc|nettoyer les toilettes|laver la salle de bain'],
+  ['bureaux', 'Nettoyage', 'nettoyer les bureaux|nettoyer mon bureau|nettoyer des bureaux|nettoyer ma boutique|nettoyer le magasin|nettoyer mon commerce|menage des bureaux|menage au bureau'],
+  ['entretien', 'Entretien régulier', 'menage chaque semaine|entretien regulier|femme de menage chaque semaine|abonnement menage|menage tous les jours'],
+
+  /* ── 🔧 PLOMBERIE ── */
+  ['plomberie', 'Dépannage', 'mon robinet coule|robinet coule|robinet qui coule|robinet fuit|mon robinet fuit|l eau coule du robinet|eau coule du robinet|j ai une fuite|fuite d eau|une fuite d eau|eau sort du tuyau|mon tuyau fuit|tuyau fuit|tuyau perce|il y a de l eau partout|de l eau partout|ma douche fuit|ma douche coule|mon wc fuit|mon evier fuit|l eau coule sous l evier|eau coule sous l evier|l eau ne descend pas|l eau reste dans l evier|je n arrive pas a faire partir l eau|mon wc est bouche|mes toilettes sont bouchees|wc bouche|mon evier est bouche|ma douche est bouchee|le lavabo est bouche|canalisation bouchee|deboucher les canalisations|ma chasse d eau ne marche plus|la chasse d eau|remplir la chasse|ma pompe a eau|le surpresseur|mon chauffe eau ne marche plus|pas d eau au robinet|je n ai plus d eau|j ai un probleme d eau'],
+  ['plomberie', 'Installation', 'installer un robinet|installer une douche|mettre une douche|installer un wc|installer un evier|mettre un chauffe eau|installer un chauffe eau|installer un reservoir|un reservoir d eau|installer une pompe|pose de plomberie'],
+
+  /* ── 💡 ÉLECTRICITÉ ── */
+  ['electricite', 'Dépannage', 'je n ai plus de courant|plus de courant chez moi|le courant ne marche pas|ma maison n a plus d electricite|mon courant coupe|le disjoncteur saute|ca fait disjoncter|j ai un probleme de courant|probleme de courant|une prise ne marche plus|ma prise ne fonctionne pas|prise ne marche pas|l interrupteur ne marche plus|ma lumiere ne s allume plus|la lumiere ne marche plus|plus de lumiere|une ampoule grillee|il y a des etincelles|le cable a brule|odeur de brule|panne d electricite|le compteur'],
+  ['electricite', 'Installation', 'installer une prise|mettre une lumiere|installer un ventilateur|installer une television au mur|la television au mur|faire l electricite de ma maison|tirer des cables|cablage electrique'],
+
+  /* ── ❄️ CLIMATISATION ── */
+  ['clim', 'Dépannage', 'ma clim ne marche plus|ma clim ne refroidit plus|ma clim ne fait plus de froid|ma clim coule|ma clim fait du bruit|ma clim est gatee|ma clim est en panne|ma clim ne fonctionne plus|ma clim ne donne plus de froid|ma clim chauffe|mon climatiseur ne fonctionne plus|mon climatiseur ne refroidit plus|reparer ma clim|panne de clim|mon split ne refroidit plus'],
+  ['clim', 'Entretien', 'laver ma clim|nettoyer ma clim|entretenir ma clim|entretien de ma clim|recharge de gaz|recharger le gaz de la clim|manque de gaz'],
+  ['clim', 'Installation', 'installer une clim|poser une clim|installer un climatiseur|installer un split'],
+
+  /* ── 🔌 ÉLECTROMÉNAGER ── */
+  ['electro', 'Dépannage', 'mon frigo ne fait plus froid|frigo ne fait plus froid|mon frigo ne refroidit plus|mon frigo est en panne|mon frigo est casse|frigo casse|mon frigo coule|mon frigo fait trop de bruit|reparer mon frigo|qui repare les frigos|mon congelateur ne congele plus|mon congelateur est en panne|mon refrigerateur est casse|reparer mon congelateur|ma machine a laver ne marche plus|ma machine ne lave plus|ma machine fait du bruit|ma machine ne demarre pas|reparer ma machine|mon four ne chauffe plus|mon micro ondes ne marche plus|mon fer a repasser ne chauffe plus|mon ventilateur ne marche plus|reparer mon appareil|reparer un appareil menager|mon refrigerateur ne fait plus de froid'],
+
+  /* ── 🔑 SERRURERIE ── */
+  ['serrurerie', 'Dépannage', 'ma porte est bloquee|je n arrive pas a ouvrir ma porte|j ai perdu ma cle|j ai perdu mes cles|ma serrure est cassee|changer ma serrure|mettre une nouvelle serrure|quelqu un pour ouvrir ma porte|mon cadenas est bloque|une cle cassee dans la serrure|ma porte a claque|je suis enferme dehors|ouvrir une porte fermee'],
+
+  /* ── 🪛 PETITS TRAVAUX ── */
+  ['bricolage', 'Travaux', 'quelqu un pour reparer|un gars pour reparer|venir reparer|reparer ca|reparer quelque chose|reparer a la maison|quelqu un qui peut reparer|qui peut venir reparer|besoin de quelqu un pour reparer|j ai quelque chose a reparer|bricoler|un homme a tout faire|accrocher ma tele|accrocher une tele|mettre une etagere|accrocher un miroir|installer un rideau|monter un meuble|fixer quelque chose au mur|deplacer un meuble|reparer une porte|changer une ampoule|changer une prise|installer quelque chose chez moi|j ai un petit probleme chez moi|petit probleme chez moi|des petits travaux|un coup de main pour bricoler'],
+
+  /* ── 🌿 JARDIN & COUR ── */
+  ['jardinage', 'Entretien', 'mon herbe est trop grande|l herbe est trop grande|couper l herbe|couper la pelouse|tondre la pelouse|tondre|nettoyer mon jardin|mon jardin est sale|quelqu un pour mon jardin|planter des fleurs|planter du gazon|mettre du gazon|couper un arbre|tailler mes arbres|taille des arbres|enlever les mauvaises herbes|desherber|nettoyer ma cour|ma cour est sale|enlever les herbes|nettoyer devant ma maison'],
+  ['macon', 'Travaux', 'construire une cloture|reparer ma cloture|ma cloture est cassee|faire un portail|changer un portail|monter un mur|crepir un mur|couler une dalle|faire une dalle|un muret|travaux de maconnerie'],
+
+  /* ── 🎨 PEINTURE / CARRELAGE / MENUISERIE / VITRERIE ── */
+  ['peinture', 'Travaux', 'peindre ma maison|je veux peindre|repeindre ma chambre|repeindre mon salon|mes murs sont sales|changer la couleur de ma maison|qui peut peindre chez moi|faire la peinture|peindre mon portail|peinture de la maison|peinture des murs|un coup de peinture'],
+  ['carrelage', 'Travaux', 'mettre du carrelage|carreler ma maison|carreler|mon carrelage est casse|un carreau est casse|changer mon carrelage|poser le carrelage|carrelage dans ma salle de bain|carrelage au sol|carrelage mural|la faience'],
+  ['menuiserie', 'Fabrication', 'fabriquer une table|fabriquer un lit|fabriquer une armoire|faire un placard|une cuisine en bois|reparer ma porte|ma porte est cassee|mon meuble est casse|fabriquer un meuble|un meuble sur mesure|ma porte grince|changer les charnieres|travailler le bois'],
+  ['vitrerie', 'Travaux', 'ma vitre est cassee|ma fenetre est cassee|changer ma vitre|reparer ma vitre|mettre une vitre|mon miroir est casse|faire un miroir|un verre casse|remplacer une vitre'],
+
+  /* ── 📦 TRANSPORT / LIVRAISON ── */
+  ['demen', 'Transport', 'je veux demenager|je cherche quelqu un pour demenager|je dois deplacer mes affaires|deplacer mes affaires|transporter mes meubles|deplacer mon lit|deplacer mon armoire|j ai beaucoup de choses a transporter|une voiture pour demenager|des personnes pour m aider a demenager|m aider a demenager|charger mes affaires|decharger mes affaires|deménagement'],
+  ['livraison', 'Livraison', 'envoyer un colis|je veux envoyer un colis|quelqu un pour livrer|faire livrer ca|envoyer ca a quelqu un|qui peut me livrer ca|envoyer un document|envoyer un vetement|faire une livraison|j ai besoin d un livreur|qu on recupere un colis pour moi|recuperer un colis|envoyer un paquet|transport de marchandises'],
+  ['chauffeur', 'Transport', 'cherche un chauffeur|un chauffeur pour la journee|me conduire a|faire un deplacement en voiture'],
+
+  /* ── 🚗 MÉCANIQUE AUTO / MOTO ── */
+  ['meca_auto', 'Dépannage', 'ma voiture est en panne|voiture en panne|ma voiture ne demarre plus|ma voiture ne veut pas demarrer|ma voiture fait un bruit|ma voiture chauffe|ma voiture fume|j ai un probleme avec ma voiture|ma batterie est morte|la batterie est morte|j ai besoin d une batterie|venez m aider a demarrer ma voiture|ma voiture ne demarre pas a cause de la batterie|j ai creve|mon pneu est creve|probleme de pneu|changer mon pneu|reparer mon pneu|je veux faire la vidange|faire la vidange|reparer mes freins|mes freins grincent|faire controler ma voiture|la courroie|le moteur fait un bruit|la climatisation de ma voiture'],
+  ['meca_moto', 'Dépannage', 'ma moto est en panne|ma moto ne demarre plus|ma moto fait du bruit|ma moto ne marche plus|reparer ma moto|un mecanicien moto|vidange de ma moto|ma moto perd de l huile|chaine de moto'],
+  ['lavageauto', 'Nettoyage', 'laver ma voiture|nettoyer ma voiture|laver ma moto|nettoyer ma moto|faire laver ma voiture|un lavage auto|laver mon vehicule'],
+
+  /* ── 📱 INFORMATIQUE ── */
+  ['telephone', 'Dépannage', 'mon telephone est casse|mon ecran est casse|l ecran de mon telephone|mon telephone est tombe|je veux changer l ecran|ma batterie ne tient plus|mon telephone ne charge plus|mon telephone ne s allume plus|mon telephone chauffe|mon telephone est lent|reparer mon telephone|un reparateur de telephone|un reparateur telephone|mon telephone est bloque'],
+  ['ordinateur', 'Dépannage', 'mon ordinateur ne marche plus|mon ordinateur est lent|mon ordinateur ne s allume plus|mon ordinateur fait du bruit|reparer mon ordinateur|installer windows|installer un logiciel|recuperer mes fichiers|mon pc ne demarre plus|mon imprimante ne marche plus|un informaticien|nettoyer mon ordinateur'],
+  ['internet', 'Travaux', 'mon wifi ne marche pas|mon wifi est lent|internet ne marche pas|ma connexion est lente|installer le wifi|installer internet|mon routeur ne marche plus|regler mon wifi|ma box ne marche plus|probleme de connexion'],
+  ['camera', 'Installation', 'je veux mettre des cameras|installer une camera|surveiller ma maison|des cameras chez moi|ma camera ne marche plus|reparer ma camera|installer une alarme|securiser ma maison|videosurveillance|une alarme de maison'],
+
+  /* ── 💈 COIFFURE / BEAUTÉ ── */
+  ['coiffure', 'Soins', 'je veux me couper les cheveux|me couper les cheveux|un coiffeur|un coiffeur a domicile|je veux faire un degrade|faire un degrade|couper ma barbe|ma barbe|je veux me raser|me faire raser|je veux me coiffer|faire des tresses|faire des nattes|poser une perruque|je veux faire mes cheveux|une coiffeuse|une coiffeuse a domicile|me faire coiffer a la maison|tresses a domicile'],
+  ['beaute', 'Soins', 'je veux faire mes ongles|faire mes ongles|quelqu un pour mes ongles|je veux me maquiller|une maquilleuse|je veux faire mes pieds|une pedicure|une manucure|un soin du visage|de la pose d ongles|du maquillage'],
+
+  /* ── 👶 ENFANTS ── */
+  ['placement', 'Garde', 'quelqu un pour garder mon enfant|garder mon enfant|je veux une nounou|une nounou|qui peut garder mon bebe|garder mon bebe|j ai besoin d une personne pour garder mon enfant|une baby sitter|quelqu un pour accompagner mon enfant a l ecole|accompagner mon enfant a l ecole|garde d enfants a domicile|gardienne d enfants'],
+
+  /* ── 📚 COURS ── */
+  ['cours', 'Cours', 'je cherche un professeur|je veux un repetiteur|un repetiteur|quelqu un pour aider mon enfant|mon enfant a besoin de cours|je veux des cours d anglais|cours d anglais|je veux des cours de maths|cours de maths|je veux des cours a domicile|cours a domicile|un professeur a domicile|je veux preparer le bac|preparer le bepc|je veux preparer un concours|du soutien scolaire|des lecons de musique|apprendre la guitare|apprendre le piano|un cours d informatique'],
+
+  /* ── 🍳 CUISINE / ÉVÉNEMENTS / PHOTO ── */
+  ['cuisine', 'Repas', 'quelqu un pour cuisiner|je cherche quelqu un pour cuisiner|un cuisinier a domicile|je veux preparer une fete|un traiteur|je veux faire un gateau|quelqu un pour faire mon gateau|je veux preparer un anniversaire|je veux commander des repas|commander des repas|un cuisinier pour un evenement'],
+  ['evenement', 'Événement', 'je prepare mon mariage|je cherche quelqu un pour decorer mon mariage|decorer mon mariage|je veux decorer une salle|decorer une salle|je prepare un anniversaire|je cherche un dj|un dj pour ma fete|quelqu un pour la sono|la sono de la fete|je veux louer des chaises|louer des chaises|je veux louer des tables|louer des tables|decorer ma fete|de la decoration de fete|un organisateur de fete'],
+  ['photo', 'Photo', 'je cherche un photographe|je veux faire des photos|je veux des photos pour mon mariage|des photos de mariage|je veux faire une video|je cherche quelqu un pour filmer|je veux faire des photos professionnelles|je veux modifier une photo|je veux monter une video|un videaste|un cameraman|monter un film'],
+
+  /* ── 🧵 COUTURE / CHAUSSURES / SACS ── */
+  ['couture', 'Couture', 'je cherche un couturier|je veux coudre une tenue|coudre une tenue|je veux faire une robe|je veux faire une chemise|je veux faire un pantalon|ma robe est trop grande|je veux retrecir ma robe|je veux reparer mon vetement|ma fermeture est cassee|une tenue sur mesure|un tailleur|une couturiere|des retouches de vetement|reparer un pantalon'],
+  ['cordonnerie', 'Réparation', 'mes chaussures sont cassees|je veux reparer mes chaussures|reparer mes chaussures|je veux laver mes chaussures|je veux reparer mon sac|mon sac est dechire|un cordonnier|remplacer un talon|ma chaussure est dechiree'],
+
+  /* ── 🖨️ DOCUMENTS / CONSEIL / IMMOBILIER ── */
+  ['documents', 'Documents', 'je veux faire mon cv|je cherche quelqu un pour faire mon cv|faire mon cv|je veux imprimer un document|imprimer un document|je veux photocopier|une photocopie|je veux scanner un document|je veux taper un document|je veux imprimer des photos|je veux faire une affiche|je veux faire un flyer|je veux creer un logo|creer un logo|un carton d invitation|une brochure'],
+  ['conseil', 'Conseil', 'je cherche un comptable|quelqu un pour ma comptabilite|je veux creer mon entreprise|creer mon entreprise|je veux faire un business plan|un business plan|quelqu un pour m aider dans mon entreprise|je veux faire une etude de marche|quelqu un pour gerer ma page facebook|gerer ma page facebook|je veux faire de la publicite|un community manager|de la publicite en ligne|un conseiller pour mon entreprise'],
+  ['immobilier', 'Recherche', 'je cherche une maison|je cherche une chambre|je cherche un appartement|je cherche un terrain|je veux louer une maison|louer une maison|je veux vendre ma maison|vendre ma maison|je veux vendre mon terrain|vendre mon terrain|quelqu un pour gerer ma maison|je veux faire visiter ma maison|faire visiter ma maison|un agent immobilier|trouver un locataire'],
+
+  /* ── 📡 CANAL+ (existant, conservé) ── */
+  ['canal', 'Travaux', 'le signal est perdu|la parabole a bouge|j ai perdu le signal|nouveau decodeur a installer|installer une parabole|installer canal|l abonnement canal|antenne tv'],
+];
+/* quelques expressions d'urgence : elles ne changent pas le métier, elles changent la PRIORITÉ */
+const LANG_URGENCE = /\b(urgent|urgence|urgemment|tout de suite|maintenant|immediatement|au plus vite|le plus vite possible|des que possible|ce soir|aujourd hui)\b/;
+
+/* ── une question = une réponse simple : « Je ne sais pas ce que ça s'appelle » ── */
+const LANG_AIDE = 'Décrivez le problème avec vos mots (ex. « il y a de l’eau qui sort sous mon évier ») : KLEAN trouve le métier. Vous pouvez aussi ajouter une photo ou parler au micro.';
+
+/* ─────────────── 🧠 COMPRÉHENSION : mots, fautes, intentions ───────────────
+   Étape 1 : on corrige les fautes de frappe simples en comparant chaque mot à un
+             vocabulaire connu (« plomblier » → « plombier », « eletricien » → « electricien »).
+   Étape 2 : on cherche les PHRASES (« mon frigo ne fait plus froid ») — la plus longue gagne.
+   Étape 3 : sinon, on retombe sur les mots-clés du catalogue (un seul mot : « plombier »).
+   Résultat : service + TÂCHE + (correcteur affiché au client) + alternatives. */
+let _LANG_VOCAB = null;
+function langVocab() {
+  if (_LANG_VOCAB) return _LANG_VOCAB;
+  const v = new Set();
+  const add = t => String(t || '').split(/[\s|]+/).forEach(w => { if (w.length > 2 && !FR_VIDES.has(w)) v.add(w); });
+  for (const e of LANG_SIMPLE) add(e[2]);
+  for (const c of SVC_CAT) { add(c.nom); add(c.mots); }
+  for (const [id, s] of Object.entries(SVC_NOUVEAUX)) { add(s.nom); add(s.mots); add(id); }
+  _LANG_VOCAB = [...v];
+  return _LANG_VOCAB;
+}
+/* distance d'édition bornée (on s'arrête dès que ça dépasse) */
+function langDist(a, b, max) {
+  const m = a.length, n = b.length;
+  if (Math.abs(m - n) > max) return max + 1;
+  let prev = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= n; j++) {
+      const c = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      cur[j] = c; if (c < best) best = c;
+    }
+    if (best > max) return max + 1;
+    prev = cur;
+  }
+  return prev[n];
+}
+/* correction des fautes : un mot inconnu → le mot du vocabulaire le plus proche (≤1 ou ≤2 lettres) */
+function langCorriger(texte) {
+  const vocab = langVocab(); const connu = new Set(vocab); const corriges = {};
+  const mots = String(texte || '').split(' ').filter(Boolean).map(mot => {
+    /* ⚠️ on ne touche jamais à un mot court ni à un mot connu : « pour », « fait », « est »
+       sont de vrais mots français — les « corriger » casserait des phrases entières. */
+    if (mot.length < 5 || connu.has(mot)) return mot;
+    const max = mot.length >= 8 ? 2 : 1;
+    let best = '', bestD = max + 1;
+    for (const v of vocab) {
+      if (Math.abs(v.length - mot.length) > max) continue;
+      if (v.slice(0, 2) !== mot.slice(0, 2)) continue;      /* une faute de frappe garde le début du mot */
+      const d = langDist(mot, v, max);
+      if (d <= max && d < bestD) { bestD = d; best = v; if (d === 1) break; }
+    }
+    if (best) { corriges[mot] = best; return best; }
+    return mot;
+  });
+  return { texte: mots.join(' '), corriges };
+}
+/* la TÂCHE dit ce que le client veut faire : dépannage, installation, entretien, fabrication… */
+function langScore(c) {
+  if (!c) return -1;
+  return c.hits.reduce((n, h) => n + h.sc, 0) + Object.values(c.parMot).reduce((a, b) => a + b, 0);
+}
+function langLire(texte) {
+  const urgence = LANG_URGENCE.test(texte);
+  const hits = [];
+  for (const e of LANG_SIMPLE) {
+    let meilleur = 0;
+    for (const m of String(e[2]).split('|')) {
+      const mm = m.trim();
+      if (mm && mm.length > meilleur && texte.indexOf(mm) >= 0) meilleur = mm.length;
+    }
+    if (meilleur) hits.push({ id: e[0], tache: e[1], sc: 40 + meilleur * 2 });
+  }
+  /* mots-clés du catalogue (repli + confirmation) */
+  const mots = texte.split(' ').filter(w => w.length > 2 && !FR_VIDES.has(w));
+  const parMot = {};
+  for (const c of SVC_CAT) {
+    const idx = SVC_MOTS_IDX.find(x => x.id === c.id);
+    const nomN = normFr(c.nom).split(' ').filter(w => w.length > 2 && !FR_VIDES.has(w));
+    let sc = 0;
+    for (const w of mots) {
+      if (idx && idx.set.has(w)) sc += 4;
+      if (nomN.includes(w)) sc += 3;
+    }
+    if (sc) parMot[c.id] = (parMot[c.id] || 0) + sc;
+  }
+  /* ⚠️ les 21 nouveaux métiers sont DÉJÀ dans SVC_CAT (poussés au chargement) :
+     on ne les recompte pas ici, sinon ils marquaient double et volaient la place de métiers
+     plus justes (ex. « reparateur frigo » partait en Réparation téléphone). */
+  return { ok: hits.length > 0 || Object.keys(parMot).length > 0, texte, corriges: {}, urgence, hits, mots, parMot };
+}
+/* 🧠 DEUX LECTURES, LA MEILLEURE GAGNE :
+   ① le texte tel que le client l'a écrit (les mots français valides restent intacts)
+   ② le texte avec les fautes réparées (« plomblier » → « plombier »)
+   On ne retient la correction que si elle fait MIEUX comprendre la demande. */
+function langComprendre(q) {
+  const brut = String(q || '').trim();
+  if (!brut) return { ok: false, type: 'vide', texte: '', corriges: {}, urgence: false, hits: [], mots: [] };
+  const base = normFr(brut);
+  const cor = langCorriger(base);
+  const l1 = langLire(base);
+  const l2 = (cor.texte !== base) ? langLire(cor.texte) : l1;
+  const garde = (langScore(l2) > langScore(l1)) ? l2 : l1;
+  const corriges = (garde === l2) ? cor.corriges : {};
+  return { ok: garde.ok, texte: garde.texte, corriges, urgence: garde.urgence, hits: garde.hits, mots: garde.mots, parMot: garde.parMot };
+}
+/* 🔗 un seul classement : les phrases pèsent plus que les mots isolés */
+function langClasser(c) {
+  if (!c || !c.ok) return [];
+  const sc = {};
+  const tache = {};
+  for (const h of c.hits) {
+    sc[h.id] = (sc[h.id] || 0) + h.sc;
+    if (!tache[h.id] || h.sc > (tache[h.id].sc || 0)) tache[h.id] = { tache: h.tache, sc: h.sc };
+  }
+  for (const id of Object.keys(c.parMot)) sc[id] = (sc[id] || 0) + c.parMot[id];
+  return Object.keys(sc).map(id => ({ id, sc: sc[id], tache: (tache[id] || {}).tache || '' }))
+    .sort((a, b) => b.sc - a.sc);
+}
+/* 🧭 LA fonction appelée par la recherche : renvoie tout ce que le client doit voir */
+function comprendreDemande(q) {
+  const brut = String(q || '').trim();
+  const kp = codeKpDe(brut);
+  if (kp) return { type: 'kp', code: kp, compris: 'Code professionnel ' + kp, ids: [], tache: '', corriges: {}, urgence: false };
+  const c = langComprendre(brut);
+  if (!c.ok) return { type: 'inconnu', ids: [], principal: '', compris: '', tache: '', corriges: c.corriges, urgence: c.urgence, suggestions: [], aide: LANG_AIDE };
+  const cl = langClasser(c);
+  const principal = cl[0];
+  const alt = cl.filter(x => x.id !== principal.id).slice(0, 2);
+  /* 🎯 Le métier compris d'abord, puis les métiers VOISINS qui ont vraiment marqué des points
+     (union bornée à 3). Les mots purement descriptifs (« domicile », « chez moi »…) sont neutres,
+     pour qu'une phrase comme « cours à domicile » ne ramène pas des laveurs de voiture. */
+  const idsCherches = [principal.id].concat(cl.filter(x => x.id !== principal.id && x.sc >= 4).slice(0, 2).map(x => x.id));
+  const nm = id => svcNomP(id);
+  const ic = id => { const s = svcCat(id); return s ? s.ic : (SVC_NOUVEAUX[id] ? SVC_NOUVEAUX[id].ic : '🛠️'); };
+  return {
+    type: 'service',
+    ids: idsCherches,
+    principal: principal.id,
+    tache: principal.tache || '',
+    categorie: (svcCat(principal.id) || SVC_NOUVEAUX[principal.id] || {}).famille || '',
+    compris: nm(principal.id),
+    comprisLong: ic(principal.id) + ' ' + nm(principal.id) + (principal.tache ? (' · ' + principal.tache) : ''),
+    corriges: c.corriges,
+    urgence: c.urgence,
+    alternatives: alt.map(x => ({ id: x.id, nom: nm(x.id), ic: ic(x.id), tache: x.tache || '' })),
+    suggestions: alt.map(x => x.id)
+  };
+}
 
 /* 🧠 COMPRÉHENSION : « cours à domicile » → métier « cours ».
    Score = mots du NOM du métier retrouvés dans la demande (+ le nom entier = très fort)
          + mots-clés spécifiques. Union bornée à 3 métiers, avec un seuil de pertinence. */
+/* 🧠 POINT D'ENTRÉE UNIQUE de la compréhension.
+   Il renvoie TOUJOURS la même forme qu'avant (type / ids / compris / suggestions) et
+   AJOUTE ce que le client doit voir : la tâche, les fautes corrigées, l'urgence, les alternatives. */
 function resoudreRecherche(q) {
-  const brut = String(q || '').trim();
-  const kp = codeKpDe(brut);
-  if (kp) return { type: 'kp', code: kp, compris: 'Code professionnel ' + kp };
-  const n = normFr(brut);
-  if (!n) return { type: 'vide', ids: [], compris: '' };
-  const mots = [...new Set(n.split(' ').filter(w => w.length > 2 && !FR_VIDES.has(w)))];
-  if (!mots.length) return { type: 'inconnu', ids: [], compris: '', suggestions: [] };
-  const notes = [];
-  for (const c of SVC_CAT) {
-    const idx = SVC_MOTS_IDX.find(x => x.id === c.id);
-    const nomN = normFr(c.nom);
-    const nomMots = new Set(nomN.split(' ').filter(w => w.length > 2 && !FR_VIDES.has(w)));
-    let sc = 0, nbNom = 0;
-    for (const w of mots) if (nomMots.has(w)) nbNom++;
-    sc += nbNom * 2;
-    if (nbNom >= 2) sc += 6;                                  // « cours » + « domicile » → très fort
-    /* « dé-menage-ment » ne doit pas être pris pour « ménage » : on compare des mots entiers */
-    if (n.length > 3) {
-      try { if (new RegExp('(^| )' + n.split(' ').join(' +') + '( |$)').test(nomN)) sc += 8; } catch (e) {}
-    }
-    for (const w of mots) if (idx.set.has(w)) sc += poidsMot(w);   // mot-clé déclaré par le métier
-    if (sc > 0.01) notes.push({ id: c.id, sc: Math.round(sc * 100) / 100 });
-  }
-  notes.sort((a, b) => b.sc - a.sc);
-  if (!notes.length) return { type: 'inconnu', ids: [], compris: '', suggestions: [] };
-  const top = notes[0].sc;
-  /* un mot seul (« ménage ») est large par nature : on garde les 3 meilleurs ;
-     une phrase précise est filtrée par un seuil de pertinence */
-  const seuil = mots.length <= 1 ? 0.5 : Math.max(1, top * 0.5);
-  const garde = notes.filter(x => x.sc >= seuil).slice(0, 3);
-  if (!garde.length) return { type: 'inconnu', ids: [], compris: '', suggestions: notes.slice(0, 4).map(x => x.id) };
-  const ids = garde.map(x => x.id);
+  const c = comprendreDemande(q);
+  if (c.type === 'kp') return { type: 'kp', code: c.code, compris: c.compris };
+  if (c.type === 'vide') return { type: 'vide', ids: [], compris: '' };
+  if (c.type === 'inconnu')
+    return { type: 'inconnu', ids: [], compris: '', suggestions: [], corriges: c.corriges, urgence: c.urgence, aide: c.aide };
   return {
-    type: 'service', ids, principal: ids[0],
-    compris: ids.map(i => svcNomP(i)).join(' · '),
-    suggestions: notes.filter(x => !ids.includes(x.id)).slice(0, 4).map(x => x.id)
+    type: 'service', ids: c.ids, principal: c.principal,
+    compris: c.compris, comprisLong: c.comprisLong, tache: c.tache, categorie: c.categorie,
+    corriges: c.corriges, urgence: c.urgence,
+    alternatives: c.alternatives, suggestions: c.suggestions
   };
 }
-
 /* 🧰 COMPÉTENCES déclarées par le pro : sous-services choisis + niveau + métiers.
    Elles sont confrontées aux mots de la demande (« maths », « vitres », « chaudière »…). */
 function competencesPro(ag) {
@@ -1234,13 +1490,19 @@ function recherchePro(o) {
     const baseMin = metierFait.length ? Math.min(...metierFait.map(id => svcBaseP(id) || 999999)) : null;
     const pPrix = baseMin == null ? 0 : Math.max(0, Math.round(5 - (baseMin / 10000) * 2));   // indicatif
     const pComp = pCompPro(ag, motsDem);                                                  // compétences déclarées
+    /* 🚨 URGENCE : quand le client dit « c'est urgent », un pro EN LIGNE et LIBRE est vraiment mieux placé.
+       Le critère n'existe que si la demande est urgente → aucun ancien résultat ne bouge. */
+    const pUrg = (o.urgence && online && dispo === 'libre') ? 5 : 0;
     const obtenu = (pDist * w.distance) + (pDispo * w.dispo) + (pNote * w.note) + (pMissions * w.missions)
-      + (pVerif * w.verif) + (pPrix * w.prix) + (pZone * w.zone) + (pComp * w.competences);
+      + (pVerif * w.verif) + (pPrix * w.prix) + (pZone * w.zone) + (pComp * w.competences)
+      + (o.urgence ? pUrg * 1.2 : 0);
     const maxPoids = (40 * w.distance) + (25 * w.dispo) + (15 * w.note) + (10 * w.missions)
-      + (5 * w.verif) + (5 * w.prix) + (10 * w.zone) + (5 * w.competences);
+      + (5 * w.verif) + (5 * w.prix) + (10 * w.zone) + (5 * w.competences)
+      + (o.urgence ? 6 : 0);
     const score = maxPoids > 0 ? Math.round(obtenu / maxPoids * 10000) / 100 : 0;   // 0–100, comparable entre pros
 
     const card = fichePublique(ag, o);
+    if (o.tache) card.tacheComprise = String(o.tache).slice(0, 40);   /* ce que le client a décrit */
     /* 📏 distance affichée UNIQUEMENT si le GPS du pro est frais — sinon on donne une ZONE (jamais une fausse précision) */
     if (distSource === 'gps' && dist != null) {
       card.distKm = distPalier(dist);
@@ -2129,57 +2391,153 @@ function jeuQCM(q, bonne, faux, niveau) {
   const choix = jeuMelanger(vus.slice(0, 4));
   return { q, choix, bonne: choix.indexOf(String(bonne)), niveau: niveau || 1 };
 }
-/* une question par « recette », du plus facile au plus difficile */
-function jeuQuestionIntegree(theme, niveau) {
-  const N = niveau || 1;
-  if (theme === 'maths') {
-    if (N === 1) { const a = 2 + jeuAleatoire(8), b = 2 + jeuAleatoire(8); return jeuQCM(a + ' + ' + b + ' = ?', String(a + b), [String(a + b + 1), String(a + b - 2), String(a + b + 10)], 1); }
-    if (N === 2) { const a = 3 + jeuAleatoire(9), b = 3 + jeuAleatoire(9); return jeuQCM(a + ' × ' + b + ' = ?', String(a * b), [String(a * b + a), String(a * b - b), String(a * b + 10)], 2); }
-    const a = 12 + jeuAleatoire(18), b = 4 + jeuAleatoire(6); const r = Math.floor(a / b), reste = a % b;
-    return jeuQCM(a + ' ÷ ' + b + ' = ? (arrondi entier)', r + ' reste ' + reste, [String(r + 1), String(r - 1), String(r + 2)], 3);
-  }
-  if (theme === 'culture_ci') {
-    const F = [
-      ['Quelle est la capitale politique de la Côte d’Ivoire ?', 'Yamoussoukro', ['Abidjan', 'Bouaké', 'Korhogo'], 1],
-      ['Quelle monnaie utilise-t-on en Côte d’Ivoire ?', 'Le franc CFA (XOF)', ['Le naira', 'Le cédi', 'Le dirham'], 1],
-      ['Quelle est la plus grande ville de Côte d’Ivoire ?', 'Abidjan', ['Bouaké', 'Yamoussoukro', 'San Pedro'], 1],
-      ['Dans quelle région se trouve Bouaké ?', 'La Vallée du Bandama', ['Le Bas-Sassandra', 'Les Lagunes', 'Le Zanzan'], 2],
-      ['Quel fleuve traverse la Côte d’Ivoire ?', 'Le Bandama', ['Le Niger', 'Le Sénégal', 'Le Congo'], 2],
-      ['Quel est le plus haut sommet de Côte d’Ivoire ?', 'Le mont Nimba', ['Le mont Tonkoui', 'Le mont Korhogo', 'Le mont Abidjan'], 3]
-    ];
-    const f = F.filter(x => x[3] === N); const c = f.length ? f[jeuAleatoire(f.length)] : F[jeuAleatoire(F.length)];
-    return jeuQCM(c[0], c[1], c[2], c[3]);
-  }
-  if (theme === 'klean') {
-    const F = [
-      ['Comment s’appelle le numéro professionnel d’un pro KLEAN ?', 'Un code KP- suivi de 6 chiffres', ['Un numéro de compte bancaire', 'Un code postal', 'Un code promo'], 1],
-      ['Que faire si aucun professionnel n’est disponible autour de vous ?', 'Déposer une demande ou élargir la recherche', ['Payer d’avance', 'Abandonner', 'Attendre une semaine'], 1],
-      ['Les Klean Points peuvent-ils être convertis en argent liquide ?', 'Non, jamais', ['Oui, en espèces', 'Oui, à la banque', 'Seulement le week-end'], 2],
-      ['Qui valide définitivement un remboursement ?', 'Le compte principal (PDG)', ['Le professionnel', 'Le gestionnaire', 'Le client'], 2],
-      ['Que se passe-t-il si vous ne donnez pas l’autorisation GPS ?', 'Vous pouvez chercher par quartier ou par ville', ['L’application se ferme', 'Rien n’est possible', 'Le compte est bloqué'], 2]
-    ];
-    const f = F.filter(x => x[3] === N); const c = f.length ? f[jeuAleatoire(f.length)] : F[jeuAleatoire(F.length)];
-    return jeuQCM(c[0], c[1], c[2], c[3]);
-  }
-  if (theme === 'sciences') {
-    const F = [
-      ['Combien de pattes a une araignée ?', '8', ['6', '10', '4'], 1],
-      ['Quel est le plus grand océan du monde ?', 'Le Pacifique', ['L’Atlantique', 'L’océan Indien', 'L’Arctique'], 2],
-      ['Quel gaz les plantes absorbent-elles pour respirer ?', 'Le dioxyde de carbone', ['L’oxygène', 'L’azote', 'L’hélium'], 2],
-      ['Quelle partie du corps pompe le sang ?', 'Le cœur', ['Le foie', 'Le poumon', 'L’estomac'], 1]
-    ];
-    const f = F.filter(x => x[3] === N); const c = f.length ? f[jeuAleatoire(f.length)] : F[jeuAleatoire(F.length)];
-    return jeuQCM(c[0], c[1], c[2], c[3]);
-  }
-  /* français (par défaut) */
-  const F = [
+/* ═══════════════════════════════════════════════════════════════════════════════
+   📚 BANQUE DE QUESTIONS INTÉGRÉE (60→120) — 3 niveaux × 8 questions par thème.
+   Format : [question, bonne réponse, [mauvaises réponses], niveau]
+   Le générateur « banque » pioche ici sans jamais répéter une question tant que le
+   stock du thème le permet (le calcul « maths » est généré à la volée, à l'infini).
+   ═══════════════════════════════════════════════════════════════════════════════ */
+const JEU_BANQUE = {
+  culture_ci: [
+    /* — niveau 1 : facile — */
+    ['Quelle est la capitale politique de la Côte d’Ivoire ?', 'Yamoussoukro', ['Abidjan', 'Bouaké', 'Korhogo'], 1],
+    ['Quelle monnaie utilise-t-on en Côte d’Ivoire ?', 'Le franc CFA (XOF)', ['Le naira', 'Le cédi', 'Le dirham'], 1],
+    ['Quelle est la plus grande ville de Côte d’Ivoire ?', 'Abidjan', ['Bouaké', 'Yamoussoukro', 'San Pedro'], 1],
+    ['Quelle est la langue officielle de la Côte d’Ivoire ?', 'Le français', ['L’anglais', 'L’espagnol', 'Le portugais'], 1],
+    ['De combien de bandes de couleur le drapeau ivoirien est-il fait ?', 'Trois (orange, blanc, vert)', ['Deux', 'Quatre', 'Cinq'], 1],
+    ['Quel océan borde la Côte d’Ivoire ?', 'L’océan Atlantique', ['La Méditerranée', 'L’océan Indien', 'La mer Rouge'], 1],
+    ['Quel plat ivoirien est fait de banane plantain frite ?', 'L’alloco', ['L’attiéké', 'Le placali', 'Le riz gras'], 1],
+    ['Quel pays est voisin de la Côte d’Ivoire ?', 'Le Ghana', ['Le Togo', 'Le Sénégal', 'Le Niger'], 1],
+    /* — niveau 2 : moyen — */
+    ['Dans quelle région se trouve la ville de Bouaké ?', 'Le Gbêkê (Vallée du Bandama)', ['Le Bas-Sassandra', 'Les Lagunes', 'Le Zanzan'], 2],
+    ['Quel fleuve traverse la Côte d’Ivoire ?', 'Le Bandama', ['Le Niger', 'Le Sénégal', 'Le Congo'], 2],
+    ['Quelle est la capitale économique de la Côte d’Ivoire ?', 'Abidjan', ['Yamoussoukro', 'Bouaké', 'Man'], 2],
+    ['Quelle ville balnéaire, ancienne capitale coloniale, est classée au patrimoine mondial ?', 'Grand-Bassam', ['San Pedro', 'Grand-Lahou', 'Sassandra'], 2],
+    ['De quel produit la Côte d’Ivoire est-elle le premier producteur mondial ?', 'Le cacao', ['Le blé', 'Le maïs', 'L’arachide'], 2],
+    ['Quelle spécialité ivoirienne est faite à partir de manioc râpé ?', 'L’attiéké', ['L’alloco', 'L’igname pilée', 'Le foutou banane'], 2],
+    ['Dans quelle ville se trouve le stade Félix Houphouët-Boigny ?', 'Abidjan', ['Bouaké', 'Yamoussoukro', 'San Pedro'], 2],
+    ['En quelle année la Côte d’Ivoire est-elle devenue indépendante ?', '1960', ['1956', '1962', '1968'], 2],
+    /* — niveau 3 : difficile — */
+    ['Quel est le plus haut sommet de la Côte d’Ivoire ?', 'Le mont Nimba', ['Le mont Tonkoui', 'Le mont Korhogo', 'Le mont Abidjan'], 3],
+    ['Quel est le plus long fleuve entièrement ivoirien ?', 'Le Bandama', ['Le Cavally', 'La Comoé', 'Le Sassandra'], 3],
+    ['Quel parc national du NORD-EST de la Côte d’Ivoire est classé au patrimoine mondial ?', 'Le parc national de la Comoé', ['Le parc de Taï', 'Le parc du Banco', 'Le parc de la Marahoué'], 3],
+    ['Sur quel fleuve se trouve le barrage de Kossou ?', 'Le Bandama', ['Le Sassandra', 'La Comoé', 'Le Cavally'], 3],
+    ['Quelle est la plus ancienne université du pays, à Abidjan-Cocody ?', 'L’université Félix Houphouët-Boigny', ['L’université Alassane Ouattara', 'L’université de Man', 'L’INP-HB de Yamoussoukro'], 3],
+    ['Quel pays partage la plus longue frontière terrestre avec la Côte d’Ivoire ?', 'Le Liberia', ['Le Ghana', 'La Guinée', 'Le Burkina Faso'], 3],
+    ['Dans quelle ville se trouve le siège de la Banque africaine de développement (BAD) ?', 'Abidjan', ['Yamoussoukro', 'Bouaké', 'Grand-Bassam'], 3],
+    ['Quel pays n’a AUCUNE frontière avec la Côte d’Ivoire ?', 'Le Togo', ['Le Mali', 'La Guinée', 'Le Liberia'], 3]
+  ],
+  klean: [
+    /* — niveau 1 — */
+    ['Comment s’appelle le numéro professionnel d’un pro KLEAN ?', 'Un code KP- suivi de 6 chiffres', ['Un numéro de compte bancaire', 'Un code postal', 'Un code promo'], 1],
+    ['Que faire si aucun professionnel n’est disponible autour de vous ?', 'Déposer une demande ou élargir la recherche', ['Payer d’avance', 'Abandonner', 'Attendre une semaine'], 1],
+    ['Les Klean Points peuvent-ils être convertis en argent liquide ?', 'Non, jamais', ['Oui, en espèces', 'Oui, à la banque', 'Seulement le week-end'], 1],
+    ['Qui valide définitivement un remboursement ?', 'Le compte principal (PDG)', ['Le professionnel', 'Le gestionnaire', 'Le client'], 1],
+    ['Que se passe-t-il si vous ne donnez pas l’autorisation GPS ?', 'Vous pouvez chercher par quartier ou par ville', ['L’application se ferme', 'Rien n’est possible', 'Le compte est bloqué'], 1],
+    ['KLEAN sert à trouver des professionnels pour… ?', 'Le nettoyage, les cours, la beauté et bien d’autres services', ['Uniquement le ménage', 'Uniquement la plomberie', 'Uniquement les livraisons'], 1],
+    ['Le numéro personnel d’un professionnel est… ?', 'Jamais affiché aux clients', ['Toujours affiché', 'Affiché après paiement', 'Affiché le week-end'], 1],
+    ['Comment signaler un problème après une mission ?', 'Avec « Signaler un problème » sur la mission terminée', ['En appelant la police', 'En envoyant un SMS', 'Ce n’est pas possible'], 1],
+    /* — niveau 2 — */
+    ['À quoi servent les Klean Points ?', 'À obtenir des récompenses et des parties gratuites', ['À payer les missions', 'À retirer de l’argent au guichet', 'À acheter du carburant'], 2],
+    ['Qui instruit un dossier de litige ?', 'Le gestionnaire (la décision finale reste au PDG)', ['Le professionnel', 'Le client', 'Personne'], 2],
+    ['Que se passe-t-il si un professionnel refuse une mission ?', 'KLEAN propose un autre professionnel disponible', ['Le client doit payer plus cher', 'La mission est annulée', 'Il faut rappeler demain'], 2],
+    ['À quoi sert le suivi en direct d’une mission ?', 'À voir l’avancement et l’arrivée du professionnel', ['À regarder un film', 'À participer à une réunion', 'À lire le journal'], 2],
+    ['Avant de payer, que devez-vous faire ?', 'Vérifier le prix proposé et accepter le devis', ['Payer tout de suite', 'Envoyer votre mot de passe', 'Rien du tout'], 2],
+    ['Le numéro d’appel d’un pro KLEAN est-il son numéro personnel ?', 'Non : c’est un numéro professionnel distinct', ['Oui, exactement le même', 'Oui, mais masqué', 'Cela dépend du jour'], 2],
+    ['Un dossier de litige est possible… ?', 'Sur une mission terminée', ['Sur une mission en cours', 'Sur n’importe quelle recherche', 'Jamais'], 2],
+    ['La photo du gagnant d’un jeu KLEAN est… ?', 'Facultative : la victoire est validée sans photo', ['Obligatoire', 'Payante', 'Interdite'], 2],
+    /* — niveau 3 — */
+    ['Que se passe-t-il si vous ne répondez pas à une question de jeu à temps ?', 'Vous êtes éliminé', ['Vous perdez 1 point seulement', 'Rien du tout', 'Vous gagnez du temps'], 3],
+    ['Dans un jeu en direct KLEAN, qui corrige les réponses ?', 'Le serveur : la bonne réponse n’est donnée qu’après le vote', ['Le joueur le plus rapide', 'Le PDG à la main', 'Personne'], 3],
+    ['Combien de gagnants un jeu en direct désigne-t-il ?', 'Au moins un : le dernier en course (ou le meilleur score)', ['Aucun', 'Toujours trois', 'Dix au maximum'], 3],
+    ['Votre position exacte sur KLEAN… ?', 'N’est jamais publique : elle sert seulement à trouver un pro proche', ['Est publique', 'Est vendue à des partenaires', 'Est cachée à vous-même'], 3],
+    ['Comment le rayon de recherche est-il réglé ?', 'Par le PDG : il peut couvrir toute la Côte d’Ivoire', ['Il est fixé à 1 km', 'Il est fixé à 5 km', 'Il n’existe pas'], 3],
+    ['Que veut dire le code « KP- » sur la fiche d’un professionnel ?', 'Son numéro professionnel KLEAN', ['Son âge', 'Son prix', 'Sa note'], 3],
+    ['Où consulter l’historique de vos missions ?', 'Dans « Mes réservations »', ['Dans les informations personnelles', 'Dans le quiz', 'Nulle part'], 3],
+    ['Un professionnel peut-il voir votre numéro personnel ?', 'Non : la demande passe par l’application', ['Oui, toujours', 'Oui, après le paiement', 'Oui, la nuit seulement'], 3]
+  ],
+  francais: [
+    /* — niveau 1 — */
     ['Quel est le pluriel de « cheval » ?', 'chevaux', ['chevals', 'chevales', 'chevaus'], 1],
-    ['Choisissez le mot correct : « Je … à Bouaké. »', 'vais', ['va', 'vas', 'allons'], 1],
-    ['Quel est le contraire de « rapide » ?', 'lent', ['vite', 'pressé', 'fort'], 2],
-    ['Complétez : « Ils … arrivés hier. »', 'sont', ['est', 'ont', 'seront'], 2],
-    ['Quel mot est un synonyme de « travailler » ?', 'œuvrer', ['chômer', 'dormir', 'jouer'], 3]
-  ];
-  const f = F.filter(x => x[3] === N); const c = f.length ? F[jeuAleatoire(f.length)] : F[jeuAleatoire(F.length)];
+    ['Complétez : « Je … à Bouaké. »', 'vais', ['va', 'vas', 'allons'], 1],
+    ['Quel est le contraire de « rapide » ?', 'lent', ['vite', 'pressé', 'fort'], 1],
+    ['Quel est le pluriel de « journal » ?', 'journaux', ['journals', 'journale', 'journales'], 1],
+    ['Complétez : « … école de mon quartier est grande. »', 'L’', ['Le', 'La', 'Les'], 1],
+    ['Complétez : « Ils … arrivés hier. »', 'sont', ['est', 'ont', 'seront'], 1],
+    ['Quel est le féminin de « acteur » ?', 'actrice', ['acteure', 'acteuse', 'acteuresse'], 1],
+    ['Quel est le contraire de « propre » ?', 'sale', ['net', 'lavé', 'rangé'], 1],
+    /* — niveau 2 — */
+    ['Quel mot est un synonyme de « travailler » ?', 'œuvrer', ['chômer', 'dormir', 'jouer'], 2],
+    ['Complétez : « Nous … prêts. »', 'sommes', ['sont', 'êtes', 'est'], 2],
+    ['Quel est le pluriel de « travail » ?', 'travaux', ['travails', 'travaus', 'travailes'], 2],
+    ['Complétez : « Elle … au marché chaque samedi. »', 'va', ['vas', 'aller', 'vont'], 2],
+    ['Quel mot est un adverbe ?', 'rapidement', ['rapide', 'rapidité', 'rapider'], 2],
+    ['Complétez : « Ils ont … leurs devoirs. »', 'fini', ['finis', 'finies', 'finir'], 2],
+    ['Quel est le pluriel de « un chou » ?', 'des choux', ['des chous', 'des choues', 'des chouxs'], 2],
+    ['Quel mot signifie « très grand » ?', 'immense', ['minuscule', 'étroit', 'court'], 2],
+    /* — niveau 3 — */
+    ['Quel est le participe passé du verbe « prendre » ?', 'pris', ['prendu', 'prenu', 'prendé'], 3],
+    ['Quelle phrase est correcte ?', 'Je me suis lavé les mains.', ['Je me suis lavé les main.', 'Je m’ai lavé les mains.', 'Je suis lavé mes mains.'], 3],
+    ['Les mots « cour » et « cours » sont… ?', 'des homophones', ['des synonymes', 'des antonymes', 'des contraires'], 3],
+    ['Quel mot est un synonyme de « difficile » ?', 'ardue', ['facile', 'simple', 'aisée'], 3],
+    ['Complétez : « Bien qu’il … fatigué, il continue à travailler. »', 'soit', ['est', 'était', 'sera'], 3],
+    ['Quel est le contraire de « souvent » ?', 'rarement', ['toujours', 'chaque jour', 'le matin'], 3],
+    ['Comment appelle-t-on une personne qui écrit des livres ?', 'un écrivain', ['un libraire', 'un lecteur', 'un éditeur'], 3],
+    ['Combien de « s » compte le mot « poisson » ?', 'deux', ['un', 'trois', 'aucun'], 3]
+  ],
+  sciences: [
+    /* — niveau 1 — */
+    ['Combien de pattes a une araignée ?', '8', ['6', '10', '4'], 1],
+    ['Quelle partie du corps pompe le sang ?', 'Le cœur', ['Le foie', 'Le poumon', 'L’estomac'], 1],
+    ['Combien de pattes a un chien ?', '4', ['2', '6', '8'], 1],
+    ['À quelle température l’eau gèle-t-elle ?', '0 °C', ['10 °C', '100 °C', '−10 °C'], 1],
+    ['À quelle température l’eau bout-elle (au niveau de la mer) ?', '100 °C', ['50 °C', '80 °C', '200 °C'], 1],
+    ['Quel animal respire avec des branchies ?', 'Le poisson', ['Le dauphin', 'La baleine', 'Le crocodile'], 1],
+    ['De quoi une plante a-t-elle besoin pour grandir ?', 'De lumière et d’eau', ['Seulement de sable', 'Seulement de vent', 'De rien du tout'], 1],
+    ['Combien de doigts avons-nous sur les deux mains ?', '10', ['8', '12', '14'], 1],
+    /* — niveau 2 — */
+    ['Quel est le plus grand océan du monde ?', 'Le Pacifique', ['L’Atlantique', 'L’océan Indien', 'L’Arctique'], 2],
+    ['Quel gaz les plantes absorbent-elles pour se nourrir ?', 'Le dioxyde de carbone', ['L’azote', 'L’hélium', 'Le méthane'], 2],
+    ['Quel gaz est indispensable à notre respiration ?', 'L’oxygène', ['L’azote', 'Le méthane', 'L’hydrogène'], 2],
+    ['En combien de temps la Terre fait-elle le tour du Soleil ?', 'Environ 365 jours', ['24 heures', '30 jours', '10 ans'], 2],
+    ['Quel organe filtre le sang ?', 'Les reins', ['Le cœur', 'Les poumons', 'L’estomac'], 2],
+    ['Où se passe la photosynthèse chez une plante ?', 'Dans les feuilles', ['Dans les racines', 'Dans les fleurs', 'Dans les fruits'], 2],
+    ['Combien d’os compte environ le corps d’un adulte ?', 'Environ 206', ['Environ 33', 'Environ 500', 'Environ 1000'], 2],
+    ['Pourquoi l’eau de mer est-elle salée ?', 'À cause du sel dissous', ['À cause du sable', 'À cause des poissons', 'À cause de l’air'], 2],
+    /* — niveau 3 — */
+    ['Quelle planète est la plus proche du Soleil ?', 'Mercure', ['Vénus', 'La Terre', 'Mars'], 3],
+    ['Quelle est l’unité de la force ?', 'Le newton', ['Le volt', 'Le litre', 'Le degré'], 3],
+    ['Quelle est la vitesse de la lumière (arrondie) ?', 'Environ 300 000 km/s', ['Environ 300 km/s', 'Environ 3 000 km/s', 'Environ 30 km/s'], 3],
+    ['Par où le sang quitte-t-il le cœur pour aller vers le corps ?', 'Par les artères', ['Par les os', 'Par les nerfs', 'Par les poumons'], 3],
+    ['Quel est le plus grand organe du corps humain ?', 'La peau', ['Le foie', 'Le cerveau', 'Les intestins'], 3],
+    ['Où se trouve l’ADN dans une cellule ?', 'Dans le noyau', ['Dans l’estomac', 'Dans le plasma seul', 'Dans les os'], 3],
+    ['Qu’est-ce qui provoque principalement l’effet de serre ?', 'Certains gaz comme le dioxyde de carbone', ['La pluie', 'Le vent', 'Les arbres'], 3],
+    ['Que mesure une année-lumière ?', 'Une distance', ['Un temps', 'Une masse', 'Une température'], 3]
+  ]
+};
+
+/* une question par « recette », du plus facile au plus difficile */
+/* une question tirée dans la banque du thème (calcul généré à la volée) */
+function jeuQuestionIntegree(theme, niveau, dejaVues) {
+  const N = niveau || 1;
+  const vu = dejaVues || {};
+  if (theme === 'maths') {
+    /* le calcul est généré : on retire tant que la question est déjà tombée */
+    for (let essai = 0; essai < 40; essai++) {
+      let q;
+      if (N === 1) { const a = 2 + jeuAleatoire(9), b = 2 + jeuAleatoire(9); q = jeuQCM(a + ' + ' + b + ' = ?', String(a + b), [String(a + b + 1), String(a + b - 2), String(a + b + 10)], 1); }
+      else if (N === 2) { const a = 3 + jeuAleatoire(9), b = 3 + jeuAleatoire(9); q = jeuQCM(a + ' × ' + b + ' = ?', String(a * b), [String(a * b + a), String(a * b - b), String(a * b + 10)], 2); }
+      else { const a = 12 + jeuAleatoire(18), b = 4 + jeuAleatoire(6), r = Math.floor(a / b), reste = a % b;
+             q = jeuQCM(a + ' ÷ ' + b + ' = ? (arrondi entier)', r + ' reste ' + reste, [String(r + 1), String(r - 1), String(r + 2)], 3); }
+      if (!vu[q.q]) return q;
+    }
+    return jeuQCM('Combien font 100 − 25 ?', '75', ['70', '85', '65'], 1);
+  }
+  const liste = JEU_BANQUE[theme] || JEU_BANQUE.francais;
+  let dispo = liste.filter(x => (x[3] || 1) === N && !vu[x[0]]);
+  if (!dispo.length) dispo = liste.filter(x => !vu[x[0]]);       /* ce niveau est épuisé : on élargit */
+  if (!dispo.length) dispo = liste;                              /* thème entièrement épuisé : on réutilise */
+  const c = dispo[jeuAleatoire(dispo.length)];
   return jeuQCM(c[0], c[1], c[2], c[3]);
 }
 function jeuGenererIntegre(opt) {
@@ -2192,12 +2550,8 @@ function jeuGenererIntegre(opt) {
     let niv = progression ? (1 + Math.round((i / Math.max(1, nb - 1)) * 2)) : (parseInt(opt.niveau, 10) || 1);
     niv = Math.max(1, Math.min(3, niv));
     /* 🚫 pas de question en double : on retire tant qu'on tombe sur une question déjà posée */
-    let q = null;
-    for (let essai = 0; essai < 24 && !q; essai++) {
-      const c = jeuQuestionIntegree(theme, (essai > 14 ? (1 + jeuAleatoire(3)) : niv));
-      if (!dejaVues[c.q]) q = c;
-    }
-    if (!q) q = jeuQuestionIntegree(theme, niv);      /* stock entièrement épuisé : on réutilise (assumé) */
+    const q0 = jeuQuestionIntegree(theme, niv, dejaVues);
+    let q = q0;
     dejaVues[q.q] = 1;
     if (base === 'vraifaux') q = { q: q.q + ' — Vrai ou faux ?', choix: [q.choix[q.bonne], 'Faux'], bonne: 0, niveau: niv };
     out.push({ q: q.q, choix: q.choix, bonne: q.bonne, niveau: q.niveau, source: 'générateur intégré' });
@@ -2373,6 +2727,72 @@ const server = http.createServer(async (req, res) => {
 
 
 /* 🔎 RECHERCHE INTELLIGENTE — proximité GPS + service + disponibilité + zone d'intervention */
+  /* 🗣️ « De quoi avez-vous besoin ? » — le SERVEUR dit ce qu'il a compris AVANT de chercher.
+     Aucun professionnel n'est mobilisé : c'est un simple contrôle, le client peut corriger. */
+  if (p === '/api/comprendre' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    const ip = req.socket.remoteAddress || '?';
+    const cle = (cli && cli.id) || ip;
+    /* le plafond reste (protection anti-abus) mais large : cette route est légère et appelée
+       pendant que le client écrit sa phrase, elle ne doit jamais le bloquer. */
+    if (!recherchePlafond('c:' + cle, (matchCfg().maxRecherchesMin || 20) * 30))
+      return sendJson(res, 429, { error: 'Doucement 🙂 réessayez dans un instant', code: 'plafond' });
+    const q = String(url.searchParams.get('q') || '').slice(0, 160);
+    const c = comprendreDemande(q);
+    if (c.type === 'kp') return sendJson(res, 200, { ok: true, mode: 'kp', code: c.code, compris: c.compris, comprisLong: '🎫 ' + c.compris });
+    if (c.type === 'vide') return sendJson(res, 200, { ok: true, mode: 'vide', compris: '', aide: LANG_AIDE });
+    if (c.type === 'inconnu')
+      return sendJson(res, 200, { ok: true, mode: 'inconnu', compris: '', corriges: c.corriges || {}, urgence: !!c.urgence, aide: LANG_AIDE, suggestions: [] });
+    if (url.searchParams.get('debug') === '1') {
+      const cc = langComprendre(q);
+      return sendJson(res, 200, { ok: true, debug: { texte: cc.texte, corriges: cc.corriges, hits: cc.hits, classement: langClasser(cc).slice(0, 4), urgence: cc.urgence } });
+    }
+    return sendJson(res, 200, {
+      ok: true, mode: 'service', principal: c.principal, service: c.compris, compris: c.compris,
+      comprisLong: c.comprisLong, tache: c.tache, categorie: c.categorie, urgence: !!c.urgence,
+      corriges: c.corriges, alternatives: c.alternatives || [], suggestions: c.suggestions || []
+    });
+  }
+  /* 📷 RECHERCHE PAR PHOTO (lot 102) — le client montre, KLEAN propose une catégorie,
+     le client CONFIRME ou MODIFIE. On ne devine jamais à sa place.
+     ⚠️ HONNÊTETÉ : la lecture automatique de l'image (IA de vision) n'est pas branchée.
+     Tant qu'aucun service d'analyse d'image n'est configuré, la proposition vient des MOTS
+     du client ; sinon on lui présente les métiers fréquents à confirmer. La réponse le dit. */
+  if (p === '/api/comprendre/photo' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    const ip = req.socket.remoteAddress || '?';
+    const cle = (cli && cli.id) || ip;
+    if (!recherchePlafond('ph:' + cle, (matchCfg().maxRecherchesMin || 20) * 6))
+      return sendJson(res, 429, { error: 'Doucement 🙂 réessayez dans un instant', code: 'plafond' });
+    const b = await readBody(req);
+    const img = typeof b.image === 'string' ? b.image : '';
+    if (!/^data:image\/(png|jpeg|jpg|webp);base64,/.test(img))
+      return sendJson(res, 400, { error: 'Photo non reconnue — utilisez une photo JPEG, PNG ou WEBP' });
+    if (img.length > 1.2e6)
+      return sendJson(res, 413, { error: 'Photo trop lourde — reprenez-la (elle est réduite automatiquement)' });
+    const texte = String(b.texte || '').slice(0, 160);
+    const c = texte ? comprendreDemande(texte) : { type: 'vide' };
+    const frequents = ['maison', 'plomberie', 'electricite', 'clim', 'electro', 'serrurerie', 'menuiserie', 'jardinage']
+      .map(id => svcCat(id)).filter(Boolean);
+    const candidats = frequents.map(s2 => ({ id: s2.id, nom: s2.nom, ic: s2.ic }));
+    const iaDispo = false;   /* ← true le jour où un service d'analyse d'image est branché */
+    let propose = null;
+    if (c.type === 'service' && c.principal && svcCat(c.principal)) {
+      const s2 = svcCat(c.principal);
+      propose = { id: s2.id, nom: s2.nom, ic: s2.ic, tache: c.tache || '' };
+    }
+    auditLog('photo_comprendre', { par: cli ? cli.nom : 'visiteur', texte, propose: propose ? propose.id : '', ia: iaDispo });
+    return sendJson(res, 200, {
+      ok: true, iaDispo, propose, candidats, tache: (propose && propose.tache) || '',
+      source: propose ? 'mots' : 'liste',
+      message: !iaDispo
+        ? (propose
+          ? 'Nous avons lu ce que vous avez écrit à côté de la photo. Confirmez la catégorie, ou changez-la — c’est vous qui décidez.'
+          : 'La lecture automatique des photos n’est pas encore activée. Choisissez la catégorie qui ressemble le plus (ou écrivez quelques mots), et nous cherchons les professionnels.')
+        : 'Nous avons regardé votre photo : voici ce que nous comprenons.'
+    });
+  }
+
   if (p === '/api/recherche' && req.method === 'GET') {
     const cfg = matchCfg();
     const cli = findClientByToken(req);
@@ -2452,15 +2872,26 @@ const server = http.createServer(async (req, res) => {
     if (comp.type === 'inconnu') {
       /* on ne devine pas : on dit honnêtement que la phrase n'a pas été comprise */
       return sendJson(res, 200, { ok: true, mode: 'inconnu', compris: '', q, pros: [], n: 0,
+        corriges: comp.corriges || {}, urgence: !!comp.urgence,
         suggestions: (comp.suggestions || []).length ? comp.suggestions : ['maison', 'clim', 'plomberie', 'cours'],
-        aide: 'Dites-nous le service en un mot (ménage, plomberie, cours…), choisissez un métier ci-dessous, ou passez par une demande sur mesure.' });
+        aide: comp.aide || 'Décrivez le problème avec vos mots (ex. « il y a de l’eau qui sort sous mon évier ») : KLEAN trouve le métier. Vous pouvez aussi ajouter une photo ou parler au micro.' });
     }
     const resu = recherchePro(Object.assign({}, geo, {
       service: service || '', services: (comp.ids && comp.ids.length) ? comp.ids : undefined,
-      inclureHorsLigne: horsLigne, limit: lim, zoneElargie, q
+      inclureHorsLigne: horsLigne, limit: lim, zoneElargie, q,
+      /* 🕒 « Quand ? = maintenant » (choisi par le client dans l'app) compte comme URGENCE,
+         même s'il n'a pas écrit le mot « urgent » : c'est sa priorité, pas un mot magique. */
+      urgence: !!(comp.urgence || url.searchParams.get('urgent') === '1'), tache: comp.tache || ''
     }));
     resu.mode = 'service';
     resu.compris = comp.compris || '';
+    /* 🗣️ ce que le client voit : « Nous avons compris que vous cherchez … » + ce qui a été corrigé */
+    resu.comprisLong = comp.comprisLong || comp.compris || '';
+    resu.tache = comp.tache || '';
+    resu.categorie = comp.categorie || '';
+    resu.corriges = comp.corriges || {};
+    resu.urgence = !!(comp.urgence || url.searchParams.get('urgent') === '1');
+    resu.alternatives = comp.alternatives || [];
     resu.q = q;
     resu.posSource = posSource;
     resu.lieuTxt = lieuTxtFinal;
@@ -4261,7 +4692,12 @@ const server = http.createServer(async (req, res) => {
     const jeu = jeuxTrouverJeu(String(url.searchParams.get('id') || ''));
     if (!jeu) return sendJson(res, 404, { error: 'Jeu introuvable' });
     let session = jeuxPartieActive(jeu.id) || (db.jeuxParties || []).slice().reverse().find(x => x.jeuId === jeu.id && x.status === 'termine') || null;
-    if (!session) return sendJson(res, 200, { ok: true, jeu: jeuInfo(jeu), partie: null, moi: null });
+    /* ⚠️ même sans partie lancée, l'app doit savoir si le jeu est publié pour elle
+       (sinon elle croit qu'aucun jeu n'est ouvert alors que le PDG vient de le publier) */
+    if (!session) return sendJson(res, 200, {
+      ok: true, jeu: jeuInfo(jeu), partie: null, moi: null,
+      enCours: false, inscriptionOuverte: jeuInscriptionOuverte(jeu), peutJouer: jeuPeutJouer(player, jeu)
+    });
     jeuxTick(session);
     const moi = session.participants.find(x => x.uid === player.id) || null;
     const reste = Math.max(0, Math.round((Date.parse(session.qFinAt || 0) - Date.now()) / 1000));
