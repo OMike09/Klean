@@ -387,7 +387,36 @@
 <!-- 📣 PUBLICITÉ — bloc FIXE : il reste à sa place pendant que l'accueil défile.
      Position et visibilité calculées par placerPub() : uniquement sur la page d'accueil. -->
 <div id="ad-box" class="hidden" style="position:fixed;left:0;right:0;margin:0 auto;max-width:480px;padding:0 12px;z-index:46;bottom:calc(78px + env(safe-area-inset-bottom, 0px));pointer-events:none"></div>
-<style>@keyframes kleanMarqueeLtr{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}
+<style>
+@keyframes kleanMarqueeLtr{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}
+/* ═══ RUBRIQUES (lot 96) : Compte · Options · Informations · Urgence · Quiz ═══ */
+.hub-tile{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:15px;padding:12px;margin-bottom:9px;cursor:pointer;font:inherit;color:var(--ink)}
+.hub-tile .ic{font-size:23px;flex:none;width:42px;height:42px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:var(--pl)}
+.hub-tile b{display:block;font-size:14.5px}
+.hub-tile small{display:block;color:var(--muted);font-size:11.5px;line-height:1.35;margin-top:1px}
+.hub-tile .go{margin-left:auto;color:var(--pd);font-weight:900;flex:none}
+.opt-row{display:flex;align-items:center;gap:10px;background:var(--card);border:1.5px solid var(--line);border-radius:13px;padding:11px 12px;margin-bottom:8px}
+.opt-row b{flex:1;font-size:13.5px;font-weight:800}
+.opt-row small{display:block;color:var(--muted);font-size:11px;font-weight:600;margin-top:2px}
+.sw{position:relative;flex:none;width:50px;height:29px;border-radius:99px;background:#d8e0dc;border:none;cursor:pointer;transition:background .18s}
+.sw::after{content:'';position:absolute;top:3px;left:3px;width:23px;height:23px;border-radius:50%;background:#fff;transition:left .18s;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.sw.on{background:var(--p)}
+.sw.on::after{left:24px}
+.cat-chip{border:1.5px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-weight:800;font-size:12px;padding:8px 12px;border-radius:99px;cursor:pointer;white-space:nowrap}
+.cat-chip.on{background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-color:transparent}
+.urg-card{background:linear-gradient(160deg,#c62828,#8e1c1c);color:#fff;border-radius:16px;padding:14px;box-shadow:0 8px 22px rgba(120,20,20,.32)}
+.urg-num{display:flex;align-items:center;gap:10px;background:var(--card);border:1.5px solid var(--line);border-radius:13px;padding:10px 12px;margin-bottom:8px;text-decoration:none;color:var(--ink)}
+.urg-num .n{font-size:19px;font-weight:900;color:#c62828;flex:none;min-width:56px}
+.qz-opt{width:100%;text-align:left;margin-top:7px;padding:11px 12px;border-radius:12px;border:2px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800;cursor:pointer;font-size:13.5px}
+.qz-opt.bon{border-color:#0a8a4c;background:#e9f7ef}
+.qz-opt.mauvais{border-color:#e5484d;background:#fdecec}
+.pill-pts{display:inline-flex;align-items:center;gap:5px;background:var(--pl);color:var(--pd);font-weight:900;font-size:12px;padding:5px 10px;border-radius:99px}
+/* options appliquées à l'application */
+body.opt-anim-off #aff-track,body.opt-anim-off .pub-clignote,body.opt-anim-off .pub-msg,body.opt-anim-off .splash{animation:none !important}
+body.opt-compact .view{padding-bottom:120px}
+body.opt-tresgrand{font-size:18px}
+body.opt-grand{font-size:16.6px}
+</style>
 /* 📣 PUB : clignotement doux et professionnel (jamais brutal) — rythme réglable depuis le HQ */
 @keyframes kleanPubPulse{0%,100%{opacity:1;text-shadow:0 1px 3px rgba(0,0,0,.45)}50%{opacity:.74;text-shadow:0 1px 3px rgba(0,0,0,.45),0 0 12px rgba(255,255,255,.55)}}
 .pub-msg{font-size:14px;line-height:1.5;font-weight:700;letter-spacing:.2px;word-break:break-word}
@@ -397,6 +426,11 @@
 .pub-sans-anim{animation:none !important}
 @media (prefers-reduced-motion: reduce){.pub-clignote{animation:none !important}}
 .pub-media{width:100%;display:block;border-radius:12px;margin-top:9px;background:#04321d;max-height:150px;object-fit:cover}
+/* 👤 COMPTE : la barre « compte complété » respire doucement quand il reste des infos à remplir */
+@keyframes accFillSoft{0%,100%{opacity:1}50%{opacity:.5}}
+.acc-fill-attente{animation:accFillSoft 3.4s ease-in-out infinite}
+body.opt-anim-off .acc-fill-attente{animation:none !important}
+@media (prefers-reduced-motion: reduce){.acc-fill-attente{animation:none !important}}
 </style>
 
 <!-- ══════════════════ CLIENT : ACCUEIL ══════════════════ -->
@@ -436,6 +470,16 @@
     </div>
     <div style="margin-top:9px;font-size:10.5px;opacity:.92;line-height:1.45">🔒 Recherche autour du <b>lieu de la prestation</b> · pros inscrits, actifs et disponibles · <span id="hero-phase">🇨🇮 Actif à Bouaké</span></div>
   </div>
+
+  <!-- 🧭 ACCÈS RAPIDE (lot 96) : les 5 grandes rubriques en un geste -->
+  <div style="display:flex;gap:7px;margin:0 0 11px;overflow-x:auto;padding-bottom:2px">
+    <button type="button" class="cat-chip" onclick="ouvrirRubrique('urgence')" style="display:flex;align-items:center;gap:5px;border-color:#f3c9c9"><span>🆘</span><b style="color:#c62828">Urgence</b></button>
+    <button type="button" class="cat-chip" onclick="ouvrirRubrique('points')" style="display:flex;align-items:center;gap:5px"><span>🪙</span><b>Klean Points</b><span id="rap-pts" style="opacity:.75"></span></button>
+    <button type="button" class="cat-chip" onclick="ouvrirRubrique('quiz')" style="display:flex;align-items:center;gap:5px"><span>🧠</span><b>Quiz</b></button>
+    <button type="button" class="cat-chip" onclick="ouvrirRubrique('infos')" style="display:flex;align-items:center;gap:5px"><span>ℹ️</span><b>Infos</b></button>
+    <button type="button" class="cat-chip" onclick="ouvrirRubrique('options')" style="display:flex;align-items:center;gap:5px"><span>⚙️</span><b>Options</b></button>
+  </div>
+  <div id="flip-slot" class="hidden" style="margin:0 0 13px"></div>
 
   <div style="display:flex;gap:7px;margin:0 0 13px">
     <div style="flex:1;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:9px 6px;text-align:center"><b style="display:block;font-size:17px;color:var(--pd)" id="hero-agents-n">—</b><span style="font-size:10px;color:var(--muted);font-weight:800;line-height:1.2;display:block" id="hero-agents-sub">Professionnels inscrits</span></div>
@@ -668,6 +712,60 @@
     <h3 class="sect-title" style="margin-top:6px">Mon compte</h3>
     <div id="acc-box"></div>
   </div>
+</div>
+
+<!-- ══════════════════ CLIENT : OPTIONS ══════════════════ -->
+<div class="view" id="view-options">
+  <div class="wrap">
+    <h3 class="sect-title" style="margin-top:6px">⚙️ Options & réglages</h3>
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 12px">Uniquement des paramètres : le reste (profil, missions, paiements) est dans <b>Compte</b>.</p>
+    <div id="opt-corps"></div>
+  </div>
+</div>
+
+<!-- ══════════════════ CLIENT : INFORMATIONS ══════════════════ -->
+<div class="view" id="view-infos">
+  <div class="wrap">
+    <h3 class="sect-title" style="margin-top:6px">ℹ️ Informations</h3>
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 10px">Actualités, conseils, sécurité, nouveautés et infos locales — publiées par Klean.</p>
+    <div id="infos-cats" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px"></div>
+    <div id="infos-corps"></div>
+  </div>
+</div>
+
+<!-- ══════════════════ CLIENT : URGENCE ══════════════════ -->
+<div class="view" id="view-urgence">
+  <div class="wrap">
+    <h3 class="sect-title" style="margin-top:6px">🆘 Urgence</h3>
+    <div id="urg-corps"></div>
+  </div>
+</div>
+
+<!-- ══════════════════ CLIENT : QUIZ ══════════════════ -->
+<div class="view" id="view-quiz">
+  <div class="wrap">
+    <h3 class="sect-title" style="margin-top:6px">🧠 Quiz Klean</h3>
+    <p style="color:var(--muted);font-size:12.5px;margin:0 0 11px">Apprenez en jouant : bonnes réponses = <b>Klean Points</b>.</p>
+    <div id="qz-corps"></div>
+  </div>
+</div>
+
+<!-- ══════════════════ CLIENT : KLEAN POINTS ══════════════════ -->
+<div class="view" id="view-points">
+  <div class="wrap">
+    <h3 class="sect-title" style="margin-top:6px">🪙 Mes Klean Points</h3>
+    <div id="pts-corps"></div>
+  </div>
+</div>
+
+<!-- ══════════════════ CLIENT : JEU FLIP FIZZ (plein écran) ══════════════════ -->
+<div id="flip-ov" class="hidden" style="position:fixed;inset:0;background:rgba(6,14,10,.72);z-index:9700;display:flex;flex-direction:column">
+  <div style="background:var(--card);border-radius:0 0 18px 18px;padding:10px 12px;display:flex;align-items:center;gap:9px">
+    <b id="flip-ov-titre" style="flex:1;font-size:14.5px">🎮 Flip Fizz</b>
+    <span id="flip-ov-quota" class="pill-pts">0 partie</span>
+    <button type="button" onclick="flipFermer()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">✕ Fermer</button>
+  </div>
+  <div id="flip-ov-corps" style="flex:1;overflow:auto;padding:10px 12px 16px"></div>
 </div>
 
 <!-- ══════════════════ AGENT : TABLEAU DE BORD ══════════════════ -->
@@ -1394,6 +1492,26 @@ function goClientAccount(){
 }
 function openIn1s(fn){
   try{ fn(); }catch(e){}
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   🧭 RUBRIQUES (lot 96) — Compte · Options · Informations · Urgence · Quiz · Points
+   Une seule logique : Compte = moi · Options = réglages · Informations = contenus ·
+   Urgence = aide immédiate · Quiz = apprendre en jouant.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const RUBRIQUES = {
+  compte:  { v:'view-account', f:'renderAccount',  t:'Mon compte' },
+  options: { v:'view-options', f:'renderOptions',  t:'Options & réglages' },
+  infos:   { v:'view-infos',   f:'renderInfos',    t:'Informations' },
+  urgence: { v:'view-urgence', f:'renderUrgence',  t:'Urgence' },
+  quiz:    { v:'view-quiz',    f:'renderQuiz',     t:'Quiz Klean' },
+  points:  { v:'view-points',  f:'renderPoints',   t:'Mes Klean Points' }
+};
+function ouvrirRubrique(r){
+  const x = RUBRIQUES[r]; if(!x) return;
+  if(mode === 'agent'){ toast('Ces rubriques sont côté client'); return; }
+  try{ showView(x.v, null, 'client'); }catch(e){}
+  try{ if(typeof window[x.f] === 'function') window[x.f](); }catch(e){ console.warn('rubrique ' + r + ' :', e && e.message); }
+  window.scrollTo({top:0});
 }
 function showView(id, btn, navGroup){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
@@ -2710,55 +2828,57 @@ let client = JSON.parse(localStorage.getItem('k2_client') || 'null');
 const hpLocal = s => { try{ return btoa(unescape(encodeURIComponent('klean::'+s))); }catch(e){ return btoa('klean::'+s); } };
 
 let accTab = 'register';
-async function saveAccountCompletion(){
-  const nom=($('#acp-nom2')||{}).value||'', quartier=($('#acp-quartier2')||{}).value||'';
-  try{
-    const r=await fetch('/api/clients/me',{method:'PUT',headers:{'Content-Type':'application/json','X-Client-Token':client.token},body:JSON.stringify({nom,quartier})});
-    if(r.ok){
-      client.nom=nom||client.nom; client.quartier=quartier||client.quartier;
-      localStorage.setItem('k2_client',JSON.stringify(client));
-      toast('✅ Compte complété — les pros proches vous trouveront 👌');
-      renderAccount();
-    } else toast('⚠️ Enregistrement impossible');
-  }catch(e){ toast('📵 Réseau fragile — réessayez'); }
-}
+/* (L'ancien formulaire « compléter mon compte » faisait doublon avec « Informations personnelles » :
+   il a été remplacé par un bouton qui ouvre la rubrique — la fonction est donc retirée.) */
 function _accHeroHTML(){
   const proLinked = agent.apply && agent.apply.status === 'approved';
   const proName = ((agent.apply && agent.apply.nom) || agent.nom || 'Pro').split(' ')[0];
   const scrollForm = "setTimeout(function(){var t=document.getElementById('acc-forms-slot');if(t)t.scrollIntoView({behavior:'smooth'})},80)";
-  return `
+  /* Le compte CLIENT n'existe plus en double : si l'on est connecté, on ne propose plus « Créer ».
+     L'espace professionnel reste accessible ici (c'est un second compte, séparé du compte client). */
+  const carteClient = client ? `
+  <div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:13px;display:flex;align-items:center;gap:11px;margin-bottom:12px;box-shadow:var(--shadow)">
+    <span style="font-size:25px;flex:none">👤</span>
+    <span style="flex:1;min-width:0">
+      <b style="display:block;font-size:14px">Compte client connecté</b>
+      <small style="color:var(--muted);font-size:11px;line-height:1.35;display:block">${(client.nom||'').split(' ')[0]} · +225 ${rechEch(client.tel||'')}</small>
+    </span>
+    <span class="status st-ok" style="font-size:10.5px;flex:none">✓ actif</span>
+  </div>` : `
   <div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px;display:flex;align-items:center;gap:12px;margin-bottom:12px;box-shadow:var(--shadow)">
     <span style="font-size:27px;flex:none">👤</span>
     <span style="flex:1;min-width:0">
       <b style="display:block;font-size:14px">Créer mon compte client</b>
       <small style="color:var(--muted);font-size:11px;line-height:1.35;display:block">Réservez un pro, suivez-le, payez simplement</small>
     </span>
-    ${client ? `
-    <span style="flex:none;text-align:center">
-      <span class="status st-ok" style="font-size:10.5px">✓ ${(client.nom||'').split(' ')[0]}</span><br>
-      <button class="btn-ghost" style="padding:8px 11px;margin-top:6px;font-size:12px;color:var(--danger)" onclick="clientLogout()">⏻ Se déconnecter</button>
-    </span>` : `
     <span style="flex:none;display:flex;flex-direction:column;gap:6px">
       <button class="btn-main" style="padding:9px 14px;font-size:12.5px" onclick="goCreateClient()">✨ Créer</button>
       <button class="btn-line" style="padding:8px 11px;font-size:12px" onclick="accTab='login';renderAccount();${scrollForm}">🔑 Se connecter</button>
-    </span>`}
-  </div>
+    </span>
+  </div>`;
+  const cartePro = `
   <div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px;display:flex;align-items:center;gap:12px;margin-bottom:14px;box-shadow:var(--shadow)">
     <span style="font-size:27px;flex:none">🧑‍💼</span>
     <span style="flex:1;min-width:0">
-      <b style="display:block;font-size:14px">Créer mon compte professionnel</b>
-      <small style="color:var(--muted);font-size:11px;line-height:1.35;display:block">Travaillez à votre rythme, missions près de chez vous</small>
+      <b style="display:block;font-size:14px">${proLinked ? 'Mon espace professionnel' : 'Créer mon compte professionnel'}</b>
+      <small style="color:var(--muted);font-size:11px;line-height:1.35;display:block">${proLinked ? 'Vos missions, votre ville de service, vos gains' : 'Travaillez à votre rythme, missions près de chez vous'}</small>
     </span>
     ${proLinked ? `
-    <span style="flex:none;text-align:center">
-      <span class="status st-ok" style="font-size:10.5px">✓ ${proName}</span><br>
-      <button class="btn-ghost" style="padding:8px 11px;margin-top:6px;font-size:12px;color:var(--danger)" onclick="agentLogout()">⏻ Se déconnecter</button>
+    <span style="flex:none;display:flex;flex-direction:column;gap:6px;text-align:center">
+      <span class="status st-ok" style="font-size:10.5px">✓ ${proName}</span>
+      <button class="btn-line" style="padding:8px 11px;font-size:12px" onclick="ouvrirEspacePro()">🧑‍💼 Mon espace</button>
+      <button class="btn-ghost" style="padding:7px 11px;font-size:11.5px;color:var(--danger)" onclick="agentLogout()">⏻ Déconnecter le pro</button>
     </span>` : `
     <span style="flex:none;display:flex;flex-direction:column;gap:6px">
       <button class="btn-main" style="padding:9px 14px;font-size:12.5px" onclick="goCreatePro()">📝 Créer</button>
       <button class="btn-line" style="padding:8px 11px;font-size:12px" onclick="goProConnect()">🔑 Se connecter</button>
     </span>`}
   </div>`;
+  return carteClient + cartePro;
+}
+function ouvrirEspacePro(){
+  try{ setMode('agent'); }
+  catch(e){ toast('Espace professionnel indisponible'); }
 }
 function renderAccount(){
   const box = $('#acc-box');
@@ -2776,19 +2896,26 @@ function renderAccount(){
     ${(()=>{ const filled=[client.nom,client.tel,client.quartier,client.photo].filter(Boolean).length; const comp=Math.round(filled/4*100); return `
     <div class="gate-card" style="border:1.5px solid var(--line);margin-bottom:10px;text-align:left">
       <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:var(--muted)">Votre compte est complété</span><b style="color:${comp>=75?'var(--p)':'var(--amber)'}">${comp} %</b></div>
-      <div style="height:8px;border-radius:5px;background:var(--card2);overflow:hidden"><div style="height:100%;width:${comp}%;background:linear-gradient(90deg,var(--amber),var(--p))"></div></div>
+      <div style="height:8px;border-radius:5px;background:var(--card2);overflow:hidden"><div class="${comp<100?'acc-fill-attente':''}" style="height:100%;width:${comp}%;background:linear-gradient(90deg,var(--amber),var(--p))"></div></div>
       ${comp<100?`
-      <div class="inp-row" style="margin-top:9px"><label>👤 Nom complet</label><input class="inp" id="acp-nom2" value="${client.nom||''}"></div>
-      <div class="inp-row"><label>📍 Quartier — essentiel pour trouver les pros proches</label><input class="inp" id="acp-quartier2" value="${client.quartier||''}" placeholder="ex : Koko, Nimbo…"></div>
-      <button class="btn-main" style="width:100%;padding:10px" onclick="saveAccountCompletion()">💾 Compléter mon compte</button>`:''}
+      <button class="btn-line" style="width:100%;margin-top:9px;font-weight:800" onclick="accInformations()">📝 Compléter mes informations</button>`:''}
     </div>`;})()}
     ${BLOCAGE.blocked ? `<div class="gate-card" style="border:2px solid var(--danger);text-align:left;margin-bottom:10px">
       <h4 style="color:var(--danger)">🚫 Compte bloqué</h4>
       <p class="sub">${BLOCAGE.motif ? ('Motif : <b>'+BLOCAGE.motif+'</b><br>') : ''}Vous ne pouvez plus passer de nouvelle demande. Contactez Klean-Service pour régulariser votre situation.</p>
     </div>` : ''}
-    <button class="btn-line" onclick="goBookings()">📋 <span>Mes réservations & mes anciennes missions</span></button>
-    <button class="btn-line" onclick="startBooking()">🧹 <span>Nouvelle réservation</span></button>
-    <button class="btn-line" onclick="mesPaiements()">🧾 <span>Mes paiements & reçus</span></button>
+    ${hubRubriquesHTML()}
+    <div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:13px;margin-bottom:11px">
+      <b style="display:block;font-size:14px;margin-bottom:2px">👤 Mon compte</b>
+      <small style="color:var(--muted);font-size:11.5px">Tout ce qui concerne votre personne, votre sécurité et vos données.</small>
+    </div>
+    <button class="hub-tile" onclick="accInformations()"><span class="ic">📝</span><span><b>Informations personnelles</b><small>Nom, téléphone, e-mail, quartier, photo</small></span><span class="go">›</span></button>
+    <button class="hub-tile" onclick="accSecurite()"><span class="ic">🔒</span><span><b>Sécurité du compte</b><small>Mot de passe, appareil connecté, déconnexion</small></span><span class="go">›</span></button>
+    <button class="hub-tile" onclick="accVerification()"><span class="ic">🛡️</span><span><b>Vérification du compte</b><small>Ce qui est déjà validé, et ce qu'il reste à compléter</small></span><span class="go">›</span></button>
+    <button class="hub-tile" onclick="accActivite()"><span class="ic">📊</span><span><b>Historique de mes activités</b><small>Missions, paiements, avis, points</small></span><span class="go">›</span></button>
+    <button class="hub-tile" onclick="ouvrirRubrique('options')"><span class="ic">🔔</span><span><b>Mes notifications & préférences</b><small>Sons, vibrations, affichage, confidentialité</small></span><span class="go">›</span></button>
+    <button class="hub-tile" onclick="accDonnees()"><span class="ic">💾</span><span><b>Mes données & mon compte</b><small>Exporter mes données, désactiver ou supprimer mon compte</small></span><span class="go">›</span></button>
+    <button class="hub-tile" onclick="accAssistance()"><span class="ic">🤝</span><span><b>Assistance</b><small>Un problème ? Klean vous répond</small></span><span class="go">›</span></button>
     <button class="btn-line" onclick="clientChangePw()">🔑 <span>Changer mon mot de passe</span></button>
     <button class="btn-line" onclick="openKleanService()">📞 <span>Contactez Klean-Service</span></button>
     <button class="btn-line" style="color:var(--danger)" onclick="clientLogout()">⏻ <span>Se déconnecter</span></button>`;
@@ -3121,6 +3248,8 @@ function fallbackCopy(txt, done){
   renderSvcGrids(); renderExtras(); renderTimes(); renderPays();
   setTimeout(function(){ try{ chargerMoyensPaiement('client', true); }catch(e){} }, 700);   // 💳 moyens pilotés par le tableau de bord
   setCity(c.city, true);
+  try{ chargerPrefs(); }catch(e){}          /* ⚙️ Options enregistrées sur le compte */
+  try{ chargerFlipAccueil(); }catch(e){}    /* 🎮 Flip Fizz : invisible tant que le PDG ne l'active pas */
   const d = new Date(); const iso = d.toISOString().split('T')[0];
   $('#inp-date').min = iso; $('#inp-date').value = iso; c.date = iso;
   $('#inp-date').addEventListener('change',e=>{c.date=e.target.value; updatePriceBar();});
@@ -3440,6 +3569,716 @@ loadAd();
 setInterval(loadAd, 6000);      // 📣 6 s : une pub publiée par le PDG apparaît presque tout de suite
 setTimeout(()=>{ try{ pubObserver(); placerPub(); }catch(e){} }, 600);
 window.__affOK = 1;   // 🛡️ publicité branchée
+/* ═══════════════════════════════════════════════════════════════════════════
+   👤 COMPTE — un seul endroit pour « moi » : profil, sécurité, activités, données.
+   Les 5 rubriques (Options, Informations, Urgence, Quiz, Points) sont ici en accès direct.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function hubRubriquesHTML(){
+  return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
+    + [['options','⚙️','Options','Réglages'],['infos','ℹ️','Informations','Actualités'],
+       ['urgence','🆘','Urgence','Aide immédiate'],['quiz','🧠','Quiz','Apprendre'],
+       ['points','🪙','Klean Points','Solde & récompenses'],['flip','🎮','Flip Fizz','Jeu Klean']]
+      .map(x=>'<button type="button" onclick="'+(x[0]==='flip'?'flipOuvrir()':'ouvrirRubrique(\''+x[0]+'\')')+'" style="text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:11px;cursor:pointer;font:inherit;color:var(--ink)">'
+        + '<div style="font-size:21px">'+x[1]+'</div><b style="display:block;font-size:13px;margin-top:3px">'+x[2]+'</b><small style="color:var(--muted);font-size:11px">'+x[3]+'</small></button>').join('')
+    + '</div>';
+}
+function accModale(titre, corps, large){
+  const m = document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:flex-end;justify-content:center';
+  m.onclick = e => { if(e.target===m) m.remove(); };
+  m.innerHTML='<div style="background:var(--card);border-radius:18px 18px 0 0;width:100%;max-width:'+(large||480)+'px;max-height:88vh;display:flex;flex-direction:column;padding:14px">'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><b style="flex:1;font-size:15px">'+titre+'</b>'
+    + '<button type="button" onclick="this.closest(\'div[style]\').parentNode.remove()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">Fermer</button></div>'
+    + '<div style="overflow:auto;font-size:13.5px;line-height:1.55">'+corps+'</div></div>';
+  document.body.appendChild(m);
+  return m;
+}
+function accInformations(){
+  accModale('📝 Informations personnelles',
+    '<div class="inp-row"><label>👤 Nom complet</label><input class="inp" id="acp-nom" value="'+rechEch(client.nom||'')+'"></div>'
+    + '<div class="inp-row"><label>📞 Téléphone (identifiant du compte)</label><input class="inp" value="+225 '+rechEch(client.tel||'')+'" disabled></div>'
+    + '<div class="inp-row"><label>✉️ E-mail — factures & confirmations</label><input class="inp" id="acp-mail" type="email" value="'+rechEch(client.mail||'')+'" placeholder="optionnel"></div>'
+    + '<div class="inp-row"><label>🏙️ Ville</label><input class="inp" id="acp-ville" value="'+rechEch(client.ville||cityName(c.city)||'')+'"></div>'
+    + '<div class="inp-row"><label>📍 Quartier</label><input class="inp" id="acp-quartier" value="'+rechEch(client.quartier||'')+'"></div>'
+    + '<button class="btn-main" style="width:100%" onclick="accInfosSave()">💾 Enregistrer</button>'
+    + '<small style="display:block;margin-top:8px;color:var(--muted);font-size:11px">Votre téléphone est votre identifiant : pour le changer, contactez Klean-Service (sécurité).</small>');
+}
+async function accInfosSave(){
+  const corps = {
+    nom: ((document.getElementById('acp-nom')||{}).value||'').trim(),
+    mail: ((document.getElementById('acp-mail')||{}).value||'').trim(),
+    ville: ((document.getElementById('acp-ville')||{}).value||'').trim(),
+    quartier: ((document.getElementById('acp-quartier')||{}).value||'').trim()
+  };
+  if(corps.nom.length < 2) return toast('❌ Indiquez votre nom complet');
+  /* on garde tout de suite sur le téléphone : rien n'est perdu si le réseau tombe */
+  client = Object.assign(client, { nom: corps.nom, mail: corps.mail, ville: corps.ville, quartier: corps.quartier });
+  try{ localStorage.setItem('k2_client', JSON.stringify(client)); }catch(e){}
+  let horsLigne = false;
+  try{
+    /* ⚠️ l'ancienne adresse /api/clients/profil n'existe pas sur le serveur : on utilise PUT /api/clients/me */
+    const r = await fetch('/api/clients/me', { method:'PUT', headers: cliHdrs(), body: JSON.stringify(corps) });
+    const d = await r.json().catch(()=>({}));
+    if(r.status === 401) horsLigne = true;                      /* session expirée : au moins le téléphone garde tout */
+    else if(!r.ok) return toast('⚠️ ' + (d.error || 'Enregistrement impossible'));
+  }catch(e){ horsLigne = true; }
+  toast(horsLigne ? '📴 Enregistré sur ce téléphone — synchronisé dès le retour du réseau' : '✅ Informations enregistrées');
+  document.querySelectorAll('div[style*="z-index: 9600"], div[style*="z-index:9600"]').forEach(x=>x.remove());
+  renderAccount();
+}
+function accSecurite(){
+  accModale('🔒 Sécurité du compte',
+    '<div class="opt-row"><span style="flex:1"><b>Mot de passe</b><small>Changer votre mot de passe déconnecte les autres appareils.</small></span>'
+    + '<button type="button" onclick="clientChangePw()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">🔑 Changer</button></div>'
+    + '<div class="opt-row"><span style="flex:1"><b>Code d’accès / PIN</b><small>Klean ne stocke aucun PIN : votre accès se fait par mot de passe robuste.</small></span><span class="pill-pts">🔒 jamais stocké</span></div>'
+    + '<div class="opt-row"><span style="flex:1"><b>Appareil connecté</b><small id="sec-app">Détection…</small></span><span class="pill-pts" id="sec-on">ce téléphone</span></div>'
+    + '<div class="opt-row"><span style="flex:1"><b>Dernière connexion</b><small id="sec-last">—</small></span></div>'
+    + '<div class="opt-row"><span style="flex:1"><b>Déconnecter les autres appareils</b><small>Un changement de mot de passe invalide immédiatement les autres accès.</small></span>'
+    + '<button type="button" onclick="clientChangePw()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--danger);font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">Faire</button></div>'
+    + '<div class="opt-row"><span style="flex:1"><b>Compte bloqué ?</b><small>Un blocage se lève avec l’équipe Klean.</small></span>'
+    + '<button type="button" onclick="openKleanService()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">💬 Support</button></div>');
+  const ua = navigator.userAgent || '';
+  const tel = /Android/i.test(ua) ? 'Téléphone Android' : (/iPhone|iPad|iPod/i.test(ua) ? 'iPhone / iPad' : 'Ordinateur');
+  const nav = /Chrome/i.test(ua) ? 'Chrome' : (/Safari/i.test(ua) ? 'Safari' : (/Firefox/i.test(ua) ? 'Firefox' : 'navigateur'));
+  setTimeout(()=>{ const a=document.getElementById('sec-app'); if(a) a.textContent = tel + ' · ' + nav; }, 50);
+  fetch('/api/compte/activite', { headers: cliHdrs() }).then(r=>r.json()).then(d=>{
+    const l = document.getElementById('sec-last');
+    if(l && d && d.connexions) l.textContent = d.connexions.derniere ? (d.connexions.derniere.replace('T',' ').slice(0,16) + (d.connexions.appareil?(' · '+d.connexions.appareil.slice(0,50)):'')) : 'cette session';
+  }).catch(()=>{});
+}
+function accVerification(){
+  fetch('/api/compte/activite', { headers: cliHdrs() }).then(r=>r.json()).then(d=>{
+    const pr = (d && d.profil) || {};
+    const cases = [
+      ['Nom complet renseigné', !!pr.nom], ['Téléphone vérifié', !!pr.tel], ['Quartier renseigné', !!pr.quartier],
+      ['Photo de profil', !!pr.photo], ['E-mail (facultatif)', !!pr.mail]
+    ];
+    accModale('🛡️ Vérification du compte',
+      '<div style="font-size:12.5px;color:var(--muted);margin-bottom:9px">Un compte complet rassure les professionnels et accélère vos réservations.</div>'
+      + cases.map(c=>'<div class="opt-row"><span style="flex:1"><b>'+c[0]+'</b></span><span class="pill-pts" style="background:'+(c[1]?'#e9f7ef':'#fff5e6')+';color:'+(c[1]?'#0a7a4f':'#b36b00')+'">'+(c[1]?'✅ validé':'⏳ à compléter')+'</span></div>').join('')
+      + '<div class="opt-row"><span style="flex:1"><b>Téléphone</b><small>Renseigné à l’inscription : c’est votre identifiant unique Klean.</small></span><span class="pill-pts">✅</span></div>'
+      + '<button class="btn-main" style="width:100%;margin-top:9px" onclick="accInformations()">📝 Compléter mes informations</button>', 440);
+  }).catch(()=>toast('Connexion au serveur impossible'));
+}
+function accActivite(){
+  fetch('/api/compte/activite', { headers: cliHdrs() }).then(r=>r.json()).then(d=>{
+    const a = (d && d.activite) || {};
+    accModale('📊 Historique de mes activités',
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+      + [['📋',a.missions||0,'Missions'],['✅',a.missionsTerminees||0,'Terminées'],['🧾',a.paiements||0,'Paiements'],['⭐',a.avis||0,'Avis'],['🪙',a.points||0,'Klean Points'],['📅',(a.derniere&&a.derniere.at?a.derniere.at.slice(0,10):'—'),'Dernière']]
+        .map(x=>'<div style="background:var(--card2);border:1.5px solid var(--line);border-radius:13px;padding:11px;text-align:center"><div style="font-size:19px">'+x[0]+'</div><b style="display:block;font-size:17px">'+x[1]+'</b><small style="color:var(--muted);font-size:11px">'+x[2]+'</small></div>').join('')
+      + '</div>'
+      + '<button class="hub-tile" onclick="accModaleClose();goBookings()"><span class="ic">📋</span><span><b>Voir mes missions & mes réservations</b><small>Historique détaillé, y compris les anciennes missions</small></span><span class="go">›</span></button>'
+      + '<button class="hub-tile" onclick="accModaleClose();mesPaiements()"><span class="ic">🧾</span><span><b>Mes paiements & reçus</b><small>Statut de chaque paiement, références</small></span><span class="go">›</span></button>'
+      + '<button class="hub-tile" onclick="accModaleClose();ouvrirRubrique(\'points\')"><span class="ic">🪙</span><span><b>Mes Klean Points</b><small>Solde, historique, récompenses obtenues</small></span><span class="go">›</span></button>', 440);
+  }).catch(()=>toast('Connexion au serveur impossible'));
+}
+function accModaleClose(){ document.querySelectorAll('div[style*="z-index:9600"]').forEach(x=>{ if(x.style.position==='fixed') x.remove(); }); }
+function accDonnees(){
+  accModale('💾 Mes données & mon compte',
+    '<div class="opt-row"><span style="flex:1"><b>Exporter mes données</b><small>Fichier lisible : profil, missions, points, réglages.</small></span>'
+    + '<button type="button" onclick="exporterMesDonnees()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">📤 Exporter</button></div>'
+    + '<div class="opt-row"><span style="flex:1"><b>Désactiver mon compte</b><small>Vous ne recevrez plus de notifications. Vos données restent en place.</small></span>'
+    + '<button type="button" onclick="accStatut(\'desactiver\')" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">'+(client.desactive?'Réactiver':'Désactiver')+'</button></div>'
+    + '<div class="opt-row"><span style="flex:1"><b>Supprimer mon compte</b><small>Demande transmise à l’équipe Klean : vos missions et vos points restent consultables jusqu’à confirmation, puis tout est effacé.</small></span>'
+    + '<button type="button" onclick="accStatut(\'supprimer\')" style="border:1.5px solid #f3c9c9;background:#fff5f5;color:#c62828;font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">Supprimer</button></div>'
+    + '<div class="opt-row"><span style="flex:1"><b>Nettoyer ce téléphone</b><small>Efface les données locales. Le compte reste intact.</small></span>'
+    + '<button type="button" onclick="viderCacheLocal()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">🧹 Nettoyer</button></div>'
+    + '<small style="display:block;margin-top:9px;color:var(--muted);font-size:11px">Klean ne stocke jamais : code PIN, mot de passe en clair, données bancaires.</small>', 460);
+}
+async function accStatut(type){
+  const mdp = prompt(type === 'supprimer'
+    ? '🔒 Confirmez votre mot de passe pour demander la suppression du compte :'
+    : '🔒 Confirmez votre mot de passe :');
+  if(!mdp) return;
+  try{
+    const d = await fetch('/api/compte/statut', { method:'POST', headers: cliHdrs(), body: JSON.stringify({ type:(type==='desactiver' && client.desactive?'reactiver':type), password: mdp }) }).then(r=>r.json());
+    if(!d.ok) return toast('⚠️ ' + (d.error || 'Action impossible'));
+    accModaleClose();
+    toast('✅ ' + (d.message || 'Enregistré'));
+    if(type === 'desactiver'){ client.desactive = !client.desactive; try{ localStorage.setItem('k2_client', JSON.stringify(client)); }catch(e){} renderAccount(); }
+  }catch(e){ toast('Réseau indisponible'); }
+}
+function accAssistance(){
+  accModale('🤝 Assistance Klean',
+    '<button class="hub-tile" onclick="accModaleClose();openKleanService()"><span class="ic">💬</span><span><b>Écrire à Klean-Service</b><small>Réponse de l’équipe, du lundi au dimanche</small></span><span class="go">›</span></button>'
+    + '<button class="hub-tile" onclick="accModaleClose();ouvrirRubrique(\'urgence\')"><span class="ic">🆘</span><span><b>Urgence</b><small>Police 110 · Pompiers 180 · SAMU 185</small></span><span class="go">›</span></button>'
+    + '<button class="hub-tile" onclick="accModaleClose();voirPolitique(\'cgu\')"><span class="ic">📜</span><span><b>Conditions d’utilisation</b><small>Comment Klean fonctionne</small></span><span class="go">›</span></button>'
+    + '<button class="hub-tile" onclick="accModaleClose();voirPolitique(\'priv\')"><span class="ic">🛡️</span><span><b>Confidentialité</b><small>Ce qui est enregistré, et ce qui ne l’est jamais</small></span><span class="go">›</span></button>'
+    + '<button class="hub-tile" onclick="accModaleClose();voirPolitique(\'pts\')"><span class="ic">🪙</span><span><b>Gagner & utiliser mes points</b><small>Flip Fizz, quiz, récompenses Klean</small></span><span class="go">›</span></button>'
+    + '<div class="opt-row"><span style="flex:1"><b>Problème de paiement</b><small>Ouvrez le détail de la mission concernée : le statut y est expliqué.</small></span>'
+    + '<button type="button" onclick="accModaleClose();mesPaiements()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">Mes paiements</button></div>', 460);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ⚙️ OPTIONS (paramètres uniquement) — enregistrés sur le compte du client
+   ═══════════════════════════════════════════════════════════════════════════ */
+let PREFS = { langue:'fr', notif:true, sons:true, vibre:true, tailleTexte:'normal', animReduites:false,
+  partagePosition:true, partageNumero:false, masquerQuartier:false, pub:true, affichageCompact:false, infosVues:[] };
+function cliHdrs(){ const h={'Content-Type':'application/json'}; try{ if(client && client.token) h['X-Client-Token']=client.token; }catch(e){} return h; }
+async function chargerPrefs(){
+  try{
+    const d = await fetch('/api/prefs', { headers: cliHdrs(), cache:'no-store' }).then(r=>r.json());
+    if(d && d.prefs) PREFS = Object.assign(PREFS, d.prefs);
+  }catch(e){ try{ PREFS = Object.assign(PREFS, JSON.parse(localStorage.getItem('k2_prefs')||'{}')); }catch(_){} }
+  appliquerPrefs();
+}
+function appliquerPrefs(){
+  try{ localStorage.setItem('k2_prefs', JSON.stringify(PREFS)); }catch(e){}
+  const b = document.body;
+  b.classList.toggle('opt-anim-off', !!PREFS.animReduites);
+  b.classList.toggle('opt-grand', PREFS.tailleTexte==='grand');
+  b.classList.toggle('opt-tresgrand', PREFS.tailleTexte==='tresgrand');
+  b.classList.toggle('opt-compact', !!PREFS.affichageCompact);
+  const ad = document.getElementById('ad-box');
+  if(ad && PREFS.pub === false){ window._pubOn = false; ad.classList.add('hidden'); ad.style.display='none'; }
+}
+async function sauverPrefs(champ, valeur){
+  PREFS[champ] = valeur; appliquerPrefs();
+  if(champ === 'notif' && valeur){
+    try{ if(window.Notification && Notification.permission === 'default') await Notification.requestPermission(); }catch(e){}
+    try{ if(window.Notification && Notification.permission === 'granted') new Notification('KLEAN', { body:'Notifications activées ✓' }); }catch(e){}
+  }
+  try{ await fetch('/api/prefs', { method:'POST', headers: cliHdrs(), body: JSON.stringify(PREFS) }); rAF_rappel(); }catch(e){ toast('📴 Enregistré sur ce téléphone — connectez-vous pour le garder sur tous vos appareils'); }
+  return true;
+}
+function rAF_rappel(){ setTimeout(()=>{ try{ chargerFlipAccueil(); }catch(e){} }, 400); }
+function swHtml(id, on, label, sub){
+  return '<div class="opt-row"><span style="flex:1"><b style="font-size:13.5px;font-weight:800">'+label+'</b>'+(sub?('<small>'+sub+'</small>'):'')+'</span>'
+    + '<button type="button" class="sw'+(on?' on':'')+'" id="'+id+'" role="switch" aria-checked="'+(on?'true':'false')+'" onclick="swBasculer(\''+id+'\',\''+id+'\')"></button></div>';
+}
+function swBasculer(elId, champ){ const v = !PREFS[champ]; const el = document.getElementById(elId); if(el) el.classList.toggle('on', v); sauverPrefs(champ, v); }
+function renderOptions(){
+  const box = document.getElementById('opt-corps'); if(!box) return;
+  const h = [];
+  h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:6px 0 6px">🌍 LANGUE</div>');
+  h.push('<div class="opt-row"><span style="flex:1"><b>Langue de l’application</b><small>Le français est complet ; l’anglais arrive progressivement.</small></span>'
+    + '<select onchange="sauverPrefs(\'langue\',this.value)" style="padding:9px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800">'
+    + '<option value="fr"'+(PREFS.langue==='fr'?' selected':'')+'>🇫🇷 Français</option><option value="en"'+(PREFS.langue==='en'?' selected':'')+'>🇬🇧 English (bêta)</option></select></div>');
+  h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 6px">🔔 NOTIFICATIONS & SONS</div>');
+  h.push(swHtml('notif', PREFS.notif, 'Notifications', 'Missions, réponses des pros, annonces importantes'));
+  h.push(swHtml('sons', PREFS.sons, 'Sons', 'Un son quand une info importante arrive'));
+  h.push(swHtml('vibre', PREFS.vibre, 'Vibrations', 'Sur téléphone uniquement'));
+  h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 6px">📐 AFFICHAGE & ACCESSIBILITÉ</div>');
+  h.push('<div class="opt-row"><span style="flex:1"><b>Taille du texte</b><small>Choisissez ce qui est le plus confortable à lire.</small></span>'
+    + '<select onchange="sauverPrefs(\'tailleTexte\',this.value)" style="padding:9px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800">'
+    + ['petit|Petit','normal|Normal','grand|Grand','tresgrand|Très grand'].map(x=>{const [v,l]=x.split('|');return '<option value="'+v+'"'+(PREFS.tailleTexte===v?' selected':'')+'>'+l+'</option>';}).join('')+'</select></div>');
+  h.push(swHtml('animReduites', PREFS.animReduites, 'Réduire les animations', 'Stop au clignotement (bandeau, publicité)'));
+  h.push(swHtml('affichageCompact', PREFS.affichageCompact, 'Affichage compact', 'Moins d’espace vide sur les petites listes'));
+  h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 6px">🔒 CONFIDENTIALITÉ</div>');
+  h.push(swHtml('partagePosition', PREFS.partagePosition, 'Autoriser ma position', 'Pour trouver les pros proches et en cas d’urgence'));
+  h.push(swHtml('partageNumero', PREFS.partageNumero, 'Partager mon numéro avec le pro', 'Sinon le pro vous écrit dans l’application'));
+  h.push(swHtml('masquerQuartier', PREFS.masquerQuartier, 'Masquer mon quartier exact', 'Le pro voit seulement « zone … »'));
+  h.push(swHtml('pub', PREFS.pub, 'Afficher la publicité', 'Vous pouvez la masquer : elle ne sert pas au fonctionnement'));
+  h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 6px">💾 DONNÉES & SÉCURITÉ</div>');
+  h.push('<button class="hub-tile" onclick="exporterMesDonnees()"><span class="ic">📤</span><span><b>Exporter mes données</b><small>Fichier lisible avec votre profil, vos missions et vos points</small></span><span class="go">›</span></button>');
+  h.push('<button class="hub-tile" onclick="viderCacheLocal()"><span class="ic">🧹</span><span><b>Nettoyer ce téléphone</b><small>Efface les données locales (le compte reste intact)</small></span><span class="go">›</span></button>');
+  h.push('<button class="hub-tile" onclick="compteSecurite()"><span class="ic">🔐</span><span><b>Mot de passe & appareil</b><small>Changer le mot de passe, voir l’appareil connecté, se déconnecter — dans Compte › Sécurité</small></span><span class="go">›</span></button>');
+  h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 6px">📜 CONDITIONS & POLITIQUES</div>');
+  h.push('<button class="hub-tile" onclick="voirPolitique(\'cgu\')"><span class="ic">📜</span><span><b>Conditions d’utilisation</b><small>Ce que Klean fait et ne fait pas</small></span><span class="go">›</span></button>');
+  h.push('<button class="hub-tile" onclick="voirPolitique(\'priv\')"><span class="ic">🛡️</span><span><b>Confidentialité des données</b><small>Ce qui est enregistré, et ce qui ne l’est jamais</small></span><span class="go">›</span></button>');
+  h.push('<button class="hub-tile" onclick="voirPolitique(\'pts\')"><span class="ic">🪙</span><span><b>Klean Points & récompenses</b><small>Règles du jeu et des points</small></span><span class="go">›</span></button>');
+  h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 6px">🤝 ASSISTANCE</div>');
+  h.push('<button class="hub-tile" onclick="openKleanService&&openKleanService()"><span class="ic">💬</span><span><b>Contacter Klean-Service</b><small>Réponse de l’équipe Klean</small></span><span class="go">›</span></button>');
+  h.push('<button class="hub-tile" onclick="ouvrirRubrique(\'urgence\')"><span class="ic">🆘</span><span><b>Numéros d’urgence</b><small>Police, pompiers, SAMU — en Côte d’Ivoire</small></span><span class="go">›</span></button>');
+  h.push('<small style="display:block;margin:12px 0 4px;color:var(--muted);font-size:11px">🔒 Klean ne stocke jamais : code PIN, mot de passe ou données bancaires. Réglages '+(client?'enregistrés sur votre compte':'sur ce téléphone (connectez-vous pour les garder partout)')+'.</small>');
+  box.innerHTML = h.join('');
+}
+function exporterMesDonnees(){
+  if(!client) return toast('Connectez-vous pour exporter les données de votre compte');
+  toast('📤 Préparation du fichier…');
+  Promise.all([
+    fetch('/api/points', { headers: cliHdrs() }).then(r=>r.json()).catch(()=>({})),
+    fetch('/api/prefs', { headers: cliHdrs() }).then(r=>r.json()).catch(()=>({})),
+    fetch('/api/quiz/banque', { headers: cliHdrs() }).then(r=>r.json()).catch(()=>({}))
+  ]).then(([pts, prefs, qz])=>{
+    const d = { genere: new Date().toISOString(), compte: { nom: client.nom, tel: client.tel, quartier: client.quartier }, points: pts, reglages: prefs && prefs.prefs, quiz: qz };
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type:'application/json' }));
+    a.download = 'klean-mes-donnees.json'; a.click();
+    setTimeout(()=>toast('✅ Fichier téléchargé'), 600);
+  }).catch(()=>toast('Export impossible pour le moment'));
+}
+function viderCacheLocal(){
+  try{ ['k2_quiz_pick','k2_aff_vote','k2_seen_intro','k2_ios_tip'].forEach(k=>localStorage.removeItem(k)); }catch(e){}
+  toast('🧹 Données locales nettoyées — votre compte et vos missions sont intacts');
+}
+function compteSecurite(){
+  ouvrirRubrique('compte');
+  setTimeout(()=>{ const b=document.getElementById('acc-box'); if(b) b.scrollIntoView({behavior:'smooth'}); }, 120);
+}
+const POLITIQUES = {
+  cgu: { t:'📜 Conditions d’utilisation', h:'<p><b>Klean met en relation</b> des clients et des professionnels indépendants en Côte d’Ivoire. Les professionnels ne sont pas des salariés de Klean : ils fixent leur disponibilité et réalisent la prestation.</p><p><b>Prix :</b> le prix affiché à la réservation est un devis estimatif ; il est confirmé avant le début de la prestation.</p><p><b>Paiement :</b> les paiements passent par les moyens officiels (Orange Money, Moov Money, Wave, carte) ou en espèces au pro. Klean ne demande jamais de code PIN.</p><p><b>Comportement :</b> tout manquement grave (agression, fraude, faux avis) entraîne le blocage du compte.</p>' },
+  priv: { t:'🛡️ Confidentialité des données', h:'<p><b>Ce que Klean garde :</b> votre nom, votre téléphone, votre quartier, vos réservations, vos points et vos réglages.</p><p><b>Ce que Klean ne garde jamais :</b> code PIN, mot de passe en clair, numéro de carte bancaire.</p><p><b>Votre position exacte n’est jamais publique</b> : les professionnels voient une distance ou une zone, jamais votre adresse.</p><p><b>Position :</b> utilisée seulement si vous l’autorisez, pour la recherche et l’urgence. Vous pouvez la couper à tout moment dans Options.</p><p><b>Vos droits :</b> export de vos données et demande de suppression depuis Compte → Données, ou via le support Klean.</p>' },
+  pts: { t:'🪙 Klean Points & récompenses', h:'<p><b>Gagner :</b> en jouant à Flip Fizz (dans la limite des parties gratuites du jour) et en répondant au Quiz Klean.</p><p><b>Utiliser :</b> échangez vos points contre des récompenses Klean (réductions, avantages, cadeaux, offres partenaires).</p><p><b>Important :</b> les Klean Points <b>ne sont pas convertibles en argent liquide</b> et n’ont aucune valeur monétaire. Ils ne se transmettent pas entre comptes.</p><p><b>Confiance :</b> chaque partie et chaque mouvement de points est enregistré côté serveur (score plafonné, durée minimale, quota quotidien). Toute tentative de manipulation peut entraîner le blocage du compte.</p>' }
+};
+function voirPolitique(k){
+  const p = POLITIQUES[k]; if(!p) return;
+  const m = document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:flex-end;justify-content:center';
+  m.onclick = e => { if(e.target===m) m.remove(); };
+  m.innerHTML='<div style="background:var(--card);border-radius:18px 18px 0 0;width:100%;max-width:480px;max-height:86vh;display:flex;flex-direction:column;padding:14px">'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="flex:1">'+p.t+'</b><button type="button" onclick="this.closest(\'div[style]\').parentNode.remove()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">Fermer</button></div>'
+    + '<div style="overflow:auto;font-size:13.5px;line-height:1.55;color:var(--ink)">'+p.h+'</div></div>';
+  document.body.appendChild(m);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ℹ️ INFORMATIONS — contenus du HQ, classés par catégories
+   ═══════════════════════════════════════════════════════════════════════════ */
+const INFO_CATS = { actualite:'📰 Actualités', conseil:'💡 Conseils', securite:'🛡️ Sécurité', service:'🧰 Services', nouveaute:'✨ Nouveautés', local:'📍 Local', hq:'📣 Messages Klean', info:'ℹ️ Information' };
+let INFOS = [], INFO_CAT = '';
+async function chargerInfos(){
+  try{
+    const d = await fetch('/api/infos?role='+(mode==='agent'?'pro':'client'), { cache:'no-store', headers: cliHdrs() }).then(r=>r.json());
+    INFOS = (d && d.liste) || [];
+  }catch(e){ INFOS = []; }
+}
+async function renderInfos(){
+  const box = document.getElementById('infos-corps'); const cats = document.getElementById('infos-cats');
+  if(!box) return;
+  box.innerHTML = '<div style="padding:18px;text-align:center;color:var(--muted)">Chargement…</div>';
+  await chargerInfos();
+  const dispo = [...new Set(INFOS.map(x=>x.cat))];
+  if(cats) cats.innerHTML = '<button class="cat-chip'+(INFO_CAT===''?' on':'')+'" onclick="INFO_CAT=\'\';renderInfos()">Tout</button>'
+    + dispo.map(c=>'<button class="cat-chip'+(INFO_CAT===c?' on':'')+'" onclick="INFO_CAT=\''+c+'\';renderInfos()">'+(INFO_CATS[c]||('ℹ️ '+c))+'</button>').join('');
+  const liste = INFOS.filter(x=>!INFO_CAT || x.cat===INFO_CAT);
+  /* infos locales utiles, calculées en direct (jamais inventées) */
+  const local = '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px">'
+    + '<b style="font-size:13.5px">📍 Autour de vous</b>'
+    + '<div style="font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.5">Ville : <b>'+(rechVille()||cityName(c.city))+'</b> · Quartier : <b>'+(rechQuartier()||'—')+'</b><br>'
+    + (typeof SERVICES!=='undefined' ? ('Services disponibles : <b>'+SERVICES.length+'</b> métiers, du nettoyage aux cours à domicile en passant par la plomberie et la clim.') : '')
+    + '<br><button type="button" onclick="ouvrirRubrique(\'urgence\')" style="margin-top:8px;border:1.5px solid #f3c9c9;background:#fff5f5;color:#c62828;font:inherit;font-weight:900;padding:8px 11px;border-radius:10px;cursor:pointer;font-size:12px">🆘 Numéros d’urgence</button></div></div>';
+  box.innerHTML = (INFO_CAT==='' || INFO_CAT==='local' ? local : '')
+    + (liste.length ? liste.map(x=>{
+        return '<div style="background:var(--card);border:1.5px solid '+(x.epin?'#F6D9BE':'var(--line)')+';border-radius:14px;padding:12px;margin-bottom:9px">'
+          + '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap"><span style="font-size:19px">'+(x.ic||'ℹ️')+'</span>'
+          + '<b style="font-size:13.5px;flex:1;min-width:0">'+rechEch(x.titre)+'</b>'
+          + (x.epin?'<span class="pill-pts">📌 Important</span>':'')+'</div>'
+          + '<div style="margin-top:6px;font-size:13px;line-height:1.5;color:var(--ink)">'+rechEch(x.texte).replace(/\n/g,'<br>')+'</div>'
+          + '<small style="display:block;margin-top:7px;color:var(--muted);font-size:11px">'+(INFO_CATS[x.cat]||x.cat)+' · '+((x.at||'').slice(0,10))+' · par '+rechEch(x.par||'Klean')+'</small></div>';
+      }).join('')
+      : '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:16px;text-align:center;color:var(--muted)">Aucune information dans cette catégorie pour le moment.</div>');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🆘 URGENCE — rapide, lisible, avec appel direct et position consentie
+   ═══════════════════════════════════════════════════════════════════════════ */
+const URG_NUMS = [
+  { n:'110', nom:'Police secours', ic:'🚔', note:'Urgence immédiate, agression, vol' },
+  { n:'111', nom:'Gendarmerie', ic:'🪖', note:'Hors des villes, routes' },
+  { n:'180', nom:'Pompiers (GSPM)', ic:'🚒', note:'Incendie, accident, noyade, secours' },
+  { n:'185', nom:'SAMU', ic:'🚑', note:'Urgence médicale, ambulance' },
+  { n:'179', nom:'CIE — électricité', ic:'⚡', note:'Câble arraché, panne dangereuse' },
+  { n:'175', nom:'SODECI — eau', ic:'🚰', note:'Fuite d’eau importante' }
+];
+function urgAppel(num, nom, service){
+  try{ window.location.href = 'tel:' + num; }catch(e){}
+  fetch('/api/urgence/alerte', { method:'POST', headers: cliHdrs(), body: JSON.stringify({ motif:'Appel ' + (nom||num), service: service || 'appel' }) }).catch(()=>{});
+  toast('📞 Appel vers ' + nom + ' (' + num + ') — Klean note l’heure');
+}
+function urgSOS(){
+  const partage = PREFS.partagePosition !== false;
+  const envoyer = (lat,lng) => fetch('/api/urgence/alerte', { method:'POST', headers: cliHdrs(),
+      body: JSON.stringify({ motif:'SOS KLEAN — besoin d’aide immédiate', partage, lat, lng, service:'SOS' }) })
+    .then(r=>r.json()).then(()=>{ toast('🆘 Alerte transmise à l’équipe Klean' + (lat?' (position partagée)':'')); urgHistorique(); })
+    .catch(()=>toast('Alerte non transmise (réseau). Appelez directement le 110 ou le 180.'));
+  if(!partage || !window.navigator.geolocation) return envoyer(null,null);
+  window.navigator.geolocation.getCurrentPosition(
+    p => envoyer(p.coords.latitude, p.coords.longitude),
+    () => envoyer(null,null), { enableHighAccuracy:true, timeout:8000 });
+}
+async function urgContacts(){ try{ const d = await fetch('/api/urgence/contacts', { headers: cliHdrs() }).then(r=>r.json()); return (d && d.contacts) || []; }catch(e){ return []; } }
+async function renderUrgence(){
+  const box = document.getElementById('urg-corps'); if(!box) return;
+  const hist = client ? await fetch('/api/urgence/historique', { headers: cliHdrs() }).then(r=>r.json()).catch(()=>({liste:[]})) : { liste:[] };
+  const ct = await urgContacts();
+  box.innerHTML =
+    '<div class="urg-card">'
+    + '<b style="display:block;font-size:16px">Vous êtes en danger maintenant ?</b>'
+    + '<p style="margin:6px 0 10px;font-size:13px;line-height:1.45;opacity:.95">Appelez d’abord les secours. Klean prévient en plus son équipe, pour qu’un professionnel proche soit alerté si possible.</p>'
+    + '<div style="display:flex;gap:7px;flex-wrap:wrap">'
+    + '<a href="tel:110" onclick="urgAppel(\'110\',\'Police\',\'appel\')" style="flex:1;min-width:130px;text-align:center;background:#fff;color:#c62828;font-weight:900;text-decoration:none;padding:12px;border-radius:12px">🚔 Appeler le 110</a>'
+    + '<a href="tel:180" onclick="urgAppel(\'180\',\'Pompiers\',\'appel\')" style="flex:1;min-width:130px;text-align:center;background:rgba(255,255,255,.16);color:#fff;border:1.5px solid rgba(255,255,255,.5);font-weight:900;text-decoration:none;padding:12px;border-radius:12px">🚒 Appeler le 180</a>'
+    + '</div>'
+    + '<button type="button" onclick="urgSOS()" style="width:100%;margin-top:8px;border:none;background:#fff;color:#8e1c1c;font:inherit;font-weight:900;font-size:15px;padding:14px;border-radius:13px;cursor:pointer;box-shadow:0 6px 16px rgba(0,0,0,.22)">🆘 SOS KLEAN — prévenir un pro proche</button>'
+    + '<small style="display:block;margin-top:8px;font-size:11px;opacity:.92">Votre position n’est envoyée <b>que si vous l’avez autorisée</b> dans Options. Sinon, l’alerte part sans position.</small>'
+    + '</div>'
+    + '<div style="background:#fff5f5;border:1.5px solid #f3c9c9;border-radius:13px;padding:11px;margin:10px 0 12px;font-size:12.5px;color:#8e1c1c;line-height:1.45">⚠️ <b>Fausses alertes :</b> un SOS mobilise des personnes. N’appuyez qu’en cas de vrai danger. Les alertes abusives répétées peuvent entraîner la suspension du compte.</div>'
+    + '<div style="font-size:12px;font-weight:900;color:var(--pd);margin:6px 0 7px">📞 NUMÉROS D’URGENCE EN CÔTE D’IVOIRE</div>'
+    + URG_NUMS.map(x=>'<a class="urg-num" href="tel:'+x.n+'" onclick="urgAppel(\''+x.n+'\',\''+x.nom+'\',\'appel\')"><span style="font-size:20px">'+x.ic+'</span><span style="flex:1"><b style="font-size:13.5px">'+x.nom+'</b><br><small style="color:var(--muted);font-size:11.5px">'+x.note+'</small></span><b class="n">'+x.n+'</b></span></a>').join('')
+    + '<button class="hub-tile" style="margin-top:4px" onclick="urgContactAjout()"><span class="ic">➕</span><span><b>Ajouter un contact personnel</b><small>Un proche à prévenir par Klean (5 maximum)</small></span><span class="go">›</span></button>'
+    + (ct.length ? ct.map(x=>'<div class="opt-row"><span style="flex:1"><b>'+rechEch(x.nom)+'</b><small>'+rechEch(x.lien||'Proche')+' · '+rechEch(x.tel)+'</small></span>'
+        + '<a href="tel:'+rechEch(x.tel)+'" style="background:#0a8a4c;color:#fff;font-weight:900;text-decoration:none;padding:9px 12px;border-radius:10px;font-size:12.5px">📞</a>'
+        + '<button type="button" onclick="urgContactSuppr(\''+x.id+'\')" style="border:1.5px solid var(--line);background:var(--card2);color:var(--danger);font:inherit;font-weight:900;padding:9px 11px;border-radius:10px;cursor:pointer;margin-left:6px">✕</button></div>').join('') : '')
+    + '<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 7px">🕓 MES ALERTES</div>'
+    + ((hist && hist.liste && hist.liste.length) ? hist.liste.map(h=>'<div style="background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:10px;margin-bottom:7px;font-size:12.5px"><b>'+rechEch(h.motif)+'</b><br><small style="color:var(--muted)">'+((h.at||'').slice(0,16).replace('T',' '))+' · '+rechEch(h.statut||'nouvelle')+(h.partage?' · position partagée':'')+'</small></div>').join('')
+      : '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:12px;color:var(--muted);font-size:12.5px">Aucune alerte enregistrée. '+(client?'':'Connectez-vous pour garder l’historique.')+'</div>');
+}
+async function urgContactAjout(){
+  if(!client) return toast('Connectez-vous pour enregistrer vos contacts d’urgence');
+  const m = document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:center;justify-content:center;padding:14px';
+  m.innerHTML='<div style="background:var(--card);border-radius:16px;width:100%;max-width:380px;padding:14px">'
+    + '<b>➕ Contact d’urgence</b>'
+    + '<div class="inp-row" style="margin-top:9px"><label>Nom</label><input class="inp" id="uc-nom" placeholder="Ex : ma sœur Awa"></div>'
+    + '<div class="inp-row"><label>Téléphone</label><input class="inp" id="uc-tel" type="tel" placeholder="01 02 03 04 05"></div>'
+    + '<div class="inp-row"><label>Lien</label><input class="inp" id="uc-lien" placeholder="Famille, ami, voisin…"></div>'
+    + '<button class="btn-main" style="width:100%" onclick="urgContactOk(this)">💾 Enregistrer</button></div>';
+  document.body.appendChild(m);
+}
+async function urgContactOk(btn){
+  const nom = document.getElementById('uc-nom').value.trim();
+  const tel = document.getElementById('uc-tel').value.trim();
+  const lien = document.getElementById('uc-lien').value.trim();
+  try{
+    const d = await fetch('/api/urgence/contacts', { method:'POST', headers: cliHdrs(), body: JSON.stringify({ nom, tel, lien }) }).then(r=>r.json());
+    if(!d.ok) return toast('⚠️ ' + (d.error||'Enregistrement impossible'));
+    btn.closest('div[style]').parentNode.remove();
+    toast('✅ Contact enregistré');
+    renderUrgence();
+  }catch(e){ toast('Réseau indisponible'); }
+}
+async function urgContactSuppr(id){
+  try{ await fetch('/api/urgence/contacts/suppr', { method:'POST', headers: cliHdrs(), body: JSON.stringify({ id }) }); renderUrgence(); }catch(e){}
+}
+async function urgHistorique(){ if(document.getElementById('view-urgence').classList.contains('active')) renderUrgence(); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🧠 QUIZ KLEAN — catégories, niveaux, points, classement, historique
+   ═══════════════════════════════════════════════════════════════════════════ */
+let QZ = { cat:'', niveau:0, questions:[], i:0, bon:0, pts:0, joue:false };
+let QDEFI = null;                     /* 🎯 défi du jour (chargé avec la rubrique) */
+function qzNiveauTxt(n){ return n===1?'Facile':(n===2?'Moyen':(n===3?'Difficile':'Tous niveaux')); }
+async function renderQuiz(){
+  const box = document.getElementById('qz-corps'); if(!box) return;
+  box.innerHTML = '<div style="padding:18px;text-align:center;color:var(--muted)">Chargement…</div>';
+  let d = {};
+  try{ d = await fetch('/api/quiz/banque', { headers: cliHdrs(), cache:'no-store' }).then(r=>r.json()); }catch(e){}
+  const cats = (d && d.categories) || [];
+  const prog = (d && d.progression) || {};
+  const live = window._lastQuizA && window._lastQuizA.type === 'quiz';
+  const defi = (d && d.defi) || null; QDEFI = defi;
+  box.innerHTML =
+    (live ? '<button class="hub-tile" style="border-color:#F6D9BE" onclick="flipFermer();showView(\'view-home\',null,\'client\');setTimeout(()=>{const q=document.getElementById(\'quiz-box\');if(q)q.scrollIntoView({behavior:\'smooth\'});},250)"><span class="ic">🔴</span><span><b>Quiz du PDG en direct</b><small>Une partie est en cours avec décompte — touchez pour jouer tout de suite</small></span><span class="go">›</span></button>' : '')
+    + '<div style="background:linear-gradient(160deg,var(--p),var(--pd));color:#fff;border-radius:15px;padding:13px;margin-bottom:11px">'
+    + '<b style="font-size:15px">🧠 Votre progression</b>'
+    + '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
+    + '<span style="background:rgba(255,255,255,.18);padding:6px 11px;border-radius:99px;font-weight:900;font-size:12.5px">✅ '+(d.mesBonnes||0)+' bonnes réponses</span>'
+    + '<span style="background:rgba(255,255,255,.18);padding:6px 11px;border-radius:99px;font-weight:900;font-size:12.5px">📝 '+(d.mesReponses||0)+' réponses</span>'
+    + '<span style="background:rgba(255,255,255,.18);padding:6px 11px;border-radius:99px;font-weight:900;font-size:12.5px">🪙 '+((d.solde!=null)?d.solde:0)+' points</span>'
+    + ((d.serie>0)?('<span style="background:rgba(255,255,255,.18);padding:6px 11px;border-radius:99px;font-weight:900;font-size:12.5px">🔥 Série : '+d.serie+'</span>'):'')
+    + ((d.seriePas>=2 && d.serieBonus>0)?('<span style="background:rgba(255,255,255,.14);padding:6px 10px;border-radius:99px;font-weight:800;font-size:11px">🔥 +'+d.serieBonus+' pts tous les '+d.seriePas+' sans faute</span>'):'')
+    + '</div>'
+    + '<div style="margin-top:8px;font-size:11.5px;opacity:.95">Les bonnes réponses rapportent des Klean Points, enregistrés sur votre compte (jamais en argent).</div></div>'
+    + '<div style="font-size:12px;font-weight:900;color:var(--pd);margin:6px 0 6px">🎯 CHOISIR UNE CATÉGORIE</div>'
+    + (cats.length ? '<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px">'
+        + '<button class="cat-chip'+(QZ.cat===''?' on':'')+'" onclick="qzChoisir(\'\',0)">🎲 Tout</button>'
+        + cats.map(c=>{ const p=prog[c.id]||{total:0,faits:0}; return '<button class="cat-chip'+(QZ.cat===c.id?' on':'')+'" onclick="qzChoisir(\''+c.id+'\',0)">'+rechEch(c.ic||'🧠')+' '+rechEch(c.nom)+' ('+p.faits+'/'+p.total+')</button>'; }).join('')+'</div>'
+      : '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:13px;padding:13px;color:var(--muted);font-size:12.5px">Aucune question publiée pour le moment. Klean en prépare — revenez bientôt !</div>')
+    + '<div style="display:flex;gap:6px;margin:4px 0 11px;flex-wrap:wrap">'
+    + [0,1,2,3].map(n=>'<button class="cat-chip'+(QZ.niveau===n?' on':'')+'" onclick="qzChoisir(QZ.cat,'+n+')">'+ (n===0?'Tous niveaux':qzNiveauTxt(n)) +'</button>').join('')
+    + '</div>'
+    + (defi && defi.actif ? (defi.fait
+        ? '<div style="background:#e9f7ef;border:1.5px solid #bfe6d2;border-radius:14px;padding:11px;margin-bottom:11px;font-size:12.5px;color:#0a7a4f;line-height:1.5">'
+          + '<b>🎯 Défi du jour ' + (defi.reussi ? 'réussi ✅' : 'déjà joué') + '</b><br>'
+          + (defi.reussi ? ('Bravo ! +' + defi.points + ' Klean Points gagnés. Revenez demain pour un nouveau défi.') : 'Revenez demain pour un nouveau défi du jour.')
+          + '</div>'
+        : '<div style="background:linear-gradient(135deg,#ffb703,#ff8a00);color:#3d2600;border-radius:14px;padding:12px;margin-bottom:11px">'
+          + '<b style="font-size:14px">🎯 Défi du jour — +' + defi.points + ' points bonus</b>'
+          + '<div style="font-size:12px;margin:4px 0 9px;line-height:1.45">Une question choisie chaque jour par Klean. Bonne réponse = Klean Points en plus.</div>'
+          + '<button class="btn-main" style="width:100%;background:#06281b;color:#fff;flex:none" onclick="qzDefi()">Relever le défi</button>'
+          + '</div>') : '')
+    + '<div id="qz-jeu"></div>'
+    + '<button class="hub-tile" onclick="qzClassement()"><span class="ic">🏆</span><span><b>Classement Klean</b><small>Les meilleurs joueurs du quiz</small></span><span class="go">›</span></button>'
+    + '<button class="hub-tile" onclick="qzHistorique()"><span class="ic">📜</span><span><b>Mes derniers résultats</b><small>Vos réponses, vos séries et les points gagnés</small></span><span class="go">›</span></button>'
+    + '<button class="hub-tile" onclick="ouvrirRubrique(\'points\')"><span class="ic">🪙</span><span><b>Mes Klean Points</b><small>Solde, historique et récompenses</small></span><span class="go">›</span></button>';
+  if(QZ.joue) qzAfficher();
+}
+async function qzChoisir(cat, niveau){
+  QZ = { cat:cat, niveau:niveau, questions:[], i:0, bon:0, pts:0, joue:true };
+  const box = document.getElementById('qz-jeu'); if(box) box.innerHTML = '<div style="padding:14px;text-align:center;color:var(--muted)">Chargement des questions…</div>';
+  try{
+    const d = await fetch('/api/quiz/questions?cat='+encodeURIComponent(cat)+'&niveau='+niveau, { headers: cliHdrs(), cache:'no-store' }).then(r=>r.json());
+    QZ.questions = (d && d.questions) || [];
+  }catch(e){ QZ.questions = []; }
+  if(!QZ.questions.length){
+    QZ.joue = false;
+    if(box) box.innerHTML = '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:13px;padding:13px;font-size:12.5px">✅ Vous avez répondu à toutes les questions de cette sélection. Choisissez une autre catégorie ou un autre niveau !</div>';
+    return;
+  }
+  qzAfficher();
+}
+function qzAfficher(){
+  const box = document.getElementById('qz-jeu'); if(!box) return;
+  const q = QZ.questions[QZ.i];
+  if(!q){ qzFin(); return; }
+  box.innerHTML = '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:15px;padding:13px">'
+    + '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap"><span class="pill-pts">Question '+(QZ.i+1)+'/'+QZ.questions.length+'</span>'
+    + '<span class="pill-pts" style="background:#f4f6f5;color:#5b6b63">'+qzNiveauTxt(q.niveau)+'</span>'
+    + '<span class="pill-pts">🪙 '+q.points+' pts</span></div>'
+    + '<b style="display:block;font-size:15px;line-height:1.4;margin:10px 0 6px">'+rechEch(q.q)+'</b>'
+    + q.choix.map((c,i)=>'<button class="qz-opt" id="qzo-'+i+'" onclick="qzRepondre('+i+')">'+String.fromCharCode(65+i)+'. '+rechEch(c)+'</button>').join('')
+    + '<div id="qz-fb" style="margin-top:9px;font-size:12.5px"></div>'
+    + '<div style="display:flex;gap:8px;margin-top:9px"><span class="pill-pts" style="background:#e9f7ef;color:#0a7a4f">✅ '+QZ.bon+' bonne(s)</span>'
+    + '<span class="pill-pts" style="background:#fff5e6;color:#b36b00">🪙 '+QZ.pts+' points gagnés</span></div></div>';
+}
+async function qzRepondre(i){
+  const q = QZ.questions[QZ.i]; if(!q) return;
+  document.querySelectorAll('#qz-jeu .qz-opt').forEach(b=>b.disabled=true);
+  let d = {};
+  try{ d = await fetch('/api/quiz/repondre', { method:'POST', headers: cliHdrs(), body: JSON.stringify({ qid:q.id, choix:i }) }).then(r=>r.json()); }catch(e){}
+  if(d && d.error && !d.bon){ /* déjà répondu ou réseau : on continue proprement */ }
+  const bonne = (d && typeof d.bonne === 'number') ? d.bonne : -1;
+  if(bonne >= 0){
+    const el = document.getElementById('qzo-'+bonne); if(el) el.classList.add('bon');
+    if(i !== bonne){ const m = document.getElementById('qzo-'+i); if(m) m.classList.add('mauvais'); }
+  }
+  if(d && d.bon){ QZ.bon++; QZ.pts += (d.pts||0) + (d.bonusDefi||0) + (d.bonusSerie||0); }
+  if(d && d.defiFait && QDEFI){ QDEFI.fait = true; QDEFI.reussi = !!d.bon; }
+  const fb = document.getElementById('qz-fb');
+  if(fb) fb.innerHTML = (d && d.bon)
+    ? '<b style="color:#0a7a4f">✅ Bravo ! +'+(d.pts||0)+' Klean Points</b>'
+  + (d.bonusDefi?('<br><b style="color:#b36b00">🎯 Prime du défi du jour : +'+d.bonusDefi+' points</b>'):'')
+  + (d.bonusSerie?('<br><b style="color:#b36b00">🔥 Série de '+d.serie+' bonnes réponses : +'+d.bonusSerie+' points</b>'):'')+(d.explication?('<br>'+rechEch(d.explication)):'')+(d.solde!=null?('<br><small style="color:var(--muted)">Nouveau solde : '+d.solde+' points</small>'):'')
+    : ('<b style="color:#c62828">'+(d && d.error ? rechEch(d.error) : '❌ Ce n’est pas la bonne réponse.')+'</b>'
+       + (d && d.bonne>=0 ? '<br><small style="color:var(--muted)">La bonne réponse était '+String.fromCharCode(65+d.bonne)+'.</small>' : '')
+       + '<br><small style="color:var(--muted)">Pas de point cette fois — mais vous progressez !</small>' + (d && d.explication?('<br>'+rechEch(d.explication)):''));
+  setTimeout(()=>{ QZ.i++; qzAfficher(); }, 1600);
+}
+function qzDefi(){
+  const q = (QDEFI && QDEFI.question) || null;
+  if(!q){ toast('🎯 Le défi du jour a déjà été joué — revenez demain !'); return; }
+  QZ = { cat:'__defi', niveau:0, questions:[q], i:0, bon:0, pts:0, joue:true, defi:true };
+  const box = document.getElementById('qz-jeu');
+  try{ if(box && box.scrollIntoView) box.scrollIntoView({behavior:'smooth', block:'center'}); }catch(e){}
+  qzAfficher();
+}
+async function qzHistorique(){
+  let hist = [], d = {};
+  try{ d = await fetch('/api/quiz/banque', { headers: cliHdrs(), cache:'no-store' }).then(r=>r.json()); hist = (d && d.hist) || []; }catch(e){}
+  const lignes = hist.length
+    ? hist.map(h => '<div class="opt-row" style="align-items:flex-start"><span style="flex:1"><b>' + (h.bon ? '✅' : '❌') + ' ' + rechEch(h.q || 'Question') + '</b><small>' + rechEch(h.cat || '') + ' · ' + String(h.at || '').slice(0, 10) + '</small></span><span class="pill-pts">' + ((h.pts > 0) ? ('+' + h.pts + ' pts') : '0 pt') + '</span></div>').join('')
+    : '<div style="font-size:12.5px;color:var(--muted);line-height:1.5">Vous n’avez pas encore répondu à une question. Choisissez une catégorie pour commencer !</div>';
+  return accModale('📜 Mes derniers résultats',
+    '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">'
+    + '<span class="pill-pts">✅ ' + (d.mesBonnes || 0) + ' bonnes</span>'
+    + '<span class="pill-pts">📝 ' + (d.mesReponses || 0) + ' réponses</span>'
+    + '<span class="pill-pts">🔥 série : ' + (d.serie || 0) + '</span>'
+    + '<span class="pill-pts">🪙 ' + (d.solde || 0) + ' points</span></div>'
+    + lignes
+    + '<div style="margin-top:11px;font-size:11.5px;color:var(--muted);line-height:1.5">Les bonnes réponses rapportent des <b>Klean Points</b> (jamais de l’argent liquide). Chaque question ne peut être répondue qu’une seule fois.</div>');
+}
+function qzFin(){
+  const box = document.getElementById('qz-jeu'); if(!box) return;
+  box.innerHTML = '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:15px;padding:15px;text-align:center">'
+    + '<div style="font-size:34px">🎉</div><b style="display:block;font-size:15px;margin:5px 0">Série terminée !</b>'
+    + '<div style="font-size:13px;color:var(--muted)">'+QZ.bon+' bonne(s) réponse(s) sur '+QZ.questions.length+' · <b style="color:var(--pd)">'+QZ.pts+' Klean Points</b> gagnés</div>'
+    + '<button class="btn-main" style="width:100%;margin-top:10px" onclick="renderQuiz()">🔁 Nouvelle série</button>'
+    + '<button class="btn-line" style="width:100%;margin-top:7px" onclick="ouvrirRubrique(\'points\')">🪙 Voir mes points</button></div>';
+}
+async function qzClassement(){
+  let d = {};
+  try{ d = await fetch('/api/quiz/classement', { cache:'no-store' }).then(r=>r.json()); }catch(e){}
+  const m = document.createElement('div');
+  m.style.cssText='position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:center;justify-content:center;padding:14px';
+  m.onclick = e => { if(e.target===m) m.remove(); };
+  m.innerHTML='<div style="background:var(--card);border-radius:16px;width:100%;max-width:420px;max-height:80vh;overflow:auto;padding:14px">'
+    + '<b>🏆 Classement Klean</b>'
+    + ((d.liste||[]).length ? (d.liste||[]).map((x,i)=>'<div class="opt-row" style="margin-top:8px"><span class="ic" style="font-size:19px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:var(--pl)">'+(i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1))+'</span>'
+        + '<span style="flex:1"><b>'+rechEch(x.nom)+'</b><small>'+x.bonnes+' bonne(s) sur '+x.reponses+'</small></span><b class="pill-pts">🪙 '+x.pts+'</b></div>').join('')
+      : '<p style="color:var(--muted);font-size:13px;margin-top:8px">Personne au classement pour l’instant : soyez le premier !</p>')
+    + '<small style="display:block;margin-top:10px;color:var(--muted);font-size:11px">Les points du classement sont ceux gagnés au Quiz Klean (hors Flip Fizz).</small>'
+    + '<button class="btn-line" style="width:100%;margin-top:9px" onclick="this.closest(\'div[style]\').parentNode.remove()">Fermer</button></div>';
+  document.body.appendChild(m);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🪙 KLEAN POINTS — solde, historique, récompenses (jamais d'argent liquide)
+   ═══════════════════════════════════════════════════════════════════════════ */
+async function renderPoints(){
+  const box = document.getElementById('pts-corps'); if(!box) return;
+  box.innerHTML = '<div style="padding:18px;text-align:center;color:var(--muted)">Chargement…</div>';
+  if(!client){
+    box.innerHTML = '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:15px;padding:16px;text-align:center">'
+      + '<div style="font-size:32px">🪙</div><b style="display:block;margin:6px 0">Vos Klean Points vivent sur votre compte</b>'
+      + '<p style="color:var(--muted);font-size:12.5px">Créez un compte (gratuit) ou connectez-vous pour cumuler des points en jouant, et les échanger contre des récompenses.</p>'
+      + '<button class="btn-main" style="width:100%" onclick="ouvrirRubrique(\'compte\')">👤 Aller à mon compte</button></div>';
+    return;
+  }
+  let p = {}, r = {};
+  try{ p = await fetch('/api/points', { headers: cliHdrs(), cache:'no-store' }).then(x=>x.json()); }catch(e){}
+  try{ r = await fetch('/api/recompenses', { headers: cliHdrs(), cache:'no-store' }).then(x=>x.json()); }catch(e){}
+  const solde = (p && p.solde) || 0;
+  const h = [];
+  h.push('<div style="background:linear-gradient(160deg,var(--p),var(--pd));color:#fff;border-radius:16px;padding:15px;margin-bottom:11px;box-shadow:0 8px 22px rgba(194,65,12,.28)">'
+    + '<div style="font-size:12px;font-weight:900;opacity:.92">SOLDE KLEAN POINTS</div>'
+    + '<div style="font-size:34px;font-weight:900;letter-spacing:.5px">🪙 '+solde+'</div>'
+    + '<div style="font-size:11.5px;opacity:.95;line-height:1.45;margin-top:4px">Ces points ne sont <b>pas</b> de l’argent liquide : ils servent à obtenir des récompenses Klean.</div>'
+    + '<div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">'
+    + '<button type="button" onclick="ouvrirRubrique(\'quiz\')" style="flex:1;min-width:118px;border:none;background:#fff;color:var(--pd);font:inherit;font-weight:900;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">🧠 Gagner au Quiz</button>'
+    + '<button type="button" onclick="flipOuvrir()" id="pts-flip-btn" style="flex:1;min-width:118px;border:1.5px solid rgba(255,255,255,.6);background:rgba(255,255,255,.14);color:#fff;font:inherit;font-weight:900;padding:10px;border-radius:11px;cursor:pointer;font-size:12.5px">🎮 Jouer à Flip Fizz</button>'
+    + '</div></div>');
+  const liste = (r && r.liste) || [];
+  h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:6px 0 7px">🎁 RÉCOMPENSES À OBTENIR</div>');
+  h.push(liste.length ? liste.map(x=>'<div style="background:var(--card);border:1.5px solid '+(x.dispo?'#F6D9BE':'var(--line)')+';border-radius:14px;padding:11px;margin-bottom:8px">'
+      + (x.mediaUrl?('<img src="'+rechEch(x.mediaUrl)+'" alt="" style="width:100%;border-radius:11px;margin-bottom:8px;max-height:120px;object-fit:cover">'):'')
+      + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="flex:1;font-size:13.5px">'+rechEch(x.nom)+'</b><span class="pill-pts">🪙 '+x.points+' pts</span></div>'
+      + (x.desc?('<div style="font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.45">'+rechEch(x.desc)+'</div>'):'')
+      + '<div style="font-size:11.5px;color:var(--muted);margin-top:5px">'+(x.stock===null?'Stock illimité':(x.stock+' restante(s)'))+(x.fin?(' · jusqu’au '+x.fin):'')+'</div>'
+      + '<button type="button" '+(x.dispo?'':'disabled')+' onclick="ptsEchanger(\''+x.id+'\')" style="width:100%;margin-top:8px;border:none;background:'+(x.dispo?'linear-gradient(135deg,var(--p),var(--pd))':'#e8eeeb')+';color:'+(x.dispo?'#fff':'#8a9a92')+';font:inherit;font-weight:900;padding:11px;border-radius:11px;cursor:'+(x.dispo?'pointer':'default')+';font-size:12.5px">'
+      + (x.dispo?'🎁 Échanger '+x.points+' points':rechEch(x.raison||'Indisponible'))+'</button></div>').join('')
+    : '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:13px;color:var(--muted);font-size:12.5px">Aucune récompense disponible pour le moment.</div>');
+  if((p.obtenues||[]).length){
+    h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 7px">✅ MES RÉCOMPENSES OBTENUES</div>');
+    h.push(p.obtenues.map(x=>'<div class="opt-row"><span style="flex:1"><b>'+rechEch(x.nom)+'</b><small>'+((x.at||'').slice(0,10))+' · code '+rechEch(x.code||'')+'</small></span><b class="pill-pts">'+x.points+' pts</b></div>').join(''));
+  }
+  h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 7px">📜 HISTORIQUE DES POINTS</div>');
+  h.push((p.hist||[]).length ? (p.hist||[]).map(x=>'<div class="opt-row"><span style="flex:1"><b>'+rechEch(x.motif)+'</b><small>'+((x.at||'').slice(0,16).replace('T',' '))+'</small></span>'
+      + '<b style="font-weight:900;color:'+(x.pts>0?'#0a7a4f':'#c62828')+'">'+(x.pts>0?'+':'')+x.pts+'</b></div>').join('')
+    : '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:13px;color:var(--muted);font-size:12.5px">Aucun mouvement pour le moment. Jouez à Flip Fizz ou répondez au Quiz pour gagner vos premiers points !</div>');
+  if((p.parties||[]).length){
+    h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 7px">🎮 MES PARTIES FLIP FIZZ</div>');
+    h.push(p.parties.map(x=>'<div class="opt-row"><span style="flex:1"><b>Score '+(x.score||0)+'</b><small>'+((x.at||'').slice(0,16).replace('T',' '))+' · '+x.dureeSec+' s</small></span><b class="pill-pts">🪙 '+(x.pts||0)+'</b></div>').join(''));
+  }
+  h.push('<small style="display:block;margin:12px 0 4px;color:var(--muted);font-size:11px">Chaque partie et chaque mouvement de points est enregistré côté serveur : le score est plafonné, la durée minimale contrôlée et les parties gratuites limitées par jour.</small>');
+  box.innerHTML = h.join('');
+  try{ const f = await fetch('/api/flip', { headers: cliHdrs(), cache:'no-store' }).then(x=>x.json()); const btn = document.getElementById('pts-flip-btn');
+    if(btn && (!f.flip || !f.flip.actif)){ btn.style.opacity = '.45'; btn.onclick = ()=>toast('🎮 Flip Fizz est en pause pour le moment'); } }catch(e){}
+}
+async function ptsEchanger(id){
+  if(!confirm('Échanger vos points contre cette récompense ?')) return;
+  try{
+    const d = await fetch('/api/recompenses/echanger', { method:'POST', headers: cliHdrs(), body: JSON.stringify({ id }) }).then(r=>r.json());
+    if(!d.ok) return toast('⚠️ ' + (d.error||'Échange impossible'));
+    try{ bip(); }catch(e){}
+    toast('🎁 Récompense obtenue ! Code : ' + d.code + ' — l’équipe Klean vous contacte pour la remise.');
+    renderPoints();
+  }catch(e){ toast('Réseau indisponible'); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🎮 FLIP FIZZ — invisible par défaut : rien ne s'affiche tant que le PDG
+   n'a pas activé le jeu ET coché « afficher sur la page d'accueil ».
+   ═══════════════════════════════════════════════════════════════════════════ */
+let FLIP = null, FLIP_SESS = null, FLIP_T0 = 0;
+async function chargerFlipAccueil(){
+  let f = null;
+  try{ f = await fetch('/api/flip', { headers: cliHdrs(), cache:'no-store' }).then(r=>r.json()); }catch(e){ f = null; }
+  FLIP = (f && f.flip) || null;
+  const slot = document.getElementById('flip-slot'); if(!slot) return;
+  if(!FLIP || !FLIP.actif || !FLIP.accueil){ slot.classList.add('hidden'); slot.innerHTML=''; return; }
+  const pts = FLIP.connecte ? ('🪙 ' + (FLIP.solde||0) + ' points') : 'Connectez-vous pour gagner';
+  slot.innerHTML = '<div style="background:linear-gradient(160deg,#0d7a45,#065c33);color:#fff;border-radius:16px;padding:13px;box-shadow:0 8px 20px rgba(4,60,33,.3)">'
+    + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="background:rgba(0,0,0,.28);padding:3px 9px;border-radius:99px;font-size:10.5px;font-weight:900;letter-spacing:.6px">🎮 JEU KLEAN</span>'
+    + '<span style="background:rgba(255,255,255,.18);padding:3px 9px;border-radius:99px;font-size:11px;font-weight:900">'+pts+'</span></div>'
+    + (FLIP.mediaUrl ? (/\.(mp4|webm)$/i.test(FLIP.mediaUrl)
+        ? '<video src="'+rechEch(FLIP.mediaUrl)+'" muted loop playsinline autoplay style="width:100%;border-radius:12px;margin-top:9px;max-height:150px;object-fit:cover"></video>'
+        : '<img src="'+rechEch(FLIP.mediaUrl)+'" alt="" style="width:100%;border-radius:12px;margin-top:9px;max-height:150px;object-fit:cover">') : '')
+    + '<b style="display:block;font-size:16px;margin:9px 0 2px">'+rechEch(FLIP.titre||'Flip Fizz')+'</b>'
+    + (FLIP.desc?('<div style="font-size:13px;line-height:1.45;opacity:.96">'+rechEch(FLIP.desc)+'</div>'):'')
+    + '<div style="font-size:11.5px;opacity:.95;margin-top:7px;line-height:1.45">🪙 Jusqu’à '+FLIP.pointsParPartie+' points par partie'+(FLIP.pointsBonus?(' · +'+FLIP.pointsBonus+' bonus au-delà de '+FLIP.seuilBonus+' points'):'')+'<br>🎯 '+FLIP.partiesRestantes+' partie(s) gratuite(s) restante(s) aujourd’hui sur '+FLIP.partiesJour+'</div>'
+    + '<button type="button" onclick="flipOuvrir()" style="width:100%;margin-top:10px;border:none;background:#fff;color:#065c33;font:inherit;font-weight:900;font-size:14.5px;padding:12px;border-radius:12px;cursor:pointer">🎮 Jouer maintenant</button>'
+    + '</div>';
+  slot.classList.remove('hidden');
+}
+function flipOuvrir(){
+  if(!FLIP || !FLIP.actif){ toast('🎮 Le jeu est en pause pour le moment'); return; }
+  ouvrirRubrique('points');               /* le bouton depuis les points ouvre aussi le jeu */
+}
+async function flipLancer(){
+  const corps = document.getElementById('flip-ov-corps'); if(!corps) return;
+  if(!client){
+    corps.innerHTML = '<div style="background:var(--card);border-radius:15px;padding:16px;text-align:center">'
+      + '<div style="font-size:32px">🔐</div><b style="display:block;margin:6px 0">Connectez-vous pour jouer</b>'
+      + '<p style="color:var(--muted);font-size:12.5px">Les Klean Points sont enregistrés sur votre compte : créez-le (gratuit) puis revenez jouer.</p>'
+      + '<button class="btn-main" style="width:100%" onclick="flipFermer();ouvrirRubrique(\'compte\')">👤 Mon compte</button></div>';
+    return;
+  }
+  corps.innerHTML = '<div style="background:var(--card);border-radius:15px;padding:16px;text-align:center;color:var(--muted)">Ouverture de votre partie…</div>';
+  let d = {};
+  try{ d = await fetch('/api/flip/ouvrir', { method:'POST', headers: cliHdrs(), body:'{}' }).then(r=>r.json()); }catch(e){}
+  if(!d || !d.ok){
+    corps.innerHTML = '<div style="background:var(--card);border-radius:15px;padding:16px;text-align:center">'
+      + '<div style="font-size:32px">⏳</div><b style="display:block;margin:6px 0">'+(d && d.error ? rechEch(d.error) : 'Impossible d’ouvrir une partie')+'</b>'
+      + '<p style="color:var(--muted);font-size:12.5px">'+(d && d.code==='connexion'?'Connectez-vous pour cumuler vos points.':'Vos parties gratuites du jour sont peut-être utilisées. Revenez demain ou gagnez des points au Quiz !')+'</p>'
+      + '<button class="btn-line" style="width:100%" onclick="flipFermer()">Fermer</button></div>';
+    return;
+  }
+  FLIP_SESS = d.session; FLIP_T0 = Date.now();
+  const url = d.url || (FLIP && FLIP.url) || '';
+  corps.innerHTML = '<div style="background:var(--card);border-radius:15px;padding:10px;margin-bottom:9px">'
+    + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="pill-pts">🎮 Partie ouverte</span><span class="pill-pts" style="background:#fff5e6;color:#b36b00" id="flip-chrono">00:00</span><span class="pill-pts" id="flip-reste">'+d.reste+' partie(s) restante(s)</span></div>'
+    + '<div style="font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45">La partie est enregistrée par le serveur Klean. Terminez votre partie puis touchez « J’ai terminé » : les points sont calculés côté serveur (score plafonné, durée minimale 20 s).</div></div>'
+    + (url ? ('<iframe id="flip-frame" src="'+rechEch(url)+'" title="Flip Fizz" style="width:100%;height:60vh;border:1.5px solid var(--line);border-radius:15px;background:#fff"></iframe>')
+           : '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:15px;padding:14px;text-align:center;color:var(--muted);font-size:12.5px">Le lien du jeu n’est pas encore configuré par le PDG.</div>')
+    + '<div style="background:var(--card);border-radius:15px;padding:12px;margin-top:9px">'
+    + '<div class="inp-row"><label>🎯 Mon score affiché par le jeu</label><input class="inp" id="flip-score" type="number" min="0" max="99999" placeholder="ex : 120" inputmode="numeric"></div>'
+    + '<button class="btn-main" style="width:100%" onclick="flipTerminer()">✅ J’ai terminé — enregistrer ma partie</button>'
+    + '<small style="display:block;margin-top:7px;color:var(--muted);font-size:11px">Points = score ÷ 10, plafonné à '+(FLIP&&FLIP.pointsParPartie||10)+' par partie. Un score inventé ne rapporte pas plus : le serveur plafonne.</small></div>';
+  if(window.__flipTimer) clearInterval(window.__flipTimer);
+  window.__flipTimer = setInterval(()=>{
+    const el = document.getElementById('flip-chrono'); if(!el) return;
+    const t = Math.floor((Date.now()-FLIP_T0)/1000);
+    el.textContent = String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0');
+  }, 1000);
+}
+window.addEventListener('message', function(ev){
+  /* si le jeu sait parler à Klean, il peut envoyer son score : {type:'flipfizz', score:…} */
+  try{
+    const d = ev && ev.data;
+    if(d && typeof d === 'object' && d.type === 'flipfizz' && FLIP_SESS){
+      const f = document.getElementById('flip-score'); if(f && d.score != null) f.value = String(d.score);
+      const t = document.getElementById('flip-ter'); if(t) t.textContent = '🎮 score reçu du jeu';
+    }
+  }catch(e){}
+});
+async function flipTerminer(){
+  const el = document.getElementById('flip-score');
+  const score = parseInt(el && el.value, 10) || 0;
+  const dureeSec = Math.max(0, Math.round((Date.now() - FLIP_T0)/1000));
+  let d = {};
+  try{ d = await fetch('/api/flip/fin', { method:'POST', headers: cliHdrs(), body: JSON.stringify({ session: FLIP_SESS, score, dureeSec }) }).then(r=>r.json()); }catch(e){}
+  if(window.__flipTimer){ clearInterval(window.__flipTimer); window.__flipTimer = null; }
+  const corps = document.getElementById('flip-ov-corps');
+  if(corps){
+    corps.innerHTML = '<div style="background:var(--card);border-radius:15px;padding:18px;text-align:center">'
+      + '<div style="font-size:36px">'+(d && d.pts>0?'🎉':'🎮')+'</div>'
+      + '<b style="display:block;font-size:16px;margin:7px 0">'+(d && d.pts>0?('+'+d.pts+' Klean Points !'):(d && d.refus ? rechEch(d.refus) : 'Partie enregistrée'))+'</b>'
+      + (d && d.bonus?('<div style="font-size:12.5px;color:#0a7a4f;font-weight:800">dont bonus de '+d.bonus+' points 🔥</div>'):'')
+      + '<div style="font-size:13px;color:var(--muted);margin-top:6px">Score : '+score+' · durée : '+dureeSec+' s'+(d && d.solde!=null?('<br>Nouveau solde : <b>'+d.solde+' points</b>'):'')+'</div>'
+      + (d && d.reste!=null?('<div style="font-size:12px;color:var(--muted);margin-top:4px">'+d.reste+' partie(s) gratuite(s) restante(s) aujourd’hui</div>'):'')
+      + '<button class="btn-main" style="width:100%;margin-top:11px" onclick="flipFermer();ouvrirRubrique(\'points\')">🪙 Voir mes points</button>'
+      + '<button class="btn-line" style="width:100%;margin-top:7px" onclick="FLIP_SESS=null;chargerFlipAccueil();flipFermer()">Fermer</button></div>';
+  }
+  try{ bip(); }catch(e){}
+  chargerFlipAccueil();
+  toast(d && d.pts>0 ? ('🪙 +' + d.pts + ' Klean Points') : 'Partie enregistrée');
+}
+function flipFermer(){
+  const ov = document.getElementById('flip-ov'); if(ov) ov.classList.add('hidden');
+  if(window.__flipTimer){ clearInterval(window.__flipTimer); window.__flipTimer = null; }
+}
+window.flipLancer = flipLancer; window.flipFermer = flipFermer; window.flipOuvrir = function(){
+  const ov = document.getElementById('flip-ov'); if(!ov) return;
+  ov.classList.remove('hidden');
+  const t = document.getElementById('flip-ov-titre'); if(t) t.textContent = '🎮 ' + ((FLIP && FLIP.titre) || 'Flip Fizz');
+  const q = document.getElementById('flip-ov-quota'); if(q) q.textContent = FLIP ? (FLIP.partiesRestantes + ' partie(s) restante(s)') : '';
+  flipLancer();
+};
+/* petit son discret (respecte le réglage « sons ») */
+function bip(){
+  if(PREFS && PREFS.sons === false) return;
+  try{
+    const A = window.AudioContext || window.webkitAudioContext; if(!A) return;
+    const ctx = new AudioContext(); const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.type='sine'; o.frequency.value = 880; g.gain.value = 0.05;
+    o.connect(g); g.connect(ctx.destination); o.start();
+    setTimeout(()=>{ try{ o.stop(); ctx.close(); }catch(e){} }, 130);
+  }catch(e){}
+  try{ if(PREFS && PREFS.vibre !== false && navigator.vibrate) navigator.vibrate(35); }catch(e){}
+}
+
 function pingPresence(){
   try{
     const w=quizWho();

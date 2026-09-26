@@ -167,6 +167,30 @@ async function initStorage() {
   db.fieldChat = db.fieldChat || [];
   db.cities = db.cities || [];
   db.catalog = db.catalog || [];
+  /* ═══ 🎮 FLIP FIZZ · KLEAN POINTS · RÉCOMPENSES · QUIZ · INFOS · URGENCE (lot 96) ═══
+     ⚠️ Par défaut le jeu est DÉSACTIVÉ et INVISIBLE sur l'accueil : seul le PDG l'active. */
+  db.flip = Object.assign({
+    actif: false, accueil: false, titre: 'Flip Fizz', desc: 'Jouez et gagnez des Klean Points !',
+    url: 'https://flip-fizz.netlify.app', mediaUrl: '', mediaType: '', videoUrl: '',
+    partiesJour: 3, regles: '', pointsParPartie: 10, pointsBonus: 5, seuilBonus: 100,
+    dureeMin: 20,                                /* durée mini d'une partie, mesurée par le SERVEUR */
+    recompensesActives: true, at: null, par: null, majAt: null
+  }, db.flip || {});
+  db.kleanPts = db.kleanPts || {};          // { '<clientId>': { solde, hist:[{at,pts,motif,ref}] } }
+  db.recompenses = db.recompenses || [];    // récompenses échangeables contre des points
+  db.parties = db.parties || [];            // historique TECHNIQUE des parties (anti-fraude)
+  db.flipSess = db.flipSess || [];          // sessions de jeu ouvertes (usage unique, expirantes)
+  db.quizBank = db.quizBank || { categories: [], questions: [] };
+  db.quizBank.categories = db.quizBank.categories || [];
+  db.quizBank.questions = db.quizBank.questions || [];
+  db.quizPlay = db.quizPlay || [];          // réponses durables au quiz permanent
+  db.quizCfg = Object.assign({ defiActif: true, defiPoints: 10, seriePas: 5, serieBonus: 5 }, db.quizCfg || {});
+  db.quizDefi = db.quizDefi || {};          // 🎯 défi du jour : { clientId: { jour, qid, reussi } }
+  db.quizSerie = db.quizSerie || {};        // 🔥 séries : { clientId: { jour, dernierPalier } }
+  db.infos = db.infos || [];                // rubrique INFORMATIONS (contenus du HQ)
+  db.urgHist = db.urgHist || [];            // alertes / SOS enregistrés
+  db.prefs = db.prefs || {};                // préférences client (rubrique OPTIONS)
+  db.urgContacts = db.urgContacts || {};    // contacts d'urgence personnels { clientId: [...] }
   /* Pré-initialisation optionnelle du mot de passe via ADMIN_PIN (1er démarrage seulement) */
   if (!db.admin && process.env.ADMIN_PIN) {
     const salt = crypto.randomBytes(12).toString('hex');
@@ -1522,6 +1546,25 @@ function pubTypeReel(buf) {
   return null;
 }
 /* 🧹 on ne garde jamais un média orphelin sur le disque */
+/* 📤 LOT 96 — enregistrer un média (image/vidéo) envoyé par le PDG, avec vérification du contenu réel */
+function pubMediaEnregistrer(dataUrl) {
+  const m = String(dataUrl || '').match(/^data:([a-z0-9.+\/-]+);base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!m) return { error: 'Fichier illisible — image JPG/PNG/WEBP/GIF ou vidéo MP4/WEBM' };
+  const meta = PUB_MEDIA_TYPES[m[1].toLowerCase()];
+  if (!meta) return { error: 'Format non autorisé. Images : JPG, PNG, WEBP, GIF. Vidéos : MP4, WEBM.' };
+  let buf;
+  try { buf = Buffer.from(m[2].replace(/\s/g, ''), 'base64'); } catch (e) { return { error: 'Fichier illisible' }; }
+  if (!buf || !buf.length) return { error: 'Fichier vide' };
+  if (buf.length > meta.max) return { error: 'Trop lourd : ' + (buf.length / 1048576).toFixed(1) + ' Mo. Maximum ' + (meta.max / 1048576) + ' Mo pour une ' + meta.genre + '.', code: 413 };
+  const reel = pubTypeReel(buf);
+  if (!reel) return { error: 'Ce fichier n’est pas une vraie image ou vidéo (contenu non reconnu)' };
+  if (PUB_MEDIA_TYPES[reel].genre !== meta.genre) return { error: 'Le contenu du fichier ne correspond pas à son type' };
+  const nom = 'pub-' + Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex') + '.' + meta.ext;
+  try { fs.writeFileSync(path.join(PUB_DIR, nom), buf); }
+  catch (e) { return { error: 'Enregistrement impossible sur le serveur', code: 500 }; }
+  return { url: '/pub/' + nom, mediaType: meta.genre, octets: buf.length, mo: Math.round(buf.length / 104857.6) / 10 };
+}
+
 function pubSupprimerFichier(url) {
   try {
     const nom = String(url || '').replace(/^\/pub\//, '');
@@ -1566,6 +1609,188 @@ function agentStats(ag) {
     rating: notes.length ? notes.reduce((s, n) => s + n, 0) / notes.length : 5.0,
     hist: done.slice(-30).reverse().map(x => ({ id: x.id, service: x.service, quartier: x.quartier, date: x.finishedAt && x.finishedAt.slice(5, 10), montant: x.prixTotal, gain: Math.round(x.prixTotal * (1 - feePct())), comm: Math.round(x.prixTotal * feePct()), note: x.note || 5 }))
   };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ 🎮 FLIP FIZZ · 🪙 KLEAN POINTS · 🎁 RÉCOMPENSES · 🧠 QUIZ · ℹ️ INFOS · 🆘 URGENCE
+ Règle d'or : TOUT ce qui donne des points est calculé ICI. Le téléphone ne fait
+ que demander — il ne peut ni s'attribuer des points, ni contourner un quota.
+ ═══════════════════════════════════════════════════════════════════════════ */
+/* ⚠️ une seule source de vérité pour les valeurs par défaut : le bloc de chargement de la base
+   (voir « 🎮 FLIP FIZZ · KLEAN POINTS … » plus haut). Ici on lit seulement, on ne redéfinit rien. */
+const flipCfg = () => db.flip || {};
+/* durée mini honnête : 0 = pas de minimum, plafonnée à 10 min (réglage PDG) */
+function flipDureeMin(cfg) {
+  const n = parseInt((cfg || flipCfg()).dureeMin, 10);
+  return Number.isFinite(n) ? Math.max(0, Math.min(600, n)) : 20;
+}
+const jourKey = () => nowISO().slice(0, 10);
+/* limite simple par clé (alertes, ouvertures de partie…) : protège le serveur et les données */
+const HITS = new Map();
+function hitsAutorises(cle, maxParMinute) {
+const t = Date.now();
+const r = HITS.get(cle) || { n: 0, t };
+if (t - r.t > 60000) { r.n = 0; r.t = t; }
+r.n++;
+HITS.set(cle, r);
+if (HITS.size > 5000) HITS.clear();
+return r.n <= (maxParMinute || 30);
+}
+function ptsCompte(id, creer) {
+if (!id) return null;
+if (!db.kleanPts[id] && creer) db.kleanPts[id] = { solde: 0, hist: [] };
+return db.kleanPts[id] || null;
+}
+/* 🪙 écriture au registre : jamais de solde « donné » par le client, toujours un mouvement tracé */
+function ptsMouvement(clientId, pts, motif, ref) {
+const c = ptsCompte(clientId, true);
+if (!c) return null;
+const n = Math.trunc(Number(pts) || 0);
+if (!n) return c;
+c.solde = Math.max(0, (c.solde || 0) + n);
+c.hist.push({ at: nowISO(), pts: n, motif: String(motif || '').slice(0, 80), ref: String(ref || '').slice(0, 40), solde: c.solde });
+if (c.hist.length > 300) c.hist = c.hist.slice(-300);
+saveDb();
+return c;
+}
+function ptsSolde(clientId) { const c = ptsCompte(clientId); return c ? (c.solde || 0) : 0; }
+function partiesDuJour(clientId) {
+const j = jourKey();
+return (db.parties || []).filter(p => p.clientId === clientId && (p.at || '').slice(0, 10) === j).length;
+}
+function flipQuota(clientId) {
+const max = Math.max(0, parseInt(flipCfg().partiesJour, 10) || 0);
+const faites = clientId ? partiesDuJour(clientId) : 0;
+return { max, faites, reste: Math.max(0, max - faites) };
+}
+function flipPublic(clientId) {
+const f = flipCfg();
+const q = flipQuota(clientId);
+return {
+  actif: !!f.actif, accueil: !!f.accueil, titre: f.titre || 'Flip Fizz', desc: f.desc || '',
+  url: f.url || '', mediaUrl: f.mediaUrl || '', mediaType: f.mediaType || '', videoUrl: f.videoUrl || '',
+  regles: f.regles || '', pointsParPartie: Math.max(1, parseInt(f.pointsParPartie, 10) || 10),
+  pointsBonus: Math.max(0, parseInt(f.pointsBonus, 10) || 0), seuilBonus: Math.max(1, parseInt(f.seuilBonus, 10) || 100),
+  partiesJour: q.max, partiesFaites: q.faites, partiesRestantes: q.reste,
+  dureeMin: flipDureeMin(f),
+  recompensesActives: !!f.recompensesActives, connecte: !!clientId, solde: clientId ? ptsSolde(clientId) : 0
+};
+}
+/* 🎁 une récompense est-elle réclamable par ce client ? (le serveur seul en décide) */
+function recompEtat(r, clientId) {
+const t = Date.now();
+const debut = r.debut ? new Date(r.debut).getTime() : 0;
+const fin = r.fin ? new Date(r.fin + 'T23:59:59').getTime() : 0;
+const pris = (db.parties && r.claims || []).filter(x => clientId && x.clientId === clientId).length;
+const stock = (r.stock === null || r.stock === undefined) ? null : Math.max(0, parseInt(r.stock, 10) || 0);
+let raison = '';
+if (!r.actif) raison = 'Récompense désactivée';
+else if (debut && t < debut) raison = 'Pas encore commencée';
+else if (fin && t > fin) raison = 'Récompense expirée';
+else if (stock !== null && stock <= 0) raison = 'Stock épuisé';
+else if (clientId && r.unique !== false && pris > 0) raison = 'Déjà obtenue';
+else if (clientId && ptsSolde(clientId) < (parseInt(r.points, 10) || 0)) raison = 'Points insuffisants';
+return { dispo: !raison, raison, stock, dejapris: pris };
+}
+/* ════════ 🧠 QUIZ — 🎯 défi du jour & 🔥 séries : toutes les règles sont ICI (jamais dans le téléphone) ════════ */
+function quizCfgQuiz() {
+  const c = db.quizCfg || {};
+  const nb = (v, d, min, max) => { const n = parseInt(v, 10); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : d; };
+  return {
+    defiActif: c.defiActif !== false, defiPoints: nb(c.defiPoints, 10, 0, 1000),
+    seriePas: nb(c.seriePas, 5, 0, 50), serieBonus: nb(c.serieBonus, 5, 0, 500),
+    defiQuestionId: String(c.defiQuestionId == null ? '' : c.defiQuestionId).slice(0, 40)
+  };
+}
+/* questions réellement publiées (actives + date de programmation atteinte) */
+function quizPubliables() {
+  const t = Date.now();
+  return (db.quizBank.questions || []).filter(q => q.actif !== false && (!q.debut || new Date(q.debut).getTime() <= t));
+}
+function quizHash(s) { let h = 0; for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) % 1000003; return h; }
+/* la question du jour : la même pour tout le monde pendant 24 h, sans jamais laisser fuiter la réponse */
+function quizDefiQuestion() {
+  const qs = quizPubliables();
+  if (!qs.length) return null;
+  /* le PDG peut imposer la question du jour ; sinon tirage stable pour la journée */
+  const imposee = quizCfgQuiz().defiQuestionId;
+  if (imposee) { const q = qs.find(x => x.id === imposee); if (q) return q; }
+  return qs[quizHash(jourKey()) % qs.length];
+}
+/* 🔥 série en cours = bonnes réponses consécutives les plus récentes */
+function quizSerieDe(clientId) {
+  const faits = (db.quizPlay || []).filter(x => x.clientId === clientId);
+  let n = 0;
+  for (let i = faits.length - 1; i >= 0; i--) { if (faits[i].bon) n++; else break; }
+  return n;
+}
+function quizDefiEtat(clientId) {
+  const cfg = quizCfgQuiz();
+  const q = quizDefiQuestion();
+  const etat = (clientId && (db.quizDefi || {})[clientId]) || null;
+  const jour = jourKey();
+  if (!q) return { actif: false, points: cfg.defiPoints, fait: false, reussi: false, question: null };
+  const fait = !!(etat && etat.jour === jour && etat.qid === q.id);
+  return {
+    actif: cfg.defiActif, jour, points: cfg.defiPoints, fait,
+    reussi: !!(etat && etat.jour === jour && etat.reussi),
+    /* la question est envoyée SANS la bonne réponse */
+    question: (clientId && cfg.defiActif && !fait)
+      ? { id: q.id, cat: q.cat || '', niveau: parseInt(q.niveau, 10) || 1, q: q.q,
+          choix: (q.choix || []).slice(0, 4), points: parseInt(q.points, 10) || 10 }
+      : null
+  };
+}
+function quizStats() {
+const play = db.quizPlay || [];
+const parJour = {}, parMois = {};
+play.forEach(p => { const j = (p.at || '').slice(0, 10); parJour[j] = (parJour[j] || 0) + 1; parMois[j.slice(0, 7)] = (parMois[j.slice(0, 7)] || 0) + 1; });
+const clients = new Set(play.map(p => p.clientId));
+return {
+  questions: (db.quizBank.questions || []).length,
+  categories: (db.quizBank.categories || []).length,
+  actives: (db.quizBank.questions || []).filter(q => q.actif !== false).length,
+  reponses: play.length,
+  bonnes: play.filter(p => p.bon).length,
+  joueurs: clients.size,
+  points: play.reduce((a, p) => a + (p.pts || 0), 0),
+  parJour, parMois,
+  /* 🎯 défi du jour et 🔥 séries */
+  defisJoues: Object.values(db.quizDefi || {}).length,
+  defisReussis: Object.values(db.quizDefi || {}).filter(x => x.reussi).length,
+  series: Object.values(db.quizSerie || {}).length,
+  meilleureSerie: (() => {
+    let m = 0; const par = {};
+    play.forEach(p => { if (p.bon) { par[p.clientId] = (par[p.clientId] || 0) + 1; m = Math.max(m, par[p.clientId]); } else par[p.clientId] = 0; });
+    return m;
+  })(),
+  jamaisArgent: true,
+  cfg: quizCfgQuiz()
+};
+}
+function flipStats() {
+const parties = db.parties || [];
+const parJour = {}, parMois = {};
+parties.forEach(p => {
+  const j = (p.at || '').slice(0, 10), m = j.slice(0, 7);
+  parJour[j] = (parJour[j] || 0) + 1; parMois[m] = (parMois[m] || 0) + 1;
+});
+const claims = (db.recompenses || []).reduce((a, r) => a + ((r.claims || []).length), 0);
+const restantes = (db.recompenses || []).reduce((a, r) => a + (r.stock === null || r.stock === undefined ? 0 : Math.max(0, parseInt(r.stock, 10) || 0)), 0);
+return {
+  joueurs: new Set(parties.map(p => p.clientId)).size,
+  parties: parties.length,
+  partiesGratuitesUtilisees: parties.filter(p => p.gratuite).length,
+  pointsDistribues: parties.reduce((a, p) => a + (p.pts || 0), 0),
+  recompensesReclamees: claims,
+  recompensesRestantes: restantes,
+  recompenses: (db.recompenses || []).length,
+  pointsEnCirculation: Object.values(db.kleanPts || {}).reduce((a, c) => a + (c.solde || 0), 0),
+  partiesRefusees: parties.filter(p => String(p.statut || '').indexOf('refusee') === 0).length,
+  dureeSuspecte: parties.filter(p => p.triche).length,
+  dureeMin: flipDureeMin(),
+  parJour, parMois
+};
 }
 
 const server = http.createServer(async (req, res) => {
@@ -1706,7 +1931,9 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  /* 🔎 RECHERCHE INTELLIGENTE — proximité GPS + service + disponibilité + zone d'intervention */
+
+
+/* 🔎 RECHERCHE INTELLIGENTE — proximité GPS + service + disponibilité + zone d'intervention */
   if (p === '/api/recherche' && req.method === 'GET') {
     const cfg = matchCfg();
     const cli = findClientByToken(req);
@@ -1805,6 +2032,353 @@ const server = http.createServer(async (req, res) => {
     resu.quartier = resu.quartier || quartierR;
     resu.client = cli ? { id: cli.id, nom: cli.nom } : null;
     return sendJson(res, 200, resu);
+  }
+
+  /* ════════ 🎮 FLIP FIZZ — configuration publique (le jeu est INVISIBLE par défaut) ════════ */
+  if (p === '/api/flip' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    return sendJson(res, 200, { ok: true, flip: flipPublic(cli && cli.id) });
+  }
+  /* ouvrir une partie : le SERVEUR vérifie le quota et remet un jeton de partie à usage unique */
+  if (p === '/api/flip/ouvrir' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous pour jouer et gagner des Klean Points', code: 'connexion' });
+    const f = flipCfg();
+    if (!f.actif) return sendJson(res, 403, { error: 'Le jeu est désactivé pour le moment', code: 'inactif' });
+    const q = flipQuota(cli.id);
+    if (q.reste <= 0) return sendJson(res, 403, { error: 'Vos ' + q.max + ' parties gratuites du jour sont utilisées. Revenez demain !', code: 'quota', reste: 0 });
+    const sess = { id: uid('FF'), clientId: cli.id, at: nowISO(), t0: Date.now(), expireAt: Date.now() + 30 * 60000, use: false, ip: clientIp(req) };
+    db.flipSess.push(sess);
+    if (db.flipSess.length > 3000) db.flipSess = db.flipSess.slice(-2000);
+    saveDb();
+    return sendJson(res, 200, { ok: true, session: sess.id, expireDans: 1800, reste: q.reste - 1, url: f.url || '' });
+  }
+  /* fin de partie : le serveur plafonne, vérifie la durée, et n'accepte JAMAIS deux fois la même session */
+  if (p === '/api/flip/fin' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connexion requise', code: 'connexion' });
+    const b = await readBody(req);
+    const sess = (db.flipSess || []).find(x => x.id === String(b.session || ''));
+    if (!sess || sess.clientId !== cli.id) return sendJson(res, 400, { error: 'Partie inconnue — relancez le jeu', code: 'session' });
+    if (sess.use) return sendJson(res, 409, { error: 'Cette partie a déjà été enregistrée', code: 'deja' });
+    if (Date.now() > sess.expireAt) { sess.use = true; saveDb(); return sendJson(res, 410, { error: 'Partie expirée (plus de 30 minutes) — aucune point compté', code: 'expiree' }); }
+    const f = flipCfg();
+    const dureeMin = flipDureeMin(f);
+    const score = Math.max(0, Math.min(99999, parseInt(b.score, 10) || 0));
+    /* 🛡️ ANTI-TRICHE : la durée est celle MESURÉE PAR LE SERVEUR (sess.t0).
+       La durée annoncée par le téléphone ne peut pas la rallonger ; si elle est plus grande,
+       on note le mensonge et on garde la durée réelle. */
+    const t0 = parseInt(sess.t0, 10) || Date.parse(sess.at) || Date.now();
+    const reelleSec = Math.max(0, Math.min(3600, Math.floor((Date.now() - t0) / 1000)));
+    const declareeSec = Math.max(0, Math.min(3600, parseInt(b.dureeSec, 10) || 0));
+    const dureeSec = Math.min(declareeSec || reelleSec, reelleSec);
+    const mensonge = declareeSec > reelleSec + 5 ? 'duree' : '';
+    sess.use = true;
+    /* 🛡️ ANTI-FRAUDE : durée minimale, plafond de points, une seule récompense par session */
+    if (dureeSec < dureeMin || (mensonge && dureeMin > 0)) {
+      db.parties.push({ id: uid('PA'), clientId: cli.id, at: nowISO(), score, dureeSec, declareeSec, triche: mensonge, pts: 0, statut: 'refusee-duree', gratuite: true, ip: clientIp(req) });
+      saveDb();
+      return sendJson(res, 200, { ok: true, pts: 0, refus: 'Partie trop courte pour compter (minimum ' + dureeMin + ' s) — la durée est vérifiée par le serveur' });
+    }
+    let pts = Math.min(Math.max(1, parseInt(f.pointsParPartie, 10) || 10), Math.max(1, Math.round(score / 10)));
+    let bonus = 0;
+    if (score >= (parseInt(f.seuilBonus, 10) || 100) && (parseInt(f.pointsBonus, 10) || 0) > 0) bonus = parseInt(f.pointsBonus, 10) || 0;
+    if (db.parties.filter(x => x.clientId === cli.id && (x.at || '').slice(0, 10) === jourKey()).length >= (parseInt(f.partiesJour, 10) || 0)) {
+      pts = 0; bonus = 0;
+      db.parties.push({ id: uid('PA'), clientId: cli.id, at: nowISO(), score, dureeSec, pts: 0, statut: 'refusee-quota', gratuite: true, ip: clientIp(req) });
+      saveDb();
+      return sendJson(res, 200, { ok: true, pts: 0, refus: 'Quota du jour atteint' });
+    }
+    const total = pts + bonus;
+    db.parties.push({ id: uid('PA'), clientId: cli.id, at: nowISO(), score, dureeSec, pts: total, statut: 'enregistree', gratuite: true, ip: clientIp(req) });
+    if (total > 0) ptsMouvement(cli.id, total, 'Flip Fizz — score ' + score + (bonus ? ' (bonus +' + bonus + ')' : ''), 'FF');
+    saveDb();
+    const c = ptsCompte(cli.id);
+    return sendJson(res, 200, { ok: true, pts: total, bonus, solde: c ? c.solde : 0, score, reste: flipQuota(cli.id).reste });
+  }
+  /* ════════ 🪙 KLEAN POINTS — solde, historique, récompenses obtenues ════════ */
+  if (p === '/api/points' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous', code: 'connexion' });
+    const c = ptsCompte(cli.id, true);
+    const parties = (db.parties || []).filter(x => x.clientId === cli.id).slice(-40).reverse();
+    const obtenues = [];
+    (db.recompenses || []).forEach(r => (r.claims || []).forEach(cl => { if (cl.clientId === cli.id) obtenues.push({ nom: r.nom, at: cl.at, points: r.points, code: cl.code }); }));
+    return sendJson(res, 200, {
+      ok: true, solde: c.solde || 0, hist: (c.hist || []).slice(-60).reverse(), parties,
+      obtenues, jamaisArgent: true,
+      regle: 'Les Klean Points ne sont pas convertibles en argent liquide : ils servent uniquement à obtenir des récompenses Klean.'
+    });
+  }
+  /* ════════ 🎁 RÉCOMPENSES — liste éligible + échange sécurisé ════════ */
+  if (p === '/api/recompenses' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    const solde = cli ? ptsSolde(cli.id) : 0;
+    const liste = (db.recompenses || []).map(r => {
+      const e = recompEtat(r, cli && cli.id);
+      return { id: r.id, nom: r.nom, desc: r.desc, mediaUrl: r.mediaUrl || '', points: r.points || 0,
+        stock: e.stock, debut: r.debut || '', fin: r.fin || '', actif: !!r.actif, dispo: e.dispo, raison: e.raison, unique: r.unique !== false };
+    }).filter(r => r.actif);
+    return sendJson(res, 200, { ok: true, liste, solde, connecte: !!cli });
+  }
+  if (p === '/api/recompenses/echanger' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous', code: 'connexion' });
+    if (!flipCfg().recompensesActives) return sendJson(res, 403, { error: 'Le programme de récompenses est en pause' });
+    const b = await readBody(req);
+    const r = (db.recompenses || []).find(x => x.id === String(b.id || ''));
+    if (!r) return sendJson(res, 404, { error: 'Récompense introuvable' });
+    const e = recompEtat(r, cli.id);
+    if (!e.dispo) return sendJson(res, 400, { error: e.raison || 'Indisponible', code: 'indispo' });
+    const pts = Math.max(1, parseInt(r.points, 10) || 0);
+    if (ptsSolde(cli.id) < pts) return sendJson(res, 400, { error: 'Points insuffisants' });
+    r.claims = r.claims || [];
+    r.claims.push({ clientId: cli.id, at: nowISO(), points: pts, code: uid('RC') });
+    if (r.stock !== null && r.stock !== undefined) r.stock = Math.max(0, (parseInt(r.stock, 10) || 0) - 1);
+    ptsMouvement(cli.id, -pts, 'Récompense obtenue : ' + (r.nom || ''), 'RC');
+    auditLog('recompense_echangee', { client: cli.nom, id: cli.id, recompense: r.nom, points: pts });
+    emitAdmin('annonce', '🎁 ' + (cli.nom || 'Un client') + ' a obtenu « ' + (r.nom || '') + ' » (' + pts + ' pts)');
+    saveDb();
+    return sendJson(res, 200, { ok: true, solde: ptsSolde(cli.id), code: r.claims[r.claims.length - 1].code, resteStock: r.stock });
+  }
+  /* ════════ 🧠 QUIZ PERMANENT — banque gérée par le HQ, correction CÔTÉ SERVEUR ════════ */
+  if (p === '/api/quiz/banque' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    const cfgQz = quizCfgQuiz();
+    const cats = (db.quizBank.categories || []).filter(c => c.actif !== false);
+    const faits = cli ? (db.quizPlay || []).filter(x => x.clientId === cli.id) : [];
+    const faitIds = new Set(faits.map(x => x.qid));
+    const parCat = {};
+    cats.forEach(c => {
+      const qs = (db.quizBank.questions || []).filter(q => q.cat === c.id && q.actif !== false);
+      parCat[c.id] = { total: qs.length, faits: qs.filter(q => faitIds.has(q.id)).length, points: qs.reduce((a, q) => a + (parseInt(q.points, 10) || 10), 0) };
+    });
+    return sendJson(res, 200, {
+      ok: true,
+      categories: cats.map(c => ({ id: c.id, nom: c.nom, ic: c.ic || '🧠', desc: c.desc || '' })),
+      progression: parCat,
+      mesReponses: faits.length, mesBonnes: faits.filter(x => x.bon).length,
+      mesPoints: faits.reduce((a, x) => a + (x.pts || 0), 0),
+      solde: cli ? ptsSolde(cli.id) : 0,
+      /* 🔥 série en cours, 🎯 défi du jour et 📜 historique des résultats */
+      serie: cli ? quizSerieDe(cli.id) : 0,
+      seriePas: cfgQz.seriePas, serieBonus: cfgQz.serieBonus,
+      defi: quizDefiEtat(cli ? cli.id : null),
+      hist: cli ? faits.slice(-20).reverse().map(x => {
+        const q = (db.quizBank.questions || []).find(y => y.id === x.qid) || {};
+        const c = (db.quizBank.categories || []).find(y => y.id === x.cat) || {};
+        return { qid: x.qid, q: String(q.q || '').slice(0, 90), cat: c.nom || '', bon: !!x.bon, pts: x.pts || 0, at: x.at || '' };
+      }) : []
+    });
+  }
+  if (p === '/api/quiz/questions' && req.method === 'GET') {
+    const cat = String(url.searchParams.get('cat') || '').slice(0, 40);
+    const niv = parseInt(url.searchParams.get('niveau'), 10) || 0;
+    const cli = findClientByToken(req);
+    const faitIds = new Set((db.quizPlay || []).filter(x => cli && x.clientId === cli.id).map(x => x.qid));
+    const t = Date.now();
+    const qs = (db.quizBank.questions || [])
+      .filter(q => q.actif !== false && !faitIds.has(q.id))
+      .filter(q => !cat || q.cat === cat)
+      .filter(q => !niv || (parseInt(q.niveau, 10) || 1) === niv)
+      .filter(q => !q.debut || new Date(q.debut).getTime() <= t)
+      .slice(0, 12)
+      .map(q => ({ id: q.id, cat: q.cat, niveau: parseInt(q.niveau, 10) || 1, q: q.q, choix: (q.choix || []).slice(0, 4), points: parseInt(q.points, 10) || 10 }));
+    return sendJson(res, 200, { ok: true, questions: qs, restantes: qs.length });
+  }
+  if (p === '/api/quiz/repondre' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous pour gagner des points', code: 'connexion' });
+    const b = await readBody(req);
+    const q = (db.quizBank.questions || []).find(x => x.id === String(b.qid || '') && x.actif !== false);
+    if (!q) return sendJson(res, 404, { error: 'Question introuvable' });
+    if ((db.quizPlay || []).some(x => x.clientId === cli.id && x.qid === q.id))
+      return sendJson(res, 409, { error: 'Vous avez déjà répondu à cette question', code: 'deja' });
+    const choix = parseInt(b.choix, 10);
+    const bonne = parseInt(q.bonne, 10) || 0;
+    const bon = choix === bonne;
+    const pts = bon ? (parseInt(q.points, 10) || 10) : 0;
+    const cfgQz = quizCfgQuiz();
+    const jour = jourKey();
+    /* 🎯 défi du jour : une seule fois par jour et par client (impossible à rejouer depuis le téléphone) */
+    const defiQ = quizDefiQuestion();
+    let bonusDefi = 0, defiFait = false;
+    if (defiQ && defiQ.id === q.id && cfgQz.defiActif) {
+      const etat = (db.quizDefi || {})[cli.id] || null;
+      const dejaFait = !!(etat && etat.jour === jour);
+      if (!dejaFait) { db.quizDefi[cli.id] = { jour, qid: q.id, reussi: bon, at: nowISO() }; defiFait = true; }
+      if (!dejaFait && bon) bonusDefi = cfgQz.defiPoints;
+    }
+    db.quizPlay.push({ id: uid('QP'), clientId: cli.id, nom: cli.nom || '', qid: q.id, cat: q.cat || '', bon, pts, at: nowISO() });
+    if (db.quizPlay.length > 5000) db.quizPlay = db.quizPlay.slice(-4000);
+    /* 🔥 série : une prime par palier atteint, et une seule fois par jour */
+    let bonusSerie = 0;
+    const serie = quizSerieDe(cli.id);
+    if (bon && cfgQz.seriePas >= 2 && cfgQz.serieBonus > 0 && serie >= cfgQz.seriePas && serie % cfgQz.seriePas === 0) {
+      const s0 = (db.quizSerie || {})[cli.id] || null;
+      if (!s0 || s0.jour !== jour || (parseInt(s0.dernierPalier, 10) || 0) < serie) {
+        bonusSerie = cfgQz.serieBonus;
+        db.quizSerie[cli.id] = { jour, dernierPalier: serie, at: nowISO() };
+      }
+    }
+    if (pts) ptsMouvement(cli.id, pts, 'Quiz Klean — bonne réponse', 'QZ');
+    if (bonusDefi) ptsMouvement(cli.id, bonusDefi, 'Quiz Klean — défi du jour', 'QD');
+    if (bonusSerie) ptsMouvement(cli.id, bonusSerie, 'Quiz Klean — série de ' + serie + ' bonnes réponses', 'QS');
+    saveDb();
+    return sendJson(res, 200, {
+      ok: true, bon, bonne, pts, bonusDefi, bonusSerie, pointsTotaux: pts + bonusDefi + bonusSerie,
+      serie, defiFait, defiPoints: cfgQz.defiPoints, seriePas: cfgQz.seriePas,
+      solde: ptsSolde(cli.id), explication: q.expl || ''
+    });
+  }
+  if (p === '/api/quiz/classement' && req.method === 'GET') {
+    const m = {};
+    (db.quizPlay || []).forEach(x => { if (!m[x.clientId]) m[x.clientId] = { nom: x.nom || 'Client Klean', pts: 0, bonnes: 0, n: 0 }; m[x.clientId].pts += x.pts || 0; m[x.clientId].n++; if (x.bon) m[x.clientId].bonnes++; });
+    const liste = Object.entries(m).map(([id, v]) => ({ id, nom: v.nom, pts: v.pts, bonnes: v.bonnes, reponses: v.n })).sort((a, b) => b.pts - a.pts || b.bonnes - a.bonnes).slice(0, 20);
+    return sendJson(res, 200, { ok: true, liste, soldeGlobal: Object.values(db.kleanPts || {}).reduce((a, c) => a + (c.solde || 0), 0) });
+  }
+  /* ════════ ℹ️ INFORMATIONS — contenus publiés par le HQ, par catégories ════════ */
+  if (p === '/api/infos' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    const role = String(url.searchParams.get('role') || 'client');
+    const t = Date.now();
+    const liste = (db.infos || [])
+      .filter(x => x.actif !== false)
+      .filter(x => !x.debut || new Date(x.debut).getTime() <= t)
+      .filter(x => !x.fin || new Date(x.fin + 'T23:59:59').getTime() >= t)
+      .filter(x => role === 'pro' ? x.cible !== 'client' : x.cible !== 'pro')
+      .sort((a, b) => (b.epin ? 1 : 0) - (a.epin ? 1 : 0) || String(b.at || '').localeCompare(String(a.at || '')))
+      .map(x => ({ id: x.id, cat: x.cat, titre: x.titre, texte: x.texte, ic: x.ic || 'ℹ️', at: x.at, epin: !!x.epin, par: x.par || 'Klean' }));
+    const cats = [...new Set(liste.map(x => x.cat))];
+    return sendJson(res, 200, { ok: true, liste, categories: cats, vu: cli ? (db.prefs[cli.id] || {}).infosVues || [] : [] });
+  }
+  /* ════════ 🆘 URGENCE — alertes (position UNIQUEMENT si le client l'autorise) ════════ */
+  if (p === '/api/urgence/alerte' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    const b = await readBody(req);
+    const ip = clientIp(req);
+    const cle = cli ? cli.id : ip;
+    if (!hitsAutorises('urg:' + cle, 5)) return sendJson(res, 429, { error: 'Trop d’alertes envoyées — patientez une minute', code: 'plafond' });
+    const motif = String(b.motif || 'Urgence').slice(0, 120);
+    const partage = !!b.partage;
+    let lat = parseFloat(b.lat), lng = parseFloat(b.lng);
+    if (!partage || !validCILatLng(lat, lng)) { lat = null; lng = null; }
+    const rec = {
+      id: uid('UR'), at: nowISO(), clientId: cli ? cli.id : null, nom: cli ? (cli.nom || '') : 'Visiteur',
+      tel: cli ? (cli.tel || '') : '', motif, lat, lng, partage, statut: 'nouvelle',
+      appels: [{ at: nowISO(), service: String(b.service || '').slice(0, 20) }]
+    };
+    db.urgHist.push(rec);
+    if (db.urgHist.length > 2000) db.urgHist = db.urgHist.slice(-1500);
+    saveDb();
+    emitAdmin('urgence', '🆘 ' + (rec.nom || 'Client') + ' — ' + motif + (partage && lat ? ' (position partagée)' : ''));
+    return sendJson(res, 200, { ok: true, id: rec.id, at: rec.at });
+  }
+  if (p === '/api/urgence/historique' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connexion requise' });
+    const liste = (db.urgHist || []).filter(x => x.clientId === cli.id).slice(-30).reverse()
+      .map(x => ({ id: x.id, at: x.at, motif: x.motif, statut: x.statut, partage: !!x.partage }));
+    return sendJson(res, 200, { ok: true, liste });
+  }
+  if (p === '/api/urgence/contacts' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    return sendJson(res, 200, { ok: true, contacts: (cli && db.urgContacts[cli.id]) || [] });
+  }
+  if (p === '/api/urgence/contacts' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous pour enregistrer vos contacts' });
+    const b = await readBody(req);
+    const nom = String(b.nom || '').trim().slice(0, 40);
+    const tel = String(b.tel || '').replace(/\D/g, '').slice(0, 15);
+    if (nom.length < 2 || tel.length < 8) return sendJson(res, 400, { error: 'Nom et téléphone valides requis' });
+    const liste = db.urgContacts[cli.id] = db.urgContacts[cli.id] || [];
+    if (liste.length >= 5) return sendJson(res, 400, { error: '5 contacts maximum' });
+    liste.push({ id: uid('UC'), nom, tel, lien: String(b.lien || '').slice(0, 30) });
+    saveDb();
+    return sendJson(res, 200, { ok: true, contacts: liste });
+  }
+  if (p === '/api/urgence/contacts/suppr' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connexion requise' });
+    const b = await readBody(req);
+    db.urgContacts[cli.id] = (db.urgContacts[cli.id] || []).filter(x => x.id !== String(b.id || ''));
+    saveDb();
+    return sendJson(res, 200, { ok: true, contacts: db.urgContacts[cli.id] });
+  }
+  /* ════════ ⚙️ OPTIONS — préférences du client (stockées sur le compte) ════════ */
+  if (p === '/api/prefs' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    const defaut = { langue: 'fr', notif: true, sons: true, vibre: true, tailleTexte: 'normal', animReduites: false,
+      partagePosition: true, partageNumero: false, masquerQuartier: false, pub: true, affichageCompact: false };
+    if (!cli) return sendJson(res, 200, { ok: true, prefs: defaut, connecte: false });
+    db.prefs[cli.id] = Object.assign(defaut, db.prefs[cli.id] || {});
+    return sendJson(res, 200, { ok: true, prefs: db.prefs[cli.id], connecte: true });
+  }
+  if (p === '/api/prefs' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous pour enregistrer vos préférences' });
+    const b = await readBody(req);
+    const p0 = db.prefs[cli.id] = Object.assign(db.prefs[cli.id] || {}, {});
+    const bools = ['notif', 'sons', 'vibre', 'animReduites', 'partagePosition', 'partageNumero', 'masquerQuartier', 'pub', 'affichageCompact'];
+    bools.forEach(k => { if (b[k] !== undefined) p0[k] = !!b[k]; });
+    if (b.tailleTexte !== undefined) p0.tailleTexte = ['petit', 'normal', 'grand', 'tresgrand'].includes(b.tailleTexte) ? b.tailleTexte : 'normal';
+    if (b.langue !== undefined) p0.langue = ['fr', 'en'].includes(b.langue) ? b.langue : 'fr';
+    if (Array.isArray(b.infosVues)) p0.infosVues = b.infosVues.slice(0, 200).map(x => String(x).slice(0, 30));
+    saveDb();
+    return sendJson(res, 200, { ok: true, prefs: p0 });
+  }
+  /* ════════ 👤 COMPTE — fiche d'activité : ce que l'utilisateur peut vérifier lui-même ════════ */
+  if (p === '/api/compte/activite' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous', code: 'connexion' });
+    const mes = (db.missions || []).filter(m => m.clientId === cli.id);
+    const c = ptsCompte(cli.id);
+    return sendJson(res, 200, {
+      ok: true,
+      profil: {
+        nom: cli.nom || '', tel: cli.tel || '', quartier: cli.quartier || '', ville: cli.ville || '',
+        mail: cli.mail || '', photo: !!cli.photo, creeLe: (cli.createdAt || '').slice(0, 10),
+        desactive: !!cli.desactive, suppressionDemandee: !!cli.suppressionDemandee
+      },
+      activite: {
+        missions: mes.length,
+        missionsTerminees: mes.filter(x => x.status === 'terminee').length,
+        derniere: mes.length ? { service: mes[mes.length - 1].service, at: mes[mes.length - 1].createdAt } : null,
+        paiements: mes.filter(x => x.paiement && ['reussi', 'declare', 'en_attente'].includes(x.paiement.statut)).length,
+        points: c ? (c.solde || 0) : 0,
+        avis: mes.filter(x => x.note).length
+      },
+      connexions: {
+        derniere: cli.lastLogin || null, appareil: cli.lastAppareil || '',
+        actuel: String(req.headers['user-agent'] || '').slice(0, 120),
+        note: 'Un seul accès par appareil : changer le mot de passe déconnecte immédiatement les autres appareils.'
+      },
+      droits: { export: true, desactivation: true, suppression: true, assistance: true }
+    });
+  }
+
+  /* ════════ 👤 COMPTE — désactivation / demande de suppression (jamais sans mot de passe) ════════ */
+  if (p === '/api/compte/statut' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connexion requise' });
+    const b = await readBody(req);
+    const type = String(b.type || '');
+    if (!['desactiver', 'reactiver', 'supprimer'].includes(type)) return sendJson(res, 400, { error: 'Action inconnue' });
+    const pw = String(b.password || '');
+    if (clientToken(cli.passHash) !== clientToken(hashPassword(cli.salt, pw)) && hashPassword(cli.salt, pw) !== cli.passHash)
+      return sendJson(res, 401, { error: 'Mot de passe incorrect' });
+    if (type === 'desactiver') { cli.desactive = true; cli.desactiveAt = nowISO(); }
+    if (type === 'reactiver') { cli.desactive = false; }
+    if (type === 'supprimer') {
+      db.accountRequests.push({ id: uid('AR'), at: nowISO(), type: 'client', nom: cli.nom, tel: cli.tel, clientId: cli.id, demande: 'suppression', statut: 'nouvelle' });
+      cli.suppressionDemandee = nowISO();
+    }
+    auditLog('compte_' + type, { id: cli.id, tel: cli.tel });
+    saveDb();
+    return sendJson(res, 200, { ok: true, type, message: type === 'supprimer'
+      ? 'Demande de suppression enregistrée. Le support Klean vous contacte sous 48 h (vos points et missions sont conservés jusqu’à confirmation).'
+      : (type === 'desactiver' ? 'Compte désactivé : vous ne recevrez plus de notifications.' : 'Compte réactivé.') });
   }
 
   /* 👤 FICHE PUBLIQUE d'un professionnel — seulement ses informations autorisées */
@@ -2096,7 +2670,8 @@ const server = http.createServer(async (req, res) => {
     if (perr) return sendJson(res, 400, { error: perr });
     if (db.clients.find(cl => cl.tel === tel)) return sendJson(res, 409, { error: 'Ce numéro a déjà un compte — connectez-vous' });
     const salt = crypto.randomBytes(12).toString('hex');
-    const cl = { id: uid('CL'), nom: b.nom.trim(), tel, quartier: String(b.quartier || '').slice(0, 60), ville: String(b.ville || '').slice(0, 60), mail: String(b.mail || '').slice(0, 80), salt, passHash: hashPassword(salt, b.password), createdAt: nowISO() };
+    const cl = { id: uid('CL'), nom: b.nom.trim(), tel, quartier: String(b.quartier || '').slice(0, 60), ville: String(b.ville || '').slice(0, 60), mail: String(b.mail || '').slice(0, 80), salt, passHash: hashPassword(salt, b.password), createdAt: nowISO(),
+      lastLogin: nowISO(), lastAppareil: String(req.headers['user-agent'] || '').slice(0, 120) };
     db.clients.push(cl); saveDb();
     console.log(`👤 Nouveau compte client : ${cl.nom} (${tel})`);
     return sendJson(res, 201, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom });
@@ -2119,6 +2694,7 @@ const server = http.createServer(async (req, res) => {
     }
     loginTries.delete(ipc + '|cli');
     if (cl.blocked) return sendJson(res, 403, { error: 'Compte bloqué' + (cl.blockReason ? ' — motif : ' + cl.blockReason : '') + ' · Contactez Klean-Service', blocked: true });
+    try { cl.lastLogin = nowISO(); cl.lastAppareil = String(req.headers['user-agent'] || '').slice(0, 120); cl.online = true; saveDb(); } catch (e) {}
     return sendJson(res, 200, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom, quartier: cl.quartier, ville: cl.ville || '', mail: cl.mail || '', photo: cl.photo || '' });
   }
 
@@ -3508,6 +4084,249 @@ const server = http.createServer(async (req, res) => {
     if (db.ad && db.ad.mediaUrl) pubSupprimerFichier(db.ad.mediaUrl);   // 🧹 pas de fichier orphelin
     db.ad = null; saveDb();
     return sendJson(res, 200, { ok: true });
+  }
+
+  /* ════════ 🎮 FLIP FIZZ — image / vidéo du jeu (téléversement PDG) ════════ */
+  if (p === '/api/admin/flip/media' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBodyBig(req, 2e7);
+    if (!b) return sendJson(res, 413, { error: 'Fichier trop lourd (limite 12 Mo vidéo / 3 Mo image)' });
+    const out = pubMediaEnregistrer(String(b.dataUrl || ''));
+    if (out.error) return sendJson(res, out.code || 400, { error: out.error });
+    const f = db.flip = db.flip || {};
+    const genre = String(b.genre || 'image') === 'video' ? 'video' : 'image';
+    if (genre === 'video') {
+      if (f.videoUrl && f.videoUrl !== out.url) pubSupprimerFichier(f.videoUrl);
+      f.videoUrl = out.url;
+    } else {
+      if (f.mediaUrl && f.mediaUrl !== out.url) pubSupprimerFichier(f.mediaUrl);
+      f.mediaUrl = out.url; f.mediaType = out.mediaType;
+    }
+    f.majAt = nowISO(); saveDb();
+    auditLog('flip_media', { url: out.url, genre, par: act(req) });
+    return sendJson(res, 200, { ok: true, url: out.url, mediaType: out.mediaType, mo: out.mo, flip: f });
+  }
+  if (p === '/api/admin/flip/media' && req.method === 'DELETE') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const f = db.flip = db.flip || {};
+    if (String(b.quoi || 'image') === 'video') { if (f.videoUrl) pubSupprimerFichier(f.videoUrl); f.videoUrl = ''; }
+    else { if (f.mediaUrl) pubSupprimerFichier(f.mediaUrl); f.mediaUrl = ''; f.mediaType = ''; }
+    f.majAt = nowISO(); saveDb();
+    return sendJson(res, 200, { ok: true, flip: f });
+  }
+  /* ════════ 🎁 RÉCOMPENSE — visuel (téléversement PDG, isolé de la publicité) ════════ */
+  if (p === '/api/admin/recomp/media' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBodyBig(req, 2e7);
+    if (!b) return sendJson(res, 413, { error: 'Fichier trop lourd' });
+    const out = pubMediaEnregistrer(String(b.dataUrl || ''));
+    if (out.error) return sendJson(res, out.code || 400, { error: out.error });
+    auditLog('recomp_media', { url: out.url, par: act(req) });
+    return sendJson(res, 200, { ok: true, url: out.url, mediaType: out.mediaType, mo: out.mo });
+  }
+
+  /* ════════ 🎮 FLIP FIZZ — réglages complets (PDG) ════════ */
+  if (p === '/api/admin/flip' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    return sendJson(res, 200, { ok: true, flip: flipCfg(), stats: flipStats(), quotas: { partiesJour: flipCfg().partiesJour } });
+  }
+  if (p === '/api/admin/flip' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const f = db.flip = db.flip || {};
+    const sTxt = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, n || 200);
+    if (b.actif !== undefined) f.actif = !!b.actif;
+    if (b.accueil !== undefined) f.accueil = !!b.accueil;
+    if (b.titre !== undefined) f.titre = sTxt(b.titre, 40) || 'Flip Fizz';
+    if (b.desc !== undefined) f.desc = sTxt(b.desc, 240);
+    if (b.regles !== undefined) f.regles = sTxt(b.regles, 1200);
+    if (b.url !== undefined) {
+      const u = String(b.url || '').trim();
+      f.url = /^https:\/\/[a-z0-9.-]+\.[a-z]{2,}(\/[^\s]*)?$/i.test(u) ? u.slice(0, 200) : (u ? f.url : '');
+    }
+    if (b.mediaUrl !== undefined) {
+      const u = String(b.mediaUrl || '');
+      if (u && !pubMediaOk(u)) return sendJson(res, 400, { error: 'Image refusée (téléversez-la depuis ce panneau)' });
+      f.mediaUrl = u; f.mediaType = u ? (/^\/pub\/.*\.(mp4|webm)$/i.test(u) ? 'video' : 'image') : '';
+    }
+    if (b.videoUrl !== undefined) {
+      const u = String(b.videoUrl || '');
+      if (u && !pubMediaOk(u)) return sendJson(res, 400, { error: 'Vidéo refusée (téléversez-la depuis ce panneau)' });
+      f.videoUrl = u;
+    }
+    if (b.partiesJour !== undefined) f.partiesJour = Math.max(0, Math.min(50, parseInt(b.partiesJour, 10) || 0));
+    if (b.pointsParPartie !== undefined) f.pointsParPartie = Math.max(1, Math.min(500, parseInt(b.pointsParPartie, 10) || 10));
+    if (b.pointsBonus !== undefined) f.pointsBonus = Math.max(0, Math.min(500, parseInt(b.pointsBonus, 10) || 0));
+    if (b.seuilBonus !== undefined) f.seuilBonus = Math.max(1, Math.min(99999, parseInt(b.seuilBonus, 10) || 100));
+    if (b.recompensesActives !== undefined) f.recompensesActives = !!b.recompensesActives;
+    if (b.dureeMin !== undefined) f.dureeMin = Math.max(0, Math.min(600, parseInt(b.dureeMin, 10) || 0));
+    f.majAt = nowISO(); f.par = act(req);
+    saveDb();
+    auditLog('flip_config', { actif: f.actif, accueil: f.accueil, par: act(req) });
+    emitAdmin('annonce', (f.actif && f.accueil) ? '🎮 Flip Fizz AFFICHÉ sur la page d’accueil' : (f.actif ? '🎮 Flip Fizz activé (non affiché sur l’accueil)' : '⏸️ Flip Fizz désactivé'));
+    return sendJson(res, 200, { ok: true, flip: f, stats: flipStats() });
+  }
+  /* ════════ 🎁 RÉCOMPENSES — création / modification / suppression (PDG) ════════ */
+  if (p === '/api/admin/recompenses' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    return sendJson(res, 200, { ok: true, liste: db.recompenses || [], stats: flipStats() });
+  }
+  if (p === '/api/admin/recompenses' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const sTxt = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
+    const nom = sTxt(b.nom, 60);
+    if (nom.length < 2) return sendJson(res, 400, { error: 'Nom de la récompense requis' });
+    const d0 = new Date(b.debut || ''), f0 = new Date(b.fin || '');
+    const rec = {
+      id: String(b.id || '').trim() || uid('RE'),
+      nom, desc: sTxt(b.desc, 200),
+      mediaUrl: pubMediaOk(b.mediaUrl) ? String(b.mediaUrl) : '',
+      points: Math.max(1, Math.min(100000, parseInt(b.points, 10) || 100)),
+      stock: (b.stock === '' || b.stock === null || b.stock === undefined) ? null : Math.max(0, Math.min(100000, parseInt(b.stock, 10) || 0)),
+      debut: (b.debut && !isNaN(d0)) ? b.debut.slice(0, 10) : '',
+      fin: (b.fin && !isNaN(f0)) ? b.fin.slice(0, 10) : '',
+      actif: b.actif !== undefined ? !!b.actif : true,
+      unique: b.unique !== false,
+      type: ['reduction', 'coupon', 'partenaire', 'avantage', 'cadeau'].includes(b.type) ? b.type : 'cadeau',
+      at: nowISO(), par: act(req)
+    };
+    const i = (db.recompenses || []).findIndex(x => x.id === rec.id);
+    if (i >= 0) { rec.claims = db.recompenses[i].claims || []; rec.at = db.recompenses[i].at; db.recompenses[i] = rec; }
+    else db.recompenses.push(rec);
+    saveDb();
+    auditLog('recompense_enregistree', { nom: rec.nom, points: rec.points, par: act(req) });
+    return sendJson(res, 200, { ok: true, recompense: rec, liste: db.recompenses });
+  }
+  if (p === '/api/admin/recompenses/suppr' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const r = (db.recompenses || []).find(x => x.id === String(b.id || ''));
+    if (!r) return sendJson(res, 404, { error: 'Introuvable' });
+    /* 🛡️ on n'efface pas une récompense déjà remise : on la désactive (les clients gardent leur gain) */
+    if ((r.claims || []).length) { r.actif = false; saveDb(); return sendJson(res, 200, { ok: true, desactivee: true, message: 'Récompense désactivée (déjà remise ' + r.claims.length + ' fois : elle est conservée pour l’historique des clients)' }); }
+    db.recompenses = db.recompenses.filter(x => x.id !== r.id);
+    saveDb();
+    return sendJson(res, 200, { ok: true, supprimee: true });
+  }
+  /* ════════ 🧠 QUIZ — catégories, questions, activation, statistiques (PDG) ════════ */
+  if (p === '/api/admin/quiz-bank' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    return sendJson(res, 200, { ok: true, banque: db.quizBank, stats: quizStats(), cfg: quizCfgQuiz(),
+      defiQuestion: (() => { const q = quizDefiQuestion(); return q ? { id: q.id, q: q.q } : null; })(),
+      reponses: (db.quizPlay || []).slice(-80).reverse() });
+  }
+  if (p === '/api/admin/quiz-bank' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const sTxt = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
+    /* ⚙️ réglages du quiz : 🎯 défi quotidien et 🔥 séries (bornés côté serveur) */
+    if (b.type === 'reglages') {
+      const c = db.quizCfg = db.quizCfg || {};
+      const nb = (v, d, min, max) => { const n = parseInt(v, 10); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : d; };
+      if (b.defiActif !== undefined) c.defiActif = !!b.defiActif;
+      if (b.defiPoints !== undefined) c.defiPoints = nb(b.defiPoints, 10, 0, 1000);
+      if (b.seriePas !== undefined) c.seriePas = nb(b.seriePas, 5, 0, 50);
+      if (b.serieBonus !== undefined) c.serieBonus = nb(b.serieBonus, 5, 0, 500);
+      if (b.defiQuestionId !== undefined) {
+        const id = String(b.defiQuestionId || '').slice(0, 40);
+        c.defiQuestionId = (id && (db.quizBank.questions || []).some(q => q.id === id)) ? id : '';   /* vide = tirage auto */
+      }
+      saveDb();
+      auditLog('quiz_reglages', Object.assign({ par: act(req) }, quizCfgQuiz()));
+      return sendJson(res, 200, { ok: true, cfg: quizCfgQuiz() });
+    }
+    if (b.type === 'categorie') {
+      const nom = sTxt(b.nom, 40);
+      if (nom.length < 2) return sendJson(res, 400, { error: 'Nom de catégorie requis' });
+      const cat = { id: String(b.id || '').trim() || uid('QC'), nom, ic: sTxt(b.ic, 4) || '🧠', desc: sTxt(b.desc, 120), actif: b.actif !== false, at: nowISO() };
+      const i = db.quizBank.categories.findIndex(x => x.id === cat.id);
+      if (i >= 0) db.quizBank.categories[i] = Object.assign(db.quizBank.categories[i], cat);
+      else db.quizBank.categories.push(cat);
+      saveDb();
+      return sendJson(res, 200, { ok: true, categorie: cat, banque: db.quizBank });
+    }
+    /* question */
+    const q = sTxt(b.q, 240);
+    if (q.length < 6) return sendJson(res, 400, { error: 'Question trop courte' });
+    const choix = Array.isArray(b.choix) ? b.choix.map(x => sTxt(x, 90)).filter(Boolean).slice(0, 4) : [];
+    if (choix.length < 2) return sendJson(res, 400, { error: 'Au moins 2 réponses possibles' });
+    const bonne = Math.max(0, Math.min(choix.length - 1, parseInt(b.bonne, 10) || 0));
+    const rec = {
+      id: String(b.id || '').trim() || uid('QQ'), cat: sTxt(b.cat, 40), niveau: Math.max(1, Math.min(3, parseInt(b.niveau, 10) || 1)),
+      q, choix, bonne, points: Math.max(1, Math.min(1000, parseInt(b.points, 10) || 10)),
+      expl: sTxt(b.expl, 200), actif: b.actif !== false,
+      debut: b.debut ? String(b.debut).slice(0, 16) : '', createdBy: act(req), at: nowISO()
+    };
+    const i = db.quizBank.questions.findIndex(x => x.id === rec.id);
+    if (i >= 0) db.quizBank.questions[i] = Object.assign(db.quizBank.questions[i], rec);
+    else db.quizBank.questions.push(rec);
+    saveDb();
+    auditLog('quiz_question', { q: rec.q.slice(0, 60), par: act(req) });
+    return sendJson(res, 200, { ok: true, question: rec, banque: db.quizBank });
+  }
+  if (p === '/api/admin/quiz-bank/suppr' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const id = String(b.id || '');
+    if (b.type === 'categorie') db.quizBank.categories = db.quizBank.categories.filter(x => x.id !== id);
+    else {
+      const qu = db.quizBank.questions.find(x => x.id === id);
+      if (qu && (db.quizPlay || []).some(x => x.qid === id)) { qu.actif = false; saveDb(); return sendJson(res, 200, { ok: true, desactivee: true, message: 'Question désactivée (des clients y ont déjà répondu : elle est conservée pour leur historique)' }); }
+      db.quizBank.questions = db.quizBank.questions.filter(x => x.id !== id);
+    }
+    saveDb();
+    return sendJson(res, 200, { ok: true, banque: db.quizBank });
+  }
+  /* ════════ ℹ️ INFORMATIONS — contenus publiés par le HQ ════════ */
+  if (p === '/api/admin/infos' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    return sendJson(res, 200, { ok: true, liste: db.infos || [] });
+  }
+  if (p === '/api/admin/infos' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const sTxt = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
+    const titre = sTxt(b.titre, 90);
+    if (titre.length < 3) return sendJson(res, 400, { error: 'Titre requis' });
+    const rec = {
+      id: String(b.id || '').trim() || uid('IN'), cat: sTxt(b.cat, 30) || 'actualite', ic: sTxt(b.ic, 4) || 'ℹ️',
+      titre, texte: sTxt(b.texte, 1200), cible: ['client', 'pro', 'tous'].includes(b.cible) ? b.cible : 'tous',
+      epin: !!b.epin, actif: b.actif !== false,
+      debut: b.debut ? String(b.debut).slice(0, 10) : '', fin: b.fin ? String(b.fin).slice(0, 10) : '',
+      at: nowISO(), par: act(req)
+    };
+    const i = (db.infos || []).findIndex(x => x.id === rec.id);
+    if (i >= 0) { rec.at = db.infos[i].at; db.infos[i] = rec; } else db.infos.push(rec);
+    saveDb();
+    return sendJson(res, 200, { ok: true, info: rec, liste: db.infos });
+  }
+  if (p === '/api/admin/infos/suppr' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    db.infos = (db.infos || []).filter(x => x.id !== String(b.id || ''));
+    saveDb();
+    return sendJson(res, 200, { ok: true, liste: db.infos });
+  }
+  /* ════════ 🆘 URGENCE — alertes reçues (suivi PDG) ════════ */
+  if (p === '/api/admin/urgences' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const liste = (db.urgHist || []).slice(-120).reverse();
+    return sendJson(res, 200, { ok: true, liste, total: (db.urgHist || []).length,
+      aujourdhui: (db.urgHist || []).filter(x => (x.at || '').slice(0, 10) === nowISO().slice(0, 10)).length });
+  }
+  if (p === '/api/admin/urgences/statut' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const b = await readBody(req);
+    const r = (db.urgHist || []).find(x => x.id === String(b.id || ''));
+    if (r) { r.statut = ['nouvelle', 'en_cours', 'traitee', 'fausse_alerte'].includes(b.statut) ? b.statut : r.statut; r.majAt = nowISO(); saveDb(); }
+    return sendJson(res, 200, { ok: true });
+  }
+  /* ════════ 📊 STATISTIQUES GLOBALES du jeu (pour le panneau PDG) ════════ */
+  if (p === '/api/admin/flip/stats' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    return sendJson(res, 200, { ok: true, stats: flipStats(), quiz: quizStats() });
   }
 
   if (p === '/api/admin/vues' && req.method === 'GET') {

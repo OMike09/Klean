@@ -112,6 +112,42 @@
 @media (prefers-reduced-motion: reduce){.pub-clignote{animation:none !important}}
 .pub-media{width:100%;display:block;border-radius:12px;margin-top:9px;background:#04321d;max-height:150px;object-fit:cover}
 </style>
+<style>
+/* ═══ 🧭 LOT 97 — NAVIGATION LATÉRALE + VUE GÉNÉRALE ═══ */
+:root{--nav-w:250px}
+.hq-nav-btn{background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:15px;font-weight:900;padding:7px 12px;border-radius:99px;cursor:pointer;font-family:inherit;line-height:1}
+#hq-nav{position:fixed;top:0;bottom:0;left:0;width:var(--nav-w);z-index:70;background:var(--card);border-right:1px solid var(--line);overflow:auto;padding:12px 10px 70px;transform:translateX(-105%);transition:transform .22s ease;-webkit-overflow-scrolling:touch}
+#hq-nav.open{transform:none}
+.hq-nav-h{display:flex;align-items:center;gap:8px;font-weight:900;font-size:13.5px;padding:6px 10px 10px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.hq-nav-h .b{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--p),var(--pd));display:flex;align-items:center;justify-content:center;font-size:13px}
+.hq-nav-g{font-size:10.5px;font-weight:900;letter-spacing:.05em;color:var(--muted);padding:13px 10px 5px;text-transform:uppercase}
+.hq-nav-i{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:transparent;border:none;color:var(--ink);font:inherit;font-size:12.5px;font-weight:700;padding:9px 10px;border-radius:10px;cursor:pointer;line-height:1.25}
+.hq-nav-i:hover{background:var(--card2)}
+.hq-nav-i.on{background:var(--pl);color:var(--p);font-weight:900}
+.hq-nav-i .ic{font-size:15px;width:19px;text-align:center;flex:none}
+.hq-nav-back{position:fixed;inset:0;background:rgba(6,14,11,.55);z-index:65;display:none;border:none;padding:0}
+.hq-nav-back.on{display:block}
+.hq-sec{font-size:11px;font-weight:900;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin:20px 2px 9px;display:flex;align-items:center;gap:9px}
+.hq-sec:after{content:'';flex:1;height:1px;background:var(--line)}
+.home-card{display:block;width:100%;text-align:left;background:var(--bg);border:1.5px solid var(--line);border-radius:13px;padding:11px 12px;cursor:pointer;font-family:inherit;color:var(--ink)}
+.home-card:hover{border-color:var(--p)}
+.home-card b{display:block;font-size:20px;line-height:1.15}
+.home-card small{display:block;color:var(--muted);font-size:11.5px;font-weight:700;margin-top:2px}
+.home-todo{display:block;width:100%;text-align:left;background:var(--card2);border:1.5px solid var(--line);border-radius:11px;padding:9px 11px;margin-bottom:6px;cursor:pointer;font-family:inherit;color:var(--ink);font-size:12.5px;font-weight:700}
+.home-todo b{color:var(--amber)}
+@media (max-width:1049px){
+  #hq-nav{width:86vw;max-width:330px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+  .hq-sec{margin-top:16px}
+}
+@media (min-width:1050px){
+  #hq-nav{transform:none}
+  body.hq-nav-on .wrap{max-width:none;margin:0;padding:16px 16px 40px calc(var(--nav-w) + 18px)}
+  body.hq-nav-on header .h-in{max-width:none;padding-left:calc(var(--nav-w) + 4px)}
+  .hq-nav-back{display:none !important}
+  body.hq-nav-off #hq-nav{transform:translateX(-105%)}
+}
+@media print{#hq-nav,.hq-nav-back,.hq-nav-btn{display:none}}
+</style>
 </head>
 <body>
 <div id="hq-splash"><img src="/hq-icon-512.png" alt=""></div>
@@ -122,9 +158,12 @@
   document.getElementById('hq-splash').onclick = go;
 })();
 </script>
+<button id="hq-nav-back" class="hq-nav-back" type="button" onclick="hqNavToggle(false)" aria-hidden="true"></button>
+<nav id="hq-nav" aria-label="Menu du tableau de bord"></nav>
 <header>
   <div class="h-in">
     <div class="logo"><span class="bubble">✨</span>KLEAN <span class="hq-tag">HQ · Côte d'Ivoire 🇨🇮</span></div>
+    <button id="hq-menu-btn" class="hq-nav-btn" onclick="hqNavToggle()" title="Ouvrir / fermer le menu" aria-label="Menu">☰</button>
     <button onclick="ouvrirFenetreComptes('client')" title="Créer un compte client ou professionnel avec ses codes d'accès" style="margin-left:auto;background:linear-gradient(135deg,var(--p),var(--pd));border:none;color:#fff;font-size:11.5px;font-weight:900;padding:8px 13px;border-radius:99px;cursor:pointer;font-family:inherit">🏗️ Créer un compte</button>
     <button onclick="changePwd()" title="Changer le mot de passe" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">🔑 Mot de passe</button>
     <button onclick="logout()" title="Se déconnecter" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">⏻ Quitter</button>
@@ -133,6 +172,17 @@
 </header>
 
 <div class="wrap">
+  <!-- 🏠 VUE GÉNÉRALE — l'essentiel en un coup d'œil (lot 97) -->
+  <div class="panel" style="margin-bottom:14px" id="panel-home">
+    <h3>🏠 Vue générale <span class="cnt" id="home-maj">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <div id="home-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:9px"></div>
+      <div id="home-alerte" style="display:none;margin-top:10px;background:rgba(255,107,107,.12);border:1.5px solid rgba(255,107,107,.4);border-radius:12px;padding:10px 11px;font-size:12.5px;line-height:1.45"></div>
+      <div id="home-todo" style="margin-top:12px"></div>
+      <small style="display:block;margin-top:9px;color:var(--muted);font-size:11px">Touchez une carte pour ouvrir la rubrique correspondante. Tout se met à jour tout seul.</small>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px" id="panel-search">
     <h3>🔎 Raccourcis — tout le tableau de bord</h3>
     <div class="body" style="padding:12px 14px">
@@ -148,7 +198,7 @@
     <div class="kpi"><span>💵 CA aujourd'hui</span><b id="k-ca">0 F</b><small>prestations livrées</small></div>
     <div class="kpi gold"><span>🏦 Commissions (25%)</span><b id="k-comm">0 F</b><small>encaissées aujourd'hui</small></div>
   </div>
-  <div class="substrip">
+  <div class="substrip" id="substrip">
     <div class="chip">👥 Clients inscrits : <b id="c-inscrits" style="color:var(--blue)">—</b></div>
     <div class="chip">🛡️ Dossiers en attente : <b id="c-pend" style="color:var(--amber)">—</b></div>
     <div class="chip">📊 CA total : <b id="c-ca">0 F</b></div>
@@ -461,7 +511,7 @@
         <button onclick="pmForm(false)" style="width:100%;margin-top:7px;background:var(--card2);border:1px solid var(--line);color:var(--muted);font:inherit;font-weight:800;padding:10px;border-radius:10px;cursor:pointer">Annuler</button>
       </div>
       <small id="pm-state" style="display:block;margin-top:8px;font-weight:800;color:var(--amber)">État : —</small>
-      <small id="pm-note" style="display:block;margin-top:5px;color:var(--muted);font-size:11.5px"></small>
+      <small id="pm-notice" style="display:block;margin-top:5px;color:var(--muted);font-size:11.5px"></small>
       <hr style="border:none;border-top:1.5px dashed var(--line);margin:13px 0">
       <b style="font-size:12.5px">🔌 Intégrations officielles (pour encaisser automatiquement)</b>
       <div id="pm-integr" style="margin-top:8px"></div>
@@ -558,8 +608,37 @@
   </div>
 
   <!-- Toutes les personnes inscrites (agents + clients) avec recherche -->
+  <!-- 📋 PRESTATIONS & MISSIONS — la liste qui manquait au tableau de bord (lot 97) -->
+  <div class="panel" style="margin-bottom:14px" id="panel-missions">
+    <h3>📋 Prestations &amp; missions <span class="cnt" id="m-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 9px;line-height:1.4">Toutes les demandes clients : en diffusion, en cours, terminées, annulées. Touchez <b>🔁 Réaff.</b> pour réattribuer une mission en urgence.</p>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
+        <button type="button" id="m-f-toutes" onclick="missionsFiltre('toutes')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">Toutes</button>
+        <button type="button" id="m-f-encours" onclick="missionsFiltre('encours')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">En cours</button>
+        <button type="button" id="m-f-terminees" onclick="missionsFiltre('terminees')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">Terminées</button>
+        <button type="button" id="m-f-annulees" onclick="missionsFiltre('annulees')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">Annulées</button>
+      </div>
+      <input id="m-q" placeholder="Rechercher : client, professionnel, quartier, n° de mission" oninput="missionsFiltre()" maxlength="60" style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px;margin-bottom:9px">
+      <div id="m-kpis" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:9px;font-size:11.5px"></div>
+      <div id="missions"><div class="empty">Chargement des missions…</div></div>
+    </div>
+  </div>
+
+  <!-- 🧑‍💼 PROFESSIONNELS — la liste qui manquait au tableau de bord (lot 97) -->
+  <div class="panel" style="margin-bottom:14px" id="panel-pros">
+    <h3>🧑‍💼 Professionnels inscrits <span class="cnt" id="a-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 8px;line-height:1.4">En ligne ou hors ligne, gains, note et services. Les <b>nouvelles candidatures</b> se traitent dans « 🛡️ Dossiers pros à vérifier ».</p>
+      <div id="agents"><div class="empty">Chargement des professionnels…</div></div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px" id="people">
     <h3>👥 Personnes inscrites <span class="cnt" id="people-cnt">—</span></h3>
+    <div style="padding:10px 16px 0">
+      <input id="people-search" placeholder="🔎 Chercher un client ou un professionnel (nom, téléphone, quartier, service)" oninput="renderPeople()" maxlength="60" style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+    </div>
     <div style="padding:10px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
       <button onclick="PEOPLE_FILTER='all';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">Tous</button>
       <button onclick="PEOPLE_FILTER='on';renderPeople()" style="background:var(--card2);border:1px solid var(--line);color:var(--p);font-size:11px;font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit">🟢 En ligne</button>
@@ -575,6 +654,7 @@
         </div>
         <button type="button" onclick="ouvrirFenetreComptes('codes')" style="width:100%;margin-top:8px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px;border-radius:12px;cursor:pointer;font-family:inherit;font-size:12.5px">🎟️ Tous les comptes &amp; codes d’accès</button>
       </div>
+      <div id="people-list" style="padding:0 16px 14px"></div>
     </div>
   </div>
 
@@ -611,12 +691,67 @@
       <button type="button" onclick="actualiserServicesHQ()" style="width:100%;margin-top:7px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit">🔄 Recharger la liste ici</button>
     </div>
   </div>
+  <!-- 🪪 RÔLES & PERMISSIONS — qui peut faire quoi (lot 97) -->
+  <div class="panel" style="margin-bottom:14px" id="panel-roles">
+    <h3>🪪 Rôles &amp; permissions</h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Voici ce que chaque profil peut faire <b>dans KLEAN</b> (règles appliquées par le serveur, pas seulement à l'écran). Touchez un bouton pour agir tout de suite.</p>
+      <div style="overflow:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;color:var(--muted);font-size:11px">
+            <th style="padding:6px 5px">Profil</th><th style="padding:6px 5px">Peut faire</th><th style="padding:6px 5px">Ne peut pas</th>
+          </tr></thead>
+          <tbody>
+            <tr style="border-top:1px solid var(--line)">
+              <td style="padding:8px 5px"><b>👑 PDG</b><br><small style="color:var(--muted)">compte principal</small></td>
+              <td style="padding:8px 5px">Tout : réglages, commission, paiements, récompenses et Flip Fizz, quiz, publicité, villes, services, création des gestionnaires, bouclier, coupure des écritures, journal d'audit, chiffre d'affaires.</td>
+              <td style="padding:8px 5px">—</td>
+            </tr>
+            <tr style="border-top:1px solid var(--line)">
+              <td style="padding:8px 5px"><b>🧑‍💼 Gestionnaire</b><br><small style="color:var(--muted)">créé par vous</small></td>
+              <td style="padding:8px 5px">Le quotidien : clients et professionnels, dossiers à vérifier, missions et réattribution d'urgence, support et messages, affiche, quiz.</td>
+              <td style="padding:8px 5px">Les <b>montants</b> (CA, commissions, paiements), les réglages, la création d'équipe, le bouclier ; ses <b>demandes de blocage/suppression</b> attendent votre validation.</td>
+            </tr>
+            <tr style="border-top:1px solid var(--line)">
+              <td style="padding:8px 5px"><b>🧭 Agent de terrain</b><br><small style="color:var(--muted)">recenseur (/field)</small></td>
+              <td style="padding:8px 5px">Créer des comptes <b>clients</b> et <b>professionnels</b> sur le terrain, discuter avec vous.</td>
+              <td style="padding:8px 5px">Ne voit pas le tableau de bord : aucun chiffre, aucune configuration.</td>
+            </tr>
+            <tr style="border-top:1px solid var(--line)">
+              <td style="padding:8px 5px"><b>👤 Client</b></td>
+              <td style="padding:8px 5px">Réserver, suivre, payer, noter, gagner des Klean Points (Flip Fizz, quiz) et échanger des récompenses.</td>
+              <td style="padding:8px 5px">Modifier ses points, rejouer au-delà du quota, voir les autres clients, accéder au HQ.</td>
+            </tr>
+            <tr style="border-top:1px solid var(--line)">
+              <td style="padding:8px 5px"><b>🧽 Professionnel</b></td>
+              <td style="padding:8px 5px">Recevoir les missions de sa zone, se déclarer en ligne/en veille, encaisser, avoir un numéro pro <b>KP-</b>.</td>
+              <td style="padding:8px 5px">Voir le numéro personnel d'un client, encaisser hors des moyens officiels, accéder au HQ.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+        <button type="button" class="btn-main" style="flex:1;min-width:160px" onclick="hqGo('panel-team','createAdmin()')">➕ Créer un gestionnaire</button>
+        <button type="button" onclick="ouvrirFenetreComptes('codes')" style="flex:1;min-width:160px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">🎟️ Comptes & codes d'accès</button>
+      </div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px" id="panel-svc-browse">
     <h3>📂 Services & professionnels</h3>
     <div class="body" style="padding:12px 14px">
       <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Scrollez, cliquez un service ou un sous-service pour voir les pros.</p>
       <div id="sv-tree" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:8px"></div>
       <div id="sv-pros" style="margin-top:10px;max-height:220px;overflow:auto"></div>
+    </div>
+  </div>
+
+  <!-- 🏢 PROFIL DE L'ENTREPRISE — fiche d'identité lue dans vos réglages (lot 97) -->
+  <div class="panel" style="margin-bottom:14px" id="panel-entreprise">
+    <h3>🏢 Profil de l'entreprise <span class="cnt" id="ent-maj">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Cette fiche est <b>lue en direct dans vos réglages</b> (aucune donnée inventée, aucune base modifiée). Chaque ligne a son bouton pour modifier.</p>
+      <div id="ent-liste"></div>
     </div>
   </div>
 
@@ -678,6 +813,201 @@
       </div>
       <button type="button" onclick="testerMatch()" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#4aa3ff,#1f6fd0);border:none;color:#fff;font-weight:900;padding:11px;border-radius:11px;cursor:pointer;font-family:inherit;font-size:13px">🔎 Voir le classement</button>
       <div id="mt-out" style="margin-top:10px;max-height:260px;overflow:auto;font-size:12.5px"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ 🎮 FLIP FIZZ & RÉCOMPENSES ═══════════════ -->
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-flip">
+    <h3>🎮 Flip Fizz &amp; Récompenses <span class="cnt" id="ff-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Le jeu est <b>invisible par défaut</b> : lui seul ne s'affiche jamais tout seul sur l'accueil client. Vous décidez ici, <b>sans toucher au code</b>, et le changement est appliqué en quelques secondes chez les clients.</p>
+      <div id="ff-etat" style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px;font-size:12px;line-height:1.5">Chargement…</div>
+
+      <!-- interrupteurs -->
+      <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+        <b style="display:block;font-size:12.5px;margin-bottom:7px">🔌 Les deux interrupteurs (indépendants)</b>
+        <label style="display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:800;margin-bottom:7px"><input type="checkbox" id="ff-actif" onchange="ffBascule('actif',this.checked)" style="width:18px;height:18px"> <span id="ff-l-actif">Flip Fizz — jeu actif 🟢/🔴</span></label>
+        <label style="display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:800"><input type="checkbox" id="ff-accueil" onchange="ffBascule('accueil',this.checked)" style="width:18px;height:18px"> <span id="ff-l-accueil">Afficher sur la page d'accueil 🟢/🔴</span></label>
+        <small style="display:block;margin-top:7px;color:var(--muted);font-size:11.5px;line-height:1.45">• Jeu <b>actif</b> + accueil <b>off</b> = les clients y accèdent seulement s'ils connaissent le lien.<br>• Jeu <b>inactif</b> = le jeu disparaît partout, immédiatement.</small>
+        <button type="button" onclick="ffToutCouper()" style="width:100%;margin-top:8px;background:var(--card2);border:1.5px solid var(--line);color:var(--danger);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">⏹ Tout désactiver (jeu + accueil)</button>
+      </div>
+
+      <!-- présentations -->
+      <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+        <b style="display:block;font-size:12.5px;margin-bottom:6px">✍️ Présentation du jeu</b>
+        <input id="ff-titre" maxlength="40" placeholder="Titre (ex : Flip Fizz)" oninput="ffMarquer()" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+        <textarea id="ff-desc" maxlength="240" rows="2" placeholder="Description courte affichée sur l'accueil" oninput="ffMarquer()" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+        <textarea id="ff-regles" maxlength="1200" rows="3" placeholder="Règles du jeu (affichées dans la rubrique Quiz / Flip Fizz)" oninput="ffMarquer()" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+        <input id="ff-url" maxlength="200" placeholder="Adresse du jeu (https://…)" oninput="ffMarquer()" style="width:100%;box-sizing:border-box;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+      </div>
+
+      <!-- points et limites -->
+      <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+        <b style="display:block;font-size:12.5px;margin-bottom:6px">🪙 Klean Points &amp; limites (contrôlés par le serveur)</b>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label style="font-size:11.5px;font-weight:800">Parties gratuites / jour<input id="ff-parties" type="number" min="0" max="50" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Points max / partie<input id="ff-pts" type="number" min="1" max="500" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Bonus (points)<input id="ff-bonus" type="number" min="0" max="500" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Seuil du bonus (score)<input id="ff-seuil" type="number" min="1" max="99999" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Durée mini / partie (s)<input id="ff-dureemin" type="number" min="0" max="600" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        </div>
+        <small style="display:block;margin-top:6px;color:var(--muted);font-size:11px">⏱️ La durée d’une partie est <b>mesurée par le serveur</b> : un téléphone ne peut pas déclarer une partie plus longue qu’elle ne l’est réellement. « 0 » = pas de durée minimale.</small>
+        <label style="display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:800;margin-top:9px"><input type="checkbox" id="ff-recomp" style="width:18px;height:18px"> Récompenses activées (échange des Klean Points)</label>
+        <small style="display:block;margin-top:6px;color:var(--muted);font-size:11.5px">Les Klean Points ne sont <b>jamais</b> convertibles en argent liquide. Le serveur revérifie la limite de parties à chaque ouverture.</small>
+      </div>
+
+      <!-- médias -->
+      <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+        <b style="display:block;font-size:12.5px;margin-bottom:4px">🖼️ Image du jeu et 🎬 vidéo de présentation</b>
+        <p style="font-size:11.5px;color:var(--muted);margin:0 0 7px;line-height:1.45">Image (JPG, PNG, WEBP, GIF) 3 Mo max · Vidéo (MP4, WEBM) 12 Mo max. Le serveur vérifie le contenu réel du fichier, et n'efface jamais les autres médias du site.</p>
+        <input type="file" id="ff-file-img" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none" onchange="ffChoisir(this,'image')">
+        <input type="file" id="ff-file-vid" accept="video/mp4,video/webm" style="display:none" onchange="ffChoisir(this,'video')">
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          <button type="button" onclick="document.getElementById('ff-file-img').click()" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">📷 Téléverser une image</button>
+          <button type="button" onclick="document.getElementById('ff-file-vid').click()" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">🎬 Téléverser une vidéo</button>
+        </div>
+        <div id="ff-media-etat" style="font-size:11.5px;color:var(--muted);margin-top:7px">Aucun média.</div>
+        <div id="ff-media-jauge" style="display:none;margin-top:7px;font-size:11.5px;font-weight:800;color:var(--p)">⏳ Envoi en cours…</div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:7px">
+          <button type="button" onclick="ffRetirerMedia('image')" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--danger);font-weight:800;padding:9px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12px">🧹 Retirer l'image</button>
+          <button type="button" onclick="ffRetirerMedia('video')" style="flex:1;min-width:120px;background:var(--card2);border:1.5px solid var(--line);color:var(--danger);font-weight:800;padding:9px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12px">🧹 Retirer la vidéo</button>
+        </div>
+      </div>
+
+      <div id="ff-apercu" style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px"></div>
+
+      <button type="button" class="btn-main" style="width:100%;padding:13px;font-size:14px" onclick="ffEnregistrer()">💾 Enregistrer les réglages du jeu</button>
+      <small id="ff-cur" style="display:block;margin-top:8px;color:var(--muted);font-size:11.5px">—</small>
+
+      <!-- statistiques -->
+      <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-top:11px">
+        <b style="display:block;font-size:12.5px;margin-bottom:7px">📊 Statistiques du jeu</b>
+        <div id="ff-stats" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+        <b style="display:block;font-size:12px;margin:11px 0 5px">📅 Activité quotidienne (14 derniers jours)</b>
+        <div id="ff-jour" style="font-size:12px"></div>
+        <b style="display:block;font-size:12px;margin:11px 0 5px">🗓️ Activité mensuelle</b>
+        <div id="ff-mois" style="font-size:12px"></div>
+      </div>
+
+      <!-- récompenses -->
+      <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-top:11px">
+        <b style="display:block;font-size:12.5px;margin-bottom:6px">🎁 Récompenses échangeables</b>
+        <p style="font-size:11.5px;color:var(--muted);margin:0 0 8px;line-height:1.45">Réduction, coupon, bon partenaire, avantage réservation, cadeau… Chaque échange est contrôlé par le serveur (stock, dates, une seule fois par client).</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label style="font-size:11.5px;font-weight:800">Nom<input id="rc-nom" maxlength="60" placeholder="Ex : -10 % sur un ménage" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Type<select id="rc-type" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"><option value="reduction">🏷️ Réduction prestation</option><option value="coupon">🎟️ Coupon</option><option value="partenaire">🤝 Bon partenaire</option><option value="avantage">⭐ Avantage réservation</option><option value="cadeau">🎁 Cadeau</option></select></label>
+          <label style="font-size:11.5px;font-weight:800">Points nécessaires<input id="rc-points" type="number" min="1" max="100000" value="100" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Quantité disponible (vide = illimité)<input id="rc-stock" type="number" min="0" max="100000" placeholder="ex : 20" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Début<input id="rc-debut" type="date" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Expiration<input id="rc-fin" type="date" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        </div>
+        <textarea id="rc-desc" maxlength="200" rows="2" placeholder="Description (ce que le client obtient)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+        <input type="file" id="rc-file" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none" onchange="rcChoisir(this)">
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">
+          <button type="button" onclick="document.getElementById('rc-file').click()" style="flex:1;min-width:130px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:10px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">🖼️ Image de la récompense</button>
+          <label style="flex:1;min-width:130px;font-size:12px;font-weight:800;display:flex;align-items:center;gap:8px"><input type="checkbox" id="rc-actif" checked style="width:17px;height:17px"> Active</label>
+          <label style="flex:1;min-width:130px;font-size:12px;font-weight:800;display:flex;align-items:center;gap:8px"><input type="checkbox" id="rc-unique" checked style="width:17px;height:17px"> Une seule fois par client</label>
+        </div>
+        <div id="rc-media-etat" style="font-size:11.5px;color:var(--muted);margin-top:7px">Aucune image.</div>
+        <div style="display:flex;gap:7px;margin-top:8px;flex-wrap:wrap">
+          <button type="button" class="btn-main" style="flex:1;min-width:150px;padding:11px" onclick="rcEnregistrer()">💾 Enregistrer la récompense</button>
+          <button type="button" onclick="rcNouveau()" style="flex:1;min-width:110px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">✚ Nouvelle</button>
+        </div>
+        <div id="rc-liste" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ 🧠 QUIZ & QUESTIONS ═══════════════ -->
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-quizbank">
+    <h3>🧠 Quiz &amp; questions <span class="cnt" id="qb-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">La <b>banque de questions</b> des rubriques Quiz / Flip Fizz. Le serveur corrige les réponses : la bonne réponse n'est jamais envoyée avant que le client ait répondu. Le quiz en direct (affiche) reste un mécanisme séparé, juste au-dessus.</p>
+      <div id="qb-stats" style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px;font-size:12px;line-height:1.6">Chargement…</div>
+
+      <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+        <b style="display:block;font-size:12.5px;margin-bottom:6px">🗂️ Catégories</b>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          <input id="qb-cat-ic" maxlength="4" placeholder="🧹" style="width:56px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;text-align:center">
+          <input id="qb-cat-nom" maxlength="40" placeholder="Nom (ex : Hygiène & maison)" style="flex:1;min-width:130px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <button type="button" class="btn-main" style="flex:none;padding:9px 13px" onclick="qbCatSave()">✚ Ajouter</button>
+        </div>
+        <input id="qb-cat-desc" maxlength="120" placeholder="Petite description (facultatif)" style="width:100%;box-sizing:border-box;margin-top:7px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+        <div id="qb-cats" style="margin-top:8px"></div>
+      </div>
+
+      <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+        <b style="display:block;font-size:12.5px;margin-bottom:6px" id="qb-form-titre">✍️ Nouvelle question</b>
+        <textarea id="qb-q" maxlength="240" rows="2" placeholder="Question" style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+        <div id="qb-choix" style="display:grid;gap:6px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:7px">
+          <label style="font-size:11.5px;font-weight:800">Catégorie<select id="qb-cat" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></select></label>
+          <label style="font-size:11.5px;font-weight:800">Niveau<select id="qb-niveau" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"><option value="1">1 — Facile</option><option value="2">2 — Moyen</option><option value="3">3 — Difficile</option></select></label>
+          <label style="font-size:11.5px;font-weight:800">Klean Points gagnés<input id="qb-points" type="number" min="1" max="1000" value="10" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Programmer (facultatif)<input id="qb-debut" type="datetime-local" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        </div>
+        <input id="qb-expl" maxlength="200" placeholder="Explication affichée après la réponse (facultatif)" style="width:100%;box-sizing:border-box;margin-top:7px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+        <label style="display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:800;margin-top:8px"><input type="checkbox" id="qb-actif" checked style="width:17px;height:17px"> Question active</label>
+        <div style="display:flex;gap:7px;margin-top:8px;flex-wrap:wrap">
+          <button type="button" class="btn-main" style="flex:1;min-width:150px;padding:11px" onclick="qbQSave()">💾 Enregistrer la question</button>
+          <button type="button" onclick="qbNouvelle()" style="flex:1;min-width:110px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">✚ Nouvelle</button>
+        </div>
+      </div>
+
+      <!-- 🎯 défi quotidien & 🔥 séries (règles appliquées par le serveur) -->
+      <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+        <b style="display:block;font-size:12.5px;margin-bottom:4px">🎯 Défi du jour &amp; 🔥 séries de bonnes réponses</b>
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:7px" id="qb-defi-stats">—</div>
+        <label style="display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:800;margin-bottom:7px"><input type="checkbox" id="qb-defi-actif" checked style="width:17px;height:17px"> Défi quotidien activé (une question bonus chaque jour)</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label style="font-size:11.5px;font-weight:800">Points bonus du défi<input id="qb-defi-points" type="number" min="0" max="1000" value="10" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Palier de série (0 = off)<input id="qb-serie-pas" type="number" min="0" max="50" value="5" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Prime par palier atteint<input id="qb-serie-bonus" type="number" min="0" max="500" value="5" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        </div>
+        <label style="font-size:11.5px;font-weight:800;display:block;margin-top:8px">🎯 Question imposée du jour (facultatif)<select id="qb-defi-question" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"><option value="">— tirage automatique du jour —</option></select></label>
+        <button type="button" class="btn-main" style="width:100%;margin-top:9px" onclick="qbReglages()">💾 Enregistrer les règles du quiz</button>
+        <small style="display:block;margin-top:7px;color:var(--muted);font-size:11px;line-height:1.45">Le défi est tiré chaque jour par le serveur : une seule participation par client, réponse corrigée côté serveur. La prime de série n’est versée qu’une fois par palier et par jour.</small>
+      </div>
+
+      <div id="qb-liste"></div>
+      <b style="display:block;font-size:12.5px;margin:11px 0 5px">👥 Dernières réponses des clients</b>
+      <div id="qb-rep" style="font-size:12px"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ ℹ️ INFORMATIONS ═══════════════ -->
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-infos">
+    <h3>ℹ️ Informations publiées <span class="cnt" id="in-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Ce que les clients et les pros lisent dans la rubrique <b>Informations</b> : actualités Klean, conseils, annonces, sécurité, nouveautés, campagnes. Chaque publication est <b>rangée dans une catégorie</b> côté client.</p>
+      <div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label style="font-size:11.5px;font-weight:800">Catégorie<select id="in-cat" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"><option value="actualite">📣 Actualité Klean</option><option value="conseil">💡 Conseil / astuce</option><option value="important">❗ Information importante</option><option value="annonce">📢 Annonce</option><option value="securite">🛡️ Sécurité</option><option value="service">🛠️ Service disponible</option><option value="nouveaute">✨ Nouveauté app</option><option value="local">📍 Info locale</option><option value="campagne">🎯 Campagne HQ</option></select></label>
+          <label style="font-size:11.5px;font-weight:800">Icône (emoji)<input id="in-ic" maxlength="4" placeholder="ℹ️" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Pour qui<select id="in-cible" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"><option value="tous">Clients et pros</option><option value="client">Clients seulement</option><option value="pro">Pros seulement</option></select></label>
+          <label style="font-size:11.5px;font-weight:800">À la une<input type="checkbox" id="in-epin" style="width:17px;height:17px;margin-left:8px"></label>
+          <label style="font-size:11.5px;font-weight:800">Du<input id="in-debut" type="date" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+          <label style="font-size:11.5px;font-weight:800">Au<input id="in-fin" type="date" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-top:4px"></label>
+        </div>
+        <input id="in-titre" maxlength="90" placeholder="Titre" style="width:100%;box-sizing:border-box;margin-top:8px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+        <textarea id="in-texte" maxlength="1200" rows="3" placeholder="Texte à lire" style="width:100%;box-sizing:border-box;margin-top:7px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px;resize:vertical"></textarea>
+        <label style="display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:800;margin-top:8px"><input type="checkbox" id="in-actif" checked style="width:17px;height:17px"> Publiée (visible par les clients)</label>
+        <div style="display:flex;gap:7px;margin-top:8px;flex-wrap:wrap">
+          <button type="button" class="btn-main" style="flex:1;min-width:150px;padding:11px" onclick="inSave()">💾 Publier / mettre à jour</button>
+          <button type="button" onclick="inNouveau()" style="flex:1;min-width:110px;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">✚ Nouvelle</button>
+        </div>
+      </div>
+      <div id="in-liste"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ 🆘 ALERTES D'URGENCE ═══════════════ -->
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-urgences">
+    <h3>🆘 Alertes d'urgence <span class="cnt" id="ug-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Journal des alertes envoyées depuis la rubrique <b>Urgence</b> (appel direct, position partagée <b>avec autorisation</b>). Le PDG peut marquer une alerte comme traitée ou comme fausse alerte — chaque client voit le suivi de ses alertes.</p>
+      <div id="ug-stats" style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px;font-size:12px;line-height:1.6">Chargement…</div>
+      <div id="ug-liste"></div>
     </div>
   </div>
 
@@ -774,13 +1104,26 @@ async function loadAll(){
         });
       }catch(e){}
     }
-    if(ov) renderOverview(ov);
-    if(ms) renderMissions(ms);
-    if(ags) renderAgents(ags);
-    if(cands) renderCands(cands);
-    PEOPLE = ppl || {agents:[], clients:[]}; renderPeople();
-    if(ME && ME.role==='pdg'){ renderConfig(cfg); if(aud) renderAudit(aud); loadPdgExtras(); }
-    loadTeam(); loadAnnonce(); loadQuizHQ(); if(!(document.activeElement && document.activeElement.id==='hqchat-in')) loadHqChat(); loadFields(); loadFieldInbox(); loadQuotesHQ(); loadVillesHQ(); loadCatalogHQ(); if(ME && ME.role==='pdg') loadShield();
+    /* 🛡️ chaque étape est isolée : si UNE partie échoue, toutes les autres se chargent quand même */
+    const etape = (nom, fn) => { try{ const r = fn(); if(r && r.catch) r.catch(e => hqOubli(nom, e)); }catch(e){ hqOubli(nom, e); } };
+    if(ov) etape('Vue d’ensemble', ()=>renderOverview(ov));
+    if(ms) etape('Missions', ()=>renderMissions(ms));
+    if(ags) etape('Professionnels', ()=>renderAgents(ags));
+    if(cands) etape('Dossiers pros', ()=>renderCands(cands));
+    etape('Personnes inscrites', ()=>{ PEOPLE = ppl || {agents:[], clients:[]}; renderPeople(); });
+    if(ME && ME.role==='pdg'){ etape('Réglages', ()=>renderConfig(cfg)); if(aud) etape('Audit', ()=>renderAudit(aud)); etape('Extras PDG', ()=>loadPdgExtras()); }
+    etape('Équipe', ()=>loadTeam());
+    etape('Affiche', ()=>loadAnnonce());
+    etape('Quiz', ()=>loadQuizHQ());
+    etape('Flip Fizz & infos', ()=>chargerHQ96());
+    etape('Fil PDG', ()=>{ if(!(document.activeElement && document.activeElement.id==='hqchat-in')) loadHqChat(); });
+    etape('Agents de terrain', ()=>loadFields());
+    etape('Messages terrain', ()=>loadFieldInbox());
+    etape('Sur mesure', ()=>loadQuotesHQ());
+    etape('Villes', ()=>loadVillesHQ());
+    etape('Services', ()=>loadCatalogHQ());
+    if(ME && ME.role==='pdg') etape('Bouclier', ()=>loadShield());
+    etape('Menu', ()=>{ paintHqNav(); paintHome(); paintEntreprise(); });
     if(!window._qzPoll){ window._qzPoll=setInterval(loadQuizHQ, 1000); }
     if(!window._livePoll){ window._livePoll=setInterval(paintAnnLive, 4000); paintAnnLive(); }
   }catch(e){
@@ -852,32 +1195,238 @@ async function nudgeOff(role, id, nom){
 function pNorm(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 let ME = null, TEAM = [];
 let _hqQtm=null;
-const HQ_GO = [
-  ['kpis','🟢 Pros en ligne / KPI'],
-  ['panel-ca7','📈 CA 7 jours'],
-  ['panel-team','👑 Équipe dirigeante'],
-  ['panel-ann','📣 Affiche'],
-  ['panel-ads','📣 Publicité accueil'],
-  ['panel-quotes','🛠️ Sur mesure'],
-  ['panel-field-inbox','🧭 Messages terrain'],
-  ['panel-support','💬 Support'],
-  ['panel-cands','🛡️ Vérification pros'],
-  ['panel-hqchat','🟠 Fil PDG'],
-  ['panel-promo','🎟️ Promos & partenaires'],
-  ['panel-pay','💳 Moyens de paiement (PDG)'],
-  ['panel-paydest','💳 Numéros de paiement'],
-  ['panel-demande-comptes','🟠 Demandes blocage/suppression'],
-  ['panel-trash','♻️ Comptes supprimés'],
-  ['panel-cfg','⚙️ Réglages'],
-  ['panel-audit','📜 Audit'],
-  ['panel-online-cli','🟢 Clients en ligne'],
-  ['people','👥 Personnes inscrites'],
-  ['panel-villes','🏙️ Villes'],
-  ['panel-svc-create','🛠️ Créer un service'],
-  ['panel-svc-browse','📂 Services & pros'],
-  ['panel-shield','🛡️ Bouclier'],
-  ['panel-freeze','⛔ Coupure écritures']
+const HQ_MENU = [
+  { g:'🏠 Tableau de bord', items:[
+    ['panel-home','🏠 Vue générale','résumé chiffres clients pros revenus paiements alertes à traiter aujourd hui'],
+    ['panel-search','🔎 Recherche rapide','chercher nom téléphone mission compte code client pro'],
+    ['kpis','📊 Vue en direct','pros en ligne missions du jour chiffre commission direct kpi'],
+    ['panel-ca7','📈 Revenus 7 jours','chiffre affaires graphique courbe semaine revenus', true]
+  ]},
+  { g:'👥 Utilisateurs', items:[
+    ['people','👥 Clients & personnes inscrites','liste clients pros fiches bloquer supprimer recherche'],
+    ['panel-online-cli','🟢 Clients en ligne','connectés maintenant en direct'],
+    ['panel-pros','🧑‍💼 Professionnels inscrits','agents pros gains note services hors ligne'],
+    ['panel-cands','🛡️ Dossiers pros à vérifier','candidatures validation nouveaux professionnels'],
+    ['panel-team','👑 Gestionnaires & agents de terrain','équipe dirigeante créer administrateur rôle'],
+    ['panel-roles','🪪 Rôles & permissions','qui peut faire quoi droits accès pdg gestionnaire agent client professionnel'],
+    ['people','🎟️ Comptes & codes d’accès','créer compte remettre code accès mot de passe client pro', false, "ouvrirFenetreComptes('codes')"]
+  ]},
+  { g:'🧰 Services & territoires', items:[
+    ['panel-svc-browse','📂 Services & professionnels','catalogue catégories tarifs pros par service'],
+    ['panel-svc-create','🛠️ Créer / déployer un service','nouveau service prix déployer villes'],
+    ['panel-villes','🏙️ Villes & quartiers','zones déployables inscription GPS'],
+    ['panel-match','🎯 Mise en relation GPS','rayon km zone distance contact']
+  ]},
+  { g:'📋 Commandes & prestations', items:[
+    ['panel-missions','📋 Prestations & missions','demandes en cours terminées annulées réaffecter historique'],
+    ['panel-quotes','🛠️ Demandes sur mesure','devis prix spécial attribuer professionnel']
+  ]},
+  { g:'💳 Paiements & finances', items:[
+    ['panel-pay','💳 Moyens de paiement','orange money moov wave carte encaissement transactions'],
+    ['panel-paydest','🏦 Numéros de paiement','numéros marchands destination'],
+    ['panel-ca7','📈 Revenus & commissions','chiffre affaires commission bénéfice', true]
+  ]},
+  { g:'📣 Communication', items:[
+    ['panel-ann','📣 Affiche aux utilisateurs','bandeau message annonce défilant accueil'],
+    ['panel-ads','📢 Publicité sur l’accueil','image vidéo fond vert aperçu publier'],
+    ['panel-field-inbox','🧭 Messages agents de terrain','recenseurs répondre fil terrain'],
+    ['panel-support','💬 Support & messages','conversations clients pros assistance'],
+    ['panel-hqchat','🟠 Fil PDG ↔ gestionnaires','discussion interne équipe'],
+    ['panel-infos','ℹ️ Informations publiées','actualités conseils annonces catégories contenu']
+  ]},
+  { g:'🎮 Marketing & récompenses', items:[
+    ['panel-flip','🎮 Flip Fizz & récompenses','jeu points klean cadeaux parties gratuites'],
+    ['panel-quizbank','🧠 Quiz & questions','catégories questions défi quotidien séries classement'],
+    ['panel-promo','🎟️ Codes promo & partenaires','réduction coupon partenaire sponsor', true]
+  ]},
+  { g:'🔐 Sécurité & modération', items:[
+    ['panel-urgences','🆘 Alertes d’urgence','sos suivi fausses alertes historique'],
+    ['panel-demande-comptes','🟠 Demandes de blocage / suppression','gestionnaires motif compte', true],
+    ['panel-trash','♻️ Comptes supprimés','récupérer restaurer corbeille', true],
+    ['panel-shield','🛡️ Bouclier anti-malveillance','ip recelées attaques protection', true],
+    ['panel-freeze','⛔ Coupure des écritures','geler lecture seule PDG', true],
+    ['panel-audit','📜 Journal d’audit','traçabilité actions historique', true]
+  ]},
+  { g:'⚙️ Paramètres', items:[
+    ['panel-cfg','⚙️ Réglages plateforme','commission configuration GPS national', true],
+    ['panel-entreprise','🏢 Profil de l’entreprise','identité klean pays devise commission villes services moyens de paiement'],
+    ['panel-cfg','🔑 Mot de passe & sécurité HQ','changer mot de passe PDG', false, 'changePwd()']
+  ]}
 ];
+/* HQ_GO reste la liste utilisée par les puces de recherche (compatibilité) */
+const HQ_GO = [];
+HQ_MENU.forEach(g => g.items.forEach(it => { if(!HQ_GO.some(x => x[0] === it[0] && x[1] === it[1])) HQ_GO.push([it[0], it[1], it[2]]); }));
+/* ordre d'affichage du tableau de bord (du plus utile au plus rare) */
+const HQ_ORDER = ['panel-home','panel-search','kpis','substrip','panel-ca7',
+  'people','panel-online-cli','panel-pros','panel-cands','panel-team','panel-roles',
+  'panel-svc-browse','panel-svc-create','panel-villes','panel-match',
+  'panel-missions','panel-quotes',
+  'panel-pay','panel-paydest',
+  'panel-ann','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
+  'panel-flip','panel-quizbank','panel-promo',
+  'panel-urgences','panel-demande-comptes','panel-trash','panel-shield','panel-freeze','panel-audit',
+  'panel-entreprise','panel-cfg'];
+/* ═══════════ 🧭 NAVIGATION LATÉRALE + 🏠 VUE GÉNÉRALE (lot 97) ═══════════ */
+function hqNavToggle(force){
+  const nav = document.getElementById('hq-nav'), back = document.getElementById('hq-nav-back');
+  if(!nav) return;
+  const large = !!(window.matchMedia && window.matchMedia('(min-width:1050px)').matches);
+  const ouvert = (typeof force === 'boolean') ? force
+    : (large ? !document.body.classList.contains('hq-nav-on') : !nav.classList.contains('open'));
+  if(large){
+    document.body.classList.toggle('hq-nav-on', ouvert);
+    document.body.classList.toggle('hq-nav-off', !ouvert);
+    nav.classList.remove('open'); if(back) back.classList.remove('on');
+  } else {
+    nav.classList.toggle('open', ouvert);
+    if(back) back.classList.toggle('on', ouvert);
+  }
+}
+function hqNavClose(){
+  const nav = document.getElementById('hq-nav'); if(nav) nav.classList.remove('open');
+  const back = document.getElementById('hq-nav-back'); if(back) back.classList.remove('on');
+}
+function hqGo(id, fn){
+  hqNavClose();
+  if(fn){ try{ (new Function(fn))(); }catch(e){} return; }
+  jumpPanel(id);
+  hqNavMarque(id);
+}
+function hqNavMarque(id){
+  document.querySelectorAll('#hq-nav .hq-nav-i').forEach(b => {
+    const on = b.getAttribute('data-id') === id;
+    b.classList.toggle('on', on);
+  });
+}
+function hqNavCible(){
+  const els = HQ_ORDER.map(id => document.getElementById(id)).filter(Boolean);
+  let best = els[0];
+  els.forEach(el => { if(el.getBoundingClientRect().top <= 140) best = el; });
+  if(best) hqNavMarque(best.id);
+}
+function paintHqNav(){
+  const nav = document.getElementById('hq-nav'); if(!nav) return;
+  const pdg = !!(ME && ME.role === 'pdg');
+  const H = ['<div class="hq-nav-h"><span class="b">✨</span><span>KLEAN HQ<span style="display:block;font-size:10.5px;color:var(--muted);font-weight:700">Menu du tableau de bord</span></span></div>'];
+  HQ_MENU.forEach(g => {
+    const items = g.items.filter(it => (!it[3] || pdg) && document.getElementById(it[0]));
+    if(!items.length) return;
+    H.push('<div class="hq-nav-g">' + g.g + '</div>');
+    items.forEach(it => {
+      const fn = it[4] ? ("'" + String(it[4]).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'") : 'null';
+      H.push('<button type="button" class="hq-nav-i" data-id="' + it[0] + '" onclick="hqGo(\'' + it[0] + '\',' + fn + ')">'
+        + '<span class="ic">' + (it[1].match(/^\S+/)[0]) + '</span><span>' + it[1].replace(/^\S+\s*/, '') + '</span></button>');
+    });
+  });
+  nav.innerHTML = H.join('');
+  try{ hqNavCible(); }catch(e){}
+}
+/* remet les rubriques dans l'ordre logique et pose les titres de sections */
+function hqReorganiser(){
+  const w = document.querySelector('.wrap'); if(!w) return;
+  /* on retire les anciens titres de section : aucun doublon, même si l'on range plusieurs fois */
+  [...w.querySelectorAll(':scope > .hq-sec')].forEach(x => x.remove());
+  const kids = [...w.children];
+  const rang = el => { const i = HQ_ORDER.indexOf(el.id); return i < 0 ? (900 + kids.indexOf(el)) : i; };
+  kids.sort((a, b) => rang(a) - rang(b));
+  const frag = document.createDocumentFragment();
+  let groupe = '';
+  kids.forEach(el => {
+    const g = HQ_MENU.find(x => x.items.some(it => it[0] === el.id));
+    const nom = g ? g.g : '';
+    if(nom && nom !== groupe){
+      const t = document.createElement('div'); t.className = 'hq-sec'; t.textContent = nom;
+      frag.appendChild(t); groupe = nom;
+    }
+    frag.appendChild(el);
+  });
+  w.appendChild(frag);
+}
+/* 🏠 VUE GÉNÉRALE : l'essentiel, lu dans les panneaux déjà remplis (aucun appel réseau en plus) */
+function hqv(id){ const e = document.getElementById(id); return e ? String(e.textContent || '').replace(/\u00a0/g, ' ').trim() : ''; }
+function hqN(s){ const m = String(s || '').match(/\d[\d\s]*/); return m ? m[0].replace(/\D/g, '') : ''; }
+function hqMissions(){ try{ return (typeof MISSIONS !== 'undefined' && MISSIONS) ? MISSIONS : (window.MISSIONS || []); }catch(e){ return window.MISSIONS || []; } }
+function paintHome(){
+  const box = document.getElementById('home-cards'); if(!box) return;
+  const pdg = !!(ME && ME.role === 'pdg');
+  const miss = hqMissions();
+  const nb = st => miss.filter(m => st.includes(m.status)).length;
+  const nouvelles = nb(['pending']);
+  const enCours = nb(['accepted', 'enroute', 'arrive', 'encours']);
+  const finies = nb(['terminee']) || hqN(hqv('c-done'));
+  const annulees = nb(['annulee']);
+  const attente = (hqv('pm-kpi').match(/En attente\s*:\s*([\d\s]+)\s*F/) || [])[1];
+  const cartes = [
+    ['👥', 'Clients inscrits', hqN(hqv('c-clients')) || hqN(hqv('c-inscrits')), 'people', false],
+    ['🧑‍💼', 'Professionnels', hqN(hqv('k-agents-sub')), 'panel-pros', false],
+    ['🟢', 'En ligne', (hqN(hqv('k-agents')) || '0') + ' pro · ' + (hqN(hqv('oncli-cnt')) || '0') + ' client', 'panel-online-cli', false],
+    ['🆕', 'Nouvelles demandes', String(nouvelles), 'panel-missions', false],
+    ['📋', 'Prestations en cours', String(enCours), 'panel-missions', false],
+    ['👑', 'Gestionnaires actifs', hqN(hqv('team-cnt')), 'panel-team', false],
+    ['✅', 'Prestations terminées', String(finies || 0), 'panel-missions', false],
+    ['✕', 'Annulations', String(annulees), 'panel-missions', false],
+    ['💵', 'Revenus (CA total)', hqv('c-ca'), 'panel-ca7', true],
+    ['🏦', 'Commissions', hqv('c-comm'), 'panel-ca7', true],
+    ['⏳', 'Paiements en attente', attente ? (attente.trim() + ' F') : '—', 'panel-pay', true],
+    ['🛡️', 'Dossiers à vérifier', hqN(hqv('cand-cnt')), 'panel-cands', false],
+    ['🎯', 'Demandes sur mesure', hqN(hqv('quotes-cnt')), 'panel-quotes', false],
+    ['🟠', 'Demandes de blocage', hqN(hqv('dem-cnt')), 'panel-demande-comptes', true],
+    ['🆘', 'Alertes d’urgence', hqN(hqv('ug-cnt')), 'panel-urgences', false],
+    ['💬', 'Messages terrain', hqN(hqv('field-in-cnt')), 'panel-field-inbox', false]
+  ].filter(c => !c[4] || pdg);
+  box.innerHTML = cartes.map(c => '<button type="button" class="home-card" onclick="hqGo(\'' + c[3] + '\')"><b>' + (c[2] === '' || c[2] === null || c[2] === undefined ? '—' : c[2]) + '</b><small>' + c[0] + ' ' + c[1] + '</small></button>').join('');
+  /* pistes à traiter maintenant */
+  const todo = [];
+  const push = (n, txt, cible) => { const v = hqN(n); if(v && v !== '0') todo.push('<button type="button" class="home-todo" onclick="hqGo(\'' + cible + '\')">' + txt + ' <b>' + v + '</b> →</button>'); };
+  push(hqv('cand-cnt'), '🛡️ Dossiers de professionnels à valider :', 'panel-cands');
+  push(hqv('dem-cnt'), '🟠 Demandes de blocage / suppression :', 'panel-demande-comptes');
+  push(hqv('ug-cnt'), '🆘 Alertes d’urgence enregistrées :', 'panel-urgences');
+  push(hqv('quotes-cnt'), '🛠️ Demandes sur mesure à chiffrer :', 'panel-quotes');
+  push(hqv('field-in-cnt'), '🧭 Messages d’agents de terrain :', 'panel-field-inbox');
+  const t = document.getElementById('home-todo');
+  if(t) t.innerHTML = todo.length ? ('<b style="display:block;font-size:12px;color:var(--p);margin-bottom:7px">⚡ À TRAITER MAINTENANT</b>' + todo.join('')) : '';
+  /* erreurs de chargement éventuelles */
+  const al = document.getElementById('home-alerte');
+  if(al){
+    const err = window._hqErr || [];
+    al.style.display = err.length ? 'block' : 'none';
+    if(err.length) al.innerHTML = '⚠️ Ces parties n’ont pas pu se charger : <b>' + err.join(', ') + '</b>. Les autres rubriques fonctionnent ; rechargez la page ou réessayez dans un instant.';
+  }
+  const maj = document.getElementById('home-maj');
+  if(maj) maj.textContent = 'à ' + new Date().toTimeString().slice(0, 5);
+}
+function paintEntreprise(){
+  const box = document.getElementById('ent-liste'); if(!box) return;
+  const ligne = (ic, nom, val, cible, libelle) => '<div style="display:flex;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)">'
+    + '<span style="font-size:17px;width:22px;text-align:center">' + ic + '</span>'
+    + '<span style="flex:1"><b style="display:block;font-size:12.5px">' + nom + '</b><small style="color:var(--muted);font-size:11.5px">' + (val || '—') + '</small></span>'
+    + '<button type="button" onclick="hqGo(\'' + cible + '\')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:11.5px">' + (libelle || 'Modifier') + '</button></div>';
+  const villes = (hqv('nv-list').match(/(\d+)\s*ville/) || [])[1] || '0';
+  let nbServices = 0; try{ nbServices = (window._catalogHQ || []).length; }catch(e){}
+  const pm = hqv('pm-cnt') || '';
+  const cartesPay = document.querySelectorAll('#pm-table tbody tr').length || document.querySelectorAll('#pm-table tr').length;
+  const H = [
+    ligne('🧼', 'Nom de la plateforme', 'KLEAN Service — mise en relation clients / professionnels', 'panel-home', 'Vue générale'),
+    ligne('🇨🇮', 'Pays & devise', 'Côte d’Ivoire · FCFA (XOF)', 'panel-villes', 'Villes'),
+    ligne('💼', 'Commission de la plateforme', (hqv('cfg-comm') ? (document.getElementById('cfg-comm').value || hqv('cfg-comm')) : '—') + ' % par mission — le reste revient au professionnel', 'panel-cfg', 'Modifier'),
+    ligne('📏', 'Rayon de mise en relation', (document.getElementById('cfg-reach') ? (document.getElementById('cfg-reach').value || hqv('cfg-reach')) : '—') + ' km — ' + (hqv('gps-nation-state') || 'état inconnu'), 'panel-match', 'Modifier'),
+    ligne('💳', 'Moyens de paiement', (pm || 'PDG') + (cartesPay ? (' · ' + cartesPay + ' ligne(s) configurée(s)') : ''), 'panel-pay', 'Gérer'),
+    ligne('🏙️', 'Villes déployées', villes + ' ville(s) — visibles chez les clients et les pros', 'panel-villes', 'Gérer'),
+    ligne('📂', 'Services au catalogue', nbServices + ' service(s) (offres prêtes + services que vous avez créés)', 'panel-svc-browse', 'Gérer'),
+    ligne('👑', 'Équipe', hqv('team-cnt') || '—', 'panel-team', 'Gérer'),
+    ligne('💬', 'Support client', 'WhatsApp / appel : +225 01 00 27 75 21 (bouton d’aide dans l’app client)', 'panel-support', 'Messages'),
+    ligne('🎮', 'Récompenses & jeu', hqv('ff-cnt') || '—', 'panel-flip', 'Modifier'),
+    ligne('🔑', 'Mot de passe du compte principal', 'Modifiable à tout moment (jamais visible en clair)', 'panel-cfg', 'Changer')
+  ];
+  box.innerHTML = H.join('');
+  const m = document.getElementById('ent-maj'); if(m) m.textContent = 'à ' + new Date().toTimeString().slice(0, 5);
+}
+function hqOubli(nom, e){
+  window._hqErr = window._hqErr || [];
+  if(!window._hqErr.includes(nom)) window._hqErr.push(nom);
+  console.warn('HQ · ' + nom + ' : ' + ((e && e.message) || e));
+}
+window.hqOubli = hqOubli;
 function searchHQ(){
   paintHqGo();
   clearTimeout(_hqQtm);
@@ -886,12 +1435,13 @@ function searchHQ(){
 function paintHqGo(){
   const box=document.getElementById('hq-q-go'); if(!box) return;
   const n=pNorm(((document.getElementById('hq-q')||{}).value||'').trim());
-  const list = HQ_GO.filter(x=>!n || pNorm(x[0]+' '+x[1]).includes(n));
+  const list = HQ_GO.filter(x=>!n || pNorm(x[0]+' '+x[1]+' '+(x[2]||'')).includes(n));
   box.innerHTML = list.map(x=>'<button type="button" onclick="jumpPanel(\''+x[0]+'\')" style="background:var(--card2);border:1px solid var(--line);color:var(--ink);font:inherit;font-size:11.5px;font-weight:800;padding:8px 11px;border-radius:99px;cursor:pointer">'+x[1]+'</button>').join('') || '<span style="color:var(--muted);font-size:12px">Aucune fenêtre</span>';
 }
 function jumpPanel(id){
   const el=document.getElementById(id);
   if(!el) return;
+  try{ hqNavMarque(id); }catch(e){}
   el.style.display='';
   try{ if(el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
   el.style.outline='2px solid var(--p)';
@@ -899,6 +1449,7 @@ function jumpPanel(id){
   /* 🔄 ouverture de la fenêtre » : on rafraîchit les données de ce panneau */
   try{
     if(id==='panel-pay'){ try{ chargerPaiements(); }catch(e){} try{ chargerProviderPay(); }catch(e){} }
+    if(id==='panel-flip' || id==='panel-quizbank' || id==='panel-infos' || id==='panel-urgences'){ try{ chargerHQ96(); }catch(e){} }
   }catch(e){}
 }
 async function runSearchHQ(){
@@ -1014,7 +1565,8 @@ async function chargerPaiements(){
           + '<button title="Supprimer" onclick="pmSupprimer(\''+m.id+'\')" style="border:none;background:rgba(255,107,107,.12);border-radius:8px;padding:5px 7px;cursor:pointer;font:inherit">🗑️</button>'
           + '</td></tr>').join('') : '<tr><td colspan="7" style="padding:10px;color:var(--muted)">Aucun moyen de paiement — ajoutez-en un ci-dessous.</td></tr>')
       + '</tbody></table></div>';
-    document.getElementById('pm-note').textContent = d.notice || '';
+    /* ⚠️ avant : cet avis était écrit dans le champ « note interne » (deux éléments partageaient l'id pm-note) */
+    document.getElementById('pm-notice').textContent = d.notice || '';
     /* ── intégrations officielles : ce qui manque exactement ── */
     document.getElementById('pm-integr').innerHTML = (d.integrations||[]).map(x=>
       '<div style="border:1px solid var(--line);border-radius:11px;padding:9px 11px;margin-bottom:7px">'
@@ -2046,7 +2598,8 @@ async function actionAdmin(id, action, nom){
 }
 
 function renderPeople(){
-  const el = document.querySelector('#people'); if(!el) return;
+  /* 🛡️ lot 97 : on n'écrase plus le panneau entier (titre, recherche et filtres restent en place) */
+  const el = document.querySelector('#people-list') || document.querySelector('#people'); if(!el) return;
   const q = pNorm((document.querySelector('#people-search')||{}).value || '');
   document.querySelector('#people-cnt').textContent = PEOPLE.agents.length + ' agent(s) · ' + PEOPLE.clients.length + ' client(s)';
   const onf = x => PEOPLE_FILTER==='all' || (PEOPLE_FILTER==='on' ? !!x.online : !x.online);
@@ -2255,20 +2808,54 @@ function renderChart(days){
     </div>`).join('');
   document.querySelector('#chart-total').textContent = fmt(days.reduce((s,d)=>s+d.ca,0))+' sur 7 j';
 }
+let MISSIONS = [], MISSIONS_FILTRE = 'toutes';
+const M_ENCOURS = ['pending', 'accepted', 'enroute', 'arrive', 'encours'];
+function missionsFiltre(f){
+  if(f) MISSIONS_FILTRE = f;
+  ['toutes', 'encours', 'terminees', 'annulees'].forEach(k => {
+    const b = document.getElementById('m-f-' + k); if(!b) return;
+    const on = (MISSIONS_FILTRE === k);
+    b.style.background = on ? 'var(--pl)' : 'var(--card2)';
+    b.style.borderColor = on ? 'rgba(21,201,138,.5)' : 'var(--line)';
+    b.style.color = on ? 'var(--p)' : 'var(--ink)';
+  });
+  renderMissions();
+}
 function renderMissions(list){
-  document.querySelector('#m-cnt').textContent = list.length ? list.length+' récentes' : '—';
-  const el = document.querySelector('#missions');
-  if(!list.length){ el.innerHTML = '<div class="empty">Aucune mission pour le moment.<br>Créez-en une depuis l\'app client !</div>'; return; }
-  el.innerHTML = list.map(m=>{
-    const [cls,txt] = STATUS[m.status]||['b-pending',m.status];
+  if(Array.isArray(list)) MISSIONS = list;
+  const cnt = document.querySelector('#m-cnt'); if(cnt) cnt.textContent = MISSIONS.length ? MISSIONS.length + ' récente(s)' : '—';
+  const el = document.querySelector('#missions'); if(!el) return;
+  const q = pNorm(((document.getElementById('m-q') || {}).value || '').trim());
+  const dans = m => { if(!q) return true; return pNorm([m.id, m.client, m.agent, m.quartier, (SVC_N[m.service] || m.service || '')].join(' ')).includes(q); };
+  const parEtat = {
+    toutes: m => true,
+    encours: m => M_ENCOURS.includes(m.status),
+    terminees: m => m.status === 'terminee',
+    annulees: m => m.status === 'annulee'
+  };
+  const kp = document.getElementById('m-kpis');
+  if(kp){
+    const c = k => MISSIONS.filter(parEtat[k]).length;
+    kp.innerHTML = '<span class="pill" style="background:var(--card2);padding:5px 9px;border-radius:8px">🔵 En cours : <b>' + c('encours') + '</b></span>'
+      + '<span class="pill" style="background:var(--card2);padding:5px 9px;border-radius:8px">✅ Terminées : <b>' + c('terminees') + '</b></span>'
+      + '<span class="pill" style="background:var(--card2);padding:5px 9px;border-radius:8px">✕ Annulées : <b>' + c('annulees') + '</b></span>'
+      + '<span class="pill" style="background:var(--card2);padding:5px 9px;border-radius:8px">🧾 Total : <b>' + MISSIONS.length + '</b></span>';
+  }
+  const L = MISSIONS.filter(m => parEtat[MISSIONS_FILTRE](m) && dans(m));
+  if(!L.length){
+    el.innerHTML = '<div class="empty">' + (MISSIONS.length ? 'Aucune mission ne correspond à ce filtre.' : 'Aucune mission pour le moment.<br>Créez-en une depuis l’app client !') + '</div>';
+    return;
+  }
+  el.innerHTML = L.map(m => {
+    const [cls, txt] = STATUS[m.status] || ['b-pending', m.status];
     return `<div class="mrow">
-      <div class="ic">${SVC[m.service]||'🧹'}</div>
+      <div class="ic">${SVC[m.service] || '🧹'}</div>
       <div>
-        <b>${SVC_N[m.service]||m.service} · ${m.quartier}</b>
-        <small>#${m.id} · ${m.client||'—'}${m.agent?' → '+m.agent:''} · ${hhmm(m.at)}${m.paiement?' · '+(PAYTAG[m.paiement]||m.paiement):''}${m.gps?' · 📡GPS':''}</small>
+        <b>${SVC_N[m.service] || m.service} · ${m.quartier || '—'}</b>
+        <small>#${m.id} · ${m.client || '—'}${m.agent ? ' → ' + m.agent : ''} · ${hhmm(m.at)}${m.paiement ? ' · ' + (PAYTAG[m.paiement] || m.paiement) : ''}${m.gps ? ' · 📡GPS' : ''}</small>
         <span class="badge ${cls}">${txt}</span>
       </div>
-      <div class="right"><b>${fmt(m.prixTotal)}</b><small>+${fmt(m.comm)} KLEAN</small>${['accepted','enroute'].includes(m.status)?`<br><button title="Réattribuer d'urgence à un autre professionnel" style="margin-top:5px;background:var(--card2);border:1px solid rgba(255,176,32,.45);color:var(--amber);font-size:9.5px;font-weight:800;padding:4px 8px;border-radius:7px;cursor:pointer;font-family:inherit" onclick="reassignMission('${m.id}','${(m.client||'').replace(/'/g,'')}')">🔁 Réaff.</button>`:''}</div>
+      <div class="right"><b>${fmt(m.prixTotal)}</b><small>+${fmt(m.comm)} KLEAN</small>${['accepted', 'enroute'].includes(m.status) ? `<br><button title="Réattribuer d'urgence à un autre professionnel" style="margin-top:5px;background:var(--card2);border:1px solid rgba(255,176,32,.45);color:var(--amber);font-size:9.5px;font-weight:800;padding:4px 8px;border-radius:7px;cursor:pointer;font-family:inherit" onclick="reassignMission('${m.id}','${(m.client || '').replace(/'/g, '')}')">🔁 Réaff.</button>` : ''}</div>
     </div>`;
   }).join('');
 }
@@ -3108,6 +3695,545 @@ function fermerMissionsClient(){
   if(w) w.style.display = 'none';
 }
 document.addEventListener('keydown', function(e){ if(e.key === 'Escape'){ fermerFenetreComptes(); fermerMissionsClient(); } });
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LOT 96 — 🎮 FLIP FIZZ & RÉCOMPENSES · 🧠 QUIZ & QUESTIONS · ℹ️ INFORMATIONS · 🆘 URGENCES
+   Tout est décidé ici, sans toucher au code. Le serveur reste seul juge des points,
+   du quota de parties et des récompenses.
+   ═══════════════════════════════════════════════════════════════════════════ */
+let FF = null, FF_MEDIA = { url: '', video: '' }, RC_MEDIA = '', RC_EDIT = '', QB_EDIT = '', IN_EDIT = '';
+
+function ffV(id){ const e = document.getElementById(id); return e ? e.value : ''; }
+function ffC(id){ const e = document.getElementById(id); return !!(e && e.checked); }
+function ffPut(id, v){ const e = document.getElementById(id); if(e) e.value = (v === null || v === undefined) ? '' : v; }
+function ffChk(id, v){ const e = document.getElementById(id); if(e) e.checked = !!v; }
+function ffMsg(txt, ok){ const e = document.getElementById('ff-cur'); if(e){ e.textContent = txt; e.style.color = ok ? 'var(--p)' : 'var(--amber)'; } }
+function ffPost(corps){
+  return fetch('/api/admin/flip', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corps) })
+    .then(r => r.json().catch(() => ({})).then(d => { if(!r.ok) throw new Error(d.error || 'Action refusée'); return d; }));
+}
+function hqPost(url, corps){
+  return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corps || {}) })
+    .then(r => r.json().catch(() => ({})).then(d => { if(!r.ok) throw new Error(d.error || 'Action refusée'); return d; }));
+}
+async function chargerHQ96(){
+  await Promise.all([ chargerFlip().catch(()=>{}), chargerQuizBank().catch(()=>{}), chargerInfos().catch(()=>{}), chargerUrgences().catch(()=>{}) ]);
+}
+
+/* ─────────── 🎮 FLIP FIZZ ─────────── */
+async function chargerFlip(){
+  try{
+    const d = await fetchJ('/api/admin/flip');
+    FF = d.flip || {};
+    FF_MEDIA = { url: FF.mediaUrl || '', video: FF.videoUrl || '' };
+    ffChk('ff-actif', FF.actif); ffChk('ff-accueil', FF.accueil); ffChk('ff-recomp', FF.recompensesActives !== false);
+    ffPut('ff-titre', FF.titre || 'Flip Fizz'); ffPut('ff-desc', FF.desc || '');
+    ffPut('ff-regles', FF.regles || ''); ffPut('ff-url', FF.url || '');
+    ffPut('ff-parties', FF.partiesJour === undefined ? 3 : FF.partiesJour);
+    ffPut('ff-pts', FF.pointsParPartie === undefined ? 10 : FF.pointsParPartie);
+    ffPut('ff-bonus', FF.pointsBonus === undefined ? 0 : FF.pointsBonus);
+    ffPut('ff-seuil', FF.seuilBonus === undefined ? 100 : FF.seuilBonus);
+    ffPut('ff-dureemin', FF.dureeMin === undefined ? 20 : FF.dureeMin);
+    ffEtat(); ffApercu(); ffMediaEtat(); ffStats(d.stats);
+    await chargerRecompenses();
+  }catch(e){
+    const el = document.getElementById('ff-etat');
+    if(el) el.textContent = 'Réglages indisponibles : ' + (e && e.message ? e.message : 'connectez-vous avec un compte HQ.');
+  }
+}
+function ffEtat(){
+  const box = document.getElementById('ff-etat'); if(!box) return;
+  const actif = ffC('ff-actif'), acc = ffC('ff-accueil');
+  const ligne = !actif
+    ? '<b style="color:var(--red)">🔴 Flip Fizz DÉSACTIVÉ</b> — le jeu n’est proposé nulle part, même à ceux qui ont le lien.'
+    : (acc
+      ? '<b style="color:var(--green,#12a150)">🟢 Jeu actif et AFFICHÉ sur la page d’accueil des clients</b> — un bloc « ' + echa(ffV('ff-titre') || 'Flip Fizz') + ' » apparaît automatiquement.'
+      : '<b style="color:var(--amber)">🟠 Jeu actif mais NON affiché</b> — les clients n’y accèdent que par le lien direct.');
+  box.innerHTML = ligne + '<br><small style="color:var(--muted)">État enregistré : ' + (FF && FF.majAt ? String(FF.majAt).slice(0,16).replace('T',' · ') : '—') + (FF && FF.par ? (' · par ' + echa(FF.par)) : '') + '</small>';
+  const l1 = document.getElementById('ff-l-actif'), l2 = document.getElementById('ff-l-accueil');
+  if(l1) l1.innerHTML = 'Flip Fizz — jeu ' + (actif ? '<b style="color:var(--green,#12a150)">ACTIF 🟢</b>' : '<b style="color:var(--red)">INACTIF 🔴</b>');
+  if(l2) l2.innerHTML = 'Afficher sur la page d’accueil ' + (acc ? '<b style="color:var(--green,#12a150)">🟢</b>' : '<b style="color:var(--red)">🔴</b>');
+  const c = document.getElementById('ff-cnt');
+  if(c) c.textContent = actif ? (acc ? 'affiché' : 'actif') : 'inactif';
+}
+function ffApercu(){
+  const box = document.getElementById('ff-apercu'); if(!box) return;
+  const actif = ffC('ff-actif'), acc = ffC('ff-accueil');
+  const titre = echa(ffV('ff-titre') || 'Flip Fizz'), desc = echa(ffV('ff-desc') || '');
+  const media = FF_MEDIA.url ? (/\.(mp4|webm)$/i.test(FF_MEDIA.url)
+      ? '<video src="' + FF_MEDIA.url + '" muted playsinline style="width:100%;border-radius:11px;margin-bottom:7px"></video>'
+      : '<img src="' + FF_MEDIA.url + '" alt="" style="width:100%;border-radius:11px;margin-bottom:7px">') : '';
+  box.innerHTML = '<b style="display:block;font-size:12.5px;margin-bottom:6px">👁 Aperçu (ce que verra le client sur son accueil)</b>'
+    + '<div style="background:linear-gradient(135deg,#123c2a,#0b2a1d);border-radius:14px;padding:11px;color:#fff;max-width:340px;margin:0 auto">'
+    + media
+    + '<b style="display:block;font-size:14px">🎮 ' + titre + '</b>'
+    + '<small style="display:block;color:#cfe9d8;font-size:11.5px;margin-top:3px">' + (desc || 'Pas de description.') + '</small>'
+    + '<div style="margin-top:8px;display:inline-block;background:#15c98a;color:#06281b;font-weight:900;padding:8px 14px;border-radius:99px;font-size:12.5px">Jouer maintenant</div>'
+    + '<small style="display:block;margin-top:7px;color:#9fd8b8;font-size:11px">' + (actif && acc ? '✅ Ce bloc s’affichera sur l’accueil.' : '🚫 Ce bloc NE s’affichera PAS (interrupteurs).') + '</small>'
+    + '</div>';
+}
+/* Appelé pendant la frappe dans les champs du jeu : aperçu en direct + rappel d'enregistrer.
+   (Les champs du panneau appelaient ffMarquer() — la fonction manquait : c'était un lien mort.) */
+function ffMarquer(){
+  const etat = document.getElementById('ff-cur');
+  if(etat) etat.textContent = '✏️ Modifications non enregistrées — cliquez sur « Enregistrer » pour publier.';
+  ffApercu();
+}
+function ffMediaEtat(){
+  const e = document.getElementById('ff-media-etat'); if(!e) return;
+  const a = FF_MEDIA.url ? ('<a href="' + FF_MEDIA.url + '" target="_blank" rel="noopener" style="color:var(--p);font-weight:800">Voir l’image</a>') : '';
+  const b = FF_MEDIA.video ? ('<a href="' + FF_MEDIA.video + '" target="_blank" rel="noopener" style="color:var(--p);font-weight:800">Voir la vidéo</a>') : '';
+  e.innerHTML = '🖼️ Image : ' + (FF_MEDIA.url ? '✅ en place ' + a : '— aucune')
+    + '<br>🎬 Vidéo de présentation : ' + (FF_MEDIA.video ? '✅ en place ' + b : '— aucune');
+}
+function ffStats(st){
+  const box = document.getElementById('ff-stats'); if(!box) return;
+  if(!st){ box.innerHTML = '<span style="color:var(--muted);font-size:12px">Statistiques indisponibles.</span>'; return; }
+  const cases = [
+    ['👥', st.joueurs || 0, 'Joueurs'], ['🎮', st.parties || 0, 'Parties jouées'],
+    ['🎟️', st.partiesGratuitesUtilisees || 0, 'Parties gratuites utilisées'],
+    ['🪙', fmt(st.pointsDistribues || 0), 'Klean Points distribués'],
+    ['💰', fmt(st.pointsEnCirculation || 0), 'Points en circulation'],
+    ['🎁', st.recompensesReclamees || 0, 'Récompenses réclamées'],
+    ['📦', st.recompensesRestantes || 0, 'Récompenses restantes'],
+    ['🏷️', st.recompenses || 0, 'Récompenses créées']
+  ];
+  box.innerHTML = cases.map(x => '<div style="background:var(--card2);border:1.5px solid var(--line);border-radius:11px;padding:9px;text-align:center"><div style="font-size:17px">' + x[0] + '</div><b style="display:block;font-size:15px">' + x[1] + '</b><small style="color:var(--muted);font-size:11px">' + x[2] + '</small></div>').join('');
+  const j = document.getElementById('ff-jour');
+  if(j){
+    const pj = st.parJour || {}, jours = Object.keys(pj).sort().slice(-14);
+    j.innerHTML = jours.length
+      ? jours.map(k => '<div style="display:flex;align-items:center;gap:7px;margin:3px 0"><small style="width:78px;color:var(--muted)">' + k + '</small><span style="flex:1;height:9px;background:var(--card2);border-radius:5px;overflow:hidden"><span style="display:block;height:100%;width:' + Math.min(100, pj[k] * 12) + '%;background:linear-gradient(90deg,#15c98a,#0b7a52)"></span></span><b style="font-size:11.5px">' + pj[k] + '</b></div>').join('')
+      : '<span style="color:var(--muted)">Aucune partie enregistrée pour l’instant.</span>';
+  }
+  const m = document.getElementById('ff-mois');
+  if(m){
+    const pm = st.parMois || {}, mois = Object.keys(pm).sort();
+    m.innerHTML = mois.length
+      ? mois.map(k => '<div style="display:flex;align-items:center;gap:7px;margin:3px 0"><small style="width:78px;color:var(--muted)">' + k + '</small><span style="flex:1;height:9px;background:var(--card2);border-radius:5px;overflow:hidden"><span style="display:block;height:100%;width:' + Math.min(100, pm[k] * 4) + '%;background:linear-gradient(90deg,#4aa3ff,#1f6fd0)"></span></span><b style="font-size:11.5px">' + pm[k] + '</b></div>').join('')
+      : '<span style="color:var(--muted)">—</span>';
+  }
+}
+/* un seul interrupteur à la fois : effet immédiat, sans toucher au code */
+async function ffBascule(champ, val){
+  try{
+    const d = await ffPost({ [champ]: val });
+    FF = Object.assign(FF || {}, d.flip || {});
+    FF[champ] = !!val;
+    ffEtat(); ffApercu(); ffStats(d.stats);
+    alert(val
+      ? (champ === 'actif' ? '✅ Flip Fizz ACTIVÉ. Le jeu est disponible (interrupteur accueil séparé).' : '✅ AFFICHÉ sur la page d’accueil : le bloc apparaît chez les clients en quelques secondes.')
+      : (champ === 'actif' ? '⏸️ Flip Fizz DÉSACTIVÉ : il disparaît immédiatement chez tous les clients.' : '🙈 RETIRÉ de la page d’accueil. Le jeu reste actif mais personne ne le voit.'));
+  }catch(e){
+    ffChk('ff-' + champ, !val);      /* on remet la case dans son état réel : c'est le serveur qui décide */
+    ffEtat(); ffApercu();
+    alert('⚠️ ' + (e && e.message ? e.message : 'Action refusée'));
+  }
+}
+async function ffToutCouper(){
+  if(!confirm('Désactiver complètement Flip Fizz : jeu ET affichage accueil ?')) return;
+  try{
+    const d = await ffPost({ actif:false, accueil:false });
+    FF = Object.assign(FF || {}, d.flip || {});
+    ffChk('ff-actif', false); ffChk('ff-accueil', false);
+    ffEtat(); ffApercu(); ffStats(d.stats);
+    alert('⏹ Flip Fizz est totalement désactivé : plus rien chez les clients.');
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Action refusée')); }
+}
+async function ffEnregistrer(){
+  const corps = {
+    actif: ffC('ff-actif'), accueil: ffC('ff-accueil'),
+    titre: ffV('ff-titre').trim(), desc: ffV('ff-desc').trim(), regles: ffV('ff-regles').trim(), url: ffV('ff-url').trim(),
+    partiesJour: parseInt(ffV('ff-parties'), 10) || 0, pointsParPartie: parseInt(ffV('ff-pts'), 10) || 10,
+    pointsBonus: parseInt(ffV('ff-bonus'), 10) || 0, seuilBonus: parseInt(ffV('ff-seuil'), 10) || 100,
+    dureeMin: parseInt(ffV('ff-dureemin'), 10) || 0,
+    recompensesActives: ffC('ff-recomp')
+  };
+  try{
+    const d = await ffPost(corps);
+    FF = d.flip || FF;
+    ffEtat(); ffApercu(); ffStats(d.stats);
+    ffMsg('✅ Réglages enregistrés ' + new Date().toLocaleTimeString('fr-FR'), true);
+    alert('✅ Réglages du jeu enregistrés.' + (corps.actif && corps.accueil ? '\nLe bloc est visible sur l’accueil des clients.' : '\nLe jeu n’est pas affiché sur l’accueil.'));
+  }catch(e){
+    ffMsg('⚠️ ' + (e && e.message ? e.message : 'Enregistrement refusé'), false);
+    alert('⚠️ ' + (e && e.message ? e.message : 'Enregistrement refusé'));
+  }
+}
+async function ffChoisir(input, genre){
+  const f = input && input.files && input.files[0]; if(!f) return;
+  const max = genre === 'video' ? 12 : 3;
+  if(f.size > max * 1048576) return alert('❌ Fichier trop lourd : ' + (f.size / 1048576).toFixed(1) + ' Mo. Maximum ' + max + ' Mo.');
+  const jauge = document.getElementById('ff-media-jauge'); if(jauge) jauge.style.display = '';
+  try{
+    const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+    const d = await hqPost('/api/admin/flip/media', { dataUrl, genre });
+    if(genre === 'video') FF_MEDIA.video = d.url; else FF_MEDIA.url = d.url;
+    FF = d.flip || FF;
+    ffMediaEtat(); ffApercu();
+    alert('✅ ' + (d.mediaType === 'video' ? 'Vidéo' : 'Image') + ' acceptée (' + d.mo + ' Mo) et mise en ligne.');
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Envoi impossible')); }
+  finally{ if(jauge) jauge.style.display = 'none'; input.value = ''; }
+}
+async function ffRetirerMedia(quoi){
+  try{
+    const r = await fetch('/api/admin/flip/media', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ quoi }) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) throw new Error(d.error || 'Impossible');
+    FF = d.flip || FF;
+    if(quoi === 'video') FF_MEDIA.video = ''; else FF_MEDIA.url = '';
+    ffMediaEtat(); ffApercu();
+    alert('🧹 Média retiré.');
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Impossible')); }
+}
+
+/* ─────────── 🎁 RÉCOMPENSES ─────────── */
+async function chargerRecompenses(){
+  try{
+    const d = await fetchJ('/api/admin/recompenses');
+    const liste = d.liste || [];
+    const box = document.getElementById('rc-liste'); if(!box) return;
+    if(!liste.length){ box.innerHTML = '<div style="color:var(--muted);font-size:12.5px">Aucune récompense pour l’instant.</div>'; return; }
+    box.innerHTML = liste.map(r => {
+      const cl = (r.claims || []).length;
+      const stock = (r.stock === null || r.stock === undefined) ? '∞' : r.stock;
+      const fen = (r.debut ? 'du ' + r.debut : '') + (r.fin ? ' au ' + r.fin : '');
+      const mort = (r.fin && r.fin < new Date().toISOString().slice(0,10));
+      return '<div style="background:var(--card2);border:1.5px solid var(--line);border-radius:11px;padding:9px;margin-bottom:7px">'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+        + (r.mediaUrl ? '<img src="' + r.mediaUrl + '" alt="" style="width:38px;height:38px;object-fit:cover;border-radius:9px">' : '')
+        + '<b style="font-size:13px">' + echa(r.nom) + '</b>'
+        + '<span style="font-size:11px;font-weight:900;color:' + (r.actif && !mort ? 'var(--p)' : 'var(--red)') + '">' + (r.actif ? (mort ? 'expirée' : 'active') : 'inactive') + '</span>'
+        + '<b style="margin-left:auto;font-size:12.5px">🪙 ' + fmt(r.points) + '</b></div>'
+        + '<small style="color:var(--muted)">' + echa(r.desc || '') + '</small><br>'
+        + '<small style="color:var(--muted)">Stock : ' + stock + ' · déjà remise ' + cl + ' fois · ' + (fen || 'sans limite de dates') + (r.unique === false ? ' · plusieurs fois par client' : ' · une fois par client') + '</small>'
+        + '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">'
+        + '<button type="button" onclick="rcEditer(\'' + r.id + '\')" style="background:var(--card);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:11.5px">✏️ Modifier</button>'
+        + '<button type="button" onclick="rcToggle(\'' + r.id + '\',' + (!r.actif) + ')" style="background:var(--card);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:11.5px">' + (r.actif ? '⏸️ Désactiver' : '▶️ Activer') + '</button>'
+        + '<button type="button" onclick="rcSuppr(\'' + r.id + '\')" style="background:var(--card);border:1.5px solid var(--line);color:var(--red);font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:11.5px">🗑 Supprimer</button>'
+        + '</div></div>';
+    }).join('');
+  }catch(e){}
+}
+function rcNouveau(){
+  RC_EDIT = ''; RC_MEDIA = '';
+  ['rc-nom','rc-desc','rc-stock','rc-debut','rc-fin'].forEach(id => ffPut(id, ''));
+  ffPut('rc-points', 100); ffPut('rc-type', 'reduction'); ffChk('rc-actif', true); ffChk('rc-unique', true);
+  const t = document.getElementById('qb-form-titre');
+  const e = document.getElementById('rc-media-etat'); if(e) e.textContent = 'Aucune image.';
+  alert('✚ Formulaire vidé : vous pouvez créer une nouvelle récompense.');
+}
+function rcEditer(id){
+  fetchJ('/api/admin/recompenses').then(d => {
+    const r = (d.liste || []).find(x => x.id === id); if(!r) return;
+    RC_EDIT = r.id; RC_MEDIA = r.mediaUrl || '';
+    ffPut('rc-nom', r.nom); ffPut('rc-desc', r.desc || ''); ffPut('rc-type', r.type || 'cadeau');
+    ffPut('rc-points', r.points); ffPut('rc-stock', (r.stock === null || r.stock === undefined) ? '' : r.stock);
+    ffPut('rc-debut', r.debut || ''); ffPut('rc-fin', r.fin || '');
+    ffChk('rc-actif', r.actif !== false); ffChk('rc-unique', r.unique !== false);
+    const e = document.getElementById('rc-media-etat');
+    if(e) e.innerHTML = RC_MEDIA ? ('🖼️ Image : ✅ <a href="' + RC_MEDIA + '" target="_blank" rel="noopener" style="color:var(--p);font-weight:800">voir</a>') : 'Aucune image.';
+    try{ document.getElementById('rc-nom').scrollIntoView({behavior:'smooth', block:'center'}); }catch(err){}
+  }).catch(()=>{});
+}
+async function rcEnregistrer(){
+  const nom = ffV('rc-nom').trim();
+  if(nom.length < 2) return alert('❌ Donnez un nom à la récompense.');
+  const corps = {
+    id: RC_EDIT, nom, desc: ffV('rc-desc').trim(), type: ffV('rc-type'),
+    points: parseInt(ffV('rc-points'), 10) || 100,
+    stock: ffV('rc-stock').trim() === '' ? null : (parseInt(ffV('rc-stock'), 10) || 0),
+    debut: ffV('rc-debut'), fin: ffV('rc-fin'),
+    actif: ffC('rc-actif'), unique: ffC('rc-unique'), mediaUrl: RC_MEDIA
+  };
+  try{
+    const d = await hqPost('/api/admin/recompenses', corps);
+    RC_EDIT = (d.recompense || {}).id || RC_EDIT;
+    chargerRecompenses();
+    alert('✅ Récompense « ' + nom + ' » enregistrée et ' + (corps.actif ? 'active' : 'inactive') + '.');
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Enregistrement refusé')); }
+}
+async function rcSuppr(id){
+  if(!confirm('Supprimer cette récompense ? Si elle a déjà été remise, elle sera seulement désactivée (les clients gardent leur gain).')) return;
+  try{
+    const d = await hqPost('/api/admin/recompenses/suppr', { id });
+    chargerRecompenses(); chargerFlip().catch(()=>{});
+    alert('✅ ' + (d.message || 'Récompense supprimée.'));
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Impossible')); }
+}
+async function rcToggle(id, actif){
+  try{
+    const liste = (await fetchJ('/api/admin/recompenses')).liste || [];
+    const r = liste.find(x => x.id === id); if(!r) return;
+    await hqPost('/api/admin/recompenses', Object.assign({}, r, { actif: !!actif }));
+    chargerRecompenses();
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Impossible')); }
+}
+async function rcChoisir(input){
+  const f = input && input.files && input.files[0]; if(!f) return;
+  if(f.size > 3 * 1048576) return alert('❌ Image trop lourde (3 Mo maximum).');
+  try{
+    const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+    const d = await hqPost('/api/admin/recomp/media', { dataUrl });
+    RC_MEDIA = d.url;
+    const e = document.getElementById('rc-media-etat');
+    if(e) e.innerHTML = '🖼️ Image : ✅ <a href="' + RC_MEDIA + '" target="_blank" rel="noopener" style="color:var(--p);font-weight:800">voir</a> — enregistrée avec la récompense.';
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Envoi impossible')); }
+  finally{ input.value = ''; }
+}
+
+/* ─────────── 🧠 QUIZ & QUESTIONS ─────────── */
+function qbLignes(){ return [0,1,2,3].map(n => document.getElementById('qb-c' + n)).filter(Boolean); }   /* ids créés de 0 à 3 */
+function qbChoixVides(){ return qbLignes().filter(e => !e.value.trim()).length; }
+function qbNouvelle(){
+  QB_EDIT = '';
+  ffPut('qb-q', ''); ffPut('qb-expl', ''); ffPut('qb-debut', '');
+  ffPut('qb-points', 10); ffPut('qb-niveau', 1); ffChk('qb-actif', true);
+  qbLignes().forEach((e, i) => { e.value = ''; });
+  const r = document.getElementById('qb-bonne0'); if(r) r.checked = true;
+  const t = document.getElementById('qb-form-titre'); if(t) t.textContent = '✍️ Nouvelle question';
+}
+function qbEdit(id){
+  fetchJ('/api/admin/quiz-bank').then(d => {
+    const q = (d.banque && d.banque.questions || []).find(x => x.id === id); if(!q) return;
+    QB_EDIT = q.id;
+    ffPut('qb-q', q.q); ffPut('qb-expl', q.expl || ''); ffPut('qb-points', q.points); ffPut('qb-niveau', q.niveau || 1);
+    ffChk('qb-actif', q.actif !== false); ffPut('qb-debut', q.debut || ''); ffPut('qb-cat', q.cat || '');
+    qbLignes().forEach((e, i) => { e.value = (q.choix || [])[i] || ''; });
+    const r = document.getElementById('qb-bonne' + (q.bonne || 0)); if(r) r.checked = true;
+    const t = document.getElementById('qb-form-titre'); if(t) t.textContent = '✏️ Modifier la question';
+    try{ document.getElementById('qb-q').scrollIntoView({behavior:'smooth', block:'center'}); }catch(err){}
+  }).catch(()=>{});
+}
+function qbChoixHTML(cat) {
+  return '<b style="font-size:12px;display:block;margin:6px 0 4px">Réponses proposées — cochez la BONNE</b>'
+    + [0,1,2,3].map(i => '<label style="display:flex;align-items:center;gap:8px"><input type="radio" name="qb-bonne" id="qb-bonne' + i + '"' + (i === 0 ? ' checked' : '') + ' style="width:17px;height:17px">'
+      + '<input id="qb-c' + i + '" maxlength="90" placeholder="Réponse ' + (i + 1) + (i > 1 ? ' (facultative)' : '') + '" style="flex:1;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px"></label>').join('')
+    + (cat && cat.length ? '<small style="display:block;margin-top:6px;color:var(--muted)">Catégorie choisie en haut — modifie-la si besoin.</small>' : '');
+}
+async function chargerQuizBank(){
+  try{
+    const d = await fetchJ('/api/admin/quiz-bank');
+    const b = d.banque || { categories: [], questions: [] }, st = d.stats || {};
+    document.getElementById('qb-stats').innerHTML = '📚 ' + (st.questions || 0) + ' question(s) dont <b>' + (st.actives || 0) + ' active(s)</b> · 🗂️ ' + (st.categories || 0) + ' catégorie(s)'
+      + '<br>👥 ' + (st.joueurs || 0) + ' joueur(s) · ✍️ ' + (st.reponses || 0) + ' réponse(s) · ✅ ' + (st.bonnes || 0) + ' bonne(s) · 🪙 ' + fmt(st.points || 0) + ' points distribués'
+      + '<br><small style="color:var(--muted)">Le serveur corrige : la bonne réponse n’est jamais envoyée avant que le client ait répondu.</small>';
+    const cf = d.cfg || {};                       /* ⚙️ règles du quiz : défi quotidien + séries */
+    ffChk('qb-defi-actif', cf.defiActif !== false);
+    ffPut('qb-defi-points', cf.defiPoints == null ? 10 : cf.defiPoints);
+    ffPut('qb-serie-pas', cf.seriePas == null ? 5 : cf.seriePas);
+    ffPut('qb-serie-bonus', cf.serieBonus == null ? 5 : cf.serieBonus);
+    const dsel = document.getElementById('qb-defi-question');
+    if(dsel) dsel.innerHTML = '<option value="">— tirage automatique du jour —</option>'
+      + (b.questions || []).map(q => '<option value="' + echa(q.id) + '"' + (cf.defiQuestionId === q.id ? ' selected' : '') + '>' + echa(String(q.q || '').slice(0, 60)) + '</option>').join('');
+    const dq = document.getElementById('qb-defi-stats');
+    if(dq) dq.textContent = '🎯 Défis joués : ' + (st.defisJoues || 0) + ' · réussis : ' + (st.defisReussis || 0)
+      + ' · 🔥 meilleure série : ' + (st.meilleureSerie || 0) + ' bonne(s) d’affilée'
+      + (d.defiQuestion ? (' — question du jour : « ' + String(d.defiQuestion.q || '').slice(0, 60) + ' »') : '');
+    const c = document.getElementById('qb-cnt'); if(c) c.textContent = (st.questions || 0) + ' questions';
+    /* catégories */
+    const sel = document.getElementById('qb-cat');
+    if(sel) sel.innerHTML = '<option value="">— sans catégorie —</option>' + (b.categories || []).map(x => '<option value="' + echa(x.id) + '">' + echa((x.ic || '') + ' ' + x.nom) + '</option>').join('');
+    const box = document.getElementById('qb-cats');
+    if(box) box.innerHTML = (b.categories || []).length
+      ? (b.categories || []).map(x => '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)"><span style="font-size:16px">' + echa(x.ic || '🧠') + '</span><span style="flex:1"><b style="font-size:12.5px">' + echa(x.nom) + '</b>' + (x.desc ? '<br><small style="color:var(--muted)">' + echa(x.desc) + '</small>' : '') + '</span><span style="font-size:11px;font-weight:900;color:' + (x.actif !== false ? 'var(--p)' : 'var(--red)') + '">' + (x.actif !== false ? 'active' : 'inactive') + '</span><button type="button" onclick="qbCatSuppr(\'' + x.id + '\')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--red);font-weight:800;padding:6px 9px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px">🗑</button></div>').join('')
+      : '<small style="color:var(--muted)">Aucune catégorie.</small>';
+    /* questions */
+    const boxQ = document.getElementById('qb-liste');
+    if(boxQ) boxQ.innerHTML = '<b style="display:block;font-size:12.5px;margin:10px 0 5px">📋 Questions (' + (b.questions || []).length + ')</b>' + ((b.questions || []).length
+      ? (b.questions || []).slice().reverse().map(q => '<div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:9px;margin-bottom:7px">'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="font-size:12.5px;flex:1;min-width:150px">' + echa(q.q) + '</b>'
+        + '<span style="font-size:11px;font-weight:900;color:' + (q.actif !== false ? 'var(--p)' : 'var(--red)') + '">' + (q.actif !== false ? 'active' : 'inactive') + '</span></div>'
+        + '<small style="color:var(--muted)">' + echa((q.choix || []).map((c, i) => (i === q.bonne ? '✅ ' : '· ') + c).join('  |  ')) + '</small><br>'
+        + '<small style="color:var(--muted)">🪙 ' + fmt(q.points || 0) + ' · niveau ' + (q.niveau || 1) + (q.cat ? (' · ' + echa(q.cat)) : '') + (q.debut ? (' · programmée ' + String(q.debut).slice(0, 16).replace('T', ' ')) : '') + '</small>'
+        + '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">'
+        + '<button type="button" onclick="qbEdit(\'' + q.id + '\')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:6px 10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px">✏️ Modifier</button>'
+        + '<button type="button" onclick="qbSuppr(\'' + q.id + '\')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--red);font-weight:800;padding:6px 10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px">🗑 Supprimer</button>'
+        + '</div></div>').join('')
+      : '<small style="color:var(--muted)">Aucune question. Créez-en une ci-dessus.</small>');
+    /* dernières réponses */
+    const rep = document.getElementById('qb-rep');
+    if(rep) rep.innerHTML = (d.reponses || []).length
+      ? (d.reponses || []).slice(0, 25).map(p => '<div style="padding:5px 0;border-bottom:1px solid var(--line)">' + (p.bon ? '✅' : '❌') + ' <b>' + echa(p.client || 'client') + '</b> · ' + echa(p.q || '') + ' <small style="color:var(--muted)">(' + String(p.at || '').slice(0, 16).replace('T', ' · ') + (p.pts ? (' · +' + p.pts + ' pts') : '') + ')</small></div>').join('')
+      : '<small style="color:var(--muted)">Aucune réponse pour l’instant.</small>';
+  }catch(e){
+    const el = document.getElementById('qb-stats'); if(el) el.textContent = 'Banque de questions indisponible.';
+  }
+}
+async function qbCatSave(){
+  const nom = ffV('qb-cat-nom').trim();
+  if(nom.length < 2) return alert('❌ Nom de catégorie requis.');
+  try{
+    await hqPost('/api/admin/quiz-bank', { type:'categorie', nom, ic: ffV('qb-cat-ic').trim() || '🧠', desc: ffV('qb-cat-desc').trim() });
+    ffPut('qb-cat-nom', ''); ffPut('qb-cat-desc', '');
+    chargerQuizBank();
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Impossible')); }
+}
+async function qbCatSuppr(id){
+  if(!confirm('Supprimer cette catégorie ? Les questions déjà créées restent (elles perdront juste leur catégorie).')) return;
+  try{ await hqPost('/api/admin/quiz-bank/suppr', { type:'categorie', id }); chargerQuizBank(); }
+  catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Impossible')); }
+}
+async function qbReglages(){
+  try{
+    await hqPost('/api/admin/quiz-bank', {
+      type: 'reglages', defiActif: ffC('qb-defi-actif'),
+      defiPoints: parseInt(ffV('qb-defi-points'), 10) || 0,
+      seriePas: parseInt(ffV('qb-serie-pas'), 10) || 0,
+      serieBonus: parseInt(ffV('qb-serie-bonus'), 10) || 0,
+      defiQuestionId: ffV('qb-defi-question')
+    });
+    chargerQuizBank();
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Impossible')); }
+}
+async function qbQSave(){
+  const q = ffV('qb-q').trim();
+  if(q.length < 6) return alert('❌ La question est trop courte.');
+  const choix = qbLignes().map(e => e.value.trim()).filter(Boolean);
+  if(choix.length < 2) return alert('❌ Il faut au moins 2 réponses possibles.');
+  let bonne = 0;
+  qbLignes().forEach((e, i) => { const r = document.getElementById('qb-bonne' + i); if(r && r.checked) bonne = i; });
+  if(!choix[bonne]) bonne = 0;
+  const corps = { type:'question', id: QB_EDIT, q, choix, bonne, cat: ffV('qb-cat'), niveau: parseInt(ffV('qb-niveau'), 10) || 1,
+    points: parseInt(ffV('qb-points'), 10) || 10, expl: ffV('qb-expl').trim(), debut: ffV('qb-debut'), actif: ffC('qb-actif') };
+  try{
+    const d = await hqPost('/api/admin/quiz-bank', corps);
+    QB_EDIT = (d.question || {}).id || QB_EDIT;
+    const t = document.getElementById('qb-form-titre'); if(t) t.textContent = '✏️ Modifier la question';
+    chargerQuizBank(); chargerFlip().catch(()=>{});
+    alert('✅ Question enregistrée.');
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Enregistrement refusé')); }
+}
+async function qbSuppr(id){
+  if(!confirm('Supprimer cette question ? Si des clients y ont déjà répondu, elle sera simplement désactivée.')) return;
+  try{
+    const d = await hqPost('/api/admin/quiz-bank/suppr', { id });
+    chargerQuizBank();
+    if(d.desactivee) alert('ℹ️ ' + (d.message || 'Question désactivée.'));
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Impossible')); }
+}
+
+/* ─────────── ℹ️ INFORMATIONS ─────────── */
+const IN_CATS = { actualite:'📣 Actualité', conseil:'💡 Conseil', important:'❗ Important', annonce:'📢 Annonce', securite:'🛡️ Sécurité', service:'🛠️ Service', nouveaute:'✨ Nouveauté', local:'📍 Info locale', campagne:'🎯 Campagne' };
+async function chargerInfos(){
+  try{
+    const d = await fetchJ('/api/admin/infos');
+    const liste = d.liste || [];
+    const c = document.getElementById('in-cnt'); if(c) c.textContent = liste.length + ' publiée(s)';
+    const box = document.getElementById('in-liste');
+    if(!box) return;
+    box.innerHTML = liste.length ? liste.slice().reverse().map(x => {
+      const mort = (x.fin && x.fin < new Date().toISOString().slice(0,10));
+      return '<div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:9px;margin-bottom:7px">'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-size:17px">' + echa(x.ic || 'ℹ️') + '</span><b style="font-size:12.5px;flex:1;min-width:130px">' + echa(x.titre) + '</b>'
+        + '<span style="font-size:11px;font-weight:900;color:' + (x.actif !== false && !mort ? 'var(--p)' : 'var(--red)') + '">' + (x.actif === false ? 'dépubliée' : (mort ? 'expirée' : 'publiée')) + '</span></div>'
+        + '<small style="color:var(--muted)">' + (IN_CATS[x.cat] || x.cat) + ' · ' + ({ client:'clients', pro:'pros', tous:'clients et pros' }[x.cible] || 'clients et pros') + (x.epin ? ' · ⭐ à la une' : '') + (x.debut || x.fin ? (' · ' + (x.debut || '…') + ' → ' + (x.fin || '…')) : '') + '</small><br>'
+        + '<small style="color:var(--muted)">' + echa((x.texte || '').slice(0, 140)) + ((x.texte || '').length > 140 ? '…' : '') + '</small>'
+        + '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">'
+        + '<button type="button" onclick="inEdit(\'' + x.id + '\')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:6px 10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px">✏️ Modifier</button>'
+        + '<button type="button" onclick="inToggle(\'' + x.id + '\',' + (x.actif === false) + ')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:6px 10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px">' + (x.actif === false ? '▶️ Republier' : '⏸️ Dépublier') + '</button>'
+        + '<button type="button" onclick="inSuppr(\'' + x.id + '\')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--red);font-weight:800;padding:6px 10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px">🗑 Supprimer</button>'
+        + '</div></div>';
+    }).join('') : '<small style="color:var(--muted)">Aucune information publiée. Le client verra les conseils par défaut de la rubrique.</small>';
+  }catch(e){
+    const c = document.getElementById('in-cnt'); if(c) c.textContent = 'indisponible';
+  }
+}
+function inNouveau(){
+  IN_EDIT = '';
+  ffPut('in-titre', ''); ffPut('in-texte', ''); ffPut('in-ic', ''); ffPut('in-debut', ''); ffPut('in-fin', '');
+  ffPut('in-cat', 'actualite'); ffPut('in-cible', 'tous'); ffChk('in-actif', true); ffChk('in-epin', false);
+}
+async function inSave(){
+  const titre = ffV('in-titre').trim();
+  if(titre.length < 3) return alert('❌ Titre requis.');
+  const corps = { id: IN_EDIT, cat: ffV('in-cat'), ic: ffV('in-ic').trim() || 'ℹ️', titre, texte: ffV('in-texte').trim(),
+    cible: ffV('in-cible'), epin: ffC('in-epin'), actif: ffC('in-actif'), debut: ffV('in-debut'), fin: ffV('in-fin') };
+  try{
+    const d = await hqPost('/api/admin/infos', corps);
+    IN_EDIT = (d.info || {}).id || IN_EDIT;
+    chargerInfos();
+    alert('✅ Information ' + (corps.actif ? 'publiée' : 'enregistrée (non publiée)') + '.');
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Publication refusée')); }
+}
+function inEdit(id){
+  fetchJ('/api/admin/infos').then(d => {
+    const x = (d.liste || []).find(y => y.id === id); if(!x) return;
+    IN_EDIT = x.id;
+    ffPut('in-titre', x.titre); ffPut('in-texte', x.texte || ''); ffPut('in-ic', x.ic || '');
+    ffPut('in-cat', x.cat || 'actualite'); ffPut('in-cible', x.cible || 'tous');
+    ffPut('in-debut', x.debut || ''); ffPut('in-fin', x.fin || '');
+    ffChk('in-actif', x.actif !== false); ffChk('in-epin', !!x.epin);
+    try{ document.getElementById('in-titre').scrollIntoView({behavior:'smooth', block:'center'}); }catch(e){}
+  }).catch(()=>{});
+}
+async function inToggle(id, actif){
+  try{
+    const liste = (await fetchJ('/api/admin/infos')).liste || [];
+    const x = liste.find(y => y.id === id); if(!x) return;
+    await hqPost('/api/admin/infos', Object.assign({}, x, { actif: !!actif }));
+    chargerInfos();
+  }catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Impossible')); }
+}
+async function inSuppr(id){
+  if(!confirm('Supprimer définitivement cette information ?')) return;
+  try{ await hqPost('/api/admin/infos/suppr', { id }); chargerInfos(); alert('🗑 Information supprimée.'); }
+  catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Impossible')); }
+}
+
+/* ─────────── 🆘 URGENCES ─────────── */
+const UG_ST = { nouvelle:['🆕','nouvelle','var(--amber)'], en_cours:['🚑','prise en charge','var(--blue)'], traitee:['✅','traitée','var(--p)'], fausse_alerte:['⚠️','fausse alerte','var(--red)'] };
+async function chargerUrgences(){
+  try{
+    const d = await fetchJ('/api/admin/urgences');
+    const liste = d.liste || [];
+    const c = document.getElementById('ug-cnt'); if(c) c.textContent = (d.total || 0) + ' au total';
+    const st = document.getElementById('ug-stats');
+    if(st) st.innerHTML = '📨 <b>' + (d.total || 0) + '</b> alerte(s) enregistrée(s) · <b>' + (d.aujourdhui || 0) + '</b> aujourd’hui'
+      + '<br><small style="color:var(--muted)">Chaque alerte est datée et garde son suivi. Les fausses alertes répétées peuvent limiter l’accès au bouton d’urgence.</small>';
+    const box = document.getElementById('ug-liste');
+    if(!box) return;
+    box.innerHTML = liste.length ? liste.map(a => {
+      const s = UG_ST[a.statut] || UG_ST.nouvelle;
+      return '<div style="background:var(--bg);border:1.5px solid var(--line);border-radius:11px;padding:9px;margin-bottom:7px">'
+        + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="font-size:12.5px">' + s[0] + ' ' + echa(a.client || 'client') + '</b>'
+        + '<span style="font-size:11px;font-weight:900;color:' + s[2] + '">' + s[1] + '</span>'
+        + '<b style="margin-left:auto;font-size:12px">' + String(a.at || '').slice(0, 16).replace('T', ' · ') + '</b></div>'
+        + '<small style="color:var(--muted)">' + echa(a.type || 'alerte') + (a.note ? (' · ' + echa(a.note)) : '') + (a.tel ? (' · 📞 ' + echa(a.tel)) : '') + (a.pos ? (' · 📍 ' + (a.pos.lat ? (a.pos.lat.toFixed(3) + ', ' + a.pos.lng.toFixed(3)) : 'position partagée')) : ' · position non partagée') + '</small>'
+        + '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">'
+        + Object.keys(UG_ST).map(k => '<button type="button" onclick="ugStatut(\'' + a.id + '\',\'' + k + '\')" style="background:var(--card2);border:1.5px solid var(--line);color:' + (a.statut === k ? 'var(--p)' : 'var(--ink)') + ';font-weight:800;padding:6px 10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px">' + UG_ST[k][0] + ' ' + UG_ST[k][1] + '</button>').join('')
+        + '</div></div>';
+    }).join('') : '<small style="color:var(--muted)">Aucune alerte d’urgence : c’est une bonne nouvelle.</small>';
+  }catch(e){}
+}
+async function ugStatut(id, statut){
+  try{ await hqPost('/api/admin/urgences/statut', { id, statut }); chargerUrgences(); }
+  catch(e){ alert('⚠️ ' + (e && e.message ? e.message : 'Impossible')); }
+}
+
+/* ═══════════ 🧭 LOT 97 — démarrage : menu, rangement des rubriques, vue générale ═══════════ */
+(function init97(){
+  function boot(){
+    try{ if(window.matchMedia && window.matchMedia('(min-width:1050px)').matches && !document.body.classList.contains('hq-nav-off')) document.body.classList.add('hq-nav-on'); }catch(e){}
+    try{ hqReorganiser(); }catch(e){ hqOubli('Rangement', e); }
+    try{ paintHqNav(); }catch(e){ hqOubli('Menu', e); }
+    try{ paintHome(); paintEntreprise(); }catch(e){ hqOubli('Vue générale', e); }
+    if(!window._hqHomeT) window._hqHomeT = setInterval(() => { try{ paintHome(); paintEntreprise(); }catch(e){} }, 5000);
+    let tm = null;
+    window.addEventListener('scroll', () => { clearTimeout(tm); tm = setTimeout(() => { try{ hqNavCible(); }catch(e){} }, 180); }, { passive: true });
+    window.addEventListener('resize', () => { hqNavClose(); });
+    document.addEventListener('keydown', e => { if(e.key === 'Escape') hqNavClose(); });
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else setTimeout(boot, 0);
+  window.addEventListener('load', () => { try{ hqReorganiser(); paintHqNav(); paintHome(); paintEntreprise(); }catch(e){} });
+})();
+
+/* mise en place des champs de réponse + des aperçus au démarrage */
+(function init96(){
+  const z = document.getElementById('qb-choix'); if(z) z.innerHTML = qbChoixHTML('');
+  ffChk('ff-recomp', true);
+  setTimeout(() => { ffEtat(); ffApercu(); }, 400);
+})();
 </script>
 
 </body>
