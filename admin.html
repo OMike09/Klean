@@ -178,6 +178,7 @@
     <div class="body" style="padding:12px 14px">
       <div id="home-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:9px"></div>
       <div id="home-alerte" style="display:none;margin-top:10px;background:rgba(255,107,107,.12);border:1.5px solid rgba(255,107,107,.4);border-radius:12px;padding:10px 11px;font-size:12.5px;line-height:1.45"></div>
+      <div id="home-stock" style="display:none;margin-top:11px;border-radius:12px;padding:10px 11px;font-size:12.5px;line-height:1.45"></div>
       <div id="home-todo" style="margin-top:12px"></div>
       <small style="display:block;margin-top:9px;color:var(--muted);font-size:11px">Touchez une carte pour ouvrir la rubrique correspondante. Tout se met à jour tout seul.</small>
     </div>
@@ -406,6 +407,7 @@
           <button type="button" onclick="retirerAd()" style="flex:1;min-width:130px;background:var(--card);border:1.5px solid var(--line);color:var(--danger);padding:11px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;font-size:12.5px">✕ Retirer la publicité</button>
         </div>
         <small id="ad-cur" style="display:block;margin-top:9px;color:var(--muted);font-size:11.5px">Aucune publicité enregistrée.</small>
+        <div id="ad-media-alerte" style="display:none;margin-top:9px;background:rgba(255,107,107,.12);border:1.5px solid rgba(255,107,107,.42);border-radius:11px;padding:10px;font-size:12px;line-height:1.5"></div>
         <button type="button" onclick="openVues('ad')" style="margin-top:8px;width:100%;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">👁 Ordre des vu(s) — publicité</button>
       </div>
       <div id="field-chat-hq" style="margin-top:12px;background:var(--card2);border-radius:12px;padding:10px">
@@ -477,6 +479,18 @@
       <div id="partner-list" style="margin-top:8px"></div>
     </div>
   </div>
+  <!-- 🟠 LITIGES & REMBOURSEMENTS (lot 99) — le client signale, vous instruisez, le PDG décide -->
+  <div class="panel" style="margin-bottom:14px" id="panel-litiges">
+    <h3>🟠 Litiges &amp; remboursements <span class="cnt" id="li-cnt">—</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Le client signale un problème depuis l’application sur une mission <b>terminée</b>. Vous instruisez le dossier ici, la réponse part dans sa messagerie. <b class="pdg-only">La décision (rembourser / refuser) et le marquage du versement sont réservés au compte principal</b> — et <b>le logiciel ne déplace jamais d’argent tout seul</b>.</p>
+      <div id="li-kpis" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px;font-size:11.5px;font-weight:800"></div>
+      <div id="li-f" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px"></div>
+      <input id="li-q" placeholder="🔎 Rechercher (client, professionnel, mission, motif…)" oninput="renderLitiges()" style="width:100%;box-sizing:border-box;margin-bottom:10px;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+      <div id="li-list"></div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px;display:none" id="panel-pay">
     <h3>💳 Moyens de paiement <span class="cnt" id="pm-cnt">PDG</span></h3>
     <div class="body" style="padding:12px 14px">
@@ -564,6 +578,39 @@
     <h3>♻️ Récupération de comptes supprimés</h3>
     <div class="body" id="trash-list" style="padding:12px 14px"><div class="empty">Vide</div></div>
   </div>
+  <!-- 💾 SAUVEGARDES DES DONNÉES (lot 98) — télécharger, restaurer, historique automatique -->
+  <div class="panel" style="margin-bottom:14px" id="panel-sauvegardes">
+    <h3>💾 Sauvegardes des données <span class="cnt" id="sv-cnt">PDG</span></h3>
+    <div class="body" style="padding:12px 14px">
+      <div id="sv-etat" style="border:1.5px solid var(--line);border-radius:12px;padding:11px;font-size:12.5px;line-height:1.5;background:var(--bg)">Chargement…</div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <a href="/api/admin/db/sauvegarde" class="btn-main" style="flex:1;min-width:190px;text-align:center;text-decoration:none;display:inline-block">⬇️ Télécharger une sauvegarde maintenant</a>
+        <button type="button" onclick="loadSauvegardes()" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:11px 13px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">🔄 Actualiser</button>
+      </div>
+      <small style="display:block;margin-top:7px;color:var(--muted);font-size:11.5px">Le fichier <b>klean-db-AAAAMMJJ.json</b> contient toute la base : comptes clients, professionnels, missions, points, réglages. Gardez-le sur votre téléphone ou dans votre e-mail — c'est votre copie de secours, elle ne s'efface jamais.</small>
+
+      <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:11px">
+        <b style="display:block;font-size:12.5px;margin-bottom:5px">↩️ Restaurer une sauvegarde depuis un fichier</b>
+        <input type="file" id="sv-file" accept=".json,application/json" style="width:100%;padding:9px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:7px;align-items:center">
+          <input id="sv-conf" placeholder="Écrivez RESTAURER pour confirmer" style="flex:1;min-width:180px;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">
+          <button type="button" onclick="restaurerFichier()" style="background:rgba(255,176,32,.16);border:1.5px solid rgba(255,176,32,.45);color:var(--amber);font-weight:900;padding:11px 14px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:12.5px">↩️ Restaurer ce fichier</button>
+        </div>
+        <label style="display:flex;gap:7px;align-items:flex-start;margin-top:8px;font-size:11.5px;color:var(--muted)">
+          <input type="checkbox" id="sv-force" style="margin-top:2px">
+          <span>J'accepte de repartir de zéro si la sauvegarde est vide (à cocher seulement si c'est bien votre intention).</span>
+        </label>
+        <small style="display:block;margin-top:6px;color:var(--muted);font-size:11.5px">🛡️ Avant chaque restauration, l'état actuel est <b>conservé automatiquement</b> (historique + fichier de secours) : une erreur reste réversible.</small>
+      </div>
+
+      <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:11px">
+        <b style="display:block;font-size:12.5px;margin-bottom:5px">🕓 Sauvegardes automatiques (10 dernières)</b>
+        <div id="sv-auto" style="font-size:12.5px"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px" id="panel-cfg">
     <h3>⚙️ Réglages plateforme (PDG)</h3>
     <div style="padding:14px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -1123,6 +1170,8 @@ async function loadAll(){
     etape('Villes', ()=>loadVillesHQ());
     etape('Services', ()=>loadCatalogHQ());
     if(ME && ME.role==='pdg') etape('Bouclier', ()=>loadShield());
+    etape('Sauvegardes', ()=>loadSauvegardes());
+    etape('Litiges', ()=>loadLitiges());
     etape('Menu', ()=>{ paintHqNav(); paintHome(); paintEntreprise(); });
     if(!window._qzPoll){ window._qzPoll=setInterval(loadQuizHQ, 1000); }
     if(!window._livePoll){ window._livePoll=setInterval(paintAnnLive, 4000); paintAnnLive(); }
@@ -1219,7 +1268,8 @@ const HQ_MENU = [
   ]},
   { g:'📋 Commandes & prestations', items:[
     ['panel-missions','📋 Prestations & missions','demandes en cours terminées annulées réaffecter historique'],
-    ['panel-quotes','🛠️ Demandes sur mesure','devis prix spécial attribuer professionnel']
+    ['panel-quotes','🛠️ Demandes sur mesure','devis prix spécial attribuer professionnel'],
+    ['panel-litiges','🟠 Litiges & remboursements','réclamation problème remboursement indemnisation client', false]
   ]},
   { g:'💳 Paiements & finances', items:[
     ['panel-pay','💳 Moyens de paiement','orange money moov wave carte encaissement transactions'],
@@ -1245,7 +1295,8 @@ const HQ_MENU = [
     ['panel-trash','♻️ Comptes supprimés','récupérer restaurer corbeille', true],
     ['panel-shield','🛡️ Bouclier anti-malveillance','ip recelées attaques protection', true],
     ['panel-freeze','⛔ Coupure des écritures','geler lecture seule PDG', true],
-    ['panel-audit','📜 Journal d’audit','traçabilité actions historique', true]
+    ['panel-audit','📜 Journal d’audit','traçabilité actions historique', true],
+    ['panel-sauvegardes','💾 Sauvegardes des données','télécharger restaurer copie de secours perte de données export', true]
   ]},
   { g:'⚙️ Paramètres', items:[
     ['panel-cfg','⚙️ Réglages plateforme','commission configuration GPS national', true],
@@ -1260,11 +1311,11 @@ HQ_MENU.forEach(g => g.items.forEach(it => { if(!HQ_GO.some(x => x[0] === it[0] 
 const HQ_ORDER = ['panel-home','panel-search','kpis','substrip','panel-ca7',
   'people','panel-online-cli','panel-pros','panel-cands','panel-team','panel-roles',
   'panel-svc-browse','panel-svc-create','panel-villes','panel-match',
-  'panel-missions','panel-quotes',
+  'panel-missions','panel-quotes','panel-litiges',
   'panel-pay','panel-paydest',
   'panel-ann','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
   'panel-flip','panel-quizbank','panel-promo',
-  'panel-urgences','panel-demande-comptes','panel-trash','panel-shield','panel-freeze','panel-audit',
+  'panel-urgences','panel-demande-comptes','panel-trash','panel-shield','panel-freeze','panel-audit','panel-sauvegardes',
   'panel-entreprise','panel-cfg'];
 /* ═══════════ 🧭 NAVIGATION LATÉRALE + 🏠 VUE GÉNÉRALE (lot 97) ═══════════ */
 function hqNavToggle(force){
@@ -1371,6 +1422,7 @@ function paintHome(){
     ['🛡️', 'Dossiers à vérifier', hqN(hqv('cand-cnt')), 'panel-cands', false],
     ['🎯', 'Demandes sur mesure', hqN(hqv('quotes-cnt')), 'panel-quotes', false],
     ['🟠', 'Demandes de blocage', hqN(hqv('dem-cnt')), 'panel-demande-comptes', true],
+    ['🟠', 'Litiges à instruire', String(LITIGES_ACTIFS()), 'panel-litiges', false],
     ['🆘', 'Alertes d’urgence', hqN(hqv('ug-cnt')), 'panel-urgences', false],
     ['💬', 'Messages terrain', hqN(hqv('field-in-cnt')), 'panel-field-inbox', false]
   ].filter(c => !c[4] || pdg);
@@ -1382,6 +1434,7 @@ function paintHome(){
   push(hqv('dem-cnt'), '🟠 Demandes de blocage / suppression :', 'panel-demande-comptes');
   push(hqv('ug-cnt'), '🆘 Alertes d’urgence enregistrées :', 'panel-urgences');
   push(hqv('quotes-cnt'), '🛠️ Demandes sur mesure à chiffrer :', 'panel-quotes');
+  push(String(LITIGES_ACTIFS()), '🟠 Litiges à instruire (dont remboursements à verser) :', 'panel-litiges');
   push(hqv('field-in-cnt'), '🧭 Messages d’agents de terrain :', 'panel-field-inbox');
   const t = document.getElementById('home-todo');
   if(t) t.innerHTML = todo.length ? ('<b style="display:block;font-size:12px;color:var(--p);margin-bottom:7px">⚡ À TRAITER MAINTENANT</b>' + todo.join('')) : '';
@@ -1392,8 +1445,217 @@ function paintHome(){
     al.style.display = err.length ? 'block' : 'none';
     if(err.length) al.innerHTML = '⚠️ Ces parties n’ont pas pu se charger : <b>' + err.join(', ') + '</b>. Les autres rubriques fonctionnent ; rechargez la page ou réessayez dans un instant.';
   }
+  try{ paintStockage(); }catch(e){}
   const maj = document.getElementById('home-maj');
   if(maj) maj.textContent = 'à ' + new Date().toTimeString().slice(0, 5);
+}
+/* ═══════════ 🟠 LITIGES & REMBOURSEMENTS (lot 99) ═══════════ */
+let LITIGES = null, LITIGES_FILTRE = 'actifs';
+const LITIGES_ACTIFS = () => {
+  const c = LITIGES && LITIGES.compteurs; if(!c) return '0';
+  return String((c.ouverts || 0) + (c.enCours || 0) + (c.aPayer || 0));
+};
+async function loadLitiges(){
+  try{ LITIGES = await fetchJ('/api/admin/litiges'); renderLitiges(); paintHome(); }
+  catch(e){ hqOubli('Litiges', e); }
+}
+const liFmt = n => (Number(n) || 0).toLocaleString('fr-FR');
+function litigesFiltre(f){ LITIGES_FILTRE = f; renderLitiges(); }
+function renderLitiges(){
+  if(!LITIGES) return;
+  const c = LITIGES.compteurs || {};
+  const k = document.getElementById('li-kpis');
+  if(k) k.innerHTML = [
+    ['🟠 À instruire', (c.ouverts || 0) + (c.enCours || 0)],
+    ['💸 À verser', (c.aPayer || 0) + ' · ' + liFmt(c.totalAccepte) + ' F'],
+    ['✅ Versés', (c.regles || 0) + ' · ' + liFmt(c.totalVerse) + ' F'],
+    ['✕ Refusés', (c.refuses || 0)],
+    ['📁 Total', (c.total || 0)]
+  ].map(x => '<span style="background:var(--card2);border:1.5px solid var(--line);border-radius:9px;padding:6px 9px">' + x[0] + ' <b>' + x[1] + '</b></span>').join('');
+  const cnt = document.getElementById('li-cnt'); if(cnt) cnt.textContent = LITIGES_ACTIFS() + ' à traiter';
+  const FILTRES = [
+    ['actifs', '🟠 À instruire'],
+    ['a_verser', '💸 À verser'],
+    ['verses', '✅ Versés'],
+    ['refuses', '✕ Refusés'],
+    ['tous', '📁 Tous']
+  ];
+  const fb = document.getElementById('li-f');
+  if(fb) fb.innerHTML = FILTRES.map(f => {
+    const on = LITIGES_FILTRE === f[0];
+    return '<button type="button" onclick="litigesFiltre(\'' + f[0] + '\')" style="padding:7px 11px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:11.5px;font-weight:800;'
+      + (on ? 'background:var(--p);border:1.5px solid var(--p);color:#04231a' : 'background:var(--card2);border:1.5px solid var(--line);color:var(--ink)') + '">' + f[1] + '</button>';
+  }).join('');
+  const q = ((document.getElementById('li-q') || {}).value || '').toLowerCase().trim();
+  const dans = l => !q || [l.id, l.clientNom, l.proNom, l.missionId, l.serviceNom, l.motifTxt].join(' ').toLowerCase().includes(q);
+  let L = (LITIGES.liste || []).filter(dans);
+  if(LITIGES_FILTRE === 'actifs') L = L.filter(l => ['ouvert', 'en_cours'].includes(l.status));
+  else if(LITIGES_FILTRE === 'a_verser') L = L.filter(l => l.status === 'rembourse');
+  else if(LITIGES_FILTRE === 'verses') L = L.filter(l => l.status === 'regle');
+  else if(LITIGES_FILTRE === 'refuses') L = L.filter(l => l.status === 'refuse');
+  const box = document.getElementById('li-list'); if(!box) return;
+  if(!L.length){
+    box.innerHTML = '<div class="empty" style="padding:14px"><b>Aucun dossier ici ✓</b><p>' + (LITIGES_FILTRE === 'actifs' ? 'Aucun litige en attente d’instruction : c’est bon signe.' : 'Aucun dossier ne correspond à ce filtre.') + '</p></div>';
+    return;
+  }
+  const pdg = !!(ME && ME.role === 'pdg');
+  const M = LITIGES.compteurs.motifs || {}, MY = LITIGES.compteurs.moyens || {};
+  const COUL = { ouvert: 'var(--amber)', en_cours: 'var(--blue)', rembourse: 'var(--p)', regle: 'var(--p)', refuse: 'var(--red)' };
+  box.innerHTML = L.map(l => {
+    const actif = ['ouvert', 'en_cours'].includes(l.status);
+    const rb = l.remboursement || {};
+    const zone = [];
+    if(actif){
+      zone.push('<textarea id="li-t-' + l.id + '" placeholder="Votre réponse au client (elle part dans sa messagerie)" style="width:100%;box-sizing:border-box;min-height:52px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px"></textarea>');
+      zone.push('<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:6px">'
+        + (l.status === 'ouvert' ? '<button type="button" onclick="priseLitige(\'' + l.id + '\')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:9px 12px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12px">✋ Prendre en charge</button>' : '')
+        + '<button type="button" onclick="messageLitige(\'' + l.id + '\',true)" style="background:var(--blue);border:none;color:#04231a;font-weight:900;padding:9px 12px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12px">💬 Envoyer au client</button>'
+        + (pdg ? '' : '<button type="button" onclick="messageLitige(\'' + l.id + '\',false)" style="background:var(--card2);border:1.5px solid var(--line);color:var(--muted);font-weight:800;padding:9px 12px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12px">📝 Note interne</button>')
+        + '</div>');
+    }
+    if(pdg && actif){
+      const sugg = l.montantSouhaite || l.prixTotal || 0;
+      zone.push('<div style="margin-top:9px;border-top:1px dashed var(--line);padding-top:9px">'
+        + '<b style="display:block;font-size:11.5px;color:var(--p);margin-bottom:6px">🔑 Décision (compte principal)</b>'
+        + '<div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">'
+        + '<input id="li-m-' + l.id + '" type="number" min="1" max="' + (l.prixTotal || 0) + '" value="' + sugg + '" style="width:120px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">'
+        + '<select id="li-my-' + l.id + '" style="padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12.5px">'
+        + Object.keys(MY).map(x => '<option value="' + x + '">' + MY[x] + '</option>').join('') + '</select>'
+        + '<button type="button" onclick="deciderLitige(\'' + l.id + '\',\'rembourser\')" style="background:var(--p);border:none;color:#04231a;font-weight:900;padding:10px 13px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12.5px">✅ Rembourser</button>'
+        + '</div>'
+        + '<input id="li-mf-' + l.id + '" placeholder="Motif du refus (le client le lira)" style="width:100%;box-sizing:border-box;margin-top:7px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">'
+        + '<button type="button" onclick="deciderLitige(\'' + l.id + '\',\'refuser\')" style="margin-top:7px;background:rgba(255,107,107,.14);border:1.5px solid rgba(255,107,107,.45);color:var(--red);font-weight:900;padding:9px 12px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12px">✕ Refuser avec ce motif</button>'
+        + '<small style="display:block;margin-top:7px;color:var(--muted);font-size:11px">Plafond : ' + liFmt(l.prixTotal) + ' F (le prix payé). Aucun argent ne part automatiquement : vous faites le versement, puis vous le marquez « payé ».</small>'
+        + '</div>');
+    }
+    if(pdg && l.status === 'rembourse'){
+      zone.push('<div style="margin-top:9px;border-top:1px dashed var(--line);padding-top:9px">'
+        + '<b style="display:block;font-size:11.5px;margin-bottom:6px">💸 Versement accepté : ' + liFmt(rb.montant) + ' F (' + (rb.moyenTxt || '') + ')</b>'
+        + '<div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">'
+        + '<input id="li-ref-' + l.id + '" placeholder="Référence (ex. WAVE-7788)" style="flex:1;min-width:150px;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:12px">'
+        + '<button type="button" onclick="regleLitige(\'' + l.id + '\')" style="background:var(--p);border:none;color:#04231a;font-weight:900;padding:10px 13px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12.5px">💸 Marquer payé</button>'
+        + '</div></div>');
+    }
+    const fil = (l.hist || []).slice(-6).map(h => '<div style="padding:5px 0;border-top:1px solid var(--line);font-size:11.5px"><b>' + (h.par || '') + '</b> <small style="color:var(--muted)">' + String(h.at || '').slice(0, 16).replace('T', ' · ') + (h.interne ? ' · note interne' : '') + '</small><br>' + (h.texte || '') + '</div>').join('');
+    return '<div style="border:1.5px solid var(--line);border-radius:12px;padding:11px;margin-bottom:10px;background:var(--bg)">'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px">'
+      + '<b style="font-size:12.5px">🟠 ' + l.id + '</b>'
+      + '<span style="background:' + (COUL[l.status] || 'var(--muted)') + ';color:#04231a;font-weight:900;font-size:10.5px;padding:3px 8px;border-radius:8px">' + (l.statusTxt || l.status) + '</span>'
+      + '<small style="color:var(--muted)">' + (l.motifTxt || '') + ' · ' + liFmt(l.prixTotal) + ' F · mission ' + l.missionId + '</small>'
+      + '</div>'
+      + '<div style="font-size:12.5px;line-height:1.5">👤 <b>' + (l.clientNom || '') + '</b>' + (l.clientTel ? (' <small style="color:var(--muted)">' + l.clientTel + '</small>') : '') + (l.proNom ? (' · 🧽 ' + l.proNom) : '') + (l.prisPar ? (' · ✋ ' + l.prisPar) : '') + '</div>'
+      + '<div style="font-size:12.5px;margin-top:5px;background:var(--card2);border-radius:9px;padding:8px">« ' + (l.texte || '') + ' »'
+      + (l.montantSouhaite ? ('<br><small style="color:var(--muted)">Montant souhaité par le client : ' + liFmt(l.montantSouhaite) + ' F</small>') : '')
+      + (l.motifRefus ? ('<br><small style="color:var(--red)">Refus — ' + l.motifRefus + '</small>') : '')
+      + (rb.montant ? ('<br><small style="color:var(--p)">Remboursement ' + liFmt(rb.montant) + ' F — ' + (rb.statut === 'paye' ? ('versé' + (rb.ref ? (' (réf. ' + rb.ref + ')') : '')) : 'à verser') + '</small>') : '')
+      + '</div>'
+      + (fil ? ('<div style="margin-top:6px">' + fil + '</div>') : '')
+      + (zone.join('') || '')
+      + '</div>';
+  }).join('');
+}
+async function liAction(url, payload, okMsg){
+  try{
+    const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) return alert('⚠️ ' + (d.error || 'Action impossible'));
+    alert(okMsg || '✅ Enregistré');
+    loadLitiges();
+  }catch(e){ alert('⚠️ Réseau indisponible'); }
+}
+function priseLitige(id){ liAction('/api/admin/litiges/prise', { id }, '✋ Dossier pris en charge'); }
+function messageLitige(id, auClient){
+  const t = ((document.getElementById('li-t-' + id) || {}).value || '').trim();
+  if(t.length < 2) return alert('⚠️ Écrivez votre message');
+  liAction('/api/admin/litiges/message', { id, texte:t, auClient }, auClient ? '💬 Message envoyé au client' : '📝 Note interne ajoutée');
+}
+function deciderLitige(id, decision){
+  const montant = parseInt(((document.getElementById('li-m-' + id) || {}).value || '0'), 10) || 0;
+  const moyen = ((document.getElementById('li-my-' + id) || {}).value || 'especes');
+  const motif = ((document.getElementById('li-mf-' + id) || {}).value || '').trim();
+  if(decision === 'rembourser'){
+    if(montant <= 0) return alert('⚠️ Indiquez le montant à rembourser');
+    if(!confirm('Rembourser ' + montant.toLocaleString('fr-FR') + ' F au client ?\n\n⚠️ Le logiciel n’envoie pas l’argent : cette décision est enregistrée et vous ferez le versement vous-même.')) return;
+  } else {
+    if(motif.length < 5) return alert('⚠️ Indiquez le motif du refus (le client le lira)');
+    if(!confirm('Refuser ce dossier ?\nLe client lira votre motif :\n\n' + motif)) return;
+  }
+  liAction('/api/admin/litiges/decision', { id, decision, montant, moyen, motif }, decision === 'rembourser' ? '✅ Remboursement enregistré — pensez au versement' : '✕ Refus enregistré');
+}
+function regleLitige(id){
+  const ref = ((document.getElementById('li-ref-' + id) || {}).value || '').trim();
+  if(!confirm('Confirmer que le remboursement a bien été versé au client ?' + (ref ? ('\nRéférence : ' + ref) : ''))) return;
+  liAction('/api/admin/litiges/regle', { id, ref }, '💸 Versement enregistré');
+}
+
+/* ═══════════ 💾 SAUVEGARDES DES DONNÉES (lot 98) ═══════════ */
+let STOCKAGE = null;
+async function loadSauvegardes(){
+  try{
+    const d = await fetchJ('/api/admin/db/etat');
+    STOCKAGE = d; paintSauvegardes(); paintStockage();
+  }catch(e){ hqOubli('Sauvegardes', e); }
+}
+const _ko = o => (o > 1024*1024 ? (o/1048576).toFixed(1)+' Mo' : Math.max(1, Math.round(o/1024))+' Ko');
+function paintSauvegardes(){
+  const el = document.getElementById('sv-etat'); if(!el || !STOCKAGE) return;
+  const p = !!STOCKAGE.permanent;
+  el.style.background = p ? 'rgba(21,201,138,.10)' : 'rgba(255,176,32,.12)';
+  el.style.borderColor = p ? 'rgba(21,201,138,.45)' : 'rgba(255,176,32,.45)';
+  el.innerHTML = '<b style="font-size:13px">' + (p ? '✅ Stockage PERMANENT — ' : '⚠️ Stockage TEMPORAIRE — ') + STOCKAGE.type + '</b><br>'
+    + 'Base actuelle : <b>' + (STOCKAGE.dossiers || 0) + '</b> dossier(s) · ' + _ko(STOCKAGE.taille || 0)
+    + ' · sauvegardes automatiques : <b>' + (STOCKAGE.auto || 0) + '</b>'
+    + (STOCKAGE.dernierEnvoi ? (' · dernière : ' + String(STOCKAGE.dernierEnvoi).slice(0, 16).replace('T', ' à ')) : '')
+    + (STOCKAGE.erreur ? ('<br><small style="color:var(--red)">Dernière erreur : ' + STOCKAGE.erreur + '</small>') : '')
+    + (STOCKAGE.conseil ? ('<br><small style="color:var(--muted)">' + STOCKAGE.conseil + '</small>') : '');
+  const box = document.getElementById('sv-auto'); if(!box) return;
+  const L = STOCKAGE.liste || [];
+  box.innerHTML = L.length
+    ? L.map(x => '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)">'
+        + '<span style="flex:1"><b>' + String(x.at || '').slice(0, 16).replace('T', ' · ') + '</b> <small style="color:var(--muted)">' + (x.dossiers || 0) + ' dossier(s) · ' + _ko(x.taille || 0) + '</small></span>'
+        + '<button type="button" onclick="restaurerAuto(' + x.id + ')" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:11.5px">↩️ Restaurer</button></div>').join('')
+    : '<small style="color:var(--muted)">' + (STOCKAGE.permanent
+        ? 'Aucune sauvegarde automatique pour le moment : la première se crée dès le prochain enregistrement (au maximum une toutes les 30 minutes).'
+        : 'Les sauvegardes automatiques nécessitent le stockage permanent (Postgres/Neon). En attendant, utilisez le bouton « ⬇️ Télécharger » ci-dessus.') + '</small>';
+}
+function paintStockage(){
+  const el = document.getElementById('home-stock'); if(!el) return;
+  if(!STOCKAGE){ el.style.display = 'none'; return; }
+  if(STOCKAGE.permanent){ el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.style.background = 'rgba(255,107,107,.12)'; el.style.border = '1.5px solid rgba(255,107,107,.42)';
+  el.innerHTML = '⚠️ <b>Stockage temporaire</b> (' + STOCKAGE.type + ') : chez l\'hébergeur, le disque est vidé à chaque redéploiement — '
+    + 'tout ce qui est saisi peut disparaître. <b>Téléchargez une sauvegarde maintenant</b> et activez le stockage permanent (Neon). '
+    + '<button type="button" onclick="hqGo(\'panel-sauvegardes\')" style="margin-top:7px;display:block;background:var(--card);border:1.5px solid var(--line);color:var(--ink);font-weight:800;padding:8px 11px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:12px">💾 Ouvrir Sauvegardes</button>';
+}
+const _lireFichier = f => (f.text ? f.text() : new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsText(f); }));
+async function restaurerFichier(){
+  const inp = document.getElementById('sv-file');
+  const f = inp && inp.files && inp.files[0];
+  if(!f) return alert('⚠️ Choisissez d’abord le fichier de sauvegarde (klean-db-….json)');
+  let j = null;
+  try{ j = JSON.parse(await _lireFichier(f)); }catch(e){ return alert('⚠️ Fichier illisible : ce n’est pas une sauvegarde KLEAN.'); }
+  const confirmation = ((document.getElementById('sv-conf') || {}).value || '').trim();
+  const force = !!(document.getElementById('sv-force') || {}).checked;
+  if(confirmation.toUpperCase() !== 'RESTAURER') return alert('⚠️ Écrivez exactement RESTAURER dans la case de confirmation.');
+  if(!confirm('Remplacer la base actuelle par cette sauvegarde ?\nL’état actuel sera conservé automatiquement (réversible).')) return;
+  try{
+    const r = await fetch('/api/admin/db/restaurer', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ data: j, confirmation, force }) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) return alert('⚠️ ' + (d.error || 'Restauration impossible'));
+    alert('✅ ' + (d.message || 'Sauvegarde restaurée'));
+    location.reload();
+  }catch(e){ alert('⚠️ Réseau indisponible'); }
+}
+async function restaurerAuto(id){
+  if(!confirm('Restaurer cette sauvegarde automatique ?\nL’état actuel sera conservé automatiquement (réversible).')) return;
+  try{
+    const r = await fetch('/api/admin/db/sauvegardes/restaurer', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok) return alert('⚠️ ' + (d.error || 'Restauration impossible'));
+    alert('✅ ' + (d.message || 'Version restaurée'));
+    location.reload();
+  }catch(e){ alert('⚠️ Réseau indisponible'); }
 }
 function paintEntreprise(){
   const box = document.getElementById('ent-liste'); if(!box) return;
@@ -3111,6 +3373,15 @@ async function chargerPub(){
     pubRemplir(d.ad||null, d.views||0);
     const c=document.getElementById('ad-cur');
     if(c && d.ad) c.textContent='📣 '+(d.ad.active?'En ligne':'Désactivée')+' : '+(d.ad.firm||'')+' — '+(d.ad.prod||'')+' · Vu(s) : '+(d.views||0);
+    /* 🖼️ lot 100 : le fichier du média a-t-il survécu au dernier redéploiement ? */
+    const al=document.getElementById('ad-media-alerte');
+    if(al){
+      const perdu = d.ad && d.ad.mediaUrl && d.mediaOk === false;
+      al.style.display = perdu ? 'block' : 'none';
+      if(perdu) al.innerHTML='🖼️ <b>Le fichier de votre image n’est plus sur le serveur</b> (il a été effacé lors d’un redéploiement — le disque de l’hébergeur est temporaire).<br>'
+        + (d.mediaRestaurable ? '✅ Bonne nouvelle : une copie existe dans la base, elle se remettra en place au prochain redémarrage. ' : '')
+        + '<b>Renvoyez l’image</b> ci-dessous puis « Enregistrer et publier » : à partir de maintenant, les images sont <b>conservées dans la base</b> et ne disparaissent plus.';
+    }
   }catch(e){ const e2=document.getElementById('pub-etat'); if(e2) e2.textContent='Serveur injoignable.'; }
 }
 async function loadPdgExtras(){
@@ -3500,9 +3771,9 @@ function blocAcces(kind, d){
     + '<small style="display:block;margin-top:8px;color:var(--muted)">' + (kind === 'pro' ? 'App → « Je suis un professionnel » → téléphone + code d’accès.' : 'App → « Se connecter » → téléphone + code d’accès.') + '</small>'
     + '</div>';
 }
-function copierTexte(t){
+function copierTexte(t, msg){
   const txt = String(t || '');
-  const fin = function(){ alert('📋 Copié ! Vous pouvez coller le message au client / au pro (WhatsApp, SMS…).'); };
+  const fin = function(){ alert(msg || '📋 Copié ! Vous pouvez coller le message au client / au pro (WhatsApp, SMS…).'); };
   if(navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(txt).then(fin).catch(function(){ copieSecours(txt, fin); });
   } else copieSecours(txt, fin);
@@ -3514,6 +3785,9 @@ function copieSecours(txt, fin){
   try{ document.execCommand('copy'); fin(); }catch(e){ alert('Copie impossible — notez à la main :\n\n' + txt); }
   ta.remove();
 }
+/* 📋 copier un texte court (URL de notification CinetPay…). ⚠️ Ces boutons appelaient une
+   fonction copyText() qui n'existait nulle part : ils ne répondaient pas. Correctif lot 99. */
+function copyText(txt, msg){ copierTexte(txt, msg); }
 async function chargerCodesAcces(silencieux){
   try{
     const r = await fetch('/api/admin/acces', { cache: 'no-store' });
@@ -4219,6 +4493,8 @@ async function ugStatut(id, statut){
     try{ paintHqNav(); }catch(e){ hqOubli('Menu', e); }
     try{ paintHome(); paintEntreprise(); }catch(e){ hqOubli('Vue générale', e); }
     if(!window._hqHomeT) window._hqHomeT = setInterval(() => { try{ paintHome(); paintEntreprise(); }catch(e){} }, 5000);
+    /* les litiges se rafraîchissent doucement (30 s) sauf si l'on est en train d'écrire dedans */
+    if(!window._liPoll) window._liPoll = setInterval(() => { const a = document.activeElement || {}; if(a.tagName !== 'TEXTAREA' && a.tagName !== 'INPUT') loadLitiges(); }, 30000);
     let tm = null;
     window.addEventListener('scroll', () => { clearTimeout(tm); tm = setTimeout(() => { try{ hqNavCible(); }catch(e){} }, 180); }, { passive: true });
     window.addEventListener('resize', () => { hqNavClose(); });

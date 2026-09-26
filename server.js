@@ -115,42 +115,9 @@ function hqCookie(token) {
   return 'klean_hq=' + token + '; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=2592000';
 }
 async function pgQuery(sql, params) { const r = await pgClient.query(sql, params); return r; }
-async function initStorage() {
-  if (process.env.DATABASE_URL) {
-    try {
-      const { Client } = require('pg');
-      pgClient = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 8000 });
-      await pgClient.connect();
-      await pgClient.query('CREATE TABLE IF NOT EXISTS klean_state (id smallint PRIMARY KEY, data jsonb NOT NULL, updated timestamptz NOT NULL DEFAULT now())');
-      const r = await pgClient.query('SELECT data FROM klean_state WHERE id=1');
-      if (r.rows.length) {
-        const incoming = r.rows[0].data || {};
-        const nIn = (incoming.agents||[]).length + (incoming.clients||[]).length + (incoming.missions||[]).length;
-        const nMem = (db.agents||[]).length + (db.clients||[]).length + (db.missions||[]).length;
-        if (nIn === 0 && nMem > 0) {
-          console.log('  🛡️  Neon vide — on garde les dossiers déjà en mémoire (pas d’écrasement)');
-        } else {
-          db = incoming;
-        }
-      }
-      else {
-        /* 📦 Première connexion Neon : on TRANSPLANTE les comptes actuels (db.json) — rien n'est perdu */
-        try {
-          db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-          console.log('  📦 Migration automatique db.json → Postgres : vos comptes existants suivent ✓');
-        } catch (e) { /* départ neuf */ }
-        await pgClient.query('INSERT INTO klean_state (id, data) VALUES (1, $1)', [JSON.stringify(db)]);
-      }
-      console.log('  💾 Stockage : Postgres (Neon) — données persistantes ✓');
-    } catch (e) {
-      pgClient = null;
-      console.log('  ⚠️  DATABASE_URL injoignable (' + e.message + ') → bascule fichier local');
-    }
-  }
-  if (!pgClient) {
-    try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
-    console.log('  💾 Stockage : fichier db.json (local)');
-  }
+/* 💾 Valeurs par défaut : appliquées au DÉMARRAGE et après une RESTAURATION de sauvegarde.
+   Aucune donnée existante n'est remplacée : on ne pose que ce qui manque. */
+function poserDefauts() {
   db.agents = db.agents || []; db.missions = db.missions || []; db.clients = db.clients || [];
   if (!db.config || typeof db.config.commission !== 'number') db.config = { commission: 25, updatedAt: null };
   db.config.payDest = db.config.payDest || { wave: ['0100277521', '0709076130'], om: '0709076130', moov: '0100277521', hide: false };
@@ -191,6 +158,47 @@ async function initStorage() {
   db.urgHist = db.urgHist || [];            // alertes / SOS enregistrés
   db.prefs = db.prefs || {};                // préférences client (rubrique OPTIONS)
   db.urgContacts = db.urgContacts || {};    // contacts d'urgence personnels { clientId: [...] }
+  db.litiges = db.litiges || [];            // 🟠 litiges & remboursements (lot 99) — dossiers de réclamation
+  db.pubFiles = db.pubFiles || {};          // 🖼️ copie des médias de publicité (lot 100) — survit aux redéploiements
+}
+
+async function initStorage() {
+  if (process.env.DATABASE_URL) {
+    try {
+      const { Client } = require('pg');
+      pgClient = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 8000 });
+      await pgClient.connect();
+      await pgClient.query('CREATE TABLE IF NOT EXISTS klean_state (id smallint PRIMARY KEY, data jsonb NOT NULL, updated timestamptz NOT NULL DEFAULT now())');
+      const r = await pgClient.query('SELECT data FROM klean_state WHERE id=1');
+      if (r.rows.length) {
+        const incoming = r.rows[0].data || {};
+        const nIn = (incoming.agents||[]).length + (incoming.clients||[]).length + (incoming.missions||[]).length;
+        const nMem = (db.agents||[]).length + (db.clients||[]).length + (db.missions||[]).length;
+        if (nIn === 0 && nMem > 0) {
+          console.log('  🛡️  Neon vide — on garde les dossiers déjà en mémoire (pas d’écrasement)');
+        } else {
+          db = incoming;
+        }
+      }
+      else {
+        /* 📦 Première connexion Neon : on TRANSPLANTE les comptes actuels (db.json) — rien n'est perdu */
+        try {
+          db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+          console.log('  📦 Migration automatique db.json → Postgres : vos comptes existants suivent ✓');
+        } catch (e) { /* départ neuf */ }
+        await pgClient.query('INSERT INTO klean_state (id, data) VALUES (1, $1)', [JSON.stringify(db)]);
+      }
+      console.log('  💾 Stockage : Postgres (Neon) — données persistantes ✓');
+    } catch (e) {
+      pgClient = null;
+      console.log('  ⚠️  DATABASE_URL injoignable (' + e.message + ') → bascule fichier local');
+    }
+  }
+  if (!pgClient) {
+    try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
+    console.log('  💾 Stockage : fichier db.json (local)');
+  }
+  poserDefauts();
   /* Pré-initialisation optionnelle du mot de passe via ADMIN_PIN (1er démarrage seulement) */
   if (!db.admin && process.env.ADMIN_PIN) {
     const salt = crypto.randomBytes(12).toString('hex');
@@ -209,7 +217,8 @@ function saveDbNow() {
       .then(r => {
         const oldN = r.rows[0] ? Number(r.rows[0].n) : 0;
         if (oldN > 0 && n === 0) { console.log('  🛡️  sauvegarde refusée : base mémoire vide, Neon a encore ' + oldN + ' dossier(s)'); return; }
-        return pgClient.query('UPDATE klean_state SET data=$1, updated=now() WHERE id=1', [JSON.parse(snap)]);
+        return pgClient.query('UPDATE klean_state SET data=$1, updated=now() WHERE id=1', [JSON.parse(snap)])
+          .then(() => { sauvegardeAuto().catch(() => { }); });      /* 💾 historique automatique (1× / 30 min) */
       })
       .catch(e => console.log('  ⚠️  sauvegarde Postgres : ' + e.message));
   }
@@ -1545,6 +1554,79 @@ function pubTypeReel(buf) {
   if (hex(0) === 0x1a && hex(1) === 0x45 && hex(2) === 0xdf && hex(3) === 0xa3) return 'video/webm';
   return null;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🖼️ LOT 100 — LES MÉDIAS DE PUBLICITÉ NE SE PERDENT PLUS
+   Le fichier est écrit sur le disque (rapide, mis en cache par le navigateur) ET conservé
+   dans la base. Au démarrage, tout média manquant est réécrit sur le disque : une image
+   envoyée depuis le HQ survit donc à un redéploiement de l'hébergeur.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const PUB_MEDIA_GARDES = 4;            // on garde les 4 médias les plus récents (+ ceux encore utilisés)
+function pubMediasUtilises() {
+  const u = [db.ad && db.ad.mediaUrl, db.flip && db.flip.mediaUrl, db.flip && db.flip.videoUrl, db.annonce && db.annonce.mediaUrl];
+  (db.recompenses || []).forEach(r => u.push(r && r.mediaUrl));
+  (db.quizBank && db.quizBank.questions || []).forEach(q => u.push(q && q.mediaUrl));
+  return u.filter(Boolean).map(x => String(x).replace(/^\/pub\//, ''));
+}
+function pubMediaMemoriser(nom, buf) {
+  try {
+    if (!/^[A-Za-z0-9_.-]{3,80}$/.test(String(nom))) return;
+    db.pubFiles = db.pubFiles || {};
+    db.pubFiles[nom] = { b64: Buffer.from(buf).toString('base64'), at: nowISO(), octets: buf.length };
+    const utilises = pubMediasUtilises();
+    const cles = Object.keys(db.pubFiles);
+    if (cles.length > PUB_MEDIA_GARDES) {
+      cles.filter(k => utilises.indexOf(k) < 0)
+        .sort((a, b) => String((db.pubFiles[a] || {}).at || '').localeCompare(String((db.pubFiles[b] || {}).at || '')))
+        .slice(0, Math.max(0, cles.length - PUB_MEDIA_GARDES))
+        .forEach(k => { delete db.pubFiles[k]; });
+    }
+    saveDb();
+  } catch (e) { }
+}
+function pubMediaRestaurer() {
+  try {
+    db.pubFiles = db.pubFiles || {};
+    /* 🛟 les médias déjà en place AVANT ce correctif sont récupérés automatiquement :
+       le fichier existe sur le disque → on en garde une copie dans la base (plus jamais perdu). */
+    let recup = 0;
+    pubMediasUtilises().forEach(nom => {
+      if (!/^[A-Za-z0-9_.-]{3,80}$/.test(nom) || db.pubFiles[nom]) return;
+      const fp = path.join(PUB_DIR, nom);
+      if (path.dirname(fp) !== PUB_DIR || !fs.existsSync(fp)) return;
+      try {
+        const buf = fs.readFileSync(fp);
+        if (buf && buf.length && buf.length < 13 * 1024 * 1024) { db.pubFiles[nom] = { b64: buf.toString('base64'), at: nowISO(), octets: buf.length, recupere: true }; recup++; }
+      } catch (e) { }
+    });
+    if (recup) { saveDb(); console.log('  🛟 ' + recup + ' média(s) existant(s) mis à l’abri dans la base (ils survivront aux redéploiements)'); }
+    /* ⚠️ média perdu avant le correctif : on le signale clairement dans les logs */
+    pubMediasUtilises().forEach(nom => {
+      if (!nom || db.pubFiles[nom]) return;
+      try { if (!fs.existsSync(path.join(PUB_DIR, nom))) console.log('  ⚠️  Média manquant : /pub/' + nom + ' — renvoyez l’image depuis le HQ (Publicité)'); } catch (e) { }
+    });
+    let n = 0;
+    for (const nom of Object.keys(db.pubFiles)) {
+      if (!/^[A-Za-z0-9_.-]{3,80}$/.test(nom)) continue;
+      const fp = path.join(PUB_DIR, nom);
+      if (path.dirname(fp) !== PUB_DIR) continue;
+      if (fs.existsSync(fp)) continue;
+      const rec = db.pubFiles[nom] || {};
+      if (!rec.b64) continue;
+      fs.writeFileSync(fp, Buffer.from(String(rec.b64), 'base64'));
+      n++;
+    }
+    if (n) console.log('  🖼️  ' + n + ' média(s) de publicité restauré(s) depuis la base (disque vidé par un redéploiement)');
+  } catch (e) { }
+}
+/* le fichier est-il bien là ? (sert à prévenir le PDG quand un média a été perdu) */
+function pubFichierPresent(url) {
+  const u = String(url || '');
+  if (!u) return true;                                    // aucun média demandé : rien à vérifier
+  const nom = u.replace(/^\/pub\//, '');
+  if (!/^[A-Za-z0-9_.-]{3,80}$/.test(nom)) return false;
+  try { return fs.existsSync(path.join(PUB_DIR, nom)); } catch (e) { return false; }
+}
 /* 🧹 on ne garde jamais un média orphelin sur le disque */
 /* 📤 LOT 96 — enregistrer un média (image/vidéo) envoyé par le PDG, avec vérification du contenu réel */
 function pubMediaEnregistrer(dataUrl) {
@@ -1562,6 +1644,7 @@ function pubMediaEnregistrer(dataUrl) {
   const nom = 'pub-' + Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex') + '.' + meta.ext;
   try { fs.writeFileSync(path.join(PUB_DIR, nom), buf); }
   catch (e) { return { error: 'Enregistrement impossible sur le serveur', code: 500 }; }
+  pubMediaMemoriser(nom, buf);          /* 🖼️ copie dans la base : survit au redéploiement */
   return { url: '/pub/' + nom, mediaType: meta.genre, octets: buf.length, mo: Math.round(buf.length / 104857.6) / 10 };
 }
 
@@ -1791,6 +1874,91 @@ return {
   dureeMin: flipDureeMin(),
   parJour, parMois
 };
+}
+
+
+/* ═══════════ 💾 SAUVEGARDES & RESTAURATION DE LA BASE (lot 98) ═══════════
+   · stockage permanent = Postgres/Neon (DATABASE_URL) ; sinon fichier db.json (temporaire sur Render)
+   · historique automatique : les 10 dernières versions conservées dans Neon (table klean_backups)
+   · téléchargement et restauration : réservés au compte principal (PDG)                     */
+let SAUV = { at: null, taille: 0, auto: 0, err: '' };
+const _dbTaille = () => { try { return JSON.stringify(db).length; } catch (e) { return 0; } };
+const _nbDossiers = () => (db.agents || []).length + (db.clients || []).length + (db.missions || []).length;
+function stockageInfo() {
+  return {
+    permanent: !!pgClient,
+    type: pgClient ? 'Postgres (Neon)' : 'fichier db.json (local)',
+    dossier: __dirname,
+    taille: _dbTaille(),
+    dossiers: _nbDossiers(),
+    dernierEnvoi: SAUV.at,
+    auto: SAUV.auto || 0,
+    erreur: SAUV.err || '',
+    conseil: pgClient ? '' : 'Chez un hébergeur (Render), le disque est vidé à chaque redéploiement : ajoutez la variable DATABASE_URL (Neon, gratuit) pour rendre les données permanentes. Les boutons ci-dessous restent votre filet de sécurité.'
+  };
+}
+let _sauvDernier = 0;
+/* une sauvegarde automatique au maximum toutes les 30 minutes (ou forcée à la demande) */
+async function sauvegardeAuto(force) {
+  if (!pgClient) return { ok: false, raison: 'sans-postgres' };
+  const t = Date.now();
+  if (!force && t - _sauvDernier < 30 * 60 * 1000) return { ok: false, raison: 'recent' };
+  _sauvDernier = t;
+  try {
+    const snap = JSON.stringify(db);
+    await pgClient.query('CREATE TABLE IF NOT EXISTS klean_backups (id bigserial PRIMARY KEY, at timestamptz NOT NULL DEFAULT now(), dossiers int NOT NULL DEFAULT 0, taille int NOT NULL DEFAULT 0, data jsonb NOT NULL)');
+    await pgClient.query('INSERT INTO klean_backups (dossiers, taille, data) VALUES ($1,$2,$3)', [_nbDossiers(), snap.length, JSON.parse(snap)]);
+    await pgClient.query('DELETE FROM klean_backups WHERE id NOT IN (SELECT id FROM klean_backups ORDER BY at DESC LIMIT 10)');
+    SAUV = { at: nowISO(), taille: snap.length, auto: (SAUV.auto || 0) + 1, err: '' };
+    return { ok: true };
+  } catch (e) { SAUV.err = String(e.message || e).slice(0, 160); return { ok: false, raison: SAUV.err }; }
+}
+async function sauvegardesListe() {
+  if (!pgClient) return [];
+  try {
+    const r = await pgClient.query('SELECT id, at, dossiers, taille FROM klean_backups ORDER BY at DESC LIMIT 10');
+    return r.rows.map(x => ({ id: x.id, at: x.at, dossiers: x.dossiers, taille: x.taille }));
+  } catch (e) { return []; }
+}
+/* 🛡️ une sauvegarde n'est appliquée que si elle a la forme d'une base KLEAN */
+function dbInvalide(d) {
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return 'Fichier illisible : ce n’est pas une sauvegarde KLEAN';
+  if (!Array.isArray(d.agents) || !Array.isArray(d.clients) || !Array.isArray(d.missions)) return 'Ce fichier n’est pas une sauvegarde KLEAN (les listes clients, professionnels et missions sont absentes)';
+  return '';
+}
+function copieAvantRestauration() {
+  try { fs.writeFileSync(DB_FILE + '.avant-restauration.json', JSON.stringify(db)); } catch (e) { }
+}
+
+
+/* ═══════════ 🟠 LITIGES & REMBOURSEMENTS (lot 99) ═══════════
+   Un dossier = une mission + un motif + une discussion + une décision.
+   🔒 Aucun argent n'est déplacé par le logiciel : la décision est enregistrée, le versement
+      est fait par le PDG (Wave / Orange / Moov / espèces / CinetPay) puis marqué « payé ».           */
+const LITIGE_MOTIFS = {
+  travail_non_fait: 'Travail non fait',
+  travail_incomplet: 'Travail incomplet',
+  retard: 'Retard important',
+  degat: 'Dégât ou casse',
+  montant: 'Désaccord sur le montant',
+  autre: 'Autre problème'
+};
+const LITIGE_MOYENS = { wave: 'Wave', om: 'Orange Money', moov: 'Moov Money', cinetpay: 'CinetPay / carte', especes: 'Espèces' };
+const LITIGE_STATUS = { ouvert: 'Ouvert', en_cours: 'En cours d’examen', rembourse: 'Remboursement accepté', refuse: 'Refusé', regle: 'Remboursement versé' };
+function litigePublic(l) {
+  return {
+    id: l.id, missionId: l.missionId, service: l.service, serviceNom: l.serviceNom || l.service,
+    prixTotal: l.prixTotal || 0, motif: l.motif, motifTxt: LITIGE_MOTIFS[l.motif] || l.motif,
+    texte: l.texte || '', montantSouhaite: l.montantSouhaite || 0,
+    status: l.status, statusTxt: LITIGE_STATUS[l.status] || l.status,
+    at: l.at, majAt: l.majAt || l.at, motifRefus: l.motifRefus || '',
+    remboursement: l.remboursement ? Object.assign({}, l.remboursement, { moyenTxt: LITIGE_MOYENS[l.remboursement.moyen] || l.remboursement.moyen }) : null,
+    hist: (l.hist || []).filter(h => !h.interne).slice(-40)
+  };
+}
+/* message déposé dans la messagerie du client (aucun nouveau système de messagerie) */
+function litigeMessageClient(l, texte) {
+  db.supportMsgs.push({ id: uid('SR'), role: 'client', uid: l.clientId, nom: l.clientNom, from: 'hq', par: 'KLEAN', text: texte, at: nowISO(), readHQ: true, readUser: false });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -3744,6 +3912,61 @@ const server = http.createServer(async (req, res) => {
     auditLog('support_chat_toggle', { on: db.config.supportChat, par: 'PDG' });
     return sendJson(res, 200, { ok: true, on: db.config.supportChat });
   }
+  /* ═══════════ 🟠 LITIGES : le client signale un problème (lot 99) ═══════════ */
+  if (p === '/api/litiges' && req.method === 'POST') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous pour signaler un problème', needLogin: true });
+    if (cli.blocked) return sendJson(res, 403, { error: 'Votre compte est bloqué — contactez Klean-Service' });
+    const b = await readBody(req);
+    const tel = String(cli.tel || '').replace(/\D/g, '');
+    const m = db.missions.find(x => x.id === String(b.missionId || '')
+      && (x.clientId === cli.id || (tel && x.client && String(x.client.tel || '').replace(/\D/g, '') === tel)));
+    if (!m) return sendJson(res, 404, { error: 'Mission introuvable sur votre compte' });
+    if (m.status !== 'terminee')
+      return sendJson(res, 400, { error: 'Un problème ne peut être signalé que sur une mission TERMINÉE (mission actuelle : ' + m.status + ')' });
+    const dejaOuvert = db.litiges.find(l => l.missionId === m.id && ['ouvert', 'en_cours'].includes(l.status));
+    if (dejaOuvert) return sendJson(res, 409, { error: 'Un signalement est déjà en cours pour cette mission (' + dejaOuvert.id + ')', litigeId: dejaOuvert.id });
+    /* anti-abus : 5 signalements par heure et par compte */
+    const heure = Date.now() - 3600000;
+    if (db.litiges.filter(l => l.clientId === cli.id && Date.parse(l.at || 0) > heure).length >= 5)
+      return sendJson(res, 429, { error: 'Trop de signalements en une heure — patientez ou écrivez au support' });
+    const texte = String(b.texte || '').trim().slice(0, 900);
+    if (texte.length < 5) return sendJson(res, 400, { error: 'Expliquez le problème en quelques mots (5 caractères minimum)' });
+    const motif = LITIGE_MOTIFS[b.motif] ? b.motif : 'autre';
+    const ag = m.agentId ? db.agents.find(a => a.id === m.agentId) : null;
+    const it = {
+      id: uid('LT'), at: nowISO(), majAt: nowISO(),
+      missionId: m.id, service: m.service, serviceNom: SVC_NAMES[m.service] || m.service,
+      clientId: cli.id, clientNom: cli.nom, clientTel: String(cli.tel || ''),
+      proId: m.agentId || '', proNom: ag ? ag.nom : '',
+      prixTotal: m.prixTotal || 0,
+      motif, texte,
+      montantSouhaite: Math.min(Math.max(0, parseInt(b.montantSouhaite, 10) || 0), m.prixTotal || 0),
+      status: 'ouvert', prisPar: '', remboursement: null, motifRefus: '',
+      hist: [{ at: nowISO(), par: cli.nom + ' (client)', action: 'ouvert', texte: LITIGE_MOTIFS[motif] + ' — ' + texte }]
+    };
+    db.litiges.push(it);
+    if (db.litiges.length > 5000) db.litiges = db.litiges.slice(-3000);
+    litigeMessageClient(it, '🟠 Signalement ' + it.id + ' — mission ' + m.id + ' (' + it.serviceNom + ') : ' + LITIGE_MOTIFS[motif] + '\n« ' + texte + ' »\nNous revenons vers vous ici même.');
+    auditLog('litige_ouvert', { id: it.id, mission: m.id, client: cli.nom, motif });
+    emitAdmin('litige', '🟠 Nouveau signalement ' + it.id + ' de ' + cli.nom + ' (' + LITIGE_MOTIFS[motif] + ')');
+    saveDb();
+    console.log('🟠 ' + it.id + ' — signalement de ' + cli.nom + ' sur ' + m.id);
+    return sendJson(res, 201, { ok: true, litige: litigePublic(it), message: 'Signalement enregistré. L’équipe KLEAN vous répond ici même, dans vos messages.' });
+  }
+  if (p === '/api/litiges' && req.method === 'GET') {
+    const cli = findClientByToken(req);
+    if (!cli) return sendJson(res, 401, { error: 'Connectez-vous pour voir vos signalements', needLogin: true });
+    const miens = db.litiges.filter(l => l.clientId === cli.id)
+      .sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 50)
+      .map(litigePublic);
+    return sendJson(res, 200, {
+      ok: true, litiges: miens, total: miens.length,
+      ouverts: miens.filter(l => ['ouvert', 'en_cours'].includes(l.status)).length,
+      rembourses: miens.filter(l => ['rembourse', 'regle'].includes(l.status)).length
+    });
+  }
+
   if (p === '/api/support/send' && req.method === 'POST') {
     if (db.config && db.config.supportChat === false)
       return sendJson(res, 403, { error: 'Messages de la bulle désactivés par le PDG' });
@@ -4010,7 +4233,14 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/admin/ads' && req.method === 'GET') {
     if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
     const adA = db.ad || null;
-    return sendJson(res, 200, { ad: adA ? Object.assign({}, adA, { views: undefined }) : null, views: adA && adA.views ? Object.keys(adA.views).length : 0 });
+    const mediaOk = !adA || pubFichierPresent(adA.mediaUrl);
+    return sendJson(res, 200, {
+      ad: adA ? Object.assign({}, adA, { views: undefined }) : null,
+      views: adA && adA.views ? Object.keys(adA.views).length : 0,
+      mediaOk,                       /* 🖼️ false = le fichier n'est plus sur le disque → renvoyer l'image */
+      mediaRestaurable: !!(adA && adA.mediaUrl && db.pubFiles && db.pubFiles[String(adA.mediaUrl).replace(/^\/pub\//, '')]),
+      conseilMedia: mediaOk ? '' : 'Le fichier de ce média a été perdu lors d’un redéploiement (disque vidé). Renvoyez-le depuis cette page : à partir de maintenant il est conservé dans la base.'
+    });
   }
   if (p === '/api/admin/ads' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
@@ -4068,6 +4298,7 @@ const server = http.createServer(async (req, res) => {
     const nom = 'pub-' + Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex') + '.' + meta.ext;
     try { fs.writeFileSync(path.join(PUB_DIR, nom), buf); }
     catch (e) { return sendJson(res, 500, { error: 'Enregistrement impossible sur le serveur' }); }
+    pubMediaMemoriser(nom, buf);          /* 🖼️ copie dans la base : survit au redéploiement */
     const ancien = db.ad && db.ad.mediaUrl;
     if (ancien && ancien !== '/pub/' + nom) pubSupprimerFichier(ancien);
     auditLog('pub_media', { nom, genre: meta.genre, octets: buf.length });
@@ -4341,9 +4572,181 @@ const server = http.createServer(async (req, res) => {
     const list = viewsOrdered(an && an.views);
     return sendJson(res, 200, { ok: true, kind: 'annonce', titre: an ? (an.message || an.type) : 'Affiche', type: an && an.type, list });
   }
+
+  /* ═══════════ 💾 SAUVEGARDES & RESTAURATION (lot 98 — PDG uniquement) ═══════════ */
+  if (p === '/api/admin/db/etat' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    return sendJson(res, 200, Object.assign({ ok: true, liste: await sauvegardesListe() }, stockageInfo()));
+  }
+  /* téléchargement : un fichier klean-db-AAAAMMJJ.json à garder sur votre téléphone */
+  if (p === '/api/admin/db/sauvegarde' && req.method === 'GET') {
+    if (!pdgOnly(req, res)) return;
+    const nom = 'klean-db-' + nowISO().slice(0, 10) + '.json';
+    const corps = JSON.stringify({ klean: 'sauvegarde', at: nowISO(), dossiers: _nbDossiers(), db }, null, 1);
+    auditLog('sauvegarde_telechargee', { par: act(req), dossiers: _nbDossiers(), taille: corps.length });
+    saveDb();
+    emitAdmin('admin', '💾 Sauvegarde téléchargée par ' + act(req));
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="' + nom + '"',
+      'Cache-Control': 'no-store'
+    });
+    return res.end(corps);
+  }
+  /* restauration depuis un fichier (le fichier téléchargé ci-dessus) */
+  if (p === '/api/admin/db/restaurer' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBodyBig(req, 3e7);
+    if (!b) return sendJson(res, 400, { error: 'Fichier trop lourd (maximum 30 Mo) ou illisible' });
+    if (String(b.confirmation || '').trim().toUpperCase() !== 'RESTAURER')
+      return sendJson(res, 400, { error: 'Pour valider, écrivez exactement RESTAURER dans la case de confirmation' });
+    const data = (b.data && b.data.db) ? b.data.db : b.data;      /* accepte le fichier complet ou la base seule */
+    const pb = dbInvalide(data);
+    if (pb) return sendJson(res, 400, { error: pb });
+    const avant = _nbDossiers();
+    const vide = ((data.agents || []).length + (data.clients || []).length + (data.missions || []).length) === 0;
+    if (vide && avant > 0 && !b.force)
+      return sendJson(res, 409, { code: 'vide', error: 'Cette sauvegarde est VIDE alors que la base contient ' + avant + ' dossier(s). Si c’est bien ce que vous voulez, cochez « j’accepte de repartir de zéro ».' });
+    await sauvegardeAuto(true);                                  /* 🛡️ garde l'état ACTUEL dans l'historique */
+    copieAvantRestauration();                                    /* 🛡️ + une copie de fichier */
+    const ancienAdmin = db.admin;
+    db = data; poserDefauts();
+    if (!db.admin && ancienAdmin) db.admin = ancienAdmin;         /* votre mot de passe HQ n'est jamais perdu */
+    auditLog('base_restauree', { par: act(req), source: 'fichier', avant, apres: _nbDossiers() });
+    emitAdmin('admin', '♻️ Base restaurée depuis un fichier par ' + act(req) + ' — ' + _nbDossiers() + ' dossier(s)');
+    saveDbNow();
+    return sendJson(res, 200, { ok: true, avant, dossiers: _nbDossiers(), message: 'Sauvegarde restaurée : ' + _nbDossiers() + ' dossier(s) en place.' });
+  }
+  /* restauration depuis une sauvegarde automatique (Neon) */
+  if (p === '/api/admin/db/sauvegardes/restaurer' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    if (!pgClient) return sendJson(res, 400, { error: 'Aucune sauvegarde automatique : le stockage permanent (Postgres/Neon) n’est pas activé.' });
+    const b = await readBody(req);
+    const id = parseInt(b.id, 10) || 0;
+    const r = await pgClient.query('SELECT data FROM klean_backups WHERE id=$1', [id]);
+    if (!r.rows.length) return sendJson(res, 404, { error: 'Sauvegarde introuvable' });
+    const data = r.rows[0].data;
+    const pb = dbInvalide(data);
+    if (pb) return sendJson(res, 400, { error: pb });
+    const avant = _nbDossiers();
+    copieAvantRestauration();
+    const ancienAdmin = db.admin;
+    db = data; poserDefauts();
+    if (!db.admin && ancienAdmin) db.admin = ancienAdmin;
+    auditLog('base_restauree', { par: act(req), source: 'neon#' + id, avant, apres: _nbDossiers() });
+    emitAdmin('admin', '♻️ Base restaurée depuis une sauvegarde automatique — ' + _nbDossiers() + ' dossier(s)');
+    saveDbNow();
+    return sendJson(res, 200, { ok: true, avant, dossiers: _nbDossiers(), message: 'Version du ' + (r.rows[0].at ? String(r.rows[0].at).slice(0, 16).replace('T', ' · ') : '') + ' restaurée.' });
+  }
+  /* ═══════════ 🟠 LITIGES : instruction côté HQ (lot 99) ═══════════
+     Prise en charge + réponse : PDG et gestionnaires · DÉCISION (rembourser/refuser) : PDG seul. */
+  if (p === '/api/admin/litiges' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const liste = db.litiges.slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 200).map(l => Object.assign(litigePublic(l), {
+      clientNom: l.clientNom || '', clientTel: l.clientTel || '', proNom: l.proNom || '',
+      prisPar: l.prisPar || '', peutDecider: isPdg(req), hist: (l.hist || []).slice(-40)
+    }));
+    const c = { total: liste.length, ouverts: 0, enCours: 0, aPayer: 0, regles: 0, refuses: 0, totalAccepte: 0, totalVerse: 0 };
+    db.litiges.forEach(l => {
+      if (l.status === 'ouvert') c.ouverts++;
+      else if (l.status === 'en_cours') c.enCours++;
+      else if (l.status === 'rembourse') { c.aPayer++; c.totalAccepte += (l.remboursement && l.remboursement.montant) || 0; }
+      else if (l.status === 'regle') { c.regles++; c.totalVerse += (l.remboursement && l.remboursement.montant) || 0; }
+      else if (l.status === 'refuse') c.refuses++;
+      if (l.remboursement && l.remboursement.statut === 'paye' && l.status !== 'regle') c.totalVerse += l.remboursement.montant || 0;
+    });
+    c.motifs = LITIGE_MOTIFS; c.moyens = LITIGE_MOYENS;
+    return sendJson(res, 200, { ok: true, liste, compteurs: c, argentDeplace: false });
+  }
+  /* le gestionnaire (ou le PDG) prend le dossier en charge */
+  if (p === '/api/admin/litiges/prise' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const b = await readBody(req);
+    const l = db.litiges.find(x => x.id === String(b.id || ''));
+    if (!l) return sendJson(res, 404, { error: 'Dossier introuvable' });
+    if (['regle', 'refuse'].includes(l.status)) return sendJson(res, 409, { error: 'Ce dossier est déjà clos (' + (LITIGE_STATUS[l.status] || l.status) + ')' });
+    l.status = 'en_cours'; l.prisPar = act(req); l.majAt = nowISO();
+    l.hist.push({ at: nowISO(), par: act(req), action: 'prise', texte: 'Dossier pris en charge' });
+    litigeMessageClient(l, '👋 ' + act(req) + ' (KLEAN) examine votre signalement ' + l.id + '. Réponse ici même.');
+    auditLog('litige_prise', { id: l.id, par: act(req) });
+    emitAdmin('litige', '🟠 ' + act(req) + ' prend en charge ' + l.id);
+    saveDb();
+    return sendJson(res, 200, { ok: true, litige: litigePublic(l) });
+  }
+  /* réponse à écrire au client (elle part dans sa messagerie) */
+  if (p === '/api/admin/litiges/message' && req.method === 'POST') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const b = await readBody(req);
+    const l = db.litiges.find(x => x.id === String(b.id || ''));
+    if (!l) return sendJson(res, 404, { error: 'Dossier introuvable' });
+    const texte = String(b.texte || '').trim().slice(0, 900);
+    if (texte.length < 2) return sendJson(res, 400, { error: 'Écrivez votre message' });
+    const auClient = b.auClient !== false;
+    l.hist.push({ at: nowISO(), par: act(req), action: auClient ? 'message' : 'note', texte, interne: !auClient });
+    l.majAt = nowISO();
+    if (auClient) litigeMessageClient(l, '🟠 Dossier ' + l.id + ' — ' + act(req) + ' (KLEAN) : ' + texte);
+    if (l.status === 'ouvert') { l.status = 'en_cours'; l.prisPar = act(req); }
+    auditLog('litige_message', { id: l.id, auClient, par: act(req) });
+    saveDb();
+    return sendJson(res, 200, { ok: true, litige: litigePublic(l) });
+  }
+  /* 🔑 LA DÉCISION — réservée au PDG : rembourser (montant) ou refuser (motif obligatoire) */
+  if (p === '/api/admin/litiges/decision' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const l = db.litiges.find(x => x.id === String(b.id || ''));
+    if (!l) return sendJson(res, 404, { error: 'Dossier introuvable' });
+    if (['rembourse', 'regle', 'refuse'].includes(l.status))
+      return sendJson(res, 409, { error: 'Ce dossier est déjà tranché (' + (LITIGE_STATUS[l.status] || l.status) + ')' });
+    if (b.decision === 'rembourser') {
+      const plafond = l.prixTotal || 0;
+      const montant = Math.min(Math.max(0, parseInt(b.montant, 10) || 0), plafond);
+      if (montant <= 0) return sendJson(res, 400, { error: 'Indiquez le montant à rembourser (entre 1 et ' + plafond.toLocaleString('fr-FR') + ' F)' });
+      const moyen = LITIGE_MOYENS[b.moyen] ? b.moyen : 'especes';
+      l.remboursement = { montant, moyen, statut: 'a_payer', at: nowISO(), par: act(req), ref: '', payeAt: null };
+      l.status = 'rembourse'; l.majAt = nowISO();
+      l.hist.push({ at: nowISO(), par: act(req), action: 'decision', texte: 'Remboursement accepté : ' + montant.toLocaleString('fr-FR') + ' F (' + LITIGE_MOYENS[moyen] + ') — versement à effectuer' });
+      litigeMessageClient(l, '✅ Dossier ' + l.id + ' — décision KLEAN : remboursement de ' + montant.toLocaleString('fr-FR') + ' F accepté (' + LITIGE_MOYENS[moyen] + '). Le versement est enregistré et sera effectué sous 48 h.');
+      auditLog('litige_decision', { id: l.id, decision: 'rembourser', montant, moyen, par: act(req), argentDeplace: false });
+      emitAdmin('litige', '✅ Remboursement de ' + montant.toLocaleString('fr-FR') + ' F accepté sur ' + l.id + ' — à verser');
+      saveDb();
+      return sendJson(res, 200, { ok: true, litige: litigePublic(l), argentDeplace: false, message: 'Décision enregistrée. ⚠️ Aucun argent n’est déplacé automatiquement : faites le versement puis marquez-le « payé ».' });
+    }
+    if (b.decision === 'refuser') {
+      const motif = String(b.motif || '').trim().slice(0, 400);
+      if (motif.length < 5) return sendJson(res, 400, { error: 'Indiquez le motif du refus : le client le lira' });
+      l.status = 'refuse'; l.motifRefus = motif; l.majAt = nowISO();
+      l.hist.push({ at: nowISO(), par: act(req), action: 'decision', texte: 'Refusé — ' + motif });
+      litigeMessageClient(l, '✕ Dossier ' + l.id + ' — décision KLEAN : aucune indemnisation.\nMotif : ' + motif + '\nVous pouvez répondre ici si vous avez de nouveaux éléments.');
+      auditLog('litige_decision', { id: l.id, decision: 'refuser', motif, par: act(req) });
+      emitAdmin('litige', '✕ Refus enregistré sur ' + l.id);
+      saveDb();
+      return sendJson(res, 200, { ok: true, litige: litigePublic(l) });
+    }
+    return sendJson(res, 400, { error: 'Décision inconnue (attendu : rembourser ou refuser)' });
+  }
+  /* 💸 le PDG a versé : on l'enregistre (aucun débit automatique n'existe) */
+  if (p === '/api/admin/litiges/regle' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const l = db.litiges.find(x => x.id === String(b.id || ''));
+    if (!l) return sendJson(res, 404, { error: 'Dossier introuvable' });
+    if (!l.remboursement) return sendJson(res, 400, { error: 'Aucun remboursement accepté sur ce dossier' });
+    if (l.remboursement.statut === 'paye') return sendJson(res, 409, { error: 'Déjà marqué payé' });
+    l.remboursement.statut = 'paye'; l.remboursement.payeAt = nowISO(); l.remboursement.ref = String(b.ref || '').trim().slice(0, 60);
+    l.remboursement.payePar = act(req);
+    l.status = 'regle'; l.majAt = nowISO();
+    l.hist.push({ at: nowISO(), par: act(req), action: 'versement', texte: 'Versement effectué (' + l.remboursement.montant.toLocaleString('fr-FR') + ' F' + (l.remboursement.ref ? ' — réf. ' + l.remboursement.ref : '') + ')' });
+    litigeMessageClient(l, '💸 Dossier ' + l.id + ' — le remboursement de ' + l.remboursement.montant.toLocaleString('fr-FR') + ' F a été versé' + (l.remboursement.ref ? (' (référence ' + l.remboursement.ref + ')') : '') + '. Merci de votre confiance.');
+    auditLog('litige_regle', { id: l.id, montant: l.remboursement.montant, ref: l.remboursement.ref, par: act(req) });
+    emitAdmin('litige', '💸 Remboursement versé sur ' + l.id + ' (' + l.remboursement.montant.toLocaleString('fr-FR') + ' F)');
+    saveDb();
+    return sendJson(res, 200, { ok: true, litige: litigePublic(l) });
+  }
+
   if (p === '/api/admin/whoami' && req.method === 'GET') {
     const id = hqIdentity(req);
-    return sendJson(res, 200, { role: id.role, nom: id.nom, gestFrozen: !!(db.config && db.config.gestFrozen) });
+    return sendJson(res, 200, { role: id.role, nom: id.nom, gestFrozen: !!(db.config && db.config.gestFrozen), stockage: stockageInfo() });
   }
   if (p === '/api/admin/gest-freeze' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
@@ -5531,6 +5934,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  ────────────────────────────────────');
   console.log('');
   initStorage().then(() => {
+    try { pubMediaRestaurer(); } catch (e) { }   /* 🖼️ remet en place les médias perdus par un redéploiement (après chargement de la base) */
     console.log('  🔑 Mot de passe HQ : ' + (db.admin ? 'déjà configuré ✓' : 'à créer à /admin'));
     console.log('  💰 Commission  : ' + (feePct() * 100) + '% par mission');
     try {

@@ -416,7 +416,6 @@ body.opt-anim-off #aff-track,body.opt-anim-off .pub-clignote,body.opt-anim-off .
 body.opt-compact .view{padding-bottom:120px}
 body.opt-tresgrand{font-size:18px}
 body.opt-grand{font-size:16.6px}
-</style>
 /* 📣 PUB : clignotement doux et professionnel (jamais brutal) — rythme réglable depuis le HQ */
 @keyframes kleanPubPulse{0%,100%{opacity:1;text-shadow:0 1px 3px rgba(0,0,0,.45)}50%{opacity:.74;text-shadow:0 1px 3px rgba(0,0,0,.45),0 0 12px rgba(255,255,255,.55)}}
 .pub-msg{font-size:14px;line-height:1.5;font-weight:700;letter-spacing:.2px;word-break:break-word}
@@ -2014,9 +2013,107 @@ function cancelMission(){
   }
 }
 
+/* ═══════════ 🟠 SIGNALER UN PROBLÈME (lot 99) ═══════════
+   Le client ouvre un dossier sur une mission TERMINÉE. La réponse de KLEAN arrive
+   dans la messagerie (onglet 💬), et l'avancement du dossier s'affiche ici. */
+let MES_LITIGES = {};
+const LITIGE_LIB = {
+  ouvert:      ['🟠', 'Signalement reçu — en attente d’examen', 'var(--p)'],
+  en_cours:    ['🔎', 'Dossier en cours d’examen', 'var(--blue)'],
+  rembourse:   ['✅', 'Remboursement accepté — versement en préparation', 'var(--p)'],
+  regle:       ['💸', 'Remboursement versé', 'var(--p)'],
+  refuse:      ['✕', 'Dossier refusé', 'var(--danger)']
+};
+const LITIGE_MOTIFS_CLI = [
+  ['travail_non_fait', '🚫 Le travail n’a pas été fait'],
+  ['travail_incomplet', '🧹 Le travail est incomplet / mal fait'],
+  ['retard', '⏰ Le professionnel est venu très en retard'],
+  ['degat', '💥 Il y a eu un dégât ou une casse'],
+  ['montant', '💰 Je ne suis pas d’accord sur le montant'],
+  ['autre', '❓ Autre problème']
+];
+function litigeDeMission(id){ return MES_LITIGES[id] || null; }
+function blocLitige(id){
+  const l = litigeDeMission(id);
+  if(!l) return '';
+  const lb = LITIGE_LIB[l.status] || ['•', l.status, 'var(--muted)'];
+  const rb = l.remboursement;
+  return '<div style="margin-top:7px;font-size:12px;font-weight:800;color:' + lb[2] + '">' + lb[0] + ' ' + lb[1]
+    + (l.id ? (' <small style="color:var(--muted);font-weight:600">' + l.id + '</small>') : '')
+    + (rb ? ('<br>💰 ' + fmt(rb.montant) + (rb.statut === 'paye' ? ' versés' : ' — à venir')) : '')
+    + (l.motifRefus ? ('<br><small style="color:var(--danger);font-weight:600">Motif : ' + l.motifRefus + '</small>') : '')
+    + '</div>';
+}
+function boutonSignalement(id, termine){
+  if(!termine) return '';
+  if(litigeDeMission(id)) return blocLitige(id);
+  if(!client || !client.token)
+    return '<button class="bkg-act" style="color:var(--p)" onclick="toast(\'🔓 Connectez-vous (onglet 👤) pour signaler un problème\')">🟠 Signaler un problème</button>';
+  return '<button class="bkg-act" style="color:var(--p)" onclick="ouvrirSignalement(\'' + id + '\')">🟠 Signaler un problème</button>';
+}
+async function chargerMesLitiges(){
+  if(!client || !client.token) return;
+  try{
+    const r = await fetch('/api/litiges', { headers:{ 'X-Client-Token': client.token }, cache:'no-store' });
+    if(!r.ok) return;
+    const d = await r.json();
+    MES_LITIGES = {};
+    (d.litiges || []).forEach(l => { MES_LITIGES[l.missionId] = l; });
+  }catch(e){}
+}
+function ouvrirSignalement(missionId){
+  if(!client || !client.token) return toast('🔓 Connectez-vous pour signaler un problème');
+  const l = document.getElementById('sig-box'); if(l) l.remove();
+  const box = document.createElement('div');
+  box.id = 'sig-box';
+  box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:12000;display:flex;align-items:flex-end;justify-content:center;padding:0';
+  box.innerHTML = '<div style="background:var(--card);width:100%;max-width:520px;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px 15px 22px;box-sizing:border-box">'
+    + '<div style="display:flex;align-items:center;gap:9px;margin-bottom:9px"><b style="font-size:15.5px">🟠 Signaler un problème</b>'
+    + '<button type="button" onclick="document.getElementById(\'sig-box\').remove()" style="margin-left:auto;background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font-weight:900;border-radius:10px;width:34px;height:34px;cursor:pointer">✕</button></div>'
+    + '<small style="display:block;color:var(--muted);font-size:12px;margin-bottom:10px">Mission <b>#' + missionId + '</b>. Décrivez le problème : KLEAN vous répondra dans vos messages, et vous suivrez l’avancement ici même.</small>'
+    + '<label style="display:block;font-size:12px;font-weight:800;margin-bottom:5px">Que s’est-il passé ?</label>'
+    + '<select id="sig-motif" style="width:100%;box-sizing:border-box;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:13px;margin-bottom:10px">'
+    + LITIGE_MOTIFS_CLI.map(m => '<option value="' + m[0] + '">' + m[1] + '</option>').join('') + '</select>'
+    + '<label style="display:block;font-size:12px;font-weight:800;margin-bottom:5px">Expliquez en quelques mots</label>'
+    + '<textarea id="sig-texte" placeholder="Ex. : la cuisine n’a pas été nettoyée, je l’ai signalé au professionnel sur place." style="width:100%;box-sizing:border-box;min-height:88px;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:13px;margin-bottom:10px"></textarea>'
+    + '<label style="display:block;font-size:12px;font-weight:800;margin-bottom:5px">Montant souhaité en dédommagement (facultatif)</label>'
+    + '<input id="sig-montant" type="number" min="0" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-size:13px;margin-bottom:12px">'
+    + '<button type="button" class="btn-main" style="width:100%;padding:13px;font-size:14.5px" onclick="envoyerSignalement(\'' + missionId + '\')">📨 Envoyer mon signalement</button>'
+    + '<small style="display:block;margin-top:9px;color:var(--muted);font-size:11.5px;line-height:1.45">KLEAN examine chaque dossier. Si le remboursement est accepté, <b>le versement est effectué par l’équipe</b> (Wave, Orange Money, Moov ou espèces) et vous en êtes informé ici.</small>'
+    + '</div>';
+  document.body.appendChild(box);
+}
+async function envoyerSignalement(missionId){
+  const motif = (document.getElementById('sig-motif') || {}).value || 'autre';
+  const texte = ((document.getElementById('sig-texte') || {}).value || '').trim();
+  const montantSouhaite = parseInt((document.getElementById('sig-montant') || {}).value, 10) || 0;
+  if(texte.length < 5) return toast('✍️ Expliquez le problème en quelques mots');
+  const btn = document.querySelector('#sig-box .btn-main');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Envoi…'; }
+  try{
+    const r = await fetch('/api/litiges', { method:'POST', headers:{ 'Content-Type':'application/json', 'X-Client-Token': client.token },
+      body: JSON.stringify({ missionId, motif, texte, montantSouhaite }) });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok){ if(btn){ btn.disabled = false; btn.textContent = '📨 Envoyer mon signalement'; } return toast('⚠️ ' + (d.error || 'Envoi impossible')); }
+    const b = document.getElementById('sig-box'); if(b) b.remove();
+    toast('🟠 Signalement envoyé — KLEAN vous répond dans vos messages');
+    await chargerMesLitiges();
+    try{ renderBookings(); }catch(e){}
+    try{ chargerHistoServer(); }catch(e){}
+  }catch(e){
+    if(btn){ btn.disabled = false; btn.textContent = '📨 Envoyer mon signalement'; }
+    toast('⚠️ Réseau indisponible — réessayez');
+  }
+}
+
 /* ══════════ RÉSERVATIONS (CLIENT) ══════════ */
 function renderBookings(){
   try{ chargerHistoServer(); }catch(e){}
+  /* 🟠 on relit d'abord l'état des dossiers de signalement, puis on affiche la liste */
+  try{ chargerMesLitiges().then(paintBookings); }catch(e){ paintBookings(); }
+  paintBookings();
+}
+function paintBookings(){
   const el = $('#bookings-list');
   if(!bookings.length){
     el.innerHTML = `<div class="empty"><div class="ic">🧼</div><b>Aucune mission pour le moment</b><p>Réservez votre première prestation — un pro de ${cityName(c.city)} arrive en quelques minutes.</p><button onclick="startBooking()">Réserver</button></div>`;
@@ -2034,6 +2131,7 @@ function renderBookings(){
         ${b.rated?`<span class="stars-mini">${'★'.repeat(b.rated)}${'☆'.repeat(5-b.rated)}</span>`:''}
         ${['recherche','enroute','arrive','encours'].includes(b.status)?`<button class="bkg-act" style="color:var(--blue)" onclick="resumeTrack('${b.id}')">👁️ Voir</button>`:''}
         ${['recherche','enroute'].includes(b.status)?`<button class="bkg-act" style="color:var(--danger)" onclick="cancelBooking('${b.id}')">✕ Annuler</button>`:''}
+        ${boutonSignalement(b.id, b.status === 'terminee')}
       </div></div>`;
   }).join('');
 }
@@ -2060,6 +2158,7 @@ async function chargerHistoServer(){
     el.innerHTML = '<div class="gate-card" style="border:1px dashed var(--line)"><h4>📜 Vos anciennes missions</h4><p class="sub">Serveur momentanément indisponible — réessayez dans un instant.</p></div>';
     return;
   }
+  await chargerMesLitiges();
   const changeBlocage = (!BLOCAGE.connu || BLOCAGE.blocked !== !!d.blocked || BLOCAGE.motif !== (d.blockReason||''));
   BLOCAGE = { blocked: !!d.blocked, motif: d.blockReason || '', connu: true };
   if(changeBlocage && typeof renderAccount === 'function' && document.getElementById('view-account') && document.getElementById('view-account').classList.contains('active')) renderAccount();
@@ -2087,6 +2186,7 @@ async function chargerHistoServer(){
       + '<div class="bkg-bottom"><b>' + fmt(m.prixTotal||0) + '</b>'
       + (m.note ? ('<span class="stars-mini">' + '★'.repeat(m.note) + '☆'.repeat(5-m.note) + '</span>') : '')
       + '<button class="bkg-act" style="color:var(--p)" onclick="refaireMission(\'' + m.service + '\',\'' + String(m.quartier||'').replace(/'/g,' ') + '\')">🔁 Refaire</button>'
+      + boutonSignalement(m.id, m.status === 'terminee')
       + '</div></div>';
   }).join('');
 }
