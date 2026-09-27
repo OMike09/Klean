@@ -1096,7 +1096,7 @@
       ne deviennent une référence <b>qu'après votre validation</b>. Rien n'est rétroactif : un prix déjà accepté ne bouge jamais.</p>
     <div id="ma-resume" style="font-size:12.5px;margin:8px 0"></div>
     <div id="ma-calculs" style="font-size:12px;margin:6px 0"></div>
-    <div id="ma-manque" style="margin:6px 0"></div>
+    <div id="ma-manque" data-bloc-saisie="1" style="margin:6px 0"></div>
     <details style="border:1.5px dashed var(--line);border-radius:12px;padding:9px;margin:8px 0">
       <summary style="cursor:pointer;font-weight:900;font-size:12.5px">➕ Ajouter une référence (source + date obligatoires)</summary>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
@@ -1126,7 +1126,7 @@
       Jamais de 3ᵉ mise en relation automatique ; après le 2ᵉ, la demande reprend <b>le lendemain</b>. La conversation est courte
       (messages et caractères limités), le prix passe par la <b>bulle PRIX</b> — verrouillé dès que le client l'accepte.</p>
     <div id="rel-hq-resume" style="font-size:12.5px;margin:8px 0"></div>
-    <div id="rel-hq-cfg" style="margin:8px 0"></div>
+    <div id="rel-hq-cfg" data-bloc-saisie="1" style="margin:8px 0"></div>
     <div id="rel-hq-contour" style="margin:8px 0"></div>
     <div id="rel-hq-liste" style="max-height:430px;overflow:auto;margin-top:6px"></div>
     <div id="rel-hq-dossier" style="margin-top:10px"></div>
@@ -2389,6 +2389,189 @@ async function viEnregistrer(){
 }
 
 /* ═══════════ 📂 SECTIONS REPLIABLES (lot 101) ═══════════ */
+/* ═══════════ 🪟 GESTIONNAIRE DE FENÊTRES DU TABLEAU DE BORD — 28/09
+   DÉFAUT CORRIGÉ (signalé par le PDG : « quand je veux créer un compte, ça ressort tout seul ») :
+   le repliage automatique des catégories (hqPliage, relancé par le rafraîchissement toutes les 12 s)
+   remettait chaque bloc à son état d'origine. Comme la fenêtre « Ouvrir un compte » naît fermée
+   (display:none), elle se refermait TOUTE SEULE pendant que le PDG la remplissait.
+   La règle est maintenant unique et vérifiée en continu :
+     · une fenêtre OUVERTE porte data-ouvert="1" → le repliage n'y touche JAMAIS ;
+     · elle porte aussi data-fenetre="1" : ce n'est pas un bloc repliable, c'est une fenêtre ;
+     · le défilement de la page est verrouillé tant qu'au moins une fenêtre est ouverte (état RÉEL, pas un compteur deviné) ;
+     · Échap ferme la dernière fenêtre ouverte ;
+     · un clic sur le fond la ferme — mais SEULEMENT si le doigt n'a pas glissé (sur mobile, un balayage ne ferme plus rien) ;
+     · un VEILLEUR vérifie en continu qu'aucune fenêtre ouverte ne s'est refermée : s'il en trouve une, il la ROUVRE
+       et note la réparation. Le PDG ne peut plus être dérangé par cette panne, même si un autre code la provoque. */
+const HQ_WIN = { ouvertes: [], reparations: 0, journal: [] };
+function hqWinJournal(quoi, detail){
+  try{
+    HQ_WIN.journal.push({ at: new Date().toISOString(), quoi: quoi, detail: String(detail || '') });
+    if(HQ_WIN.journal.length > 40) HQ_WIN.journal = HQ_WIN.journal.slice(-30);
+  }catch(e){}
+}
+function hqWinEstFenetre(el){
+  if(!el || !el.id) return false;
+  if(el.id === 'hq-pal') return false;                     /* la palette Ctrl+K garde ses propres règles */
+  return /^win-/.test(el.id) || /-modal$/.test(el.id) || /-ov$/.test(el.id) ||
+    (el.classList && (el.classList.contains('modal-ov') || el.classList.contains('modal-bg')));
+}
+function hqWinDeclare(el){
+  try{
+    if(!el || el.dataset.fenetre === '1' || !hqWinEstFenetre(el)) return;
+    const st = el.style || {};
+    if(String(st.position) !== 'fixed') return;            /* un vrai écran plein écran seulement */
+    el.dataset.fenetre = '1';
+    el.dataset.affichage = (String(st.display) === 'flex') ? 'flex' : 'block';
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+    /* le clic sur le fond : repris ici, en mieux (l'ancien « onclick= » ne mesurait pas le glissement) */
+    el.onclick = null;
+    let x0 = null, y0 = 0, glisse = false;
+    const debut = (x, y) => { x0 = x; y0 = y; glisse = false; };
+    const bouge = (x, y) => { if(x0 !== null && (Math.abs(x - x0) > 12 || Math.abs(y - y0) > 12)) glisse = true; };
+    el.addEventListener('touchstart', e => { const t = (e.touches && e.touches[0]) || {}; debut(t.clientX, t.clientY); }, { passive: true });
+    el.addEventListener('touchmove', e => { const t = (e.touches && e.touches[0]) || {}; bouge(t.clientX, t.clientY); }, { passive: true });
+    el.addEventListener('mousedown', e => { if(e.target === el) debut(e.clientX, e.clientY); });
+    el.addEventListener('mousemove', e => { if(e.target === el) bouge(e.clientX, e.clientY); });
+    el.addEventListener('click', function(e){
+      if(e.target !== el) return;
+      if(glisse){ glisse = false; return; }                 /* 🔒 le doigt avait glissé : on ne ferme pas */
+      const id = el.id;
+      if(id === 'win-comptes') return fermerFenetreComptes();
+      if(id === 'win-villes') return fermerFenetreVilles();
+      if(id === 'win-missions') return fermerMissionsClient();
+      return hqWinFermer(id);
+    });
+  }catch(e){}
+}
+function hqWinDeclareTout(){
+  try{
+    [...document.querySelectorAll('.wrap > [id], body > [id]')].forEach(hqWinDeclare);
+  }catch(e){}
+}
+function hqWinOuvrir(id, mode){
+  const el = document.getElementById(id);
+  if(!el) return null;
+  hqWinDeclare(el);
+  el.style.display = mode || el.dataset.affichage || 'block';
+  el.dataset.ouvert = '1';                                   /* 🖐️ ouverte par l'utilisateur : intouchable */
+  if(HQ_WIN.ouvertes.indexOf(id) < 0) HQ_WIN.ouvertes.push(id);
+  try{ document.body.style.overflow = 'hidden'; }catch(e){}
+  hqWinJournal('ouverture', id);
+  return el;
+}
+function hqWinFermer(id){
+  const el = document.getElementById(id);
+  if(el){
+    el.style.display = 'none';
+    delete el.dataset.ouvert;
+  }
+  HQ_WIN.ouvertes = HQ_WIN.ouvertes.filter(x => x !== id);
+  if(!hqWinUneOuverte()){ try{ document.body.style.overflow = ''; }catch(e){} }
+  hqWinJournal('fermeture', id);
+}
+function hqWinUneOuverte(){
+  return HQ_WIN.ouvertes.some(function(id){
+    const e = document.getElementById(id);
+    return e && e.style.display !== 'none';
+  });
+}
+/* 🛡️ LE VEILLEUR : aucune fenêtre ouverte ne peut se refermer sans que le PDG l'ait décidé */
+function hqVeilleurFenetres(){
+  try{
+    hqWinDeclareTout();
+    HQ_WIN.ouvertes.slice().forEach(function(id){
+      const el = document.getElementById(id);
+      if(!el){ HQ_WIN.ouvertes = HQ_WIN.ouvertes.filter(x => x !== id); return; }
+      if(el.style.display === 'none' && el.dataset.ouvert === '1'){
+        el.style.display = el.dataset.affichage || 'block';
+        HQ_WIN.reparations++;
+        hqWinJournal('réparation', id + ' — refermée par un autre code, rouverte automatiquement');
+      }
+      if(el.dataset.ouvert !== '1') el.dataset.ouvert = '1';
+    });
+    const ouvre = hqWinUneOuverte();
+    if(ouvre && document.body.style.overflow !== 'hidden') document.body.style.overflow = 'hidden';
+    if(!ouvre && document.body.style.overflow === 'hidden' && !document.querySelector('.modal-ov, #sheet, #hq-pal:not(.hidden)'))
+      document.body.style.overflow = '';
+  }catch(e){}
+  return HQ_WIN;
+}
+/* 🖐️ 28/09 — AUCUNE SAISIE DU PDG N'EST JAMAIS ÉCRASÉE PAR UN RAFRAÎCHISSEMENT
+   Même famille que la fenêtre qui se refermait : le tableau de bord se rafraîchit tout seul (12 s).
+   Deux protections, complémentaires :
+     · hqSaisieSnapshot / hqSaisieRestaurer : si un rafraîchissement remplace le champ où le PDG écrit,
+       la valeur ET la position du curseur sont remises aussitôt ;
+     · hqEcrase : les blocs marqués data-bloc-saisie="1" ne sont pas réécrits tant que le curseur y est,
+       et les valeurs tapées mais pas encore enregistrées sont conservées. */
+function hqSaisieSnapshot(){
+  try{
+    const a = document.activeElement;
+    if(!a || !a.tagName || !/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return null;
+    if(!a.id && !a.name) return null;
+    return { id: a.id || '', name: a.name || '', valeur: a.value, debut: a.selectionStart, fin: a.selectionEnd };
+  }catch(e){ return null; }
+}
+function hqSaisieRestaurer(snap){
+  if(!snap) return;
+  try{
+    const el = (snap.id ? document.getElementById(snap.id) : null) ||
+      (snap.name ? document.querySelector('[name="' + snap.name.replace(/"/g, '') + '"]') : null);
+    if(!el) return;
+    if(el.value !== snap.valeur){
+      el.value = snap.valeur;
+      try{ el.focus(); el.setSelectionRange(snap.debut, snap.fin); }catch(e){}
+      hqWinJournal('saisie conservée', el.id || el.name);
+    }
+  }catch(e){}
+}
+function hqSaisieDans(box){
+  try{
+    const a = document.activeElement;
+    if(!a || !a.tagName || !/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false;
+    return !!(box && box.contains && box.contains(a));
+  }catch(e){ return false; }
+}
+function hqEcrase(box, html){
+  if(!box) return false;
+  if(hqSaisieDans(box)) return false;                       /* le curseur est dans ce bloc : on n'y touche pas */
+  if(box.dataset && box.dataset.saisie === '1'){            /* valeurs tapées non encore enregistrées : on les garde */
+    const etat = {};
+    [...box.querySelectorAll('input, textarea, select')].forEach(x => { if(x.id) etat[x.id] = x.value; });
+    box.innerHTML = html;
+    Object.keys(etat).forEach(id => { const el = box.querySelector('#' + id); if(el && el.value !== etat[id]) el.value = etat[id]; });
+    return true;
+  }
+  box.innerHTML = html; return true;
+}
+function hqSaisiePropre(id){ const el = document.getElementById(id); if(el && el.dataset) delete el.dataset.saisie; }
+document.addEventListener('input', function(e){
+  try{
+    const t = e.target; if(!t || !t.tagName || !t.closest) return;
+    const b = t.closest('[data-bloc-saisie="1"]');
+    if(b && b.dataset) b.dataset.saisie = '1';
+  }catch(x){}
+}, true);
+
+function hqSante(){
+  hqVeilleurFenetres();
+  return { fenetresOuvertes: HQ_WIN.ouvertes.slice(), reparations: HQ_WIN.reparations, journal: HQ_WIN.journal.slice(-20),
+    repliage: { sectionsPliees: window._hqPlies || 0 } };
+}
+window.hqSante = hqSante; window.hqWinOuvrir = hqWinOuvrir; window.hqWinFermer = hqWinFermer;
+window.hqWinDeclareTout = hqWinDeclareTout; window.hqVeilleurFenetres = hqVeilleurFenetres;
+setInterval(hqVeilleurFenetres, 2500);
+window.addEventListener('load', function(){ try{ hqWinDeclareTout(); }catch(e){} });
+setTimeout(function(){ try{ hqWinDeclareTout(); }catch(e){} }, 400);
+/* ⌨️ Échap ferme la dernière fenêtre ouverte (toutes les fenêtres, pas seulement deux) */
+document.addEventListener('keydown', function(e){
+  if(e.key !== 'Escape' || !HQ_WIN.ouvertes.length) return;
+  const id = HQ_WIN.ouvertes[HQ_WIN.ouvertes.length - 1];
+  if(id === 'win-comptes') return fermerFenetreComptes();
+  if(id === 'win-villes') return fermerFenetreVilles();
+  if(id === 'win-missions') return fermerMissionsClient();
+  hqWinFermer(id);
+}, true);
+
 function hqPliage(){
   try{ hqEtatsInitiaux(); }catch(e){}
   const cle = 'klean_hq_plies';
@@ -2434,6 +2617,8 @@ function hqPliageAppliquer(){
     let el = t.nextElementSibling, nb = 0;
     while(el && !el.classList.contains('hq-sec')){
       if(!el.dataset || el.id === 'hq-erreur'){ el = el.nextElementSibling; continue; }
+      /* 🪟 une FENÊTRE (compte, villes, missions, modale) n'est pas un bloc repliable : on n'y touche jamais */
+      if(el.dataset.fenetre === '1' || hqWinEstFenetre(el)){ el = el.nextElementSibling; continue; }
       if(el.dataset.d0 === undefined) el.dataset.d0 = el.style.display || '';
       /* 🖐️ une fenêtre ouverte par l'utilisateur ne se referme jamais toute seule */
       el.style.display = ferme ? 'none' : (el.dataset.ouvert === '1' ? '' : el.dataset.d0);
@@ -3074,16 +3259,11 @@ async function gelerGest(frozen){
   alert(d.gestFrozen ? '⛔ Plus personne n’écrit (sauf vous, PDG).' : '✅ Écritures réactivées.');
 }
 async function ouvrirFenetreVilles(){
-  const w=document.getElementById('win-villes');
+  const w=hqWinOuvrir('win-villes','block');               /* 🪟 même règle : jamais refermée toute seule */
   if(!w) return alert('Fenêtre introuvable — rechargez la page (Ctrl+F5)');
-  w.style.display='block'; document.body.style.overflow='hidden';
   chargerVillesHQ();
 }
-function fermerFenetreVilles(){
-  const w=document.getElementById('win-villes');
-  if(w) w.style.display='none';
-  document.body.style.overflow='';
-}
+function fermerFenetreVilles(){ hqWinFermer('win-villes'); }
 
 
 
@@ -3551,6 +3731,20 @@ function genererCodePro(){
 }
 /* 🏗️ Les boutons « créer un compte » ouvrent désormais la FENÊTRE (tout en un) */
 function toggleAcctForm(which){ ouvrirFenetreComptes(which==='pro'?'pro':'client'); }
+/* ⏱️ 28/09 — un envoi du tableau de bord ne reste plus jamais « en attente » :
+   au bout de 20 s la main revient, le bouton se réactive et la raison est dite au PDG. */
+async function hqEnvoi(url, corps, ms){
+  const ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+  const fin = setTimeout(function(){ try{ if(ctl) ctl.abort(); }catch(e){} }, ms || 20000);
+  try{
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(corps || {}), signal: ctl ? ctl.signal : undefined, cache: 'no-store' });
+    const d = await r.json().catch(function(){ return {}; });
+    return { ok: r.ok, code: r.status, d: d };
+  }catch(e){
+    return { ok: false, code: 0, d: { error: (e && e.name === 'AbortError') ? 'Le serveur n’a pas répondu en 20 secondes — réessayez' : 'Serveur injoignable — vérifiez la connexion' } };
+  }finally{ clearTimeout(fin); }
+}
 async function createClientHQ(){
   const nom=((document.getElementById('w-c-nom')||{}).value||'').trim(), tel=((document.getElementById('w-c-tel')||{}).value||'').trim();
   const quartier=((document.getElementById('w-c-quartier')||{}).value||'').trim(), password=(document.getElementById('w-c-pw')||{}).value||'';
@@ -3561,9 +3755,9 @@ async function createClientHQ(){
   const btn=document.getElementById('w-c-btn'); if(btn){ btn.disabled=true; btn.textContent='⏳ Création…'; }
   let d={}, ok=false;
   try{
-    const r=await fetch('/api/admin/clients/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,tel,quartier,ville,mail,password,pin})});
-    d=await r.json().catch(()=>({})); ok=r.ok;
-    if(!r.ok) alert('⚠️ '+(d.error||'Création impossible'));
+    const r = await hqEnvoi('/api/admin/clients/create', {nom,tel,quartier,ville,mail,password,pin});
+    d = r.d; ok = r.ok;
+    if(!ok) alert('⚠️ '+(d.error||'Création impossible'));
   }catch(e){ alert('⚠️ Serveur injoignable — réessayez'); }
   if(btn){ btn.disabled=false; btn.textContent='🏗️ Ouvrir le compte client'; }
   if(!ok) return;
@@ -3572,10 +3766,12 @@ async function createClientHQ(){
     box.style.display='block';
     box.dataset.txt = messageAcces('client', d);
     box.innerHTML = blocAcces('client', d);
+    /* 🪟 la fenêtre reste ouverte (le veilleur y veille) et on amène le PDG droit sur les codes */
+    try{ box.scrollIntoView({ behavior:'smooth', block:'center' }); }catch(e){}
   }
   ['w-c-nom','w-c-tel','w-c-quartier','w-c-ville','w-c-mail','w-c-code','w-c-pw'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
-  loadAll();
   if(typeof chargerCodesAcces==='function') chargerCodesAcces(true);
+  loadAll();
 }
 async function createProHQ(){
   const prenom=((document.getElementById('w-p-prenom')||{}).value||'').trim(), nom=((document.getElementById('w-p-nom')||{}).value||'').trim();
@@ -3590,9 +3786,9 @@ async function createProHQ(){
   const btn=document.getElementById('w-p-btn'); if(btn){ btn.disabled=true; btn.textContent='⏳ Création…'; }
   let d={}, ok=false;
   try{
-    const r=await fetch('/api/admin/agents/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nom,prenom,tel,quartier,ville,villeService,mail,service,pin,password})});
-    d=await r.json().catch(()=>({})); ok=r.ok;
-    if(!r.ok) alert('⚠️ '+(d.error||'Création impossible'));
+    const r = await hqEnvoi('/api/admin/agents/create', {nom,prenom,tel,quartier,ville,villeService,mail,service,pin,password});
+    d = r.d; ok = r.ok;
+    if(!ok) alert('⚠️ '+(d.error||'Création impossible'));
   }catch(e){ alert('⚠️ Serveur injoignable — réessayez'); }
   if(btn){ btn.disabled=false; btn.textContent='🏗️ Ouvrir le compte pro (validé d’office)'; }
   if(!ok) return;
@@ -3601,10 +3797,11 @@ async function createProHQ(){
     box.style.display='block';
     box.dataset.txt = messageAcces('pro', d);
     box.innerHTML = blocAcces('pro', d);
+    try{ box.scrollIntoView({ behavior:'smooth', block:'center' }); }catch(e){}
   }
   ['w-p-prenom','w-p-nom','w-p-tel','w-p-quartier','w-p-code','w-p-pw'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
-  loadAll();
   if(typeof chargerCodesAcces==='function') chargerCodesAcces(true);
+  loadAll();
 }
 async function reassignMission(id, clientNom){
   const reason = prompt('🔁 RÉATTRIBUER D\'URGENCE la mission '+id+' ('+(clientNom||'client')+') ?\n\nLe professionnel actuel la perd et ne peut plus la reprendre.\nLes autres professionnels en ligne sont avertis immédiatement.\n\nMotif (tracé dans l\'historique) :');
@@ -4328,12 +4525,12 @@ async function chargerMarcheHQ(){
     if(sel && !sel.options.length){ sel.innerHTML = '<option value="">— service Klean (facultatif) —</option>' + (d.services||[]).map(x=>'<option value="'+cdEchap(x.id)+'">'+cdEchap(x.nom)+'</option>').join(''); }
     if(uni && !uni.options.length){ uni.innerHTML = (d.unites||[]).map(x=>'<option value="'+cdEchap(x.id)+'">'+cdEchap(x.nom)+'</option>').join(''); }
     const mk = document.getElementById('ma-manque');
-    if(mk) mk.innerHTML = '<details style="border:1.5px solid #ffe0a3;background:#fffdf5;border-radius:12px;padding:9px"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">'
+    if(mk) hqEcrase(mk, '<details style="border:1.5px solid #ffe0a3;background:#fffdf5;border-radius:12px;padding:9px"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">'
       + '⚠️ Métiers SANS référence de marché : <b>' + (d.manque||[]).length + '</b> — à compléter (on n’invente jamais un prix)</summary>'
       + '<div style="font-size:11.5px;margin-top:7px">' + (d.manque||[]).map(x => '<span style="display:inline-block;background:#fff;border:1px solid var(--line);border-radius:8px;padding:2px 7px;margin:2px 4px 0 0">' + cdEchap(x)
         + (ME && ME.role==='pdg' ? ' <b style="cursor:pointer;color:var(--danger)" onclick="maManque(\'' + cdEchap(x).replace(/'/g,'') + '\',false)">✕</b>' : '') + '</span>').join('')
       + (ME && ME.role==='pdg' ? '<div style="margin-top:7px"><input id="ma-manque-new" placeholder="Ajouter un métier à compléter" style="padding:6px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)"> <button class="btn-soft" onclick="maManque(document.getElementById(\'ma-manque-new\').value,true)">ajouter</button></div>' : '')
-      + '</div></details>';
+      + '</div></details>');
     const rf = document.getElementById('ma-refs');
     if(rf) rf.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
       + '<tr style="text-align:left;color:var(--muted)"><th>Ce que c’est</th><th>Service</th><th>Fourchette</th><th>Source</th><th>Date</th><th>État</th><th></th></tr>'
@@ -4417,6 +4614,7 @@ async function maManque(libelle, ajouter){
   if(!libelle) return;
   const d = await maPost({action: ajouter ? 'manque-ajouter' : 'manque-retirer', libelle: libelle, motif:'liste des métiers à compléter'});
   if(d.erreur) return alert(d.erreur);
+  hqApresEnregistrement('ma-manque');
   chargerMarcheHQ();
 }
 window.chargerMarcheHQ = chargerMarcheHQ; window.maAjouter = maAjouter; window.maModifier = maModifier;
@@ -4436,7 +4634,7 @@ async function chargerRelHQ(){
       + Object.keys(parEtat).map(k => '<span style="display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:2px 7px;margin:2px 4px 0 0">' + cdEchap(k) + ' : <b>' + parEtat[k] + '</b></span>').join('')
       + '<br><small style="color:var(--muted)">' + cdEchap(d.regle||'') + '</small>';
     const c = document.getElementById('rel-hq-cfg'), C = d.config || {};
-    if(c) c.innerHTML = '<details style="border:1.5px dashed var(--line);border-radius:12px;padding:9px"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">⚙️ Réglages '
+    if(c) hqEcrase(c, '<details style="border:1.5px dashed var(--line);border-radius:12px;padding:9px"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">⚙️ Réglages '
       + (ME && ME.role==='pdg' ? '(PDG)' : '(lecture seule — le PDG décide)') + '</summary>'
       + '<div style="font-size:12px;margin-top:7px;line-height:1.7">'
       + 'Professionnels par demande : <b>1 ᵉʳ puis 2ᵉ — ' + (C.maxProsParTour||2) + ' maximum</b> (indépassable, même par le PDG)<br>'
@@ -4446,7 +4644,7 @@ async function chargerRelHQ(){
       + 'Reprise après le 2ᵉ refus (heures) : <input id="rel-cfg-rep" type="number" min="1" max="48" value="' + (C.repriseHeures||12) + '" style="width:64px" ' + ((ME&&ME.role==='pdg')?'':'disabled') + '><br>'
       + 'Contrôle anti-contournement : <b>' + ((C.anti&&C.anti.actif)?'ACTIF':'désactivé') + '</b> · blocage : <b>' + ((C.anti&&C.anti.bloquer)?'oui':'non') + '</b> · signalement après <b>' + ((C.anti&&C.anti.signalerApres)||3) + '</b> manquement(s)'
       + (ME && ME.role==='pdg' ? '<br><button class="btn-soft" style="margin-top:7px" onclick="relHQCfg()">💾 Enregistrer les réglages</button>' : '')
-      + '</div></details>';
+      + '</div></details>');
     const k = document.getElementById('rel-hq-contour');
     if(k) k.innerHTML = '<details style="border:1.5px solid #f0b5b5;border-radius:12px;padding:9px;background:#fff7f7"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">🛡️ Tentatives de sortir de Klean : <b>'
       + (d.nbContournements||0) + '</b></summary><div style="max-height:230px;overflow:auto;margin-top:7px;font-size:11.5px">'
@@ -4501,10 +4699,12 @@ async function relHQFermer(mid){
   alert('⛔ Relation arrêtée — le motif est enregistré.');
   chargerRelHQ();
 }
+function hqApresEnregistrement(id){ hqSaisiePropre(id); }   /* l’enregistrement est passé : le bloc suit de nouveau le serveur */
 async function relHQCfg(){
   const v = id => { const e=document.getElementById(id); return e ? Number(e.value) : undefined; };
   const r = await fetch('/api/admin/rel', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
     maxProsParJour: v('rel-cfg-jour'), msgMaxParCote: v('rel-cfg-msg'), msgMaxCar: v('rel-cfg-car'), repriseHeures: v('rel-cfg-rep') })});
+  hqApresEnregistrement('rel-hq-cfg');
   const d = await r.json().catch(()=>({}));
   if(!r.ok) return alert(d.error||'Impossible');
   alert('✅ Réglages enregistrés (version ' + ((d.config||{}).version||'') + ')');
@@ -5815,7 +6015,10 @@ document.addEventListener('keydown', function(e){
 loadAll();
 connectWS();
 setInterval(loadHqChat, 12000);
-setInterval(loadAll, 12000); // secours
+setInterval(function(){                     /* 🔄 le secours de 12 s — protégé : la saisie en cours survit */
+  const snap = hqSaisieSnapshot();
+  Promise.resolve().then(loadAll).then(function(){ hqSaisieRestaurer(snap); setTimeout(function(){ hqSaisieRestaurer(snap); }, 700); }).catch(function(){});
+}, 12000);
 </script>
 <style>
 /* 🗂️ HQ : volets pliables — le quotidien ouvert, le long refermé */
@@ -6058,18 +6261,12 @@ function echa(v){
   });
 }
 function ouvrirFenetreComptes(which){
-  const w = document.getElementById('win-comptes');
+  const w = hqWinOuvrir('win-comptes', 'block');          /* 🪟 ouverte par l'utilisateur : elle ne se refermera plus seule */
   if(!w){ alert('Fenêtre introuvable — rechargez la page (Ctrl+F5)'); return; }
-  w.style.display = 'block';
-  document.body.style.overflow = 'hidden';
   ongletComptes(which === 'pro' ? 'pro' : (which === 'codes' ? 'codes' : 'client'));
   if(which === 'codes') chargerCodesAcces();
 }
-function fermerFenetreComptes(){
-  const w = document.getElementById('win-comptes');
-  if(w) w.style.display = 'none';
-  document.body.style.overflow = '';
-}
+function fermerFenetreComptes(){ hqWinFermer('win-comptes'); }
 function ongletComptes(t){
   ONGLET_COMPTES = t;
   const map = { client: ['wsec-client','wt-client'], pro: ['wsec-pro','wt-pro'], codes: ['wsec-codes','wt-codes'] };
@@ -6283,9 +6480,8 @@ async function supprimerCompte(kind, id, nom){
 }
 /* 📜 Toutes les missions d'un compte (même anciennes, même après suppression) */
 async function voirMissionsCompte(kind, id, nom){
-  const w = document.getElementById('win-missions');
+  const w = hqWinOuvrir('win-missions','block');           /* 🪟 la fiche des anciennes missions reste ouverte tant que le PDG la garde */
   if(!w) return;
-  w.style.display = 'block';
   document.getElementById('win-mis-titre').textContent = '📜 ' + (kind === 'pro' ? 'Missions de ' : 'Anciennes missions de ') + (nom || '');
   document.getElementById('win-mis-stats').textContent = 'Chargement…';
   document.getElementById('win-mis-list').innerHTML = '';
@@ -6318,10 +6514,7 @@ async function voirMissionsCompte(kind, id, nom){
       + '</div>';
   }).join('');
 }
-function fermerMissionsClient(){
-  const w = document.getElementById('win-missions');
-  if(w) w.style.display = 'none';
-}
+function fermerMissionsClient(){ hqWinFermer('win-missions'); }
 document.addEventListener('keydown', function(e){ if(e.key === 'Escape'){ fermerFenetreComptes(); fermerMissionsClient(); } });
 
 /* ═══════════════════════════════════════════════════════════════════════════

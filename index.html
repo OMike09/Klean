@@ -4331,7 +4331,7 @@ function renderAccount(){
     <h4>👋 Bon retour !</h4>
     <p class="sub">Connectez-vous avec votre téléphone et votre mot de passe.</p>
     <div class="inp-row"><label>📞 Téléphone</label><div class="phone-wrap"><span class="prefix">+225</span><input type="tel" id="al-tel" placeholder="01 02 03 04 05" maxlength="14"></div></div>
-    <div class="inp-row"><label>🔑 Mot de passe <button type="button" onclick="togglePw('al-pw')" style="float:right;font-size:12px;font-weight:800;color:var(--pd)">👁 Voir</button></label><input class="inp" id="al-pw" type="password" placeholder="ou votre code d’accès (6 chiffres)"></div>
+    <div class="inp-row"><label>🔑 Mot de passe <span style="font-weight:400;color:var(--muted);font-size:11.5px">— ou votre code d’accès à 4 à 8 chiffres</span> <button type="button" onclick="togglePw('al-pw')" style="float:right;font-size:12px;font-weight:800;color:var(--pd)">👁 Voir</button></label><input class="inp" id="al-pw" type="password" placeholder="ou votre code d’accès (6 chiffres)"></div>
     <p style="font-size:12px;color:var(--muted);margin:-4px 0 8px;line-height:1.35">💡 Vous avez reçu un <b>code d’accès</b> de l’équipe KLEAN ? Tapez-le ici à la place du mot de passe.</p>
     <button class="btn-main" style="width:100%;flex:none" onclick="clientLogin()">🔓 Se connecter</button>
   </div>`}
@@ -4748,7 +4748,7 @@ let FLIP = null, FLIP_SESS = null, FLIP_T0 = 0;
   try{ if(window.kVeilleRetirer) window.kVeilleRetirer(); }catch(e){}   /* l'alerte éventuelle s'efface d'elle-même */
   /* 🔎 « Vérifier les mises à jour » : le client (et le PDG) peut savoir d'un geste s'il a la
      dernière page. Sans cela, un téléphone pouvait rester sur l'ancienne version sans le dire. */
-  window.KLEAN_VERSION = '118.2';
+  window.KLEAN_VERSION = '118.3';
   window.kVerifierVersion = function(){
     try{ toast('🔍 Vérification de la mise à jour…'); }catch(e){}
     try{
