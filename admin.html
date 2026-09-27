@@ -886,6 +886,36 @@
       </div>
       <div id="tf-services" style="max-height:420px;overflow:auto"></div>
       <div id="tf-moteur"></div>
+      <!-- ❓ LOT 112 : les questions posées au client (elles changent le prix, jamais inventées) -->
+      <div style="margin-top:12px;border-top:1.5px dashed var(--line);padding-top:10px">
+        <b style="font-size:13px">❓ Questions posées au client</b>
+        <p style="font-size:11.5px;color:var(--muted);margin:4px 0 8px;line-height:1.45">
+          Seulement les questions <b>utiles au prix</b> d’un service. Le client peut toujours répondre
+          <b>« Je ne sais pas »</b> : le prix devient alors une <b>estimation</b>, jamais un prix inventé.
+          On ne supprime pas une question : on la <b>désactive</b> (les demandes passées gardent la leur).</p>
+        <div id="tf-questions"></div>
+        <details style="border:1.5px dashed var(--line);border-radius:12px;padding:9px;margin-top:8px">
+          <summary style="cursor:pointer;font-weight:900;font-size:12.5px">➕ Ajouter une question</summary>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
+            <input id="tq-q" placeholder="La question (ex : Le logement est-il meublé ?)" style="grid-column:1/-1;padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+            <select id="tq-type" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+              <option value="choix">Choix (boutons)</option><option value="nombre">Un nombre</option><option value="photo">Photos</option>
+            </select>
+            <select id="tq-cible" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+              <option value="">Tous les services</option>
+              <option value="cat:nettoyage">Catégorie : nettoyage</option>
+              <option value="cat:technique">Catégorie : technique</option>
+              <option value="metier:plomberie">Métier : plomberie</option>
+              <option value="metier:clim">Métier : climatisation</option>
+            </select>
+            <select id="tq-coef" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)"></select>
+            <input id="tq-aide" placeholder="Aide affichée sous la question (facultatif)" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+            <input id="tq-unite" placeholder="Unité si « un nombre » (ex : m2)" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+            <input id="tq-prix" type="number" placeholder="Prix si « un nombre » (FCFA/unité)" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+          </div>
+          <button class="btn-soft" style="margin-top:8px" onclick="tqAjouter()">💾 Enregistrer la question</button>
+        </details>
+      </div>
     </div>
   </div>
 
@@ -1058,6 +1088,65 @@
     </div>
   </div>
 
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-marche">
+    <h3>🏷️ Références marché &amp; statistiques</h3>
+    <p class="sub">Les prix du marché ivoirien constatés, <b>chacun avec sa source et sa date</b>. Ils ne changent <b>aucun</b> prix :
+      ils servent à <b>situer</b> un montant proposé par un professionnel et à <b>signaler</b> ce qui sort de la fourchette
+      (jamais à le corriger ni à le supprimer). Les <b>statistiques</b> viennent des prix <b>réellement acceptés</b> sur Klean et
+      ne deviennent une référence <b>qu'après votre validation</b>. Rien n'est rétroactif : un prix déjà accepté ne bouge jamais.</p>
+    <div id="ma-resume" style="font-size:12.5px;margin:8px 0"></div>
+    <div id="ma-calculs" style="font-size:12px;margin:6px 0"></div>
+    <div id="ma-manque" style="margin:6px 0"></div>
+    <details style="border:1.5px dashed var(--line);border-radius:12px;padding:9px;margin:8px 0">
+      <summary style="cursor:pointer;font-weight:900;font-size:12.5px">➕ Ajouter une référence (source + date obligatoires)</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
+        <input id="ma-nom" placeholder="Ce que c'est (ex : Peinture au m²)" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+        <select id="ma-service" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)"></select>
+        <select id="ma-unite" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)"></select>
+        <input id="ma-ville" placeholder="Ville (ex : Abidjan)" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+        <input id="ma-min" type="number" placeholder="Minimum (FCFA)" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+        <input id="ma-max" type="number" placeholder="Maximum (FCFA)" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+        <input id="ma-source" placeholder="SOURCE (qui l'a dit : prestataire, site, relevé…)" style="grid-column:1/-1;padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+        <input id="ma-date" placeholder="DATE du relevé (ex : 28/09/2026)" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+        <input id="ma-note" placeholder="Note (facultatif)" style="padding:7px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)">
+      </div>
+      <button class="btn-soft" style="margin-top:8px" onclick="maAjouter()">💾 Enregistrer la référence</button>
+    </details>
+    <b style="font-size:12.5px">Références enregistrées</b>
+    <div id="ma-refs" style="max-height:430px;overflow:auto;margin-top:6px"></div>
+    <b style="font-size:12.5px;display:block;margin-top:12px">📊 Statistiques des prix réellement acceptés</b>
+    <p style="font-size:11.5px;color:var(--muted);margin:3px 0 6px">Rien n'est publié avant votre validation. Une fois validée, une statistique peut devenir une référence (avec sa provenance et sa date).</p>
+    <div id="ma-stats" style="max-height:360px;overflow:auto"></div>
+    <div id="ma-journal" style="margin-top:10px"></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-rel">
+    <h3>🤝 Mise en relation client ↔ professionnel</h3>
+    <p class="sub">La règle du PDG : <b>une demande → professionnel 1 → s'il refuse, professionnel 2 → fin de la recherche</b>.
+      Jamais de 3ᵉ mise en relation automatique ; après le 2ᵉ, la demande reprend <b>le lendemain</b>. La conversation est courte
+      (messages et caractères limités), le prix passe par la <b>bulle PRIX</b> — verrouillé dès que le client l'accepte.</p>
+    <div id="rel-hq-resume" style="font-size:12.5px;margin:8px 0"></div>
+    <div id="rel-hq-cfg" style="margin:8px 0"></div>
+    <div id="rel-hq-contour" style="margin:8px 0"></div>
+    <div id="rel-hq-liste" style="max-height:430px;overflow:auto;margin-top:6px"></div>
+    <div id="rel-hq-dossier" style="margin-top:10px"></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-conditions">
+    <h3>📜 Conditions Klean-Services (client &amp; professionnel)</h3>
+    <p class="sub">Le texte officiel que le client et le professionnel acceptent. Publier une nouvelle version <b>n'efface rien</b> :
+    les acceptations passées restent attachées à leur version, et les utilisateurs doivent relire et ré-accepter.</p>
+    <div id="cd-resume" style="font-size:12.5px;margin:8px 0"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">
+      <button class="btn-soft" onclick="cdRole('client')">👤 Conditions CLIENT</button>
+      <button class="btn-soft" onclick="cdRole('pro')">🛠️ Conditions PROFESSIONNEL</button>
+      <button class="btn-soft" onclick="cdPublier()">📣 Publier une nouvelle version</button>
+      <button class="btn-soft" onclick="cdExigence()">⚖️ Acceptation obligatoire : oui/non</button>
+    </div>
+    <div id="cd-articles" style="max-height:430px;overflow:auto"></div>
+    <div id="cd-preuves" style="margin-top:10px"></div>
+    <div id="cd-journal" style="margin-top:10px"></div>
+  </div>
   <div class="panel" style="margin-bottom:14px" id="panel-freeze">
     <h3>⛔ Bloquer l’entreprise</h3>
     <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Action de <b>modération la plus forte</b> : tout Klean passe en lecture seule — plus aucune écriture (missions, comptes, paiements, chat) sauf la vôtre. À utiliser en cas d’attaque, de bug grave ou de fuite de données.</p>
@@ -1520,6 +1609,9 @@ async function loadAll(){
     etape('Services', ()=>loadCatalogHQ());
     if(ME && ME.role==='pdg') etape('Bouclier', ()=>loadShield());
     if(ME && ME.role==='pdg') etape('Tarification', ()=>chargerTarif());
+    etape('Références marché', ()=>chargerMarcheHQ());                     /* 🏷️ lot 112 : sources, dates, statistiques */
+    etape('Mise en relation', ()=>chargerRelHQ());                            /* 🤝 2 pros max + traçabilité (litiges) */
+    if(ME && ME.role==='pdg') etape('Conditions', ()=>chargerConditions());   /* 📜 texte officiel + preuves d’acceptation */
     etape('Sauvegardes', ()=>loadSauvegardes());
     etape('Litiges', ()=>loadLitiges());
     etape('Jeux', ()=>loadJeux());
@@ -1613,7 +1705,10 @@ const HQ_MENU = [
   { g:'🧰 Services & territoires', items:[
     ['panel-svc-browse','📂 Services & professionnels','catalogue catégories tarifs pros par service'],
     ['panel-catnat','📚 Catalogue national des services','catalogue national catégories services sous-services tâches mots-clés synonymes ajouter renommer désactiver activer'],
-    ['panel-tarif','💰 Moteur de tarification','prix tarifs unités coefficients paliers déplacement zones devis seuils versions estimation marché', true],
+    ['panel-marche','🏷️ Références marché & statistiques','reference marché prix ivoirien source date fourchette inhabituel statistiques prix acceptes valider pdg'],
+    ['panel-rel','🤝 Mise en relation (2 pros max)','mise en relation professionnel 1 professionnel 2 refus conversation courte prix devis verrouille contournement numero telephone whatsapp gestionnaire litige historique'],
+    ['panel-conditions','📜 Conditions Klean-Services','conditions client professionnel cgu charte règlement accepter contrat engagement articles'],
+    ['panel-tarif','💰 Moteur de tarification','prix tarifs unités coefficients paliers déplacement zones devis seuils versions estimation marché questions dynamiques je ne sais pas', true],
     ['panel-svc-create','🛠️ Créer / déployer un service','nouveau service prix déployer villes'],
     ['panel-villes','🏙️ Villes & quartiers','zones déployables inscription GPS'],
     ['panel-match','🎯 Mise en relation GPS','rayon km zone distance contact']
@@ -1668,13 +1763,13 @@ HQ_MENU.forEach(g => g.items.forEach(it => { if(!HQ_GO.some(x => x[0] === it[0] 
    les « Revenus » (panel-ca7) sont rangés avec les Paiements & finances, leur vraie catégorie. */
 const HQ_ORDER = ['panel-home','panel-search','kpis','substrip',
   'people','panel-online-cli','panel-pros','panel-cands','panel-team','panel-roles',
-  'panel-svc-browse','panel-svc-create','panel-catnat','panel-tarif','panel-villes','panel-match',
+  'panel-svc-browse','panel-svc-create','panel-catnat','panel-tarif','panel-marche','panel-villes','panel-match',
   'panel-missions','panel-quotes','panel-litiges',
   'panel-ca7','panel-pay','panel-paydest',
   'panel-ann','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
   'panel-flip','panel-quizbank','panel-jeux','panel-promo',
   'panel-urgences','panel-demande-comptes','panel-trash','panel-shield','panel-audit','panel-sauvegardes',
-  'panel-entreprise','panel-cfg','panel-vitesse','panel-freeze'];
+  'panel-entreprise','panel-cfg','panel-vitesse','panel-rel','panel-conditions','panel-freeze'];   /* 🤝 Mise en relation, 📜 Conditions AVANT le blocage (le blocage reste le dernier, règle du PDG) */
 /* ═══════════ 🧭 NAVIGATION LATÉRALE + 🏠 VUE GÉNÉRALE (lot 97) ═══════════ */
 function hqNavToggle(force){
   const nav = document.getElementById('hq-nav'), back = document.getElementById('hq-nav-back');
@@ -2949,6 +3044,7 @@ function jumpPanel(id){
     if(id==='panel-flip' || id==='panel-quizbank' || id==='panel-infos' || id==='panel-urgences'){ try{ chargerHQ96(); }catch(e){} }
     if(id==='panel-jeux'){ try{ loadJeux(); }catch(e){} }
     if(id==='panel-catnat'){ try{ chargerCatNat(); }catch(e){} }
+    if(id==='panel-marche'){ try{ chargerMarcheHQ(); }catch(e){} }        /* 🏷️ lot 112 : sources, dates, statistiques */
     if(id==='panel-vitesse' || id==='panel-cfg'){ try{ loadJeux(); }catch(e){} }
     if(id==='panel-vitesse'){ try{ loadJeux(); paintVitesses(); }catch(e){} }
   }catch(e){}
@@ -4071,7 +4167,7 @@ function applyRole(){
   if(ME && ME.role !== 'pdg'){
     document.body.classList.add('role-gest');
     window._hqMasquesRole = window._hqMasquesRole || {};
-    ['panel-cfg','panel-audit','panel-ca7','panel-shield','panel-tarif'].forEach(id=>{
+    ['panel-cfg','panel-audit','panel-ca7','panel-shield','panel-tarif','panel-conditions'].forEach(id=>{
       window._hqMasquesRole[id] = 1;
       const p=document.getElementById(id); if(p) p.style.display='none';
     });
@@ -4137,10 +4233,347 @@ async function loadShield(){
     }).join('') || '<div class="empty">RAS</div>';
   }catch(e){}
 }
+/* ═══════════ 📜 CONDITIONS KLEAN-SERVICES (affichage + actions PDG) ═══════════
+   Le PDG est l'auteur du texte : il peut corriger un article, en ajouter, et PUBLIER une nouvelle
+   version datée. Rien n'est supprimé ; chaque changement est journalisé ; chaque acceptation est une preuve. */
+let CD = null, CD_ROLE = 'client';
+const cdEchap = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+window.cdEchap = cdEchap;                 /* 🖐️ appelée depuis un attribut onclick généré : elle doit exister partout */
+async function chargerConditions(){
+  try{
+    const d = await fetch('/api/admin/conditions', {cache:'no-store'}).then(r=>r.json());
+    if(!d || !d.ok) return;
+    CD = d;
+    const r = document.getElementById('cd-resume');
+    if(r) r.innerHTML = 'Version en vigueur : <b>v' + d.version + '</b> · du <b>' + cdEchap(d.maj||'—') + '</b>'
+      + ' · acceptation <b>' + (d.exigee ? 'OBLIGATOIRE' : 'facultative') + '</b>'
+      + '<br><small style="color:var(--muted)">' + cdEchap(d.source||'') + '</small>'
+      + '<br>' + Object.keys(d.parVersion||{}).map(k => '<span style="display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:2px 7px;margin:2px 3px 0 0">' + cdEchap(k) + ' : <b>' + d.parVersion[k] + '</b></span>').join('')
+      + ' · <b>' + (d.nbAcceptations||0) + '</b> acceptation(s) au total';
+    cdRole(CD_ROLE);
+    const p = document.getElementById('cd-preuves');
+    if(p) p.innerHTML = '<details style="border:1.5px dashed var(--line);border-radius:12px;padding:9px"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">✍️ Preuves d’acceptation (' + ((d.acceptations||[]).length) + ')</summary>'
+      + '<div style="max-height:260px;overflow:auto;margin-top:7px"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      + '<tr style="text-align:left;color:var(--muted)"><th>Quand</th><th>Rôle</th><th>Qui</th><th>Tél.</th><th>Version</th><th>Appareil</th></tr>'
+      + (d.acceptations||[]).map(a => '<tr style="border-top:1px solid var(--line)"><td>' + cdEchap(String(a.at||'').replace('T',' ').slice(0,16)) + '</td>'
+        + '<td>' + (a.role==='pro'?'🛠️ pro':'👤 client') + '</td><td>' + cdEchap(a.qui||'') + '</td><td>' + cdEchap(a.tel||'') + '</td>'
+        + '<td>v' + a.version + '</td><td>' + cdEchap(String(a.appareil||'').slice(0,42)) + '</td></tr>').join('')
+      + '</table></div></details>';
+    const j = document.getElementById('cd-journal');
+    if(j) j.innerHTML = '<details style="border:1.5px dashed var(--line);border-radius:12px;padding:9px"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">📜 Journal des conditions (' + ((d.journal||[]).length) + ')</summary>'
+      + (d.journal||[]).map(x => '<div style="font-size:11.5px;margin-top:5px">' + cdEchap(String(x.at||'').replace('T',' ').slice(0,16)) + ' · <b>' + cdEchap(x.action||'') + '</b> v' + x.version
+        + (x.motif ? (' · motif : ' + cdEchap(x.motif)) : '') + '<br><small style="color:var(--muted)">avant : ' + cdEchap(String(x.avant||'').slice(0,80)) + ' → après : ' + cdEchap(String(x.apres||'').slice(0,80)) + '</small></div>').join('')
+      + '</details>';
+  }catch(e){}
+}
+function cdRole(role){
+  CD_ROLE = (role==='pro') ? 'pro' : 'client';
+  const box = document.getElementById('cd-articles'); if(!box || !CD) return;
+  const arts = CD[CD_ROLE] || [];
+  box.innerHTML = '<div style="font-size:12px;font-weight:800;margin:6px 0">' + (CD_ROLE==='pro' ? '🛠️ CONDITIONS PROFESSIONNEL' : '👤 CONDITIONS CLIENT') + ' — ' + arts.length + ' articles</div>'
+    + arts.map((a,i) => '<div style="border:1px solid var(--line);border-radius:11px;padding:8px 10px;margin-bottom:7px">'
+      + '<div style="font-size:12.5px;font-weight:800">' + (i+1) + '. ' + cdEchap(a.t)
+      + ' <a href="#" onclick="cdArticle(' + i + ');return false" style="color:var(--p);font-weight:700">✏️ corriger</a></div>'
+      + a.p.map(pt => '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + cdEchap(pt) + '</div>').join('')
+      + '</div>').join('')
+    + '<div style="margin-top:5px"><a href="#" onclick="cdArticleAjouter();return false" style="color:var(--p);font-weight:800">➕ ajouter un article</a></div>';
+}
+async function cdArticle(i){
+  const a = (CD[CD_ROLE]||[])[i]; if(!a) return;
+  const titre = prompt('Titre de l’article ' + (i+1), a.t); if(titre===null) return;
+  const pts = a.p.join('\n');
+  const points = prompt('Texte (une ligne = un point — laissez les lignes comme vous voulez)', pts); if(points===null) return;
+  const motif = prompt('Motif du changement (écrit au journal)', 'correction du texte') || '';
+  tfActionConditions({action:'article', role:CD_ROLE, index:i, titre, points:points.split(/\n+/).filter(x=>x.trim()), motif});
+}
+async function cdArticleAjouter(){
+  const titre = prompt('Titre du nouvel article ?'); if(!titre) return;
+  const points = prompt('Texte (une ligne = un point) ?'); if(!points) return;
+  tfActionConditions({action:'article-ajouter', role:CD_ROLE, titre, points:points.split(/\n+/).filter(x=>x.trim()), motif:'nouvel article'});
+}
+async function cdPublier(){
+  const source = prompt('Source / note de publication (ex. « texte officiel PDG »)', (CD||{}).source || '');
+  if(source===null) return;
+  const motif = prompt('Motif de la publication', 'publication des conditions') || '';
+  tfActionConditions({action:'publier', source, motif});
+}
+async function cdExigence(){
+  const veut = confirm('L’acceptation des conditions est-elle OBLIGATOIRE à l’inscription ?\n\nOK = obligatoire (recommandé)\nAnnuler = facultative');
+  tfActionConditions({action:'exigee', exigee:veut, motif:veut?'acceptation rendue obligatoire':'acceptation rendue facultative'});
+}
+async function tfActionConditions(corps){
+  const r = await fetch('/api/admin/conditions', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corps)});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert((d.error||'Impossible') + (d.conseil ? ('\n👉 ' + d.conseil) : ''));
+  if(d.version) alert('✅ Enregistré — conditions version v' + d.version);
+  chargerConditions();
+}
+
+/* ═══════════ 🏷️ RÉFÉRENCES MARCHÉ & STATISTIQUES (lot 112) — lecture pour tous, décision au PDG ═══════════ */
+let MA = null;
+const maFmt = n => (Number(n)||0).toLocaleString('fr-FR') + ' F';
+async function chargerMarcheHQ(){
+  try{
+    const d = await fetch('/api/admin/marche', {cache:'no-store'}).then(r=>r.json());
+    if(!d || !d.ok) return;
+    MA = d;
+    const r = document.getElementById('ma-resume');
+    if(r) r.innerHTML = '<b>' + d.nbRefs + '</b> référence(s) active(s) · <b>' + (d.refs||[]).filter(x=>x.statut==='a_confirmer').length + '</b> à confirmer'
+      + ' · ' + (d.nbDesactivees||0) + ' désactivée(s) (conservées) · <b>' + (d.nbStats||0) + '</b> service(s) avec des prix acceptés'
+      + ' · version <b>v' + d.version + '</b><br><small style="color:var(--muted)">' + cdEchap(d.regle||'') + '</small>';
+    const c = document.getElementById('ma-calculs');
+    if(c) c.innerHTML = '📐 Prix de professionnels comparés à la base : <b>' + ((d.calculs||{}).devisAvecMarche||0) + '</b> · signalés hors fourchette : <b>'
+      + ((d.calculs||{}).devisHorsFourchette||0) + '</b> (tous conservés tels quels).';
+    const sel = document.getElementById('ma-service'), uni = document.getElementById('ma-unite');
+    if(sel && !sel.options.length){ sel.innerHTML = '<option value="">— service Klean (facultatif) —</option>' + (d.services||[]).map(x=>'<option value="'+cdEchap(x.id)+'">'+cdEchap(x.nom)+'</option>').join(''); }
+    if(uni && !uni.options.length){ uni.innerHTML = (d.unites||[]).map(x=>'<option value="'+cdEchap(x.id)+'">'+cdEchap(x.nom)+'</option>').join(''); }
+    const mk = document.getElementById('ma-manque');
+    if(mk) mk.innerHTML = '<details style="border:1.5px solid #ffe0a3;background:#fffdf5;border-radius:12px;padding:9px"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">'
+      + '⚠️ Métiers SANS référence de marché : <b>' + (d.manque||[]).length + '</b> — à compléter (on n’invente jamais un prix)</summary>'
+      + '<div style="font-size:11.5px;margin-top:7px">' + (d.manque||[]).map(x => '<span style="display:inline-block;background:#fff;border:1px solid var(--line);border-radius:8px;padding:2px 7px;margin:2px 4px 0 0">' + cdEchap(x)
+        + (ME && ME.role==='pdg' ? ' <b style="cursor:pointer;color:var(--danger)" onclick="maManque(\'' + cdEchap(x).replace(/'/g,'') + '\',false)">✕</b>' : '') + '</span>').join('')
+      + (ME && ME.role==='pdg' ? '<div style="margin-top:7px"><input id="ma-manque-new" placeholder="Ajouter un métier à compléter" style="padding:6px;border:1.5px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink)"> <button class="btn-soft" onclick="maManque(document.getElementById(\'ma-manque-new\').value,true)">ajouter</button></div>' : '')
+      + '</div></details>';
+    const rf = document.getElementById('ma-refs');
+    if(rf) rf.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      + '<tr style="text-align:left;color:var(--muted)"><th>Ce que c’est</th><th>Service</th><th>Fourchette</th><th>Source</th><th>Date</th><th>État</th><th></th></tr>'
+      + (d.refs||[]).map(x => '<tr style="border-top:1px solid var(--line);' + (x.statut==='desactivee' ? 'opacity:.55' : '') + '">'
+        + '<td>' + cdEchap(x.nom||'') + (x.note ? '<br><small style="color:var(--muted)">' + cdEchap(x.note) + '</small>' : '') + '</td>'
+        + '<td>' + cdEchap((d.services||[]).filter(y=>y.id===x.service)[0] ? (d.services||[]).filter(y=>y.id===x.service)[0].nom : (x.service || '—')) + '</td>'
+        + '<td><b>' + maFmt(x.min) + (x.max!==x.min ? ' – ' + maFmt(x.max) : '') + '</b>' + (x.unite ? ' <small style="color:var(--muted)">/ ' + cdEchap(x.unite) + '</small>' : '') + '</td>'
+        + '<td>' + cdEchap(x.source||'') + (x.origine==='stats' ? ' <small>(statistiques validées)</small>' : '') + '</td>'
+        + '<td>' + cdEchap(x.date||'') + '</td>'
+        + '<td>' + (x.statut==='desactivee' ? '⛔ désactivée' : (x.statut==='a_confirmer' ? '❓ à confirmer' : '✅ confirmée')) + '</td>'
+        + '<td>' + (ME && ME.role==='pdg' ? ((x.statut==='desactivee')
+            ? '<button class="btn-soft" style="padding:2px 6px;font-size:11px" onclick="maRef(\'' + x.id + '\',\'ref-reactivier\')">réactiver</button>'
+            : (x.statut==='a_confirmer' ? '<button class="btn-soft" style="padding:2px 6px;font-size:11px" onclick="maRef(\'' + x.id + '\',\'ref-confirmer\')">confirmer</button> ' : '')
+              + '<button class="btn-soft" style="padding:2px 6px;font-size:11px" onclick="maModifier(\'' + x.id + '\')">corriger</button> '
+              + '<button class="btn-soft" style="padding:2px 6px;font-size:11px" onclick="maRef(\'' + x.id + '\',\'ref-desactiver\')">désactiver</button>') : '') + '</td></tr>').join('')
+      + '</table>';
+    const st = document.getElementById('ma-stats');
+    if(st) st.innerHTML = (d.stats||[]).length ? '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      + '<tr style="text-align:left;color:var(--muted)"><th>Service</th><th>Prix acceptés</th><th>Minimum</th><th>Médiane</th><th>Maximum</th><th>Période</th><th>Décision</th></tr>'
+      + (d.stats||[]).map(x => '<tr style="border-top:1px solid var(--line)"><td>' + cdEchap(x.nomService||x.service) + (x.refsExistantes ? ' <small style="color:var(--muted)">(' + x.refsExistantes + ' réf.)</small>' : '') + '</td>'
+        + '<td><b>' + x.n + '</b></td><td>' + maFmt(x.min) + '</td><td>' + maFmt(x.mediane) + '</td><td>' + maFmt(x.max) + '</td>'
+        + '<td>' + cdEchap((x.periode||{}).de||'') + ' → ' + cdEchap((x.periode||{}).a||'') + '</td>'
+        + '<td>' + (x.validee === true ? '<b style="color:#0a8a62">✅ validée</b> le ' + cdEchap(String(((x.validation||{}).valideeAt)||'').slice(0,10))
+            : (x.validee === false ? '<b style="color:var(--danger)">🚫 rejetée</b>' : '<b style="color:#b45309">⏳ à valider</b>'))
+          + (ME && ME.role==='pdg' ? '<br><button class="btn-soft" style="padding:2px 6px;font-size:11px;margin-top:3px" onclick="maStat(\'' + x.service + '\',\'stat-valider\')">valider</button> '
+            + '<button class="btn-soft" style="padding:2px 6px;font-size:11px" onclick="maStat(\'' + x.service + '\',\'stat-rejeter\')">rejeter</button> '
+            + (x.validee === true ? '<button class="btn-soft" style="padding:2px 6px;font-size:11px" onclick="maStat(\'' + x.service + '\',\'stat-promouvoir\')">→ référence</button>' : '') : '') + '</td></tr>').join('')
+      + '</table>' : '<div style="font-size:12px;color:var(--muted)">Aucun prix encore accepté : les statistiques se remplissent au fil des missions.</div>';
+    const j = document.getElementById('ma-journal');
+    if(j) j.innerHTML = '<details style="border:1.5px dashed var(--line);border-radius:12px;padding:9px"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">🗂️ Journal &amp; versions du moteur (qui, quoi, avant, après, quand, pourquoi)</summary>'
+      + '<div style="font-size:11.5px;margin-top:7px;max-height:240px;overflow:auto">'
+      + (d.journal||[]).map(x => '<div style="border-top:1px solid var(--line);padding:4px 0"><b>' + cdEchap(String(x.at||'').replace('T',' ').slice(0,16)) + '</b> · ' + cdEchap(x.action||'') + ' · ' + cdEchap(x.quoi||'')
+        + (x.avant ? ' · avant : ' + cdEchap(String(x.avant).slice(0,60)) : '') + (x.apres ? ' → après : ' + cdEchap(String(x.apres).slice(0,60)) : '') + (x.motif ? ' <i>(' + cdEchap(x.motif) + ')</i>' : '') + '</div>').join('')
+      + '</div><div style="font-size:11.5px;margin-top:7px"><b>Versions :</b> ' + (d.versions||[]).slice(0,8).map(v => 'v' + v.n).join(' · ') + '</div></details>';
+  }catch(e){}
+}
+async function maPost(corps){
+  const r = await fetch('/api/admin/marche', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corps)});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return { erreur: (d.error||'Impossible') + (d.conseil ? ('\n👉 ' + d.conseil) : '') };
+  return d;
+}
+async function maAjouter(){
+  const v = id => { const e=document.getElementById(id); return e ? e.value : ''; };
+  const d = await maPost({action:'ref-ajouter', motif:'ajout depuis le tableau de bord', ref:{
+    nom: v('ma-nom'), service: v('ma-service'), unite: v('ma-unite'), ville: v('ma-ville'),
+    min: v('ma-min'), max: v('ma-max'), source: v('ma-source'), date: v('ma-date'), note: v('ma-note') }});
+  if(d.erreur) return alert(d.erreur);
+  alert('✅ Référence enregistrée' + (d.version ? (' — moteur v' + d.version) : ''));
+  chargerMarcheHQ();
+}
+async function maModifier(id){
+  const x = ((MA||{}).refs||[]).filter(r=>r.id===id)[0]; if(!x) return;
+  const nom = prompt('Ce que c’est :', x.nom||''); if(nom===null) return;
+  const min = prompt('Minimum (FCFA) :', x.min); if(min===null) return;
+  const max = prompt('Maximum (FCFA) :', x.max); if(max===null) return;
+  const source = prompt('SOURCE (obligatoire) :', x.source||''); if(source===null) return;
+  const date = prompt('DATE du relevé (obligatoire) :', x.date||''); if(date===null) return;
+  const motif = prompt('POURQUOI cette correction ? (journalisé)', 'correction d’une référence'); if(motif===null) return;
+  const d = await maPost({action:'ref-modifier', motif: motif, ref:{ id: id, nom: nom, service: x.service||'', unite: x.unite||'', ville: x.ville||'', min: min, max: max, source: source, date: date, note: x.note||'' }});
+  if(d.erreur) return alert(d.erreur);
+  alert('✅ Référence corrigée (motif journalisé)');
+  chargerMarcheHQ();
+}
+async function maRef(id, action){
+  const motifs = { 'ref-confirmer':'source et date vérifiées', 'ref-desactiver':'référence retirée du calcul', 'ref-reactivier':'référence remise en service' };
+  const motif = prompt('Motif (' + action + ') — journalisé :', motifs[action]||''); if(motif===null) return;
+  const d = await maPost({action: action, id: id, motif: motif});
+  if(d.erreur) return alert(d.erreur);
+  if(action==='ref-desactiver') alert('⛔ Référence désactivée — elle est CONSERVÉE et reste consultable.');
+  chargerMarcheHQ();
+}
+async function maStat(service, action){
+  const motif = prompt('Motif — journalisé (le PDG décide) :', action==='stat-valider' ? 'prix contrôlés' : (action==='stat-promouvoir' ? 'référence interne Klean' : 'statistique non fiable')); if(motif===null) return;
+  const d = await maPost({action: action, service: service, motif: motif});
+  if(d.erreur) return alert(d.erreur);
+  alert(action==='stat-promouvoir' ? '📈 Référence créée depuis les statistiques validées (source + date conservées)' : '✅ Décision enregistrée');
+  chargerMarcheHQ();
+}
+async function maManque(libelle, ajouter){
+  if(!libelle) return;
+  const d = await maPost({action: ajouter ? 'manque-ajouter' : 'manque-retirer', libelle: libelle, motif:'liste des métiers à compléter'});
+  if(d.erreur) return alert(d.erreur);
+  chargerMarcheHQ();
+}
+window.chargerMarcheHQ = chargerMarcheHQ; window.maAjouter = maAjouter; window.maModifier = maModifier;
+window.maRef = maRef; window.maStat = maStat; window.maManque = maManque;
+
+/* ═══════════ 🤝 MISE EN RELATION — suivi, dossier de litige, réglages (lot 118) ═══════════ */
+let RELHQ = null;
+async function chargerRelHQ(){
+  try{
+    const d = await fetch('/api/admin/rel', {cache:'no-store'}).then(r=>r.json());
+    if(!d || !d.ok) return;
+    RELHQ = d;
+    const r = document.getElementById('rel-hq-resume');
+    const parEtat = {};
+    (d.relations||[]).forEach(x => { parEtat[x.etatTxt] = (parEtat[x.etatTxt]||0)+1; });
+    if(r) r.innerHTML = '<b>' + (d.nb||0) + '</b> demande(s) en mise en relation · '
+      + Object.keys(parEtat).map(k => '<span style="display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:2px 7px;margin:2px 4px 0 0">' + cdEchap(k) + ' : <b>' + parEtat[k] + '</b></span>').join('')
+      + '<br><small style="color:var(--muted)">' + cdEchap(d.regle||'') + '</small>';
+    const c = document.getElementById('rel-hq-cfg'), C = d.config || {};
+    if(c) c.innerHTML = '<details style="border:1.5px dashed var(--line);border-radius:12px;padding:9px"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">⚙️ Réglages '
+      + (ME && ME.role==='pdg' ? '(PDG)' : '(lecture seule — le PDG décide)') + '</summary>'
+      + '<div style="font-size:12px;margin-top:7px;line-height:1.7">'
+      + 'Professionnels par demande : <b>1 ᵉʳ puis 2ᵉ — ' + (C.maxProsParTour||2) + ' maximum</b> (indépassable, même par le PDG)<br>'
+      + 'Plafond par jour pour la même demande : <input id="rel-cfg-jour" type="number" min="1" max="10" value="' + (C.maxProsParJour||2) + '" style="width:64px" ' + ((ME&&ME.role==='pdg')?'':'disabled') + '><br>'
+      + 'Messages maximum par personne : <input id="rel-cfg-msg" type="number" min="2" max="30" value="' + (C.msgMaxParCote||8) + '" style="width:64px" ' + ((ME&&ME.role==='pdg')?'':'disabled') + '><br>'
+      + 'Caractères par message : <input id="rel-cfg-car" type="number" min="80" max="600" value="' + (C.msgMaxCar||240) + '" style="width:80px" ' + ((ME&&ME.role==='pdg')?'':'disabled') + '><br>'
+      + 'Reprise après le 2ᵉ refus (heures) : <input id="rel-cfg-rep" type="number" min="1" max="48" value="' + (C.repriseHeures||12) + '" style="width:64px" ' + ((ME&&ME.role==='pdg')?'':'disabled') + '><br>'
+      + 'Contrôle anti-contournement : <b>' + ((C.anti&&C.anti.actif)?'ACTIF':'désactivé') + '</b> · blocage : <b>' + ((C.anti&&C.anti.bloquer)?'oui':'non') + '</b> · signalement après <b>' + ((C.anti&&C.anti.signalerApres)||3) + '</b> manquement(s)'
+      + (ME && ME.role==='pdg' ? '<br><button class="btn-soft" style="margin-top:7px" onclick="relHQCfg()">💾 Enregistrer les réglages</button>' : '')
+      + '</div></details>';
+    const k = document.getElementById('rel-hq-contour');
+    if(k) k.innerHTML = '<details style="border:1.5px solid #f0b5b5;border-radius:12px;padding:9px;background:#fff7f7"><summary style="cursor:pointer;font-weight:900;font-size:12.5px">🛡️ Tentatives de sortir de Klean : <b>'
+      + (d.nbContournements||0) + '</b></summary><div style="max-height:230px;overflow:auto;margin-top:7px;font-size:11.5px">'
+      + (d.contournements||[]).slice(0,80).map(c2 => '<div style="border-top:1px solid var(--line);padding:5px 0"><b>' + cdEchap(String(c2.at||'').replace('T',' ').slice(0,16)) + '</b> · '
+        + cdEchap(c2.qui||'') + ' (' + cdEchap(c2.role||'') + ') · ' + cdEchap((c2.motifs||[]).join(' · ')) + ' · <i>' + cdEchap(c2.action||'') + '</i><br><small style="color:var(--muted)">« ' + cdEchap(c2.extrait||'') + ' » — ' + cdEchap(c2.missionId||'') + '</small>'
+        + ' <button class="btn-soft" style="padding:1px 6px;font-size:11px" onclick="relHQDossier(\'' + c2.missionId + '\')">voir la demande</button></div>').join('') || '<div>Aucun manquement 🎉</div>'
+      + '</div></details>';
+    const l = document.getElementById('rel-hq-liste');
+    if(l) l.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:11.5px"><tr style="text-align:left;color:var(--muted)"><th>Demande</th><th>Client</th><th>État</th><th>Étape</th><th>Professionnels</th><th>Prix</th><th></th></tr>'
+      + (d.relations||[]).map(x => '<tr style="border-top:1px solid var(--line)">'
+        + '<td style="font-weight:800">' + cdEchap(x.missionId) + (x.signale ? ' ⛔' : '') + '</td>'
+        + '<td>' + cdEchap(x.client) + '</td>'
+        + '<td>' + cdEchap(x.etatTxt||'') + '</td><td>' + cdEchap(x.etape||'') + '</td>'
+        + '<td>' + (x.pros||[]).map(p => 'P' + p.rang + ' ' + cdEchap(p.nom) + ' (' + (p.sens==='accepte'?'✅':p.sens==='refuse'?'❌':'⏳') + ')').join('<br>') + '</td>'
+        + '<td>' + (x.prixVerrouille ? ('🔒 ' + tfFmt(x.prixVerrouille.montant)) : (x.prix ? ('💬 ' + tfFmt(x.prix.total) + ' v' + x.prix.version) : '—')) + '</td>'
+        + '<td><button class="btn-soft" style="padding:2px 7px;font-size:11px" onclick="relHQDossier(\'' + x.missionId + '\')">dossier</button> '
+        + '<button class="btn-soft" style="padding:2px 7px;font-size:11px" onclick="relHQFermer(\'' + x.missionId + '\')">⛔ arrêter</button></td></tr>').join('')
+      + '</table>';
+  }catch(e){}
+}
+function relHQDossier(mid){
+  fetch('/api/admin/rel/' + mid, {cache:'no-store'}).then(r=>r.json()).then(d=>{
+    if(!d || !d.ok) return;
+    const b = document.getElementById('rel-hq-dossier'); if(!b) return;
+    const rel = d.rel || {}, h = rel.hist || [];
+    b.innerHTML = '<div style="border:1.5px solid var(--line);border-radius:13px;padding:10px;background:var(--card2)">'
+      + '<b style="font-size:13px">🗂️ Dossier complet — ' + cdEchap(mid) + '</b>'
+      + '<div style="font-size:12px;margin-top:6px">État : <b>' + cdEchap(rel.etatTxt||'') + '</b> · étape : <b>' + cdEchap(rel.etape||'') + '</b> · statut mission : <b>' + cdEchap(d.status||'') + '</b>'
+      + (rel.prochaineLe ? (' · reprise : ' + cdEchap(String(rel.prochaineLe).slice(0,16).replace('T',' '))) : '') + '</div>'
+      + '<div style="font-size:12px;margin-top:6px">👤 Client : ' + cdEchap(((rel.msgs||[])[0]||{}).de||'') + ' · 💰 ' + (d.paiement && d.paiement.verrou ? ('montant officiel ' + tfFmt(d.paiement.verrou.montant)) : 'aucun prix verrouillé') + '</div>'
+      + '<div style="margin-top:8px"><b style="font-size:12px">Professionnels contactés</b><br>'
+      + (rel.pros||[]).map(p => '<span style="display:inline-block;background:#fff;border:1px solid var(--line);border-radius:8px;padding:3px 8px;margin:3px 4px 0 0;font-size:11.5px">P' + p.rang + ' ' + cdEchap(p.nom) + ' — ' + cdEchap(REL_SENS_HQ[p.sens]||p.sens) + (p.motif?(' : « ' + cdEchap(p.motif) + ' »'):'') + '</span>').join('') + '</div>'
+      + '<div style="margin-top:8px"><b style="font-size:12px">Messages échangés (' + ((rel.msgs||[]).length) + ')</b><div style="max-height:220px;overflow:auto;margin-top:5px">'
+      + (rel.msgs||[]).map(m => '<div style="font-size:11.5px;border-top:1px solid var(--line);padding:4px 0"><b>' + cdEchap(String(m.at||'').slice(11,16)) + '</b> ' + cdEchap(m.de||'') + (m.type==='prix' ? (' · 💰 PRIX ' + tfFmt(m.montant) + (m.decision?(' — ' + m.decision):'')) : ' : ' + cdEchap(m.texte||'')) + '</div>').join('')
+      + '</div></div>'
+      + '<div style="margin-top:8px"><b style="font-size:12px">Historique complet (qui, quoi, quand)</b><div style="max-height:200px;overflow:auto;margin-top:5px">'
+      + h.slice().reverse().map(x => '<div style="font-size:11.5px;border-top:1px solid var(--line);padding:4px 0"><b>' + cdEchap(String(x.at||'').replace('T',' ').slice(0,16)) + '</b> · ' + cdEchap(x.quoi) + ' · ' + cdEchap(x.qui) + ' (' + cdEchap(x.role) + ')' + (x.detail?(' — ' + cdEchap(x.detail)):'') + '</div>').join('')
+      + '</div></div>'
+      + (d.contournements && d.contournements.length ? ('<div style="margin-top:8px"><b style="font-size:12px">🛡️ Contournements (' + d.contournements.length + ')</b><div style="font-size:11.5px;margin-top:4px">'
+        + d.contournements.map(c => '<div>' + cdEchap(String(c.at||'').slice(0,16)) + ' · ' + cdEchap((c.motifs||[]).join(' · ')) + ' · ' + cdEchap(c.action||'') + '</div>').join('') + '</div></div>') : '')
+      + '<div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap"><button class="btn-soft" onclick="relHQFermer(\'' + mid + '\')">⛔ Arrêter cette relation</button>'
+      + '<button class="btn-soft" onclick="document.getElementById(\'rel-hq-dossier\').innerHTML=\'\'">✕ Fermer le dossier</button></div></div>';
+  }).catch(()=>{});
+}
+const REL_SENS_HQ = { en_attente: '⏳ en attente', accepte: '✅ a accepté', refuse: '❌ refusé / non disponible' };
+async function relHQFermer(mid){
+  const motif = prompt('Pourquoi arrêter cette mise en relation ? (le motif est journalisé)', 'contrôle gestionnaire');
+  if(motif === null) return;
+  const r = await fetch('/api/admin/rel/fermer', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({missionId: mid, motif: motif})});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert(d.error||'Impossible');
+  alert('⛔ Relation arrêtée — le motif est enregistré.');
+  chargerRelHQ();
+}
+async function relHQCfg(){
+  const v = id => { const e=document.getElementById(id); return e ? Number(e.value) : undefined; };
+  const r = await fetch('/api/admin/rel', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    maxProsParJour: v('rel-cfg-jour'), msgMaxParCote: v('rel-cfg-msg'), msgMaxCar: v('rel-cfg-car'), repriseHeures: v('rel-cfg-rep') })});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert(d.error||'Impossible');
+  alert('✅ Réglages enregistrés (version ' + ((d.config||{}).version||'') + ')');
+  chargerRelHQ();
+}
+
 /* ═══════════ 💰 MOTEUR DE TARIFICATION (affichage + actions PDG) ═══════════ */
 let TF = null;
 const tfFmt = n => (Number(n)||0).toLocaleString('fr-FR') + ' F';
 const tfEchap = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+/* ❓ LOT 112 — les questions dynamiques du moteur vues par le PDG (désactiver, jamais supprimer) */
+function tqRendre(){
+  const box = document.getElementById('tf-questions'); if(!box || !TF) return;
+  const qs = (TF.questions || []).slice().sort((a, b) => (a.ordre || 50) - (b.ordre || 50));
+  box.innerHTML = '<div style="font-size:12px;margin-bottom:6px"><b>' + (TF.nbQuestions || 0) + '</b> question(s) active(s)'
+    + ((TF.nbQuestionsOff || 0) ? ' · ' + TF.nbQuestionsOff + ' désactivée(s) (conservées)' : '') + '</div>'
+    + '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+    + '<tr style="text-align:left;color:var(--muted)"><th>Ordre</th><th>Question</th><th>Type</th><th>Pour qui</th><th>Effet sur le prix</th><th>État</th><th></th></tr>'
+    + qs.map(x => '<tr style="border-top:1px solid var(--line)' + (x.off ? ';opacity:.55' : '') + '">'
+      + '<td>' + (x.ordre || 50) + '</td>'
+      + '<td>' + tfEchap(x.q) + (x.aide ? '<br><small style="color:var(--muted)">' + tfEchap(x.aide).slice(0, 90) + '</small>' : '') + '</td>'
+      + '<td>' + (x.type === 'nombre' ? '🔢 un nombre' : (x.type === 'photo' ? '📷 photos' : '🔘 choix')) + '</td>'
+      + '<td>' + tfEchap(x.qui || '') + '</td>'
+      + '<td>' + (x.coefNom ? ('📊 ' + tfEchap(x.coefNom) + (x.valeurs.length ? ' (' + tfEchap(x.valeurs.join(' · ')) + ')' : ''))
+          : (x.type === 'nombre' ? ('💰 ' + tfFmt(x.prixUnite || 0) + ' / ' + tfEchap(x.unite || 'unité')) : '—')) + '</td>'
+      + '<td>' + (x.off ? '⏸ désactivée' : '✅ posée') + (x.obligatoire ? ' · confirmation' : '') + '</td>'
+      + '<td><a href="#" onclick="tqModifier(\'' + x.id + '\');return false" style="color:var(--p)">✏️</a> '
+      + '<a href="#" onclick="tqBasculer(\'' + x.id + '\');return false" style="color:' + (x.off ? 'var(--p)' : 'var(--amber)') + '">' + (x.off ? '▶️' : '⏸') + '</a></td></tr>').join('')
+    + '</table>';
+}
+async function tqPost(corps){
+  const r = await fetch('/api/admin/tarif', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(corps)});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return { erreur: (d.error || 'Impossible') + (d.conseil ? ('\n👉 ' + d.conseil) : '') };
+  return d;
+}
+async function tqAjouter(){
+  const v = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+  if(!v('tq-q').trim()) return alert('Écrivez la question');
+  const cible = v('tq-cible') || '';
+  const corps = { action:'question', motif:'ajout depuis le tableau de bord', ajouter: { q: v('tq-q'), type: v('tq-type'),
+    aide: v('tq-aide'), coef: v('tq-coef'), unite2: v('tq-unite'), prixUnite: v('tq-prix'), ordre: 55 } };
+  if(cible.indexOf('cat:') === 0) corps.ajouter.cat = cible.slice(4);
+  else if(cible.indexOf('metier:') === 0) corps.ajouter.metier = cible.slice(7);
+  const d = await tqPost(corps);
+  if(d.erreur) return alert(d.erreur);
+  alert('✅ Question enregistrée (moteur v' + d.version + ')');
+  chargerTarif();
+}
+async function tqModifier(id){
+  const x = ((TF || {}).questions || []).filter(q => q.id === id)[0]; if(!x) return;
+  const q = prompt('La question :', x.q); if(q === null) return;
+  const aide = prompt('Aide affichée sous la question :', x.aide || ''); if(aide === null) return;
+  const ordre = prompt('Ordre d’apparition (1 = en premier) :', x.ordre); if(ordre === null) return;
+  const motif = prompt('Pourquoi ce changement ? (journalisé)', 'précision de la question'); if(motif === null) return;
+  const d = await tqPost({ action:'question', qid: id, q: q, aide: aide, ordre: ordre, motif: motif });
+  if(d.erreur) return alert(d.erreur);
+  chargerTarif();
+}
+async function tqBasculer(id){
+  const motif = prompt('Motif (désactiver/réactiver) — journalisé :', 'question désactivée'); if(motif === null) return;
+  const d = await tqPost({ action:'question', qid: id, basculer: true, motif: motif });
+  if(d.erreur) return alert(d.erreur);
+  const desac = !!(d.question && d.question.off);
+  alert(desac ? '⏸ Question désactivée — CONSERVÉE (les demandes passées gardent la leur)' : '▶️ Question réactivée');
+  chargerTarif();
+}
+window.tqAjouter = tqAjouter; window.tqModifier = tqModifier; window.tqBasculer = tqBasculer;
+
 async function chargerTarif(){
   try{
     const d = await fetch('/api/admin/tarif', {cache:'no-store'}).then(r=>r.json());
@@ -4153,6 +4586,10 @@ async function chargerTarif(){
       + '<br><small style="color:var(--muted);font-weight:600">' + tfEchap(d.règle || '') + '</small>';
     renderTarif();
     renderMoteur();
+    const sel = document.getElementById('tq-coef');
+    if(sel && !sel.options.length) sel.innerHTML = '<option value="">(aucun effet chiffré : question utile seulement)</option>'
+      + Object.keys(d.coefs || {}).map(k => '<option value="' + k + '">' + tfEchap((d.coefs[k] || {}).nom || k) + '</option>').join('');
+    tqRendre();
   }catch(e){}
 }
 function tfSvcLigne(s){
@@ -4498,6 +4935,7 @@ async function loadTeam(){
   }
   if(ME && ME.role==='pdg') loadShield();
   if(ME && ME.role==='pdg' && document.getElementById('panel-tarif') && document.getElementById('panel-tarif').style.display!=='none') chargerTarif();
+  if(document.getElementById('panel-marche') && document.getElementById('panel-marche').style.display!=='none'){ try{ chargerMarcheHQ(); }catch(e){} }
   const st=document.getElementById('frz-state');
   if(st && ME) st.textContent = ME.gestFrozen ? '⛔ Écritures actuellement coupées (tous)' : '✅ Écritures actuellement actives';
   if(ME && ME.role==='gest' && ME.gestFrozen){

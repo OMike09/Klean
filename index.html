@@ -1598,6 +1598,8 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     </div>
     <!-- 🧾 lot 109 : le devis structuré du client (détail, accepter, refuser) -->
     <div id="trk-devis" style="margin-top:12px"></div>
+    <!-- 🤝 lot 118 : mise en relation (états, conversation courte, bulle PRIX) -->
+    <div id="trk-rel" style="margin-top:12px"></div>
   </div>
   <div id="rate-wrap"></div>
 </div>
@@ -2185,6 +2187,108 @@ function pickCity(id){
 function jetonPro(){
   try{ return (agent && agent.jeton) || kLS.get('k2_agent_jeton') || ''; }catch(e){ return ''; }
 }
+/* ══════════ 📜 CONDITIONS KLEAN-SERVICES — l'écran que le client (et le pro) lisent et signent ══════════
+   · le texte vient du SERVEUR (version + date) : le téléphone n'invente rien ;
+   · l'acceptation est nominative et horodatée côté serveur (preuve) ;
+   · si le PDG publie une nouvelle version, l'écran le dit et demande de relire. */
+let CONDITIONS_ETAT = null;
+async function ouvrirConditions(role){
+  role = (role === 'pro') ? 'pro' : 'client';
+  let d = null;
+  try{ d = await fetch('/api/conditions?role='+role, {cache:'no-store'}).then(r=>r.json()); }catch(e){}
+  if(!d || !d.ok){ toast('📜 Conditions momentanément indisponibles — réessayez dans un instant'); return; }
+  const tel = (role==='client' && typeof client!=='undefined' && client) ? client.tel : ((typeof agent!=='undefined' && agent) ? agent.tel : '');
+  try{ CONDITIONS_ETAT = await fetch('/api/conditions/etat?role='+role+(tel?('&tel='+encodeURIComponent(tel)):''),
+        {cache:'no-store', headers: (role==='client'&&typeof client!=='undefined'&&client&&client.token) ? {'X-Client-Token':client.token} : jetonProHeaders()}
+      ).then(r=>r.json()); }catch(e){ CONDITIONS_ETAT = null; }
+  const arts = (d.articles||[]).map(a =>
+    '<div style="margin:0 0 10px"><b style="font-size:13.5px">'+a.n+'. '+kEchap(a.t)+'</b>'
+    + a.p.map(p=>'<div style="font-size:13px;line-height:1.45;margin-top:3px;color:var(--ink)">'+kEchap(p)+'</div>').join('')
+    + '</div>').join('');
+  const deja = CONDITIONS_ETAT && CONDITIONS_ETAT.accepte;
+  const relire = CONDITIONS_ETAT && CONDITIONS_ETAT.aRelire;
+  const h = '<div class="win-head"><h3>📜 '+(d.titre||'Conditions Klean-Services')+'</h3>'
+    + '<button class="win-x" onclick="fermerConditions()">✕</button></div>'
+    + '<div class="win-body" style="max-height:66vh;overflow:auto;padding:12px 14px">'
+    + '<div style="background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:9px;font-size:12.5px">'
+    + '<b>Version '+d.version+'</b> · du '+kEchap(d.maj||'—')+'<br><small style="color:var(--muted)">'+kEchap(d.source||'')+'</small>'
+    + (deja ? '<br><span style="color:#137a2b;font-weight:800">✅ Vous avez accepté cette version</span>'
+            : (relire ? '<br><span style="color:#ff9f43;font-weight:800">⚠️ Une nouvelle version est en vigueur — relisez puis acceptez</span>'
+                      : '<br><span style="color:#ff9f43;font-weight:800">⚠️ Pas encore acceptée</span>'))
+    + '</div>'
+    + '<p style="font-size:13px;font-weight:700;margin:0 0 9px">'+kEchap(d.intro||'')+'</p>' + arts
+    + '<div style="font-size:11.5px;color:var(--muted);margin-top:8px">Chaque acceptation est enregistrée comme preuve : qui, version du texte, date et heure, appareil.</div>'
+    + '</div>'
+    + '<div class="win-foot" style="display:flex;gap:8px;padding:10px 12px">'
+    + (deja ? '<button class="btn-main" style="flex:1" onclick="fermerConditions()">✅ J’ai lu — fermer</button>'
+            : '<button class="btn-main" style="flex:1" onclick="accepterConditions(\''+role+'\','+d.version+')">✍️ J’accepte les conditions (version '+d.version+')</button>')
+    + '<button onclick="fermerConditions()" style="flex:none;padding:0 14px">Fermer</button></div>';
+  let w = document.getElementById('klean-conditions');
+  if(!w){
+    w = document.createElement('div'); w.id = 'klean-conditions';
+    w.style.cssText = 'position:fixed;inset:0;z-index:1200;background:rgba(10,12,16,.55);display:flex;align-items:center;justify-content:center;padding:12px';
+    w.onclick = e => { if(e.target === w) fermerConditions(); };
+    document.body.appendChild(w);
+    if(typeof kEnregistrerFenetre === 'function'){ try{ kEnregistrerFenetre('klean-conditions'); }catch(e){} }
+  }
+  w.innerHTML = '<div style="background:var(--card);border-radius:16px;max-width:620px;width:100%;overflow:hidden">'+h+'</div>';
+  w.style.display = 'flex';
+  const v = document.getElementById('ac-cond-v'); if(v) v.textContent = d.version;
+}
+function fermerConditions(){ const w = document.getElementById('klean-conditions'); if(w) w.style.display = 'none'; }
+function kEchap(x){ return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+async function accepterConditions(role, version){
+  const tel = (role==='client' && typeof client!=='undefined' && client) ? client.tel : ((typeof agent!=='undefined' && agent) ? agent.tel : '');
+  const nom = (role==='client' && typeof client!=='undefined' && client) ? client.nom : ((typeof agent!=='undefined' && agent) ? agent.nom : '');
+  try{
+    const r = await fetch('/api/conditions/accepter', {method:'POST',
+      headers: Object.assign({'Content-Type':'application/json'}, (role==='client'&&typeof client!=='undefined'&&client&&client.token) ? {'X-Client-Token':client.token} : jetonProHeaders()),
+      body: JSON.stringify({role, version, tel, nom, source:'application'})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) return toast('❌ '+(d.error||'Impossible d’enregistrer votre acceptation'));
+    const cb = document.getElementById('ac-cond'); if(cb && role==='client') cb.checked = true;
+    toast('✍️ Acceptation enregistrée (version '+version+') — merci !');
+    ouvrirConditions(role);
+    if(typeof renderAccount === 'function'){ try{ renderAccount(); }catch(e){} }
+  }catch(e){ toast('❌ Serveur injoignable — votre acceptation n’a PAS été enregistrée'); }
+}
+/* 🔎 l'état des conditions, dit franchement dans « Mon compte » (et dans l'espace pro) */
+async function majEtatConditions(){
+  const el = document.getElementById('mon-compte-cond');
+  const elPro = document.getElementById('pro-cond-etat');
+  try{
+    const role = el ? 'client' : 'pro';
+    const tel = (role==='client' && typeof client!=='undefined' && client) ? client.tel : ((typeof agent!=='undefined' && agent) ? agent.tel : '');
+    const d = await fetch('/api/conditions/etat?role='+role+(tel?('&tel='+encodeURIComponent(tel)):''), {cache:'no-store',
+      headers: (role==='client' && typeof client!=='undefined' && client && client.token) ? {'X-Client-Token':client.token} : jetonProHeaders()}).then(r=>r.json());
+    /* un visiteur NON connecté ne doit pas lire « vous n’avez pas accepté » (il n’a pas encore de compte) */
+    const txt = !tel ? ('📜 Conditions version '+d.version+' — lecture libre ; elles s’acceptent à la création du compte')
+      : (d.accepte ? ('✅ Version '+d.version+' acceptée le '+String(d.accepteLe||'').slice(0,10))
+        : (d.aRelire ? ('⚠️ Nouvelle version '+d.version+' : à relire et à accepter') : ('⚠️ Vous n’avez pas encore accepté la version '+d.version)));
+    if(el) el.textContent = txt;
+    if(elPro) el.textContent = txt;
+    const v1 = document.getElementById('ac-cond-v'); if(v1) v1.textContent = d.version;
+    const v2 = document.getElementById('ap-cond-v'); if(v2) v2.textContent = d.version;
+  }catch(e){
+    if(el) el.textContent = '📜 Conditions lisibles à tout moment (appuyez sur le bouton)';
+  }
+}
+/* 🔒 LOT 118 — « Valider mon inscription » reste DÉSACTIVÉ tant que les conditions ne sont pas cochées.
+   Sans case cochée : le bouton ne répond pas (et le serveur refuserait de toute façon l'inscription). */
+function majBoutonConditions(){
+  [['ac-cond','ac-btn','ac-cond-aide'],['ap-cond','ap-btn',null]].forEach(function(x){
+    const cb = document.getElementById(x[0]), bt = document.getElementById(x[1]), ai = x[2] ? document.getElementById(x[2]) : null;
+    if(!cb || !bt) return;
+    const ok = !!cb.checked;
+    bt.disabled = !ok;
+    bt.style.opacity = ok ? '' : '.5';
+    bt.style.cursor = ok ? 'pointer' : 'not-allowed';
+    if(ai) ai.textContent = ok ? '✅ Conditions acceptées — vous pouvez valider.' : '🔒 Cochez la case ci-dessus pour activer le bouton.';
+  });
+  const v1 = document.getElementById('ac-cond-v');
+  return true;
+}
+window.majBoutonConditions = majBoutonConditions;
 function jetonProHeaders(){
   const h = {'Content-Type':'application/json'};
   const t = jetonPro();
@@ -2504,6 +2608,8 @@ function openTrack(btn){
   /* 🧾 lot 109 : on affiche tout de suite le devis s'il y en a un (et on le rafraîchit) */
   try{ devisRendre({ missionId: mission.id, devis: mission.devis, verrou: mission.prixVerrouille }); }catch(e){}
   try{ devisCharger(mission.id); }catch(e){}
+  /* 🤝 lot 118 : l'état de la mise en relation (pro 1, pro 2, prix, conversation) */
+  try{ if(typeof relCharger==='function') relCharger(mission.id,'client','#trk-rel'); }catch(e){}
 }
 function cityName(id){ const x = CITIES.find(v=>v.id===id); return x?x.nom:'Bouaké'; }
 
@@ -3671,12 +3777,19 @@ function renderAgentGate(){
     <div class="inp-row"><label>🔑 Mot de passe du compte pro * <button type="button" onclick="togglePw('ap-pw')" style="float:right;font-size:12px;font-weight:800;color:var(--pd)">👁 Voir</button></label><input class="inp" id="ap-pw" type="password" placeholder="lettres + chiffres + symbole"></div>
     <div class="inp-row"><label>Confirmez * <button type="button" onclick="togglePw('ap-pw2')" style="float:right;font-size:12px;font-weight:800;color:var(--pd)">👁 Voir</button></label><input class="inp" id="ap-pw2" type="password"></div>
     <p class="note" style="text-align:left">🛡️ En soumettant, je certifie l'exactitude de ces informations. Elles seront vérifiées par le propriétaire KLEAN avant validation.</p>
-    <button class="btn-main" style="width:100%;flex:none" onclick="submitApplication()">📤 Envoyer mon dossier de candidature</button>
+    <label style="display:flex;gap:9px;align-items:flex-start;margin:10px 0 8px;font-size:13px;line-height:1.4;cursor:pointer">
+      <input type="checkbox" id="ap-cond" onchange="majBoutonConditions()" style="width:22px;height:22px;margin-top:1px;flex:none;accent-color:var(--p)">
+      <span>J’ai lu et j’accepte les <b>conditions professionnelles Klean-Services</b><br>
+      <a href="#" onclick="ouvrirConditions('pro');return false" style="color:var(--p);font-weight:800">📜 Lire les conditions professionnelles (version <span id="ap-cond-v">…</span>)</a></span>
+    </label>
+    <button class="btn-main" id="ap-btn" style="width:100%;flex:none;opacity:.5;cursor:not-allowed" disabled onclick="submitApplication()">📤 Valider mon inscription</button>
+    <p style="font-size:11.5px;color:var(--muted);margin:6px 0 0;text-align:center">🔒 Cochez la case ci-dessus pour activer le bouton.</p>
   </div>`;
   applySvc = {}; applySvcSubs = {};
   window._piecePhoto = null;
   window._agentAvatar = null;
   renderQuartiers();
+  setTimeout(majBoutonConditions, 0);      /* le bouton naît désactivé */
 }
 let applySvcSubs = {};
 function toggleApplySvc(id, btn){ applySvc[id] = !applySvc[id]; btn.classList.toggle('sel', !!applySvc[id]);
@@ -3800,6 +3913,11 @@ async function submitApplication(){
   }
   if(dossier.services.includes('cours') && !dossier.niveau) return toast('❌ Choisissez votre niveau d\u2019étude 🎓 (exigé pour les Cours ou formation à domicile)');
 
+  /* 📜 conditions professionnelles : obligatoires avant de déposer le dossier (le serveur refuse sinon) */
+  dossier.conditionsAcceptees = !!(document.getElementById('ap-cond') || {}).checked;
+  if(!(dossier.conditionsAcceptees === true))
+    return toast('❌ Cochez « J’accepte les conditions professionnelles Klean-Services » avant d’envoyer votre dossier'),
+    ouvrirConditions('pro');
   agent.nom = dossier.prenom + ' ' + dossier.nom;
   agent.quartier = dossier.quartier; agent.tel = dossier.tel1;
 
@@ -4201,7 +4319,13 @@ function renderAccount(){
       <div id="acc-r-sym">○ Contient un symbole</div>
     </div>
     <div class="inp-row"><label>Confirmez * <button type="button" onclick="togglePw('ac-pw2')" style="float:right;font-size:12px;font-weight:800;color:var(--pd)">👁 Voir</button></label><input class="inp" id="ac-pw2" type="password"></div>
-    <button class="btn-main" style="width:100%;flex:none" onclick="clientRegister()">🚀 Créer mon compte sécurisé</button>
+    <label style="display:flex;gap:9px;align-items:flex-start;margin:10px 0 8px;font-size:13px;line-height:1.4;cursor:pointer">
+      <input type="checkbox" id="ac-cond" onchange="majBoutonConditions()" style="width:22px;height:22px;margin-top:1px;flex:none;accent-color:var(--p)">
+      <span>J’ai lu et j’accepte les <b>conditions client Klean-Services</b><br>
+      <a href="#" onclick="ouvrirConditions('client');return false" style="color:var(--p);font-weight:800">📜 Lire les conditions (version <span id="ac-cond-v">…</span>)</a></span>
+    </label>
+    <button class="btn-main" id="ac-btn" style="width:100%;flex:none;opacity:.5;cursor:not-allowed" disabled onclick="clientRegister()">🚀 Valider mon inscription</button>
+    <p id="ac-cond-aide" style="font-size:11.5px;color:var(--muted);margin:6px 0 0;text-align:center">🔒 Cochez la case ci-dessus pour activer le bouton.</p>
   </div>` : `
   <div class="gate-card">
     <h4>👋 Bon retour !</h4>
@@ -4212,6 +4336,7 @@ function renderAccount(){
     <button class="btn-main" style="width:100%;flex:none" onclick="clientLogin()">🔓 Se connecter</button>
   </div>`}
   <p class="note">🔒 Votre mot de passe est stocké hashé (chiffré) — personne ne peut le lire, pas même KLEAN.</p>`;
+  try{ setTimeout(majEtatConditions, 0); }catch(e){}   /* 📜 état des conditions (client) */
 }
 function accRule(id, ok, txt){ const d = document.getElementById(id); if(!d) return; d.className = ok?'ok':''; d.textContent = (ok?'●':'○')+' '+txt; }
 function accStrength(){ const v = (document.getElementById('ac-pw')||{}).value || '';
@@ -4243,9 +4368,12 @@ async function clientRegister(){
   if(mail && !/^\S+@\S+\.\S+$/.test(mail)) return toast('❌ E-mail invalide — ou laissez la case vide');
   const bad = strongClientPw(pw); if(bad) return toast('❌ '+bad);
   if(pw !== pw2) return toast('❌ Les deux mots de passe ne correspondent pas');
+  /* 📜 les conditions s'acceptent AVANT la création du compte (le serveur refuse sinon) */
+  const condOk = !!(document.getElementById('ac-cond') || {}).checked;
+  if(!condOk) return toast('❌ Cochez « J’accepte les conditions client Klean-Services » pour créer votre compte');
   if(typeof NET!=='undefined' && NET.on){
     try{
-      const r = await fetch('/api/clients/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({nom, tel, quartier, ville, mail, password: pw})});
+      const r = await fetch('/api/clients/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({conditionsAcceptees:true, source:'inscription-app', nom, tel, quartier, ville, mail, password: pw})});
       const d = await r.json();
       if(r.status === 409){ accTab='login'; renderAccount(); return toast('ℹ️ Ce numéro a déjà un compte — connectez-vous'); }
       if(!r.ok) return toast('❌ '+(d.error||'Erreur'));
@@ -4376,13 +4504,18 @@ function hideRequest(){
 }
 function answerRequest(accept){
   if(!incomingReq) return;
+  /* 🤝 lot 118 : la réponse du professionnel est enregistrée dans la mise en relation
+     (accepter = « J'accepte la demande. », refuser = « Je ne suis pas disponible. ») */
+  const mid = incomingReq.id;
   if(accept){
     activeMission = {...incomingReq, stage:1, startedAt:Date.now()};
     hideRequest();
     renderAgentDash();
+    try{ if(typeof relRepondrePro==='function') relRepondrePro(mid,'auto','J’accepte la demande.'); }catch(e){}
     toast('✓ Mission acceptée ! Rendez-vous chez le client.');
   } else {
-    hideRequest(); toast('Demande refusée'); scheduleRequest();
+    hideRequest(); toast('Demande refusée — le client passe au 2ᵉ professionnel'); scheduleRequest();
+    try{ if(typeof relRepondrePro==='function') relRepondrePro(mid,'auto','Je ne suis pas disponible.'); }catch(e){}
   }
 }
 function renderMissionPanel(){
@@ -4398,6 +4531,7 @@ function renderMissionPanel(){
       <div class="rline"><span>👤 ${m.client} · 📍 ${m.quartier} (${m.dist.toFixed(1)} km)</span><span>🕐 ${m.time}</span></div>
       <div class="rline"><span>💰 Votre gain</span><span style="color:var(--pd);font-weight:800">${fmt(m.prix.total*(1-PLATFORM_FEE))}</span></div>
     </div>
+    <div id="pro-rel" style="margin-top:10px"></div>
     <div class="m-flow" id="m-flow">${stages.map((s,i)=>{
       const n=i+1;
       if(n<m.stage) return `<button class="m-btn go" style="background:var(--bg);color:var(--pd)">✓ ${s.replace(/^[^ ]+ /,'')}</button>`;
@@ -4405,6 +4539,8 @@ function renderMissionPanel(){
       return `<button class="m-btn wait">${s}</button>`;
     }).join('')}</div>
   </div>`;
+  /* 🤝 lot 118 : la conversation courte et la bulle PRIX de cette mission */
+  try{ if(typeof relCharger==='function') relCharger(m.id,'pro','#pro-rel'); }catch(e){}
 }
 function advanceMission(){
   activeMission.stage++;
@@ -4612,7 +4748,7 @@ let FLIP = null, FLIP_SESS = null, FLIP_T0 = 0;
   try{ if(window.kVeilleRetirer) window.kVeilleRetirer(); }catch(e){}   /* l'alerte éventuelle s'efface d'elle-même */
   /* 🔎 « Vérifier les mises à jour » : le client (et le PDG) peut savoir d'un geste s'il a la
      dernière page. Sans cela, un téléphone pouvait rester sur l'ancienne version sans le dire. */
-  window.KLEAN_VERSION = '116';
+  window.KLEAN_VERSION = '118.2';
   window.kVerifierVersion = function(){
     try{ toast('🔍 Vérification de la mise à jour…'); }catch(e){}
     try{
@@ -4643,7 +4779,12 @@ let FLIP = null, FLIP_SESS = null, FLIP_T0 = 0;
     return `<div style="background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:11px 13px;margin:14px 0 16px;text-align:center">
       <div style="font-size:12px;font-weight:800;color:var(--ink)">🛡️ Version vérifiable</div>
       <div style="font-size:11.5px;color:var(--muted);margin:3px 0 8px">Si vous ne voyez pas <b>version 115</b> ici, votre téléphone garde encore l'ancienne page : touchez le bouton ci-dessous.</div>
-      <div style="font-size:11.5px;color:var(--ink);font-weight:700">Klean Service · version 116 · <span id="klean-ver-cache" style="color:var(--p)">cache klean-v69</span></div>
+      <div style="margin:0 0 9px;padding:9px 11px;border:1px solid var(--line);border-radius:11px;background:var(--card2)">
+        <b style="font-size:13px">📜 Conditions Klean-Services</b>
+        <div id="mon-compte-cond" style="font-size:12px;color:var(--muted);margin:3px 0 6px">Vérification…</div>
+        <button class="btn-soft" style="font-size:12.5px" onclick="ouvrirConditions('client')">Lire les conditions / accepter</button>
+      </div>
+      <div style="font-size:11.5px;color:var(--ink);font-weight:700">Klean Service · version 118 · <span id="klean-ver-cache" style="color:var(--p)">cache klean-v69</span></div>
       <button class="btn-line" style="margin-top:9px;justify-content:center" onclick="kVerifierVersion()">🔄 <span>Vérifier les mises à jour</span></button>
       <div style="border-top:1px dashed var(--line);margin:10px 0 8px"></div>
       <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Si l'écran ne réagit plus, ces deux boutons le remettent en marche.</div>

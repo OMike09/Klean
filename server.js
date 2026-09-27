@@ -1073,6 +1073,516 @@ const TARIF_DEVIS_METIERS = ['macon', 'menuiserie', 'alu', 'soudure', 'etancheit
 const TARIF_DEVIS_NUMS = ['7', '8', '9', '10', '24', '30', '38', '40', '42', '48'];
 
 /* ─────────── INITIALISATION (une seule fois, ne remplace jamais ce que le PDG a réglé) ─────────── */
+
+/* ═══════════ 📜 CONDITIONS KLEAN-SERVICES (client & professionnel) ═══════════
+   Texte OFFICIEL envoyé par le PDG le 28/09/2026 — repris mot pour mot, rien d'inventé.
+   · versionné : publier une nouvelle version n'efface jamais l'ancienne (une acceptation passée
+     reste attachée à SA version) ;
+   · chaque acceptation est une PREUVE : qui, rôle, version, date, heure, appareil, IP ;
+   · le PDG exige l'acceptation (case à cocher obligatoire) — refus côté serveur si elle manque ;
+   · le tableau de bord voit tout (textes, versions, acceptations, journal) et peut tout régler. */
+const CONDITIONS_DEF = {
+  version: 1, maj: '2026-09-28', source: 'PDG — texte officiel des conditions Klean-Services (28/09/2026)',
+  exigee: true,
+  client: [
+  { t: 'Création de la demande', p: [
+      'Je m\'engage à effectuer une demande correspondant réellement au service que je souhaite obtenir et à fournir toutes les informations nécessaires à sa compréhension.'] },
+  { t: 'Informations exactes et complètes', p: [
+      'Je m\'engage à fournir des informations exactes concernant notamment le lieu, la quantité, les dimensions, l\'état des biens, les difficultés particulières, la date, l\'heure et toute autre information utile à la réalisation de la prestation.'] },
+  { t: 'Photos, vidéos et informations complémentaires', p: [
+      'Lorsque Klean-Services ou le professionnel demande des photos, vidéos ou informations complémentaires afin d\'évaluer correctement la prestation, je m\'engage à fournir des éléments clairs, récents et pertinents.'] },
+  { t: 'Mise en relation avec le professionnel', p: [
+      'Je reconnais que les échanges avec le professionnel doivent se dérouler à travers les fonctionnalités prévues par Klean Service, afin de permettre le suivi et la sécurisation de la prestation qui pourrait à un appel téléphonique.'] },
+  { t: 'Échanges avec le professionnel', p: [
+      'Je m\'engage à communiquer au professionnel uniquement les informations nécessaires à la réalisation de la prestation et à respecter les règles de conduite de Klean-Services.'] },
+  { t: 'Interdiction de contourner Klean Service', p: [
+      'Je m\'engage à ne pas utiliser les échanges ou les coordonnées obtenues grâce à Klean-Services pour demander directement au professionnel une nouvelle prestation en dehors de l\'application, dans le but de contourner Klean Service ou sa procédure de réservation et de paiement.',
+      'Si je souhaite faire appel de nouveau à un professionnel déjà rencontré sur Klean-Services, je dois utiliser son code unique dans l\'application, effectuer une nouvelle demande et suivre la procédure de réservation et de paiement prévue par Klean-Services.'] },
+  { t: 'Évaluation et détermination du prix', p: [
+      'Je reconnais que le prix peut être déterminé à partir des informations fournies, des caractéristiques de la prestation, de la quantité, de la difficulté, de la distance, des options choisies, des matériaux nécessaires ou d\'autres paramètres applicables.',
+      'Je m\'engage à vérifier les informations affichées avant de poursuivre la réservation.'] },
+  { t: 'Modification du prix', p: [
+      'Lorsqu\'un prix définitif a été accepté, aucune modification ne doit être imposée directement par le professionnel.',
+      'Toute prestation supplémentaire ou modification susceptible d\'entraîner un coût supplémentaire doit être déclarée dans l\'application et suivre la procédure de validation prévue par Klean Service.'] },
+  { t: 'Réservation de la prestation', p: [
+      'La prestation est considérée comme réservée lorsque les étapes requises par Klean-Services ont été correctement effectuées, notamment la validation de la demande et, lorsque cela est prévu, le paiement ou la confirmation du mode de paiement.'] },
+  { t: 'Paiement', p: [
+      'Je m\'engage à payer le montant convenu selon le moyen de paiement proposé et accepté dans Klean-Services.',
+      'Je ne dois pas effectuer un paiement supplémentaire directement au professionnel en dehors de la procédure prévue par l\'application, sauf lorsque Klean-Services prévoit explicitement un paiement en espèces.'] },
+  { t: 'Paiement en espèces', p: [
+      'Lorsque le paiement en espèces est autorisé, je m\'engage à verser au professionnel le montant correspondant à la prestation validée.',
+      'Après le paiement, je dois confirmer dans l\'application le montant effectivement versé.',
+      'En cas de différence entre le montant prévu et le montant demandé ou reçu, je dois le signaler immédiatement à Klean Service.'] },
+  { t: 'Accès au lieu de prestation', p: [
+      'Je m\'engage à permettre au professionnel d\'accéder au lieu convenu et à lui fournir les conditions raisonnablement nécessaires à la réalisation du service.',
+      'Je dois également signaler à l\'avance toute difficulté d\'accès ou toute circonstance particulière pouvant affecter la prestation.'] },
+  { t: 'Objets fragiles, précieux ou particuliers', p: [
+      'Avant le début de la prestation, je dois informer le professionnel de la présence d\'objets fragiles, précieux, dangereux ou nécessitant des précautions particulières.'] },
+  { t: 'Surveillance et protection de mes biens', p: [
+      'Je suis responsable de prendre les précautions nécessaires pour surveiller mes biens et mon environnement pendant l\'intervention du professionnel.',
+      'Lorsque cela est possible, je suis invité à rester présent ou à désigner une personne de confiance pour superviser la prestation.',
+      'Je dois notamment mettre à l\'abri mes objets de valeur, documents importants, espèces et biens personnels qui ne sont pas concernés par la prestation.'] },
+  { t: 'Respect du professionnel', p: [
+      'Je m\'engage à traiter le professionnel avec respect et à ne pas lui demander d\'effectuer une prestation dangereuse, illégale ou différente de celle convenue sans validation préalable.'] },
+  { t: 'Annulation, retard ou absence', p: [
+      'En cas d\'empêchement, de retard important ou d\'impossibilité d\'assurer ma présence lorsque celle-ci est nécessaire, je dois prévenir le professionnel et, lorsque cela est nécessaire, Klean-Services.',
+      'Les éventuels frais ou conséquences liés à une annulation ou à une absence sont appliqués conformément aux règles de Klean Service.'] },
+  { t: 'Fin de la prestation', p: [
+      'À la fin de la prestation, je dois vérifier le service réalisé et signaler rapidement toute anomalie constatée à travers les fonctionnalités prévues par Klean-Services.',
+      'Lorsque le système prévoit une confirmation de fin de prestation, je dois l\'effectuer après vérification.'] },
+  { t: 'Litiges et réclamations', p: [
+      'En cas de problème, de désaccord concernant le service, le prix, le paiement ou le comportement du professionnel, je dois utiliser les fonctionnalités de réclamation ou de signalement de Klean-Services.',
+      'Je peux être invité à fournir des photos, messages, preuves de paiement ou tout autre élément permettant d\'examiner la situation.'] },
+  { t: 'Fraude et fausses déclarations', p: [
+      'Il est interdit de fournir volontairement de fausses informations, de simuler un paiement, de créer de fausses demandes, de manipuler les évaluations ou d\'utiliser Klean-Services dans le but d\'escroquer, de tromper, de harceler ou de nuire à un professionnel ou à la plateforme.'] },
+  { t: 'Compte personnel et sécurité', p: [
+      'Je suis responsable de la sécurité de mon compte Klean-Services et je m\'engage à ne pas partager mes identifiants, codes de connexion ou moyens d\'accès avec des tiers.'] },
+  { t: 'Blocage, suspension ou suppression du compte', p: [
+      'En cas de non-respect des présentes conditions, de fraude, de tentative de contournement de Klean-Services, de comportement abusif ou de violation grave des règles de la plateforme, le compte du client peut être bloqué, suspendu ou supprimé, conformément aux procédures et règles applicables de Klean Service.'] },
+  { t: 'Acceptation des conditions', p: [
+      'En acceptant les conditions établies par Klean-Services, j\'accepte de devenir un client Klean pour le bon déroulement des prestations.'] }
+],
+  pro: [
+  { t: 'Inscription et informations professionnelles', p: [
+      'Je m\'engage à fournir des informations exactes, complètes et à jour concernant mon identité, mon entreprise lorsqu\'il y a lieu, mes coordonnées, mes compétences, mes services, ma zone d\'intervention et toute information demandée par Klean Service.'] },
+  { t: 'Vérification du profil', p: [
+      'Je reconnais que Klean-Services peut demander des informations ou documents permettant de vérifier mon identité, mon activité, mes compétences ou les informations fournies.',
+      'Je m\'engage à fournir des documents authentiques et valides lorsque ceux-ci sont demandés.'] },
+  { t: 'Présentation de mes services', p: [
+      'Je m\'engage à présenter uniquement les services que je suis réellement capable de réaliser et à ne pas déclarer de fausses compétences, qualifications, expériences ou disponibilités.'] },
+  { t: 'Réception d\'une demande client', p: [
+      'Lorsque je reçois une demande, je dois examiner attentivement les informations fournies par le client avant d\'accepter la prestation.',
+      'Si des informations sont insuffisantes, je peux demander les précisions nécessaires à travers Klean-Services.'] },
+  { t: 'Échanges avec le client', p: [
+      'Les échanges relatifs à la prestation doivent être effectués à travers les fonctionnalités prévues par Klean-Services afin de permettre le suivi et la sécurisation de la prestation.',
+      'Je m\'engage à rester respectueux, professionnel et clair dans mes communications avec le client.'] },
+  { t: 'Photos, vidéos et informations complémentaires', p: [
+      'Lorsque cela est nécessaire pour évaluer correctement la prestation, je peux demander au client des photos, vidéos ou informations complémentaires à travers Klean-Services.',
+      'Je m\'engage à utiliser ces éléments uniquement dans le cadre de la prestation et conformément aux règles de la plateforme.'] },
+  { t: 'Évaluation de la prestation', p: [
+      'Je m\'engage à examiner objectivement les caractéristiques de la prestation avant de confirmer mon intervention, notamment la quantité, les dimensions, l\'état des biens, la difficulté, l\'accessibilité, la distance, les matériaux nécessaires et toute autre circonstance pouvant avoir une incidence sur le travail.'] },
+  { t: 'Prix et devis', p: [
+      'Je m\'engage à respecter le système de tarification de Klean Service lorsqu\'il est applicable.',
+      'Lorsque je suis autorisé à proposer ou à modifier un prix, je dois fournir un montant correspondant réellement à la prestation demandée et respecter les limites, règles et procédures définies par Klean-Services.',
+      'Pour les prestations nécessitant un devis, celui-ci doit être suffisamment clair pour permettre au client de comprendre ce qui est inclus dans le prix.'] },
+  { t: 'Interdiction des frais cachés', p: [
+      'Je ne dois pas demander au client de frais supplémentaires qui n\'ont pas été prévus ou validés.',
+      'Toute prestation supplémentaire ou modification entraînant un coût supplémentaire doit être déclarée dans Klean-Services et suivre la procédure de validation prévue par la plateforme.'] },
+  { t: 'Acceptation de la prestation', p: [
+      'Je ne dois accepter une prestation que si je suis réellement en mesure de la réaliser dans les conditions convenues.',
+      'Après acceptation, je m\'engage à respecter les informations, le prix, la date, l\'heure, le lieu et les caractéristiques de la prestation validés dans Klean-Services.'] },
+  { t: 'Interdiction de contourner Klean Service', p: [
+      'Je m\'engage à ne pas utiliser les coordonnées ou informations obtenues grâce à Klean Service pour proposer ou réaliser directement avec le client une prestation en dehors de l\'application dans le but de contourner Klean-Services, sa réservation, son suivi ou son système de paiement.',
+      'Si un client souhaite faire appel de nouveau à mes services, il doit utiliser mon code professionnel dans l\'application et effectuer une nouvelle demande selon la procédure prévue par Klean Service.',
+      'Je m\'engage à ne pas encourager ou accepter le contournement de cette procédure.'] },
+  { t: 'Déplacement vers le lieu de prestation', p: [
+      'Je m\'engage à me rendre au lieu convenu dans les conditions prévues.',
+      'En cas de retard important, d\'empêchement ou d\'impossibilité de me déplacer, je dois prévenir rapidement le client et Klean-Services lorsque cela est nécessaire.'] },
+  { t: 'Réalisation de la prestation', p: [
+      'Je m\'engage à réaliser uniquement le travail convenu et à respecter les caractéristiques de la prestation validée.',
+      'Je ne dois pas effectuer volontairement un travail différent de celui accepté sans accord préalable du client et, lorsque nécessaire, validation dans Klean-Services.'] },
+  { t: 'Matériel, équipements et produits', p: [
+      'Je suis responsable de disposer des outils, équipements et produits nécessaires lorsque ceux-ci sont à ma charge selon les conditions de la prestation.',
+      'Je dois utiliser un matériel adapté et prendre les précautions nécessaires pour éviter les dommages aux biens du client.'] },
+  { t: 'Sécurité pendant l\'intervention', p: [
+      'Je m\'engage à respecter les règles de sécurité applicables à mon activité et à ne pas effectuer volontairement une opération présentant un risque injustifié pour le client, ses biens, moi-même ou les autres personnes présentes.',
+      'Lorsque les conditions de travail sont dangereuses ou ne permettent pas une intervention normale, je dois le signaler au client et, si nécessaire, à Klean-Services.'] },
+  { t: 'Respect des biens du client', p: [
+      'Je m\'engage à respecter les biens, équipements, locaux et objets appartenant au client.',
+      'Je ne dois pas déplacer, utiliser, prendre ou emporter un bien du client sans autorisation lorsque cela n\'est pas nécessaire à la prestation.'] },
+  { t: 'Paiement', p: [
+      'Je m\'engage à respecter le mode de paiement prévu par Klean-Services.',
+      'Je ne dois pas demander au client de payer un montant différent du montant validé sans passer par la procédure de modification prévue par Klean-Services.'] },
+  { t: 'Paiement en espèces', p: [
+      'Lorsque le paiement en espèces est autorisé, je m\'engage à recevoir uniquement le montant correspondant à la prestation validée ou au montant supplémentaire officiellement accepté.',
+      'Je dois confirmer honnêtement dans l\'application le montant effectivement reçu.',
+      'Il est interdit de déclarer un montant différent de celui réellement payé.'] },
+  { t: 'Preuve et confirmation de la prestation', p: [
+      'Lorsque Klean-Services demande une confirmation, une preuve, une photo ou toute autre information concernant la réalisation de la prestation, je m\'engage à fournir des éléments exacts et pertinents.',
+      'Je ne dois pas déclarer une prestation comme terminée si elle n\'a pas réellement été réalisée.'] },
+  { t: 'Fin de prestation', p: [
+      'À la fin de l\'intervention, je dois permettre au client de vérifier le travail réalisé et signaler dans Klean-Services toute information nécessaire à la clôture de la prestation.'] },
+  { t: 'Annulation ou impossibilité d\'intervenir', p: [
+      'Si je ne peux plus assurer une prestation acceptée, je dois prévenir le client et Klean-Services le plus rapidement possible.',
+      'Les conséquences éventuelles d\'une annulation injustifiée, répétée ou tardive sont appliquées conformément aux règles de Klean-Services.'] },
+  { t: 'Réclamations et litiges', p: [
+      'En cas de désaccord avec un client concernant le travail, le prix, le paiement, les biens ou tout autre élément de la prestation, je m\'engage à utiliser la procédure de réclamation ou de résolution des litiges prévue par Klean-Services.',
+      'Je m\'engage à fournir les éléments permettant d\'examiner la situation : messages, photos, preuves de paiement, informations sur la prestation ou tout autre élément pertinent.'] },
+  { t: 'Interdiction de fraude et de fausses déclarations', p: [
+      'Il est interdit de fournir de faux documents, de fausses informations, de fausses preuves de prestation ou de paiement, de manipuler les évaluations, de créer de faux comptes ou d\'utiliser Klean-Services pour escroquer, tromper, harceler ou nuire à un client ou à la plateforme.'] },
+  { t: 'Compte professionnel', p: [
+      'Je suis responsable de la sécurité de mon compte professionnel.',
+      'Je m\'engage à ne pas partager mes identifiants, codes de connexion ou moyens d\'accès avec une personne non autorisée.',
+      'Pour une entreprise, les accès accordés à ses employés ou représentants doivent être gérés de manière sécurisée et conformément aux fonctionnalités prévues par Klean-Services.'] },
+  { t: 'Responsabilité professionnelle', p: [
+      'Je reconnais être responsable des actes que j\'accomplis dans le cadre de mes prestations et je m\'engage à respecter les obligations légales, professionnelles et de sécurité applicables à mon activité.'] },
+  { t: 'Respect des règles de Klean-Services', p: [
+      'Je m\'engage à respecter les règles, procédures, fonctionnalités et mécanismes de sécurité mis en place par Klean-Services, notamment ceux concernant les réservations, les paiements, les réclamations, les évaluations et la communication avec les clients.'] },
+  { t: 'Blocage, suspension ou suppression du compte', p: [
+      'En cas de non-respect des présentes conditions, de fraude, de contournement de Klean-Services, de fausses déclarations, de comportement abusif, de mise en danger d\'un client ou de violation grave des règles de la plateforme, le compte professionnel peut être bloqué, suspendu ou supprimé définitivement, conformément aux procédures et règles applicables de Klean-Services.'] },
+  { t: 'Acceptation des conditions', p: [
+      'En acceptant les conditions établies par Klean-Services pour le bon déroulement des prestations, je deviens un Klean professionnel et je m\'engage à les respecter.'] }
+]
+};
+function conditionsEnsure() {
+  const C = db.conditions;
+  if (!C || typeof C !== 'object') { db.conditions = JSON.parse(JSON.stringify(CONDITIONS_DEF)); db.conditions.versions = [{ n: 1, at: nowISO(), par: 'PDG', note: CONDITIONS_DEF.source }]; db.conditions.acceptations = []; db.conditions.journal = []; return; }
+  if (!Array.isArray(C.client) || !C.client.length) C.client = JSON.parse(JSON.stringify(CONDITIONS_DEF.client));
+  if (!Array.isArray(C.pro) || !C.pro.length) C.pro = JSON.parse(JSON.stringify(CONDITIONS_DEF.pro));
+  if (!Array.isArray(C.versions)) C.versions = [{ n: Number(C.version) || 1, at: nowISO(), par: 'PDG', note: C.source || '' }];
+  if (!Array.isArray(C.acceptations)) C.acceptations = [];
+  if (!Array.isArray(C.journal)) C.journal = [];
+  if (typeof C.version !== 'number') C.version = 1;
+  if (C.exigee === undefined) C.exigee = true;
+}
+const conditionsRole = r => (String(r || '').toLowerCase() === 'pro' ? 'pro' : 'client');
+function conditionsPub(role) {
+  conditionsEnsure();
+  const C = db.conditions, r = conditionsRole(role);
+  return { ok: true, role: r, version: C.version, maj: C.maj || '', source: C.source || '', exigee: C.exigee !== false,
+    titre: (r === 'pro' ? 'CONDITIONS PROFESSIONNEL — KLEAN-SERVICES' : 'CONDITIONS CLIENT — KLEAN-SERVICES CI'),
+    intro: (r === 'pro' ? 'En utilisant Klean Service en tant que professionnel particulier ou entreprise, je reconnais et accepte les conditions suivantes :'
+                       : 'En utilisant Klean-Services en tant que client, je reconnais et accepte les conditions suivantes :'),
+    articles: C[r].map((a, i) => ({ n: i + 1, t: a.t, p: a.p })),
+    nbAcceptations: (C.acceptations || []).filter(a => a.role === r).length,
+    nbAcceptationsVersion: (C.acceptations || []).filter(a => a.role === r && a.version === C.version).length };
+}
+/* 🔎 l'acceptation d'UNE personne (par téléphone) pour la version courante */
+function conditionsEtat(role, tel) {
+  conditionsEnsure();
+  const C = db.conditions, r = conditionsRole(role), t = String(tel || '').replace(/\D/g, '');
+  const miennes = (C.acceptations || []).filter(a => a.role === r && (!t || a.tel === t));
+  const derniere = miennes.length ? miennes[miennes.length - 1] : null;
+  return { ok: true, role: r, version: C.version, exigee: C.exigee !== false,
+    accepte: !!(derniere && derniere.version === C.version),
+    accepteVersion: derniere ? derniere.version : 0, accepteLe: derniere ? derniere.at : '',
+    aRelire: !!(derniere && derniere.version !== C.version), nbAcceptations: miennes.length };
+}
+/* ✍️ enregistre l'acceptation (preuve) — refuse une version périmée : on n'accepte QUE ce qu'on a lu */
+function conditionsAccepter(role, qui, tel, extra) {
+  conditionsEnsure();
+  const C = db.conditions, r = conditionsRole(role);
+  const a = { at: nowISO(), role: r, version: C.version, qui: String(qui || '').slice(0, 80),
+    tel: String(tel || '').replace(/\D/g, '').slice(0, 20), appareil: String((extra && extra.ua) || '').slice(0, 120),
+    ip: String((extra && extra.ip) || '').slice(0, 60), source: String((extra && extra.source) || 'application').slice(0, 40),
+    texte: 'v' + C.version + ' du ' + (C.maj || '') };
+  C.acceptations.push(a);
+  if (C.acceptations.length > 5000) C.acceptations = C.acceptations.slice(-4000);
+  return a;
+}
+
+
+/* ═══════════ 🤝 MISE EN RELATION CLIENT ↔ PROFESSIONNEL (lot 118) ═══════════
+   Règle du PDG : UNE DEMANDE → PROFESSIONNEL 1 → (s'il refuse) PROFESSIONNEL 2 → FIN.
+   · 2 professionnels maximum par demande et par jour, jamais de 3ᵉ mise en relation automatique ;
+   · après le 2ᵉ refus : la demande se met en pause et ne se reprend que LE JOUR SUIVANT ;
+   · la conversation ne s'ouvre qu'avec une vraie mise en relation, et reste COURTE (nombre de
+     messages, caractères, cadence limités) — pas un WhatsApp ;
+   · le prix passe par la BULLE « PRIX » (le devis du lot 109) : séparé des messages ordinaires,
+     verrouillé dès que le client l'accepte ; un nouveau montant = nouvelle proposition à accepter ;
+   · tout est tracé (qui, quoi, quand) et consultable par les gestionnaires ;
+   · la protection contre le contournement surveille chaque message : numéros, liens, e-mails,
+     réseaux sociaux, invitation à sortir de Klean. Trois manquements → relation arrêtée et
+     signalement aux gestionnaires (jamais un blocage définitif automatique : le PDG décide).
+   ═══════════════════════════════════════════════════════════════════════════ */
+const REL_DEF = {
+  version: 1, maxProsParTour: 2, maxProsParJour: 2, repriseHeures: 12,
+  msgMaxParCote: 8, msgMaxCar: 240, msgMinIntervalSec: 3,
+  anti: { actif: true, bloquer: true, signalerApres: 3 },
+  rapides: {
+    pro: ['J’accepte la demande.', 'Je suis disponible.', 'J’ai besoin d’une précision.', 'Voici le prix pour ce devis.'],
+    client: ['J’accepte le prix.', 'Je refuse le prix.', 'J’ai une précision à ajouter.', 'Modifier ma demande.', 'Annuler.']
+  }
+};
+const REL_ETATS = {
+  attente_pro1: 'En attente du professionnel 1', pro1_accepte: 'Professionnel 1 accepté',
+  pro1_refuse: 'Professionnel 1 refusé / non disponible', attente_pro2: 'En attente du professionnel 2',
+  pro2_accepte: 'Professionnel 2 accepté', aucun_pro: 'Aucun professionnel disponible', annulee: 'Demande annulée'
+};
+function relConfig() {
+  if (!db.rel || typeof db.rel !== 'object') db.rel = JSON.parse(JSON.stringify(REL_DEF));
+  const R = db.rel;
+  ['maxProsParTour', 'maxProsParJour', 'repriseHeures', 'msgMaxParCote', 'msgMaxCar', 'msgMinIntervalSec'].forEach(k => { if (typeof R[k] !== 'number') R[k] = REL_DEF[k]; });
+  if (!R.anti || typeof R.anti !== 'object') R.anti = JSON.parse(JSON.stringify(REL_DEF.anti));
+  if (!R.rapides || typeof R.rapides !== 'object') R.rapides = JSON.parse(JSON.stringify(REL_DEF.rapides));
+  if (!Array.isArray(R.rapides.pro)) R.rapides.pro = REL_DEF.rapides.pro.slice();
+  if (!Array.isArray(R.rapides.client)) R.rapides.client = REL_DEF.rapides.client.slice();
+  if (typeof R.version !== 'number') R.version = 1;
+  if (!db.contournements) db.contournements = [];
+  return R;
+}
+function relNorm(texte) {
+  return String(texte == null ? '' : texte).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u2019']/g, ' ').replace(/\s+/g, ' ').trim();
+}
+/* 🗣️ LE LANGAGE DU REFUS — ce que veut dire un professionnel (ou un client), même écrit vite ou mal */
+const REL_MOTS = {
+  refuse: ['je refuse', 'refuse la demande', 'je ne peux pas', 'je ne peut pas', 'je peux pas', 'pas possible', 'impossible',
+    'pas disponible', 'pas dispo', 'non disponible', 'indisponible', 'je ne suis pas disponible', 'je suis occupe', 'suis occupe', 'occupe',
+    'desole', 'trop loin', 'hors de ma zone', 'hors zone', 'je ne fais pas', 'pas dans mes competences', 'pas ma competence',
+    'je passe', 'non merci', 'je decline', 'je ne suis pas libre', 'pas libre', 'je ne pourrai pas', 'je ne serai pas disponible',
+    'je ne serai pas la', 'pas aujourd hui', 'une autre fois', 'plus tard peut etre', 'demain peut etre', 'annule', 'annuler',
+    'je me retire', 'je laisse tomber', 'je ne suis pas interesse', 'pas interesse', 'je ne prends pas', 'j abandonne'],
+  accepte: ['j accepte', 'accepte la demande', 'jaccepte', 'je suis disponible', 'je suis dispo', 'je suis libre', 'je peux',
+    'oui je peux', 'je peux le faire', 'je peux venir', 'je viens', 'j arrive', 'd accord', 'ok', 'okay', 'je prends',
+    'c est bon', 'ca marche', 'je confirme', 'je valide', 'disponible', 'je suis la', 'present', 'je suis interesse'],
+  precision: ['besoin d une precision', 'j ai besoin d une precision', 'une precision', 'un detail', 'des details', 'j ai une question',
+    'question sur', 'expliquez', 'precisez', 'pouvez vous me dire', 'je veux comprendre', 'c est quoi'],
+  prix: ['voici le prix', 'mon prix', 'prix pour ce devis', 'mon tarif', 'voici mon tarif', 'je propose', 'mon devis', 'le prix est']
+};
+/* sens reconnu par ordre de priorité : refus explicite d'abord (un refus ne doit jamais être pris pour un oui) */
+function relSens(texte) {
+  const t = relNorm(texte);
+  if (!t) return 'inconnu';
+  const contient = (liste) => liste.some(m => t.indexOf(m) >= 0);
+  if (contient(REL_MOTS.refuse)) return 'refuse';
+  if (/\bnon\b/.test(t) && !/\bnon\s*(,| )?\s*(probleme|souci)\b/.test(t)) return 'refuse';
+  if (contient(REL_MOTS.prix)) return 'prix';
+  if (contient(REL_MOTS.precision)) return 'precision';
+  if (contient(REL_MOTS.accepte)) return 'accepte';
+  return 'inconnu';
+}
+function relSensTxt(s) {
+  return { accepte: '✅ acceptation', refuse: '❌ refus', precision: '❓ demande de précision', prix: '💰 prix', inconnu: '💬 message' }[s] || '💬 message';
+}
+/* 🛡️ PROTECTION CONTRE LE CONTOURNEMENT — détecte ce qui sert à sortir de Klean */
+function relContournement(texte) {
+  const brut = String(texte == null ? '' : texte);
+  /* ① on neutralise d'abord les MONTANTS (« 8 000 F », « 12.500 FCFA ») : un prix n'est pas un numéro */
+  let t = brut.replace(/\b\d{1,3}(?:[ .\u00a0\u202f]\d{3})+(?:\s*(?:f|fcfa|francs?|cfa))?\b/gi, ' MONTANT ')
+              .replace(/\b\d+\s*(?:f\b|fcfa|francs?|cfa)/gi, ' MONTANT ');
+  const n = relNorm(brut);                                   /* minuscules, sans accents, espaces conservés */
+  const motifs = [], fort = [];
+  if (/\+?225\d{8,}/.test(t.replace(/[^0-9+]/g, '')) || /\d{8,}/.test(t.replace(/[^0-9]/g, ''))) { motifs.push('numéro de téléphone'); fort.push(1); }
+  if (/(https?:|www\.|\.(com|net|org|ci|fr|io|me)\b|t\.me|wa\.me|bit\.ly)/i.test(brut)) motifs.push('lien externe');
+  if (/[\w.+-]+@[\w-]+\.[a-z]{2,}/i.test(brut)) { motifs.push('adresse e-mail'); fort.push(1); }
+  if (/\b(whatsapp|whatsap|watsap|ouatsap|telegram|instagram|facebook|tiktok|snapchat|messenger|viber)\b/.test(n)
+      || /\bimo\b/.test(n) || /(^|\s)@[a-z0-9_.]{3,}/.test(n)) motifs.push('réseau social / messagerie externe');
+  if (/(appelle moi|appel moi|appelle-moi|ton numero|votre numero|mon numero|mon contact|mon tel|mon telephone|mes coordonnees|mes contacts|mon adresse|envoie moi ton|envoyer ton|donne moi ton|donner ton|mon whatsapp|mon mail|hors application|hors de l application|en dehors de l application|sans l application|sans passer par|directement avec moi|en direct|en cash|contourn|on regle ca ensemble|on s arrange|je t explique au tel|je te explique au tel|appelle|appelez)/.test(n)) motifs.push('volonté de sortir de Klean');
+  return { contourne: motifs.length > 0, motifs, gravite: fort.length ? 2 : (motifs.length ? 1 : 0) };
+}
+function relDe(m) {
+  if (!m.rel) m.rel = { tour: 1, pros: [], actuel: null, etat: 'attente_pro1', msgs: [], hist: [], signale: false, ouvertLe: nowISO() };
+  const r = m.rel;
+  if (!Array.isArray(r.pros)) r.pros = [];
+  if (!Array.isArray(r.msgs)) r.msgs = [];
+  if (!Array.isArray(r.hist)) r.hist = [];
+  if (typeof r.tour !== 'number') r.tour = 1;
+  if (!Array.isArray(r.etatHisto)) r.etatHisto = [];
+  if (!r.etat || !REL_ETATS[r.etat]) r.etat = 'attente_pro1';
+  return r;
+}
+function relSetEtat(r, etat, quoi) {                    /* chaque état traversé est conservé (traçabilité) */
+  r.etat = etat;
+  if (!Array.isArray(r.etatHisto)) r.etatHisto = [];
+  r.etatHisto.push({ at: nowISO(), etat: etat, txt: REL_ETATS[etat] || etat, quoi: String(quoi || '').slice(0, 120) });
+  if (r.etatHisto.length > 60) r.etatHisto = r.etatHisto.slice(-50);
+}
+function relJournal(r, quoi, qui, role, detail) {
+  r.hist.push({ at: nowISO(), quoi: quoi, qui: String(qui || '').slice(0, 60), role: role || 'systeme', detail: String(detail || '').slice(0, 300) });
+  if (r.hist.length > 400) r.hist = r.hist.slice(-350);
+}
+function relMsgsys(r, texte, type) {
+  r.msgs.push({ at: nowISO(), de: 'Klean', role: 'systeme', type: type || 'systeme', texte: String(texte).slice(0, 400) });
+  if (r.msgs.length > 120) r.msgs = r.msgs.slice(-100);
+}
+/* ⏰ après le 2ᵉ refus : la demande ne reprend que LE JOUR SUIVANT */
+function relRepriseISO(C) {
+  const d = new Date(Date.now() + Math.max(1, Number((C || relConfig()).repriseHeures) || 12) * 3600 * 1000);
+  d.setHours(Math.max(6, d.getHours()), 0, 0, 0);
+  return d.toISOString();
+}
+function relEtape(m) {                       /* l'étape affichée : prix proposé → prix accepté → paiement → prestation */
+  if (!m) return 'attente';
+  if (m.status === 'annulee') return 'annulee';
+  if (m.status === 'terminee') return 'prestation_terminee';
+  if (['enroute', 'arrive', 'encours'].indexOf(m.status) >= 0) return 'prestation';
+  const r = m.rel || {};
+  if (m.prixVerrouille && m.prixVerrouille.montant > 0) return (r.payeAt ? 'prestation' : 'paiement');
+  if (m.devis && m.devis.version) return m.devis.statut === 'accepte' ? 'prix_accepte' : 'devis';
+  return 'attente';
+}
+/* combien de professionnels contactés AUJOURD'HUI pour CETTE demande (le plafond est par demande) */
+function relProsAujourdHui(m) {
+  const j = String(nowISO()).slice(0, 10);
+  const r = m.rel || {};
+  return (r.pros || []).filter(p => String(p.at || '').slice(0, 10) === j).length;
+}
+/* 🤝 ouvrir une relation avec UN professionnel (1ᵉʳ ou 2ᵉ, jamais un 3ᵉ) */
+function relOuvrir(m, ag, source, silencieux) {
+  const C = relConfig(), r = relDe(m);
+  if (!ag) return { ok: false, error: 'Professionnel introuvable' };
+  if (r.pros.some(p => p.proId === ag.id))
+    return { ok: false, error: 'Ce professionnel a déjà été contacté pour cette demande', deja: true };
+  const duTour = r.pros.filter(p => (p.tour || 1) === (r.tour || 1)).length;
+  if (duTour >= C.maxProsParTour)
+    return { ok: false, error: 'RÈGLE KLEAN : ' + C.maxProsParTour + ' professionnels maximum par demande. Après le 2ᵉ, la recherche s’arrête — reprenez cette demande demain.', limite: true };
+  const dejaJour = relProsAujourdHui(m);
+  if (dejaJour >= C.maxProsParJour)
+    return { ok: false, error: 'Plafond du jour atteint : ' + C.maxProsParJour + ' mises en relation par jour. Reprenez demain — c’est la règle pour protéger les professionnels.', limite: true };
+  const rang = r.pros.length + 1;
+  r.pros.push({ proId: ag.id, nom: ag.nom, numPro: ag.numPro || '', rang: rang, tour: r.tour || 1, at: nowISO(), sens: 'en_attente', source: source || 'systeme' });
+  r.actuel = ag.id; r.actuelNom = ag.nom;
+  relSetEtat(r, rang === 1 ? 'attente_pro1' : 'attente_pro2', 'professionnel ' + rang + ' sollicité : ' + ag.nom);
+  r.prochaineLe = null;
+  m.cible = ag.id; m.cibleNom = ag.nom; m.matchScope = 'cible'; m.agentId = null; m.status = 'pending';
+  relJournal(r, 'mise_en_relation', 'système', 'systeme', 'professionnel ' + rang + ' : ' + ag.nom + (source === 'cible' ? ' (choisi par le client)' : ''));
+  relMsgsys(r, '🤝 Mise en relation avec le professionnel ' + rang + ' : ' + ag.nom + '. Vous pouvez échanger ici, brièvement.');
+  saveDb();
+  if (!silencieux) { try { broadcastMissionCiblee(m); } catch (e) { } }
+  try { emitAdmin('relation', '🤝 ' + m.id + ' — professionnel ' + rang + ' sollicité : ' + ag.nom); } catch (e) { }
+  return { ok: true, rang: rang, etat: r.etat };
+}
+/* 🔎 proposer le professionnel suivant (jamais un 3ᵉ : la règle est dans relOuvrir) */
+function relProposerSuivant(m) {
+  const r = relDe(m);
+  const deja = r.pros.map(p => p.proId);
+  const cands = (db.agents || []).filter(a => a && (a.status || 'approved') === 'approved' && !a.blocked && deja.indexOf(a.id) < 0
+    && (m.exclAg || []).indexOf(a.id) < 0 && (m.service === 'custom' || agentHasService(a, m.service)));
+  if (!cands.length) return { ok: false, aucun: true };
+  cands.sort((a, b) => ((b.online ? 1 : 0) - (a.online ? 1 : 0)) || ((agentStats(b).rating || 0) - (agentStats(a).rating || 0)));
+  const o = relOuvrir(m, cands[0], 'systeme');
+  return o.ok ? { ok: true, pro: cands[0].nom, rang: o.rang, etat: o.etat } : { ok: false, error: o.error, limite: !!o.limite, aucun: true };
+}
+/* ✅/❌ la réponse du professionnel (mot reconnu par le langage du refus) */
+function relReponse(m, ag, sens, texte) {
+  const C = relConfig(), r = relDe(m);
+  const p = r.pros.slice().reverse().find(x => x.proId === ag.id);
+  if (!p) return { ok: false, error: 'Vous n’êtes pas le professionnel en relation sur cette demande' };
+  if (p.sens === 'refuse') return { ok: false, error: 'Vous avez déjà répondu à cette demande' };
+  const s = (sens && sens !== 'auto') ? sens : relSens(texte);
+  const mot = String(texte || '').slice(0, 200);
+  if (s === 'accepte') {
+    p.sens = 'accepte'; p.reponseAt = nowISO();
+    relSetEtat(r, p.rang === 1 ? 'pro1_accepte' : 'pro2_accepte', ag.nom + ' accepte');
+    r.derniereReponse = 'accepte';
+    m.status = 'accepted'; m.agentId = ag.id;
+    const premier = !m.dist; if (premier) m.dist = distMissionPro(m, ag);
+    relJournal(r, 'reponse_pro', ag.nom, 'pro', 'accepte la demande' + (mot ? ' — « ' + mot + ' »' : ''));
+    relMsgsys(r, '✅ ' + ag.nom + ' accepte la demande. Prochaine étape : son PRIX, puis votre validation.');
+    saveDb();
+    try { emitAdmin('accept', '✅ ' + ag.nom + ' accepte la demande ' + m.id + (p.rang === 2 ? ' (professionnel 2)' : '')); } catch (e) { }
+    return { ok: true, etat: r.etat, sens: 'accepte' };
+  }
+  if (s === 'refuse') {
+    relJournal(r, 'reponse_pro', ag.nom, 'pro', 'refus / non disponible' + (mot ? ' — « ' + mot + ' »' : ''));
+    relMsgsys(r, (p.rang === 1 ? '❌ Le professionnel 1 n’est pas disponible' : '❌ Le professionnel 2 n’est pas disponible')
+      + (mot ? ' · « ' + mot.slice(0, 120) + ' »' : '') + '.', 'refus');
+    const e = relApresEchec(m, ag.id, mot || 'refus du professionnel', 'refus');
+    return { ok: true, etat: e.etat, sens: 'refuse', suivant: e.suivant };
+  }
+  /* ni oui ni non : le professionnel pose une question → simple message (compte dans les limites) */
+  if (mot) { const w = relMsg(m, 'pro', ag.nom, mot, { rapide: false }); if (w.bloque) return w; }
+  relJournal(r, 'question_pro', ag.nom, 'pro', mot);
+  saveDb();
+  return { ok: true, etat: r.etat, sens: 'precision' };
+}
+/* ❌ un professionnel sort du jeu (refus, non disponible, ou prix refusé par le client) :
+   on marque, on prévient, et on propose LE SUIVANT — jamais un 3ᵉ, et pause jusqu'au lendemain après le 2ᵉ. */
+function relApresEchec(m, proId, motif, cause) {
+  const C = relConfig(), r = relDe(m);
+  const p = r.pros.find(x => x.proId === proId);
+  const rang = p ? p.rang : r.pros.length;
+  if (p && p.sens !== 'refuse') { p.sens = 'refuse'; p.reponseAt = nowISO(); p.motif = String(motif || '').slice(0, 200); p.cause = cause || ''; }
+  const autres = r.pros.filter(x => x.sens === 'accepte');
+  if (!autres.length) { m.agentId = null; m.status = 'pending'; }
+  r.derniereReponse = 'refuse';
+  relSetEtat(r, rang === 1 ? 'pro1_refuse' : 'aucun_pro', (p && p.nom ? p.nom : 'professionnel ' + rang) + ' : ' + String(motif || cause || '').slice(0, 80));
+  let suivant = null;
+  if (!autres.length) {
+    if (r.pros.filter(x => (x.tour || 1) === (r.tour || 1)).length < C.maxProsParTour) {
+      suivant = relProposerSuivant(m);
+      if (!suivant.ok) {
+        relSetEtat(r, 'aucun_pro', 'aucun professionnel disponible'); r.prochaineLe = relRepriseISO(C);
+        relMsgsys(r, '⏸️ Aucun professionnel disponible maintenant. Vous pourrez reprendre cette demande demain.', 'alerte');
+      }
+    } else {
+      relSetEtat(r, 'aucun_pro', 'fin de recherche : 2 professionnels atteints'); r.prochaineLe = relRepriseISO(C);
+      relMsgsys(r, '⏸️ Après ' + C.maxProsParTour + ' professionnels, la recherche s’arrête : vous pourrez reprendre cette demande demain (jamais de 3ᵉ professionnel automatique).', 'alerte');
+    }
+  }
+  saveDb();
+  try { emitAdmin('relation', (rang === 1 ? '🔁' : '⏹️') + ' ' + m.id + ' — professionnel ' + rang + ' hors jeu (' + (cause || motif || '') + ')'
+    + (suivant && suivant.ok ? ' → professionnel 2 : ' + suivant.pro : ' → fin de recherche, reprise possible demain')); } catch (e) { }
+  return { etat: r.etat, suivant: suivant && suivant.ok ? suivant.rang : null };
+}
+
+/* 💬 un message (court, limité, surveillé) — refusé s'il sert à contourner Klean */
+function relMsg(m, role, qui, texte, opts) {
+  const C = relConfig(), r = relDe(m);
+  const t = String(texte == null ? '' : texte).trim();
+  if (!t) return { ok: false, error: 'Message vide' };
+  if (r.etat === 'annulee') return { ok: false, error: 'Cette demande est annulée : la conversation est fermée' };
+  if (t.length > C.msgMaxCar) return { ok: false, error: 'Message trop long (maximum ' + C.msgMaxCar + ' caractères) — soyez bref, c’est une conversation de travail' };
+  const miens = r.msgs.filter(x => x.role === role && x.type !== 'systeme').length;
+  if (miens >= C.msgMaxParCote) return { ok: false, error: 'Limite atteinte : ' + C.msgMaxParCote + ' messages maximum par personne et par demande. Utilisez les réponses rapides ou le bouton PRIX.', limite: true };
+  const derniers = r.msgs.filter(x => x.role === role).map(x => x.at).sort();
+  if (derniers.length) {
+    const dt = (Date.now() - new Date(derniers[derniers.length - 1]).getTime()) / 1000;
+    if (dt < C.msgMinIntervalSec) return { ok: false, error: 'Doucement : patientez quelques secondes entre deux messages' };
+  }
+  /* 🛡️ contrôle anti-contournement */
+  const ctl = C.anti.actif ? relContournement(t) : { contourne: false, motifs: [], gravite: 0 };
+  if (ctl.contourne && C.anti.bloquer) {
+    db.contournements.push({ id: uid('CT'), at: nowISO(), missionId: m.id, role: role, qui: String(qui || '').slice(0, 60),
+      motifs: ctl.motifs, gravite: ctl.gravite, extrait: t.slice(0, 160), action: 'message bloqué' });
+    if (db.contournements.length > 2000) db.contournements = db.contournements.slice(-1500);
+    const combien = db.contournements.filter(x => x.missionId === m.id && x.qui === qui).length;
+    relJournal(r, 'contournement_bloque', qui, role, ctl.motifs.join(' · '));
+    relMsgsys(r, '🛡️ Message bloqué : il contient ' + ctl.motifs.join(', ') + '. Klean protège la prestation : tout se passe ici. (manquement ' + combien + ')', 'alerte');
+    let action = 'message bloqué + avertissement';
+    if (combien >= (C.anti.signalerApres || 3)) {
+      relSetEtat(r, 'annulee', 'contournement répété — signalé aux gestionnaires'); r.signale = true; m.status = 'annulee';
+      action = 'relation arrêtée + signalement aux gestionnaires';
+      relMsgsys(r, '⛔ Trop de tentatives de sortir de Klean : la relation est ARRÊTÉE et signalée aux gestionnaires.', 'alerte');
+    }
+    db.contournements[db.contournements.length - 1].action = action;
+    saveDb();
+    try { emitAdmin('contournement', '🛡️ ' + m.id + ' — ' + qui + ' (' + role + ') : ' + ctl.motifs.join(' · ') + ' → ' + action); } catch (e) { }
+    return { ok: false, bloque: true, error: 'Message bloqué : ' + ctl.motifs.join(', ') + ' — la prestation et le paiement passent par Klean.', motifs: ctl.motifs, etat: r.etat };
+  }
+  r.msgs.push({ at: nowISO(), de: String(qui || '').slice(0, 60), role: role, type: opts && opts.rapide ? 'rapide' : 'texte', texte: t.slice(0, C.msgMaxCar) });
+  if (r.msgs.length > 120) r.msgs = r.msgs.slice(-100);
+  relJournal(r, 'message', qui, role, t.slice(0, 160));
+  saveDb();
+  try { emitToMission(m, { type: 'rel_message', missionId: m.id, role: role, de: qui, texte: t.slice(0, C.msgMaxCar) }); } catch (e) { }
+  return { ok: true, restants: C.msgMaxParCote - (miens + 1) };
+}
+/* ce que le client et le pro voient (aucune donnée cachée, rien d'inventé) */
+function relDemandePublique(m) {              /* ✍️ lot 112 : l'état de la demande et son historique, jamais perdu */
+  const d = m.demandeModif || null;
+  return { version: Number(m.demandeVersion || 1),
+    modif: d ? { statut: d.statut, at: d.at, par: d.par, version: d.version, motif: d.motif || '',
+      champs: d.champs || [], decideAt: d.decideAt || null } : null,
+    hist: (m.demandeHist || []).slice(-6).map(h => ({ at: h.at, version: h.version, par: h.par, motif: h.motif,
+      champs: Object.keys(h.apres || {}), avant: h.avant, apres: h.apres })) };
+}
+function relPublique(m) {
+  const C = relConfig(), r = relDe(m);
+  const role = (m.status || '') === '' ? 'client' : 'client';
+  return {
+    ok: true, missionId: m.id, etat: r.etat, etatTxt: REL_ETATS[r.etat] || r.etat, etape: relEtape(m),
+    pros: r.pros.map(p => ({ proId: p.proId, rang: p.rang, tour: p.tour || 1, nom: p.nom, numPro: p.numPro, at: p.at, sens: p.sens, motif: p.motif || '' })),
+    actuel: r.actuel ? { id: r.actuel, nom: r.actuelNom || '' } : null,
+    prochaineLe: r.prochaineLe || null, signale: !!r.signale,
+    etatHisto: (r.etatHisto || []).slice(-12),
+    msgs: r.msgs.slice(-40), hist: r.hist.slice(-60),
+    limites: { msgMaxParCote: C.msgMaxParCote, msgMaxCar: C.msgMaxCar, maxProsParTour: C.maxProsParTour, maxProsParJour: C.maxProsParJour },
+    rapides: C.rapides, antiActif: !!C.anti.actif,
+    prix: m.devis ? { version: m.devis.version, total: m.devis.total, statut: m.devis.statut, par: m.devis.par, at: m.devis.at,
+      lignes: m.devis.lignes, motif: m.devis.motif || '', estModification: !!m.devis.estModification,
+      marche: m.devis.marche || null, inhabituelMarche: !!m.devis.inhabituelMarche } : null,
+    prixVerrouille: m.prixVerrouille || null,
+    prixEnVigueur: m.prixVerrouille ? m.prixVerrouille.montant : (m.prixTotal || 0),
+    demande: relDemandePublique(m),            /* ✍️ lot 112 : version des modifications, historique — jamais perdu */
+    service: m.service, quartier: m.quartier, ville: m.ville || '', desc: m.desc || '', pieces: parseInt(m.pieces) || 1,
+    date: m.date || '', time: m.time || '', adresse: m.adresse || '',
+    tarif: m.tarif ? { mode: m.tarif.mode, total: m.tarif.total, fourchette: m.tarif.fourchette,
+      unite: m.tarif.unite || '', quantite: m.tarif.quantite || 1,
+      reponses: (m.tarif.reponses || []).slice(0, 20), questions: m.tarif.questions || 0 } : null
+  };
+}
+
 function tarifEnsure() {
   if (!db.tarif) db.tarif = {};
   const T = db.tarif;
@@ -1261,6 +1771,19 @@ function tarifQuestionsToutes() {
   T.questions.forEach(q => { if (typeof q.off === 'undefined') q.off = false; if (!q.ordre) q.ordre = 50; });
   return T.questions;
 }
+function tarifQuestionAdmin(q) {                 /* ❓ ce que le PDG voit d'une question du moteur */
+  const T = db.tarif, c = q.cible || {}, B = q.coef ? ((T.coefs || {})[q.coef] || null) : null;
+  const qui = c.tous ? 'tous les services'
+    : (c.etatCompte ? 'services avec état des lieux'
+      : (c.cat ? 'catégorie : ' + (c.cat || []).join(', ')
+        : (c.metier ? 'métier : ' + (c.metier || []).join(', ')
+          : (c.unite ? 'unité : ' + (c.unite || []).join(', ')
+            : (c.svc ? 'service n° ' + (c.svc || []).join(', ') : 'tous les services')))));
+  return { id: q.id, q: q.q, type: q.type, aide: q.aide || '', ordre: q.ordre || 50, qui: qui,
+    coef: q.coef || null, coefNom: B ? B.nom : '', valeurs: B ? (B.valeurs || []).map(v => v.nom).slice(0, 10) : [],
+    obligatoire: !!q.obligatoire, jeNeSaisPas: q.jeNeSaisPas !== false, off: !!q.off,
+    unite: q.unite || '', prixUnite: q.prixUnite || 0, min: q.min || 0, cree: !!q.cree };
+}
 function tarifQuestionsDe(svc, avecPhotos) {
   if (!svc) return [];
   const qs = tarifQuestionsToutes().filter(q => !q.off && tarifCibleOk(q.cible, svc));
@@ -1363,6 +1886,158 @@ function tarifDeplacement(km) {
   return { prix: Math.round(prix), km: Math.round(km * 10) / 10 };
 }
 /* 🧾 LE CALCUL DÉTAILLÉ — une ligne par élément, jamais un prix global sorti de nulle part. */
+
+/* ═══════════ 🏷️ BASE DE RÉFÉRENCES MARCHÉ + STATISTIQUES (lot 112) ═══════════
+   Règles du PDG, appliquées à la lettre :
+     · un prix de référence n'existe QUE s'il a une SOURCE et une DATE (sinon il est refusé) ;
+     · on n'INVENTE jamais un prix : ce qui vient du marché est daté, ce qui manque est DIT comme manquant ;
+     · ces références ne changent AUCUN prix : elles servent à BORNER et à SIGNALER un montant
+       inhabituel — un prix hors fourchette est conservé tel quel, jamais supprimé automatiquement ;
+     · les statistiques viennent des prix RÉELLEMENT acceptés (jamais des propositions) et ne
+       deviennent une référence qu'après VALIDATION du PDG (aucun changement automatique) ;
+     · rien n'est rétroactif : un prix déjà accepté garde son montant, même si la base évolue ;
+     · tout est journalisé (qui, quoi, avant, après, quand, pourquoi) et versionné.
+   ════════════════════════════════════════════════════════════════════════════ */
+const TARIF_MARCHE_DEF = [
+  { id: 'canape-2-3', service: 'canapes', nom: 'Canapé 2-3 places (nettoyage complet)', unite: 'place', min: 20000, max: 20000, ville: 'Abidjan', source: 'Elyone Pressing — tarif publié (Cocody)', date: '27/09/2026' },
+  { id: 'canape-4', service: 'canapes', nom: 'Canapé 4 places (nettoyage complet)', unite: 'place', min: 25000, max: 25000, ville: 'Abidjan', source: 'Elyone Pressing — tarif publié (Cocody)', date: '27/09/2026' },
+  { id: 'canape-5-6', service: 'canapes', nom: 'Canapé 5-6 places (nettoyage complet)', unite: 'place', min: 30000, max: 30000, ville: 'Abidjan', source: 'Elyone Pressing — tarif publié (Cocody)', date: '27/09/2026' },
+  { id: 'canape-7', service: 'canapes', nom: 'Canapé 7 places et plus (nettoyage complet)', unite: 'place', min: 35000, max: 35000, ville: 'Abidjan', source: 'Elyone Pressing — tarif publié (Cocody)', date: '27/09/2026' },
+  { id: 'fauteuil-cleanride', service: 'canapes', nom: 'Fauteuil (nettoyage à domicile)', unite: 'place', min: 9000, max: 9000, ville: 'Abidjan', source: 'CleanRide — tarif publié (Abidjan)', date: '27/09/2026' },
+  { id: 'canape-cleanride', service: 'canapes', nom: 'Canapé (nettoyage à domicile)', unite: 'place', min: 10000, max: 22000, ville: 'Abidjan', source: 'CleanRide — tarif publié (Abidjan)', date: '27/09/2026' },
+  { id: 'plomb-deplacement', service: 'plomberie', nom: 'Déplacement d’un plombier', unite: 'intervention', min: 5000, max: 15000, ville: 'Abidjan', source: 'Yemba Plomberie — grille publiée', date: '27/09/2026' },
+  { id: 'plomb-fuite', service: 'plomberie', nom: 'Réparation d’une fuite simple', unite: 'intervention', min: 10000, max: 25000, ville: 'Abidjan', source: 'Yemba Plomberie — grille publiée', date: '27/09/2026' },
+  { id: 'plomb-complexe', service: 'plomberie', nom: 'Réparation complexe (réseau, colonne)', unite: 'intervention', min: 20000, max: 50000, ville: 'Abidjan', source: 'Yemba Plomberie — grille publiée', date: '27/09/2026' },
+  { id: 'plomb-wc', service: 'plomberie', nom: 'WC / chasse d’eau (réparation)', unite: 'intervention', min: 10000, max: 30000, ville: 'Abidjan', source: 'Yemba Plomberie — grille publiée', date: '27/09/2026' },
+  { id: 'plomb-robinet', service: 'plomberie', nom: 'Pose / remplacement d’un robinet', unite: 'intervention', min: 25000, max: 25000, ville: 'Abidjan', source: 'Le Plombier CI — tarif publié', date: '27/09/2026' },
+  { id: 'clim-entretien-split', service: 'clim', nom: 'Entretien climatiseur split (habitation)', unite: 'appareil', min: 10000, max: 18000, ville: 'Abidjan', source: 'CIP SARL — tarif publié (Abidjan)', date: '27/09/2026' },
+  { id: 'clim-entretien-entreprise', service: 'clim', nom: 'Entretien climatiseur split (entreprise / immeuble)', unite: 'appareil', min: 15000, max: 25000, ville: 'Abidjan', source: 'CIP SARL — tarif publié (Abidjan)', date: '27/09/2026' },
+  { id: 'clim-gaz', service: 'clim', nom: 'Recharge de gaz (climatiseur)', unite: 'appareil', min: 20000, max: 45000, ville: 'Abidjan', source: 'CIP SARL — tarif publié (Abidjan)', date: '27/09/2026' },
+  { id: 'clim-fuite-gaz', service: 'clim', nom: 'Recherche de fuite + recharge de gaz', unite: 'appareil', min: 35000, max: 80000, ville: 'Abidjan', source: 'CIP SARL — tarif publié (Abidjan)', date: '27/09/2026' },
+  { id: 'clim-bureaux', service: 'clim', nom: 'Entretien climatisation de bureaux', unite: 'appareil', min: 20000, max: 40000, ville: 'Abidjan', source: 'CIP SARL — tarif publié (Abidjan)', date: '27/09/2026' },
+  { id: 'menage-mois', service: 'entretien', nom: 'Ménage régulier (contrat au mois)', unite: 'mois', min: 20000, max: 80000, ville: 'Abidjan', source: 'Abidjan.net — annonces ménage (fourchette constatée)', date: '27/09/2026' },
+  { id: 'carrelage-m2', service: '', nom: 'Pose de carrelage (au m², fourni posé)', unite: 'm2', min: 14900, max: 15250, ville: 'Abidjan', source: 'CYPE CI — bordereau publié', date: '27/09/2026', note: 'À rattacher à un service par le PDG (aucun service Klean ne correspond encore exactement).' },
+  { id: 'platre-m2', service: '', nom: 'Pose de plâtre / faux plafond (au m²)', unite: 'm2', min: 7700, max: 7700, ville: 'Abidjan', source: 'CYPE CI — bordereau publié', date: '27/09/2026', note: 'À rattacher à un service par le PDG.' },
+  { id: 'mo-carreleur', service: '', nom: 'Main-d’œuvre carreleur (à l’heure)', unite: 'heure', min: 1200, max: 1900, ville: 'Abidjan', source: 'CYPE CI — bordereau publié', date: '27/09/2026', note: 'À rattacher à un service par le PDG.' }
+];
+/* Ce qu'on n'a PAS trouvé sur le marché : on le DIT, on ne l'invente pas. Le PDG complète quand il veut. */
+const TARIF_MARCHE_MANQUE = ['Maçonnerie', 'Peinture', 'Électricité', 'Menuiserie', 'Soudure', 'Déménagement',
+  'Garde d’enfants', 'Coiffure / beauté', 'Cours et formations', 'Vitres & baies', 'Jardinage', 'Lavage auto',
+  'Serrurerie', 'Électroménager', 'Bricolage & montage', 'Cuisinier à domicile', 'Placement de personnel', 'Canal+'];
+const TARIF_MARCHE_STATUTS = { a_confirmer: 'à confirmer par le PDG', confirmee: 'confirmée', desactivee: 'désactivée (conservée)' };
+function marcheEnsure() {
+  tarifEnsure();
+  const T = db.tarif;
+  if (!Array.isArray(T.refs)) T.refs = [];
+  /* ① les références de la veille marché (sourcées et datées) — jamais écrasées si le PDG les a modifiées */
+  TARIF_MARCHE_DEF.forEach(d => {
+    const ex = T.refs.find(x => x && x.id === d.id);
+    if (!ex) T.refs.push(Object.assign({}, d, { type: 'marche', origine: 'veille', statut: 'a_confirmer', at: nowISO(), par: 'Klean (veille marché)' }));
+    else if (!ex.type) { ex.type = 'marche'; ex.origine = ex.origine || 'veille'; ex.statut = ex.statut || 'a_confirmer'; }
+  });
+  /* ② l'ancienne référence « déplacement » (lot 109) est conservée : on la complète, on ne la supprime pas */
+  const dep = T.refs.find(x => x && x.id === 'deplacement');
+  if (dep) { if (!dep.type) dep.type = 'marche'; if (!dep.statut) dep.statut = 'a_confirmer'; if (!dep.origine) dep.origine = 'veille'; if (!dep.service) dep.service = ''; }
+  /* ③ les références ajoutées par le PDG (service + montant) entrent dans le même moule */
+  T.refs.forEach(r => {
+    if (!r || typeof r !== 'object') return;
+    if (r.type === 'marche') return;
+    r.type = 'marche'; r.origine = r.origine || 'pdg'; r.statut = r.statut || 'confirmee';
+    if (r.montant && !r.min) { r.min = r.montant; r.max = r.montant; }
+  });
+  if (!T.marcheStats || typeof T.marcheStats !== 'object') T.marcheStats = { maj: nowISO(), parService: {} };
+  if (!T.marcheStatsValidees || typeof T.marcheStatsValidees !== 'object') T.marcheStatsValidees = {};
+  if (!T.marcheManque) T.marcheManque = TARIF_MARCHE_MANQUE.slice();
+  return T;
+}
+function marcheRefValide(r) {
+  const motifs = [];
+  if (!r || typeof r !== 'object') return { ok: false, motifs: ['référence vide'] };
+  if (!String(r.nom || '').trim()) motifs.push('nom manquant');
+  if (!String(r.source || '').trim() || String(r.source).trim().length < 3) motifs.push('source manquante (obligatoire)');
+  if (!String(r.date || '').trim() || String(r.date).trim().length < 4) motifs.push('date manquante (obligatoire)');
+  const mn = Number(r.min), mx = Number(r.max);
+  if (!(mn >= 0) || !(mx >= 0)) motifs.push('montants manquants');
+  else if (mx < mn) motifs.push('maximum inférieur au minimum');
+  return { ok: motifs.length === 0, motifs: motifs };
+}
+function marcheRefsActives() { const T = marcheEnsure(); return (T.refs || []).filter(r => r && r.type === 'marche' && r.statut !== 'desactivee'); }
+function marcheRefsPour(service) {
+  const svc = String(service || '');
+  if (!svc) return [];
+  const nomSvc = (db.tarif.svc[svc] || {}).nom || '';
+  const n = relNorm(nomSvc);
+  return marcheRefsActives().filter(r => {
+    if (r.service === svc) return true;
+    if (!r.service && nomSvc) {                       /* référence non rattachée : on la rapproche par le nom */
+      const lib = relNorm(r.nom || '');
+      return n && (lib.indexOf(n) >= 0 || n.indexOf(lib) >= 0) && n.length > 3;
+    }
+    return false;
+  });
+}
+/* 🏷️ BORNE OBJECTIVE : dans la fourchette ? sinon de combien, en % (jamais un refus, jamais une suppression) */
+function marcheCompare(service, montant, opts) {
+  marcheEnsure();
+  const refs = marcheRefsPour(service);
+  const m = Math.round(Number(montant) || 0);
+  if (!refs.length) return { trouve: false, refs: [], min: 0, max: 0, dans: true, ecartPct: 0, inhabituel: false,
+    message: 'Aucune référence de marché enregistrée pour ce service : aucun jugement n’est porté sur ce montant (le PDG peut ajouter la référence : source + date obligatoires).' };
+  const min = Math.min.apply(null, refs.map(r => Number(r.min) || 0));
+  const max = Math.max.apply(null, refs.map(r => Number(r.max) || 0));
+  const dans = m >= min && m <= max;
+  let ecartPct = 0;
+  if (m > max && max > 0) ecartPct = Math.round(((m / max) - 1) * 100);
+  else if (m < min && m > 0) ecartPct = -Math.round((1 - (m / min)) * 100);
+  const abs = Math.abs(ecartPct);
+  const srcs = [];
+  refs.forEach(r => { if (srcs.indexOf(r.source) < 0) srcs.push(r.source); });
+  return { trouve: true, refs: refs.map(r => ({ id: r.id, nom: r.nom, unite: r.unite, min: r.min, max: r.max, source: r.source, date: r.date, statut: r.statut })),
+    min: min, max: max, dans: dans, ecartPct: ecartPct, sources: srcs,
+    inhabituel: !dans && abs >= 50,            /* écart ≥ 50 % → inhabituel, SIGNALÉ (conservé) */
+    tresInhabituel: !dans && abs >= 150,       /* écart ≥ 150 % → contrôle gestionnaire demandé */
+    message: dans ? 'Dans la fourchette du marché (' + min.toLocaleString('fr-FR') + ' – ' + max.toLocaleString('fr-FR') + ' F)'
+      : (m > max ? 'Au-dessus de la fourchette du marché (' + max.toLocaleString('fr-FR') + ' F maximum constaté) : +' + ecartPct + ' %'
+                 : 'En dessous de la fourchette du marché (' + min.toLocaleString('fr-FR') + ' F minimum constaté) : ' + ecartPct + ' %') };
+}
+/* 📊 STATISTIQUES — calculées sur les prix RÉELLEMENT ACCEPTÉS (jamais les propositions) */
+function marcheStatsCalcul() {
+  const par = {};
+  (db.missions || []).forEach(m => {
+    const v = m.prixVerrouille;
+    if (!v || !(Number(v.montant) > 0)) return;
+    const s = m.service || 'autre';
+    const x = par[s] = par[s] || { service: s, n: 0, montants: [], villes: {}, premier: '', dernier: '', sources: 0 };
+    x.n++; x.montants.push(Number(v.montant));
+    if (m.ville) x.villes[m.ville] = (x.villes[m.ville] || 0) + 1;
+    const d = String(v.date || m.createdAt || '');
+    if (!x.premier || d < x.premier) x.premier = d;
+    if (!x.dernier || d > x.dernier) x.dernier = d;
+  });
+  const res = {};
+  Object.keys(par).forEach(k => {
+    const x = par[k], tri = x.montants.slice().sort((a, b) => a - b);
+    const med = tri.length % 2 ? tri[(tri.length - 1) / 2] : Math.round((tri[tri.length / 2 - 1] + tri[tri.length / 2]) / 2);
+    const villes = Object.keys(x.villes).sort((a, b) => x.villes[b] - x.villes[a]);
+    res[k] = { service: k, n: x.n, min: tri[0], max: tri[tri.length - 1], mediane: med,
+      moyenne: Math.round(tri.reduce((a, b) => a + b, 0) / tri.length), ville: villes[0] || '', periode: { de: String(x.premier).slice(0, 10), a: String(x.dernier).slice(0, 10) } };
+  });
+  return res;
+}
+function marcheStatsMaj() {
+  const T = marcheEnsure();
+  T.marcheStats = { maj: nowISO(), parService: marcheStatsCalcul() };
+  saveDb();
+  return T.marcheStats;
+}
+/* une statistique n'est servie que si le PDG l'a VALIDÉE — et elle ne rejoue jamais le passé */
+function marcheStatsValidees() { const T = marcheEnsure(); return T.marcheStatsValidees; }
+function marcheStatsPubliques() {
+  const V = marcheStatsValidees(), res = {};
+  Object.keys(V).forEach(k => { if (V[k] && V[k].statut !== 'rejetee') res[k] = V[k]; });
+  return res;
+}
+
 function tarifCalculer(id, o) {
   o = o || {};
   tarifEnsure();
@@ -4604,6 +5279,49 @@ const server = http.createServer(async (req, res) => {
   }
   /* ❓ les questions à poser pour un service (aucune question inutile) */
   /* 🗺️ ZONES & DÉPLACEMENT — lecture publique (le client a le droit de savoir sur quoi repose son prix) */
+  /* 📜 CONDITIONS — lecture publique (tout le monde a le droit de lire ce qu'il signe) */
+  if (p === '/api/conditions' && req.method === 'GET') {
+    try { return sendJson(res, 200, conditionsPub(url.searchParams.get('role'))); }
+    catch (e) { return sendJson(res, 500, { error: 'Conditions indisponibles', detail: e.message }); }
+  }
+  /* 🔎 « ai-je accepté la version en vigueur ? » — client (jeton client) ou pro (jeton pro) */
+  if (p === '/api/conditions/etat' && req.method === 'GET') {
+    const role = conditionsRole(url.searchParams.get('role'));
+    let tel = String(url.searchParams.get('tel') || '');
+    try {
+      if (role === 'client') {
+        const cl = findClientByToken(req);            /* aucune confiance au téléphone annoncé */
+        if (cl) tel = cl.tel;
+      } else {
+        const jt = (req.headers && req.headers['x-agent-token']) || '';
+        const ag = jt ? db.agents.find(a => a.jeton && a.jeton === jt) : null;
+        if (ag) tel = ag.tel;
+      }
+    } catch (e) { }
+    return sendJson(res, 200, conditionsEtat(role, tel));
+  }
+  /* ✍️ ACCEPTER — la preuve est enregistrée (qui, version, date, heure, appareil, IP) */
+  if (p === '/api/conditions/accepter' && req.method === 'POST') {
+    const b = await readBody(req);
+    conditionsEnsure();
+    const role = conditionsRole(b.role);
+    if (Number(b.version) !== Number(db.conditions.version))
+      return sendJson(res, 409, { error: 'Le texte a changé : relisez la version ' + db.conditions.version + ' avant d’accepter',
+        conseil: 'rechargez les conditions à l’écran, puis acceptez la version en vigueur.', version: db.conditions.version });
+    let tel = '', qui = '';
+    if (role === 'client') { const cl = findClientByToken(req); if (cl) { tel = cl.tel; qui = cl.nom; } }
+    else { const jt = (req.headers && req.headers['x-agent-token']) || ''; const ag = jt ? db.agents.find(a => a.jeton && a.jeton === jt) : null; if (ag) { tel = ag.tel; qui = ag.nom; } }
+    if (!tel) { tel = String(b.tel || '').replace(/\D/g, ''); qui = String(b.nom || qui || ''); }
+    if (tel.length < 8) return sendJson(res, 400, { error: 'Connectez-vous (ou indiquez votre numéro) pour que l’acceptation soit nominative' });
+    const a = conditionsAccepter(role, qui || b.nom || '', tel, { ua: req.headers['user-agent'], ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress, source: b.source || 'application' });
+    if (role === 'client') { const cl = db.clients.find(x => x.tel === tel); if (cl) { cl.conditionsVersion = a.version; cl.conditionsAt = a.at; } }
+    else { const ag = db.agents.find(x => x.tel === tel); if (ag) { ag.conditionsVersion = a.version; ag.conditionsAt = a.at; } }
+    saveDb();
+    auditLog('conditions_acceptees', { role, qui: qui || tel, version: a.version, source: a.source });
+    console.log('✍️  Conditions v' + a.version + ' acceptées par ' + (qui || tel) + ' (' + role + ')');
+    return sendJson(res, 200, { ok: true, acceptation: { role, version: a.version, at: a.at, qui: a.qui } });
+  }
+
   if (p === '/api/tarif/zones' && req.method === 'GET') {
     tarifEnsure();
     const T = db.tarif, src = T.zonesSrc || {}, dep = T.deplacement || {};
@@ -5249,6 +5967,11 @@ const server = http.createServer(async (req, res) => {
     if (actives >= 3) return sendJson(res, 409, { error: 'Maximum 3 missions actives en même temps' });
     db.missions.push(m); saveDb();
     broadcastNewMission(m);
+    /* 🤝 lot 118 : un professionnel précis est visé → c'est LE PROFESSIONNEL 1 de la mise en relation */
+    if (m.cible) {
+      const agC1 = db.agents.find(a => a.id === m.cible);
+      if (agC1) { try { relOuvrir(m, agC1, 'cible', true); } catch (e) { } }
+    }
     return sendJson(res, 201, { id: m.id, dist: m.dist });
   }
 
@@ -5311,7 +6034,12 @@ const server = http.createServer(async (req, res) => {
         }
       }
     } catch (e) {}
-    return { brut: brut, remise: remise, total: total, parType: parType, estimation: estimation, inhabituel: inhabituel };
+    /* 🏷️ lot 112 : le montant est aussi comparé à la BASE MARCHÉ du service (source + date).
+       Un prix hors fourchette est SIGNALÉ (écart en %), JAMAIS refusé ni supprimé automatiquement. */
+    let marche = null;
+    try { if (typeof marcheCompare === 'function') marche = marcheCompare((m || {}).service, total); } catch (e) { }
+    return { brut: brut, remise: remise, total: total, parType: parType, estimation: estimation, inhabituel: inhabituel, marche: marche,
+      inhabituelMarche: !!(marche && marche.trouve && !marche.dans) };   /* hors fourchette sourcée = signalé (le montant reste intact) */
   }
   function devisNettoyerChamp(v, max) { return String(v == null ? '' : v).trim().slice(0, max || 300); }
   /* création d'une version (v1 ou modification motivée) */
@@ -5335,11 +6063,16 @@ const server = http.createServer(async (req, res) => {
       motif: motif, estModification: !!estModification,
       par: par, at: nowISO(),
       estimation: t.estimation, inhabituel: t.inhabituel,
+      marche: t.marche || null, inhabituelMarche: !!t.inhabituelMarche,
       remplaceVersion: estModification ? version - 1 : null
     };
     if (m.prixVerrouille) m.devis.enAttenteSurPrixVerrouille = { montant: m.prixVerrouille.montant, version: m.prixVerrouille.version };
     devisJournaliser(m, estModification ? 'modification_proposee' : 'devis_envoye', avant,
-      { version: version, total: t.total, lignes: lignes.length, inhabituel: t.inhabituel }, motif, par);
+      { version: version, total: t.total, lignes: lignes.length, inhabituel: t.inhabituel,
+        marche: t.marche ? { min: t.marche.min, max: t.marche.max, ecartPct: t.marche.ecartPct, sources: t.marche.sources || [], date: (t.marche.refs[0] || {}).date } : null,
+        inhabituelMarche: !!t.inhabituelMarche }, motif, par);
+    /* 🏷️ un prix TRÈS inhabituel (écart ≥ 150 %) est porté à la connaissance des gestionnaires — il reste en place */
+    try { if (t.marche && t.marche.tresInhabituel) emitAdmin('prix', '🏷️ ' + m.id + ' — prix ' + t.total.toLocaleString('fr-FR') + ' F ' + t.marche.message + ' (conservé, contrôle gestionnaire demandé)'); } catch (e) { }
     saveDb();
     emitToMission(m, { type: 'devis', missionId: m.id, version: version, total: t.total, statut: 'envoye',
       motif: motif, prixVerrouille: m.prixVerrouille ? m.prixVerrouille.montant : null });
@@ -5390,6 +6123,62 @@ const server = http.createServer(async (req, res) => {
     };
   }
 
+  /* 💰 BULLE « PRIX » — le professionnel transmet son prix : il devient un DEVIS (lot 109), affiché
+     séparément des messages. Le client accepte (verrou) ou refuse (→ droit au 2ᵉ professionnel). */
+  function relPrix(m, ag, montant, libelle) {
+    const r = relDe(m);
+    if (!ag || m.agentId !== ag.id) return { error: 'Vous n’êtes pas le professionnel en relation sur cette demande' };
+    if (r.etat !== 'pro1_accepte' && r.etat !== 'pro2_accepte') return { error: 'Acceptez d’abord la demande, puis envoyez votre prix' };
+    const total = Math.max(500, Math.round(Number(montant) || 0));
+    const lignes = [{ type: 'autre', libelle: String(libelle || 'Montant proposé pour la prestation').slice(0, 80), qte: 1, pu: total }];
+    const avait = !!(m.devis && m.devis.version);
+    const rr = devisCreer(m, { lignes: lignes, conditions: 'Proposition du professionnel',
+      motif: avait ? 'nouveau prix proposé par le professionnel' : '' }, ag.nom, avait);
+    if (rr.error) return rr;
+    const d = m.devis;
+    /* 🏷️ lot 112 : on dit au professionnel où se situe son prix par rapport au marché (source + date) */
+    if (d.marche && d.marche.trouve && !d.marche.dans) {
+      relMsgsys(r, '🏷️ Information marché : ' + d.marche.message + ' — référence(s) : ' + (d.marche.sources || []).join(', ')
+        + ' (' + ((d.marche.refs[0] || {}).date || '') + '). Votre prix est conservé : aucune modification automatique.', 'alerte');
+    }
+    r.msgs.push({ at: nowISO(), de: ag.nom, role: 'pro', type: 'prix', montant: d.total, devisVersion: d.version, texte: 'PRIX' });
+    relJournal(r, avait ? 'prix_repropose' : 'prix_propose', ag.nom, 'pro', 'devis v' + d.version + ' · ' + d.total + ' F');
+    relMsgsys(r, '💰 ' + ag.nom + ' propose un prix : ' + d.total.toLocaleString('fr-FR') + ' F (devis v' + d.version + '). En attente de la décision du client.');
+    saveDb();
+    try { emitToMission(m, { type: 'devis', missionId: m.id, version: d.version, total: d.total, statut: 'envoye' }); } catch (e) { }
+    try { emitAdmin('prix', '💰 ' + m.id + ' — ' + ag.nom + ' propose ' + d.total.toLocaleString('fr-FR') + ' F (v' + d.version + ')'); } catch (e) { }
+    return { ok: true, devis: d };
+  }
+  /* ✅ / ✕ / ↩ la décision du CLIENT sur le prix */
+  function relPrixDecision(m, decision, motif) {
+    const r = relDe(m);
+    if (!m.devis || !m.devis.version) return { error: 'Aucun prix n’a encore été proposé par le professionnel' };
+    if (decision === 'accepter') {
+      const a = devisAccepter(m, 'client');
+      if (a.error) return a;
+      const montant = m.prixVerrouille.montant;
+      r.msgs.push({ at: nowISO(), de: 'Client', role: 'client', type: 'prix', montant: montant, devisVersion: m.devis.version, texte: 'PRIX ACCEPTÉ', decision: 'accepte' });
+      relJournal(r, 'prix_accepte', 'client', 'client', 'devis v' + m.devis.version + ' · ' + montant + ' F — montant officiel verrouillé');
+      relMsgsys(r, '✅ Prix accepté : ' + montant.toLocaleString('fr-FR') + ' F. C’est le montant officiel de la prestation. Étape suivante : le paiement.');
+      saveDb();
+      try { emitToMission(m, { type: 'mission_update', status: m.status, missionId: m.id, prixTotal: m.prixTotal, verrouille: true, etape: 'paiement' }); } catch (e) { }
+      try { emitAdmin('prix', '🔒 ' + m.id + ' — prix accepté ' + montant.toLocaleString('fr-FR') + ' F → étape paiement'); } catch (e) { }
+      return { ok: true, etape: 'paiement', prixVerrouille: m.prixVerrouille };
+    }
+    if (decision === 'refuser') {
+      const d = devisRefuser(m, motif || 'prix refusé par le client', 'client');
+      if (d.error) return d;
+      r.msgs.push({ at: nowISO(), de: 'Client', role: 'client', type: 'prix', montant: m.devis.total, devisVersion: m.devis.version,
+        texte: 'PRIX REFUSÉ', decision: 'refuse', motif: String(motif || '').slice(0, 160) });
+      relJournal(r, 'prix_refuse', 'client', 'client', 'devis v' + m.devis.version + ' · ' + m.devis.total + ' F' + (motif ? ' — ' + motif : ''));
+      relMsgsys(r, '❌ Le client refuse ce prix.' + (motif ? ' Motif : « ' + String(motif).slice(0, 120) + ' ».' : ''));
+      relMsgsys(r, '🔎 Le client a droit à un DEUXIÈME professionnel dans le même domaine.', 'alerte');
+      const e = relApresEchec(m, m.agentId, motif || 'prix refusé par le client', 'prix refusé');
+      return { ok: true, etat: e.etat, suivant: e.suivant };
+    }
+    return { error: 'Décision inconnue (accepter / refuser)' };
+  }
+
   const mAccept = p.match(/^\/api\/missions\/(.+)\/accept$/);
   if (mAccept && req.method === 'POST') {
     const { agentId } = await readBody(req);
@@ -5407,7 +6196,21 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 403, { error: 'Prestation réglementée (' + (r.nom || m.reglemente) + ') : réservée aux professionnels habilités. Envoyez votre diplôme ou agrément au HQ pour être vérifié.', reglemente: m.reglemente, habilitationRequise: r.exige || '' });
       }
     }
-    m.status = 'accepted'; m.agentId = ag.id; m.dist = distMissionPro(m, ag); invaliderStats(ag.id); saveDb();
+    /* 🤝 lot 118 : la règle des 2 professionnels maximum s'applique aussi ici (jamais de 3ᵉ) */
+    const rel0 = relDe(m);
+    const dejaContacte = (rel0.pros || []).some(p => p.proId === ag.id);
+    if (!dejaContacte && (rel0.pros || []).filter(p => (p.tour || 1) === (rel0.tour || 1)).length >= relConfig().maxProsParTour)
+      return sendJson(res, 409, { error: 'RÈGLE KLEAN : 2 professionnels maximum par demande. Cette demande est en pause — le client peut la reprendre demain.' });
+    m.status = 'accepted'; m.agentId = ag.id; m.dist = distMissionPro(m, ag); invaliderStats(ag.id);
+    if (!dejaContacte) {
+      const o = relOuvrir(m, ag, 'pro-libre', true);
+      if (!o.ok) { m.status = 'pending'; m.agentId = null; return sendJson(res, 409, { error: o.error }); }
+      relReponse(m, ag, 'accepte', '');
+    } else {
+      const p0 = rel0.pros.find(p => p.proId === ag.id);
+      if (p0 && p0.sens !== 'accepte') relReponse(m, ag, 'accepte', '');
+    }
+    saveDb();
     // informer les autres agents que la mission est prise
     broadcast(onlineAgents().filter(s => s.meta.agentId !== ag.id), { type: 'mission_taken', missionId: m.id });
     emitToMission(m, { type: 'mission_update', status: 'accepted', missionId: m.id,
@@ -5457,6 +6260,12 @@ const server = http.createServer(async (req, res) => {
     if (quoi === 'accepter') {
       /* seul le client de la mission peut verrouiller le prix */
       if (!estClient) return sendJson(res, 403, { error: 'Seul le client de la mission peut accepter le devis' });
+      /* 🤝 lot 118 : la carte devis et la bulle PRIX suivent EXACTEMENT la même règle (un seul comportement) */
+      if (m.rel) {
+        const r2 = relPrixDecision(m, 'accepter', '');
+        if (r2.error) return sendJson(res, 400, { error: r2.error });
+        return sendJson(res, 200, { ok: true, prixTotal: m.prixTotal, verrouille: m.prixVerrouille, etape: r2.etape, rel: m.rel.etat });
+      }
       const r = devisAccepter(m, 'client');
       if (r.error) return sendJson(res, 400, { error: r.error });
       return sendJson(res, 200, r);
@@ -5464,6 +6273,12 @@ const server = http.createServer(async (req, res) => {
     if (quoi === 'refuser') {
       if (!(estClient || estPro || isAdminReq(req))) return sendJson(res, 403, { error: 'non autorisé' });
       const par = estClient ? 'client' : (estPro ? (agAppelant.nom || 'professionnel') : act(req));
+      /* 🤝 lot 118 : un refus du CLIENT (pas du pro, pas de l'admin) ouvre le droit au 2ᵉ professionnel */
+      if (estClient && m.rel && !isAdminReq(req)) {
+        const r2 = relPrixDecision(m, 'refuser', b.motif);
+        if (r2.error) return sendJson(res, 400, { error: r2.error });
+        return sendJson(res, 200, { ok: true, prixEnVigueur: m.prixVerrouille ? m.prixVerrouille.montant : 0, rel: m.rel.etat, suivant: r2.suivant || null });
+      }
       const r = devisRefuser(m, b.motif, par);
       if (r.error) return sendJson(res, 400, { error: r.error });
       return sendJson(res, 200, r);
@@ -5485,6 +6300,175 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true, n: j.length, journal: j,
       verrous: db.missions.filter(m => m.prixVerrouille).length,
       enAttente: db.missions.filter(m => m.devis && m.devis.statut === 'envoye').length });
+  }
+
+  /* ═══════════ 🤝 LOT 118 — MISE EN RELATION (client & professionnel) ═══════════ */
+  /* qui parle : jeton CLIENT ou jeton PRO — jamais un numéro annoncé par l'appareil */
+  function relQui(req, m) {
+    const cl = findClientByToken(req);
+    if (cl && m.clientId === cl.id) return { role: 'client', qui: cl.nom, id: cl.id };
+    const jt = (req.headers && req.headers['x-agent-token']) || '';
+    const ag = jt ? db.agents.find(a => a.jeton && a.jeton === jt) : null;
+    if (ag && (m.agentId === ag.id || m.cible === ag.id || (m.rel && (m.rel.pros || []).some(p => p.proId === ag.id))))
+      return { role: 'pro', qui: ag.nom, id: ag.id, ag: ag };
+    return null;
+  }
+  const mRel = p.match(/^\/api\/missions\/([^/]+)\/rel$/);
+  if (mRel && req.method === 'GET') {
+    const m = db.missions.find(x => x.id === mRel[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    const qui = relQui(req, m);
+    if (!qui) return sendJson(res, 401, { error: 'Connectez-vous (compte client ou professionnel concerné)' });
+    return sendJson(res, 200, Object.assign(relPublique(m), { vous: { role: qui.role, nom: qui.qui } }));
+  }
+  const mRelMsg = p.match(/^\/api\/missions\/([^/]+)\/rel\/message$/);
+  if (mRelMsg && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mRelMsg[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    const qui = relQui(req, m);
+    if (!qui) return sendJson(res, 401, { error: 'Connectez-vous (compte client ou professionnel concerné)' });
+    const b = await readBody(req);
+    const w = relMsg(m, qui.role, qui.qui, b.texte, { rapide: !!b.rapide });
+    if (w.bloque) return sendJson(res, 403, w);
+    if (!w.ok) return sendJson(res, /Limite|Doucement/.test(w.error || '') ? 429 : 400, w);
+    return sendJson(res, 200, Object.assign(w, { rel: relPublique(m) }));
+  }
+  const mRelRep = p.match(/^\/api\/missions\/([^/]+)\/rel\/reponse$/);
+  if (mRelRep && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mRelRep[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    const qui = relQui(req, m);
+    if (!qui || qui.role !== 'pro') return sendJson(res, 403, { error: 'Réservé au professionnel en relation sur cette demande' });
+    const b = await readBody(req);
+    const rp = relReponse(m, qui.ag, b.sens || 'auto', b.texte);
+    if (!rp.ok) return sendJson(res, 400, rp);
+    return sendJson(res, 200, Object.assign(rp, { rel: relPublique(m) }));
+  }
+  const mRelPrix = p.match(/^\/api\/missions\/([^/]+)\/rel\/prix$/);
+  if (mRelPrix && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mRelPrix[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    const qui = relQui(req, m);
+    if (!qui || qui.role !== 'pro') return sendJson(res, 403, { error: 'Réservé au professionnel en relation sur cette demande' });
+    const b = await readBody(req);
+    const px = relPrix(m, qui.ag, b.montant, b.libelle);
+    if (px.error) return sendJson(res, 400, px);
+    if (m.demandeModif && m.demandeModif.statut === 'en_attente_nouveau_prix') {   /* ✍️ lot 112 : la demande modifiée a sa nouvelle proposition */
+      m.demandeModif.statut = 'nouvelle_proposition'; m.demandeModif.proposeeAt = nowISO();
+      try { relMsgsys(relDe(m), '💰 Nouveau prix proposé pour la demande modifiée (v' + Number(m.demandeVersion || 1) + ') — il n\'est officiel qu\'après VOTRE acceptation explicite.'); } catch (e) { }
+      try { relJournal(relDe(m), 'demande-nouveau-prix', qui.qui, 'pro', 'v' + Number(m.demandeVersion || 1) + ' · ' + (parseInt(b.montant) || 0) + ' F — à accepter explicitement'); } catch (e) { }
+    }
+    return sendJson(res, 200, Object.assign(px, { rel: relPublique(m) }));
+  }
+  const mRelDec = p.match(/^\/api\/missions\/([^/]+)\/rel\/prix-decision$/);
+  if (mRelDec && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mRelDec[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    const qui = relQui(req, m);
+    if (!qui || qui.role !== 'client') return sendJson(res, 403, { error: 'Réservé au client de cette demande' });
+    const b = await readBody(req);
+    const dec = String(b.decision || '');
+    if (['accepter', 'refuser'].indexOf(dec) < 0) return sendJson(res, 400, { error: 'Décision inconnue (accepter / refuser)' });
+    const dv = relPrixDecision(m, dec, b.motif);
+    if (dv.error) return sendJson(res, 400, dv);
+    if (m.demandeModif && m.demandeModif.statut === 'nouvelle_proposition') {      /* ✍️ lot 112 : l'acceptation explicite clôt le cycle */
+      m.demandeModif.statut = dec === 'accepter' ? 'acceptee' : 'refusee';
+      m.demandeModif.decideAt = nowISO(); saveDb();
+    }
+    return sendJson(res, 200, Object.assign(dv, { rel: relPublique(m) }));
+  }
+  /* ✍️ « MODIFIER MA DEMANDE » — LOT 112 : le client corrige sa demande, rien n'est supprimé,
+     tout est conservé (avant/après, qui, quand, pourquoi) et un prix déjà accepté n'est JAMAIS
+     touché : une modification ouvre une NOUVELLE proposition que le client devra accepter lui-même. */
+  const mDemMod = p.match(/^\/api\/missions\/([^/]+)\/demande\/modifier$/);
+  if (mDemMod && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mDemMod[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    const qui = relQui(req, m);
+    if (!qui || qui.role !== 'client') return sendJson(res, 403, { error: 'Seul le client de cette demande peut la modifier' });
+    const b = await readBody(req);
+    const r = relDe(m);
+    const etat = String(r.etat || '');
+    if (etat === 'annulee' || m.status === 'annulee') return sendJson(res, 400, { error: 'Cette demande est annulée : elle ne peut plus être modifiée' });
+    if (m.status === 'done' || m.finishedAt) return sendJson(res, 400, { error: 'Cette prestation est terminée : créez une nouvelle demande si besoin' });
+    const apre = {};
+    [['desc', 280], ['quartier', 60], ['adresse', 160], ['date', 20], ['time', 10]].forEach(([k, max]) => {
+      if (typeof b[k] === 'string' && b[k].trim() && String(m[k] || '') !== b[k].trim().slice(0, max)) apre[k] = b[k].trim().slice(0, max);
+    });
+    if (b.pieces !== undefined && (parseInt(b.pieces) || 1) !== (parseInt(m.pieces) || 1)) apre.pieces = Math.max(1, Math.min(20, parseInt(b.pieces) || 1));
+    if (Array.isArray(b.reponses) && b.reponses.length) {
+      const rep = b.reponses.filter(x => x && x.q).slice(0, 20).map(x => ({ q: String(x.q).slice(0, 60), v: String(x.v).slice(0, 60) }));
+      const avant = JSON.stringify((m.tarif && m.tarif.reponses) || []);
+      if (JSON.stringify(rep) !== avant) apre.reponses = rep;
+    }
+    if (b.service && b.service !== m.service) return sendJson(res, 400, { error: 'Le métier ne peut pas changer ici',
+      conseil: 'Pour un autre métier, annulez et créez une nouvelle demande : deux professionnels différents peuvent être concernés.' });
+    if (!Object.keys(apre).length) return sendJson(res, 400, { error: 'Aucun changement : précisez ce que vous voulez modifier' });
+    const avant = {}; Object.keys(apre).forEach(k => avant[k] = m[k] !== undefined ? m[k] : null);
+    const ancienneVersion = Number(m.demandeVersion || 1);
+    Object.keys(apre).forEach(k => { if (k === 'reponses') { m.tarif = m.tarif || {}; m.tarif.reponses = apre.reponses; } else m[k] = apre[k]; });
+    m.demandeVersion = ancienneVersion + 1;
+    m.demandeHist = (m.demandeHist || []).concat([{ at: nowISO(), version: m.demandeVersion, par: qui.qui, role: 'client',
+      motif: String(b.motif || 'modification du client').slice(0, 160), avant: avant, apres: apre }]);
+    if (m.demandeHist.length > 30) m.demandeHist = m.demandeHist.slice(-25);
+    const prixAccepte = !!(m.prixVerrouille && m.prixVerrouille.montant > 0) || !!(m.devis && m.devis.statut === 'accepte');
+    const lib = Object.keys(apre).map(k => k === 'reponses' ? 'précisions' : k).join(', ');
+    if (prixAccepte) {
+      m.demandeModif = { statut: 'en_attente_nouveau_prix', at: nowISO(), par: qui.qui, version: m.demandeVersion,
+        motif: String(b.motif || '').slice(0, 160), champs: Object.keys(apre) };
+      relMsgsys(r, '✍️ Le client a modifié sa demande (v' + m.demandeVersion + ' : ' + lib + '). Le prix déjà accepté reste en vigueur tant qu\'un NOUVEAU prix n\'a pas été proposé puis accepté par le client.');
+      try { relMsg(m, 'systeme', 'Klean', '✍️ Demande modifiée par le client — un nouveau prix est attendu (le prix accepté actuel ne change pas).', { type: 'prix' }); } catch (e) { }
+    } else {
+      m.demandeModif = { statut: 'prise_en_compte', at: nowISO(), par: qui.qui, version: m.demandeVersion };
+      relMsgsys(r, '✍️ Demande actualisée par le client (v' + m.demandeVersion + ' : ' + lib + ').');
+    }
+    relJournal(r, 'demande-modifiee', qui.qui, 'client', 'v' + ancienneVersion + ' → v' + m.demandeVersion + ' · ' + lib + ' · motif : ' + String(b.motif || '').slice(0, 80)
+      + (prixAccepte ? ' · prix accepté INCHANGÉ (' + (m.prixVerrouille ? m.prixVerrouille.montant : (m.devis || {}).total) + ' F) — nouvelle proposition exigée' : ''));
+    saveDb();
+    try { emitAdmin('relation', '✍️ ' + m.id + ' — demande modifiée par le client (v' + m.demandeVersion + ')' + (prixAccepte ? ' · prix accepté inchangé' : '')); } catch (e) { }
+    try { tarifBump('demande-modifiee', { par: qui.qui, role: 'client', mission: m.id, version: m.demandeVersion, champs: Object.keys(apre) }); } catch (e) { }
+    return sendJson(res, 200, { ok: true, version: m.demandeVersion, prixAccepteConserve: prixAccepte,
+      message: prixAccepte ? 'Demande modifiée. Le prix déjà accepté reste en vigueur : le professionnel doit proposer un NOUVEAU prix, que vous accepterez ou refuserez explicitement.'
+        : 'Demande modifiée — le professionnel est prévenu.', rel: relPublique(m), hist: m.demandeHist.slice(-5) });
+  }
+  const mRelAnn = p.match(/^\/api\/missions\/([^/]+)\/rel\/annuler$/);
+  if (mRelAnn && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mRelAnn[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    const qui = relQui(req, m);
+    if (!qui || qui.role !== 'client') return sendJson(res, 403, { error: 'Réservé au client de cette demande' });
+    const b = await readBody(req);
+    const r = relDe(m);
+    relSetEtat(r, 'annulee', 'annulée par le client'); r.annuleAt = nowISO();
+    relJournal(r, 'annulation', qui.qui, 'client', String(b.motif || '').slice(0, 160));
+    relMsgsys(r, '⛔ Demande annulée par le client' + (b.motif ? ' — « ' + String(b.motif).slice(0, 100) + ' »' : '') + '.');
+    m.status = 'annulee'; saveDb();
+    try { emitAdmin('relation', '⛔ ' + m.id + ' — annulée par le client'); } catch (e) { }
+    return sendJson(res, 200, { ok: true, rel: relPublique(m) });
+  }
+  /* 🔁 reprise du lendemain : nouveau tour de 2 professionnels pour LA MÊME demande */
+  const mRelRel = p.match(/^\/api\/missions\/([^/]+)\/rel\/relancer$/);
+  if (mRelRel && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mRelRel[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    const qui = relQui(req, m);
+    if (!qui || qui.role !== 'client') return sendJson(res, 403, { error: 'Réservé au client de cette demande' });
+    const C = relConfig(), r = relDe(m);
+    if (r.etat !== 'aucun_pro' && !isPdg(req))
+      return sendJson(res, 409, { error: 'La recherche est encore en cours : attendez la réponse du professionnel en relation.' });
+    if ((r.pros || []).some(p => p.sens === 'en_attente'))
+      return sendJson(res, 409, { error: 'Un professionnel doit encore répondre : laissez-lui le temps de faire son devis.' });
+    if (relProsAujourdHui(m) >= C.maxProsParTour && !isPdg(req))
+      return sendJson(res, 409, { error: 'RÈGLE KLEAN : ' + C.maxProsParTour + ' professionnels maximum par jour pour la même demande. La reprise est possible demain (ou par décision du PDG).',
+        prochaineLe: r.prochaineLe || relRepriseISO(C) });
+    if (r.prochaineLe && Date.now() < new Date(r.prochaineLe).getTime() && !isPdg(req))
+      return sendJson(res, 409, { error: 'Reprise possible à partir de ' + String(r.prochaineLe).slice(0, 16).replace('T', ' ') + ' (règle : après 2 professionnels, on reprend le jour suivant).', prochaineLe: r.prochaineLe });
+    r.tour = (r.tour || 1) + 1; r.prochaineLe = null; relSetEtat(r, 'attente_pro1', 'reprise du jour ' + String(nowISO()).slice(0, 10));
+    relJournal(r, 'reprise', qui.qui, 'client', 'tour ' + r.tour + ' — recherche relancée');
+    relMsgsys(r, '🔁 Nouvelle recherche (tour ' + r.tour + ') : jusqu’à ' + C.maxProsParTour + ' professionnels, puis pause jusqu’au lendemain.');
+    saveDb();
+    const su = relProposerSuivant(m);
+    return sendJson(res, 200, { ok: true, tour: r.tour, suivant: su.ok ? su.rang : null, rel: relPublique(m) });
   }
 
   const mStatus = p.match(/^\/api\/missions\/(.+)\/status$/);
@@ -5646,10 +6630,21 @@ const server = http.createServer(async (req, res) => {
     const perr = validPassword(b.password);
     if (perr) return sendJson(res, 400, { error: perr });
     if (db.clients.find(cl => cl.tel === tel)) return sendJson(res, 409, { error: 'Ce numéro a déjà un compte — connectez-vous' });
+    /* 📜 le client devient un client Klean en ACCEPTANT les conditions (règle du PDG — case obligatoire) */
+    conditionsEnsure();
+    if (db.conditions.exigee !== false && b.conditionsAcceptees !== true)
+      return sendJson(res, 400, { error: 'Vous devez accepter les conditions Klean-Services (client) pour créer votre compte',
+        conditions: conditionsPub('client').version,
+        conseil: 'lisez les conditions à l’écran puis cochez « J’accepte » — aucun compte n’est créé sans cela.' });
     const salt = crypto.randomBytes(12).toString('hex');
-    const cl = { id: uid('CL'), nom: b.nom.trim(), tel, quartier: String(b.quartier || '').slice(0, 60), ville: String(b.ville || '').slice(0, 60), mail: String(b.mail || '').slice(0, 80), salt, passHash: hashPassword(salt, b.password), createdAt: nowISO(),
+    const cl0 = { id: uid('CL'), nom: b.nom.trim(), tel, quartier: String(b.quartier || '').slice(0, 60), ville: String(b.ville || '').slice(0, 60), mail: String(b.mail || '').slice(0, 80), salt, passHash: hashPassword(salt, b.password), createdAt: nowISO(),
       lastLogin: nowISO(), lastAppareil: String(req.headers['user-agent'] || '').slice(0, 120) };
-    db.clients.push(cl); saveDb();
+    const cl = cl0;
+    db.clients.push(cl);
+    const accC = conditionsAccepter('client', cl.nom, tel, { ua: req.headers['user-agent'], ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress, source: 'inscription' });
+    cl.conditionsVersion = accC.version; cl.conditionsAt = accC.at;
+    saveDb();
+    auditLog('conditions_acceptees', { role: 'client', qui: cl.nom, version: accC.version, source: 'inscription' });
     console.log(`👤 Nouveau compte client : ${cl.nom} (${tel})`);
     return sendJson(res, 201, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom });
   }
@@ -5929,6 +6924,12 @@ const server = http.createServer(async (req, res) => {
   /* --- DOSSIERS AGENTS (candidature vérifiée par le propriétaire) --- */
   if (p === '/api/agents/apply' && req.method === 'POST') {
     const b = await readBody(req);
+    /* 📜 le professionnel devient un Klean professionnel en ACCEPTANT les conditions (case obligatoire) */
+    conditionsEnsure();
+    if (db.conditions.exigee !== false && b.conditionsAcceptees !== true)
+      return sendJson(res, 400, { error: 'Vous devez accepter les conditions Klean-Services (professionnel) avant d’envoyer votre dossier',
+        conditions: conditionsPub('pro').version,
+        conseil: 'lisez les conditions à l’écran puis cochez « J’accepte les conditions professionnelles » — aucun dossier n’est déposé sans cela.' });
     const need = ['nom', 'prenom', 'naissance', 'tel1', 'quartier', 'adresse', 'pieceType', 'pieceNum', 'urgenceNom', 'urgenceTel', 'ref1Nom', 'ref1Tel'];
     for (const k of need) if (!b[k] || String(b[k]).trim() === '') return sendJson(res, 400, { error: 'Champ manquant : ' + k });
     if (Array.isArray(b.services) && b.services.includes('cours') && !(b.niveau && String(b.niveau).trim())) return sendJson(res, 400, { error: 'Niveau d\'étude requis pour les Cours ou formation à domicile' });
@@ -5969,7 +6970,11 @@ const server = http.createServer(async (req, res) => {
       db.agents = db.agents.filter(a => a.id !== reApply.id);
       auditLog('agent_recandidature', { agent: ag.nom, tel: tel1 });
     }
-    db.agents.push(ag); saveDb();
+    db.agents.push(ag);
+    const accP = conditionsAccepter('pro', ag.nom, tel1, { ua: req.headers['user-agent'], ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress, source: 'inscription' });
+    ag.conditionsVersion = accP.version; ag.conditionsAt = accP.at;
+    saveDb();
+    auditLog('conditions_acceptees', { role: 'pro', qui: ag.nom, version: accP.version, source: 'inscription' });
     emitAdmin('cand', `📋 Nouvelle candidature professionnel : ${ag.nom} (${ag.quartier}) — dossier à vérifier`);
     console.log(`📋 Candidature agent : ${ag.nom} — ${ag.pieceType} ${ag.pieceNum}`);
     return sendJson(res, 201, { ok: true, agentId: ag.id, status: 'pending' });
@@ -8816,6 +9821,293 @@ const server = http.createServer(async (req, res) => {
   }
 
   /* ═══════════════ 💰 MOTEUR DE TARIFICATION (tableau de bord PDG) ═══════════════ */
+  /* ═══════════ 🤝 MISE EN RELATION — vue des gestionnaires (traçabilité complète) ═══════════ */
+  if (p === '/api/admin/rel' && req.method === 'GET') {
+    if (!hqIdentity(req)) return sendJson(res, 401, { error: 'Connexion requise' });
+    const C = relConfig();
+    const avec = db.missions.filter(x => x.rel && (x.rel.pros || []).length);
+    const liste = avec.slice(-200).reverse().map(x => {
+      const r = x.rel;
+      return { missionId: x.id, client: (x.client || {}).nom || (db.clients.find(c => c.id === x.clientId) || {}).nom || '—',
+        service: x.service, ville: x.ville || '', etat: r.etat, etatTxt: REL_ETATS[r.etat] || r.etat, etape: relEtape(x),
+        pros: (r.pros || []).map(p => ({ rang: p.rang, tour: p.tour || 1, nom: p.nom, sens: p.sens, at: p.at, motif: p.motif || '' })),
+        prochaineLe: r.prochaineLe || null, signale: !!r.signale,
+    etatHisto: (r.etatHisto || []).slice(-12), nbMsgs: (r.msgs || []).length,
+        prix: x.devis ? { version: x.devis.version, total: x.devis.total, statut: x.devis.statut } : null,
+        prixVerrouille: x.prixVerrouille || null, createdAt: x.createdAt || '' };
+    });
+    return sendJson(res, 200, { ok: true, config: C, relations: liste, nb: liste.length,
+      contournements: (db.contournements || []).slice(-200).reverse(),
+      nbContournements: (db.contournements || []).length,
+      regle: 'UNE DEMANDE → PROFESSIONNEL 1 → (s’il refuse) PROFESSIONNEL 2 → FIN. Jamais de 3ᵉ mise en relation automatique ; '
+           + 'après le 2ᵉ, la demande se reprend le jour suivant. Conversation courte, prix dans la bulle PRIX, verrouillé à l’acceptation.' });
+  }
+  if (p === '/api/admin/rel' && req.method === 'POST') {
+    if (!isPdg(req)) return sendJson(res, 403, { error: 'Réglage réservé au compte principal (PDG)' });
+    const b = await readBody(req);
+    const C = relConfig();
+    const avant = JSON.stringify({ maxProsParTour: C.maxProsParTour, maxProsParJour: C.maxProsParJour, msgMaxParCote: C.msgMaxParCote, msgMaxCar: C.msgMaxCar, repriseHeures: C.repriseHeures, anti: C.anti });
+    if (b.maxProsParTour !== undefined) C.maxProsParTour = Math.max(1, Math.min(2, parseInt(b.maxProsParTour, 10) || 2));   /* jamais plus de 2 : règle du PDG */
+    if (b.maxProsParJour !== undefined) C.maxProsParJour = Math.max(1, Math.min(10, parseInt(b.maxProsParJour, 10) || 2));
+    if (b.msgMaxParCote !== undefined) C.msgMaxParCote = Math.max(2, Math.min(30, parseInt(b.msgMaxParCote, 10) || 8));
+    if (b.msgMaxCar !== undefined) C.msgMaxCar = Math.max(80, Math.min(600, parseInt(b.msgMaxCar, 10) || 240));
+    if (b.repriseHeures !== undefined) C.repriseHeures = Math.max(1, Math.min(48, parseInt(b.repriseHeures, 10) || 12));
+    if (b.anti && typeof b.anti === 'object') {
+      if (b.anti.actif !== undefined) C.anti.actif = !!b.anti.actif;
+      if (b.anti.bloquer !== undefined) C.anti.bloquer = !!b.anti.bloquer;
+      if (b.anti.signalerApres !== undefined) C.anti.signalerApres = Math.max(2, Math.min(10, parseInt(b.anti.signalerApres, 10) || 3));
+    }
+    if (Array.isArray(b.rapidesPro)) C.rapides.pro = b.rapidesPro.map(x => String(x).slice(0, 60)).filter(x => x).slice(0, 8);
+    if (Array.isArray(b.rapidesClient)) C.rapides.client = b.rapidesClient.map(x => String(x).slice(0, 60)).filter(x => x).slice(0, 8);
+    C.version = (C.version || 1) + 1;
+    auditLog('relation_config', { version: C.version, par: 'PDG', avant: avant.slice(0, 300), apres: JSON.stringify({ maxProsParTour: C.maxProsParTour, maxProsParJour: C.maxProsParJour, msgMaxParCote: C.msgMaxParCote, msgMaxCar: C.msgMaxCar, anti: C.anti }).slice(0, 300) });
+    saveDb();
+    return sendJson(res, 200, { ok: true, config: C, version: C.version });
+  }
+  const mAdminRel = p.match(/^\/api\/admin\/rel\/([^/]+)$/);
+  if (mAdminRel && req.method === 'GET') {                     /* 🔎 le dossier complet d'une demande (litige) */
+    if (!hqIdentity(req)) return sendJson(res, 401, { error: 'Connexion requise' });
+    const m = db.missions.find(x => x.id === mAdminRel[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    return sendJson(res, 200, { ok: true, rel: relPublique(m), journal: (db.devisJournal || []).filter(j => j.missionId === m.id).slice(-60),
+      contournements: (db.contournements || []).filter(c => c.missionId === m.id),
+      paiement: { moyen: m.paiement || 'cash', verrou: m.prixVerrouille || null, dist: m.dist || null }, status: m.status });
+  }
+  if (p === '/api/admin/rel/fermer' && req.method === 'POST') {  /* ⛔ le gestionnaire arrête une relation à problème */
+    if (!hqIdentity(req)) return sendJson(res, 401, { error: 'Connexion requise' });
+    const b = await readBody(req);
+    const m = db.missions.find(x => x.id === String(b.missionId || ''));
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
+    const r = relDe(m);
+    relSetEtat(r, 'annulee', 'arrêt par un gestionnaire'); r.annuleAt = nowISO(); r.signale = true;
+    relJournal(r, 'arret_gestionnaire', (hqIdentity(req) || {}).nom || 'gestionnaire', 'hq', String(b.motif || '').slice(0, 200));
+    relMsgsys(r, '⛔ Relation arrêtée par Klean' + (b.motif ? ' — « ' + String(b.motif).slice(0, 120) + ' »' : '') + '.', 'alerte');
+    m.status = 'annulee'; saveDb();
+    auditLog('relation_arret', { missionId: m.id, motif: String(b.motif || '').slice(0, 160) });
+    return sendJson(res, 200, { ok: true, rel: relPublique(m) });
+  }
+
+  /* ═══════════ 📜 CONDITIONS KLEAN (tableau de bord PDG) ═══════════ */
+  if (p === '/api/admin/conditions' && req.method === 'GET') {
+    if (!pdgOnly(req, res)) return;
+    conditionsEnsure();
+    const C = db.conditions;
+    const parVersion = {};
+    (C.acceptations || []).forEach(a => { parVersion[a.role + ' v' + a.version] = (parVersion[a.role + ' v' + a.version] || 0) + 1; });
+    return sendJson(res, 200, { ok: true, version: C.version, maj: C.maj, source: C.source, exigee: C.exigee !== false,
+      client: C.client, pro: C.pro, versions: (C.versions || []).slice(-40).reverse(),
+      acceptations: (C.acceptations || []).slice(-300).reverse(), nbAcceptations: (C.acceptations || []).length,
+      parVersion, journal: (C.journal || []).slice(-120).reverse(),
+      regle: 'Le PDG publie le texte (version + date). Un client ou un pro ne devient utilisateur qu’en ACCEPTANT la version en vigueur ; '
+           + 'chaque acceptation est une preuve (qui, rôle, version, date, heure, appareil, IP). Publier une nouvelle version n’efface rien : '
+           + 'les acceptations passées restent attachées à leur version, et les utilisateurs doivent relire et ré-accepter.' });
+  }
+  if (p === '/api/admin/conditions' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const action = String(b.action || '').slice(0, 20);
+    conditionsEnsure();
+    const C = db.conditions;
+    const bump = (quoi, avant, apres, motif) => {
+      C.version = Number(C.version || 1) + 1;
+      C.versions = (C.versions || []); C.versions.push({ n: C.version, at: nowISO(), par: 'PDG', note: String(motif || quoi).slice(0, 200) });
+      C.journal = (C.journal || []); C.journal.push({ at: nowISO(), action: quoi, avant: String(avant).slice(0, 300), apres: String(apres).slice(0, 300), motif: String(motif || '').slice(0, 200), version: C.version, par: 'PDG' });
+      auditLog('conditions_' + quoi, { version: C.version, motif: String(motif || '').slice(0, 120) });
+    };
+    /* exiger (ou non) l'acceptation : jamais supprimé, seulement activé/désactivé */
+    if (action === 'exigee') {
+      const avant = C.exigee !== false; C.exigee = !!b.exigee;
+      /* ⚠️ le TEXTE n'a pas changé : on ne crée donc PAS de nouvelle version — sinon tout le monde
+         serait obligé de relire et re-signer pour un simple interrupteur (défaut évité). */
+      C.journal = (C.journal || []);
+      C.journal.push({ at: nowISO(), action: 'exigence', avant: avant ? 'obligatoire' : 'facultative',
+        apres: C.exigee ? 'obligatoire' : 'facultative', motif: String(b.motif || 'acceptation obligatoire ou non').slice(0, 200), version: C.version, par: 'PDG' });
+      auditLog('conditions_exigence', { exigee: C.exigee, version: C.version });
+      saveDb();
+      return sendJson(res, 200, { ok: true, exigee: C.exigee, version: C.version, texteInchange: true });
+    }
+    /* modifier un article (titre et/ou points) */
+    if (action === 'article') {
+      const role = (String(b.role) === 'pro' ? 'pro' : 'client');
+      const i = parseInt(b.index, 10);
+      if (!(i >= 0) || i >= C[role].length) return sendJson(res, 400, { error: 'Article inconnu', conseil: 'index de 0 à ' + (C[role].length - 1) });
+      const avant = JSON.stringify({ t: C[role][i].t, p: C[role][i].p });
+      if (b.titre !== undefined && String(b.titre).trim()) C[role][i].t = String(b.titre).trim().slice(0, 160);
+      if (Array.isArray(b.points)) C[role][i].p = b.points.map(x => String(x).trim()).filter(x => x).slice(0, 20);
+      if (!C[role][i].p.length) return sendJson(res, 400, { error: 'Un article ne peut pas rester vide' });
+      bump('article', avant, JSON.stringify({ t: C[role][i].t, p: C[role][i].p }), b.motif || ('article ' + (i + 1) + ' (' + role + ')'));
+      saveDb();
+      return sendJson(res, 200, { ok: true, article: C[role][i], version: C.version });
+    }
+    /* ajouter un article */
+    if (action === 'article-ajouter') {
+      const role = (String(b.role) === 'pro' ? 'pro' : 'client');
+      const titre = String(b.titre || '').trim();
+      const points = (Array.isArray(b.points) ? b.points : []).map(x => String(x).trim()).filter(x => x);
+      if (!titre || !points.length) return sendJson(res, 400, { error: 'Titre et au moins un point sont nécessaires' });
+      C[role].push({ t: titre.slice(0, 160), p: points.slice(0, 20) });
+      bump('article-ajoute', C[role].length - 1, titre, b.motif || ('nouvel article (' + role + ')'));
+      saveDb();
+      return sendJson(res, 200, { ok: true, nb: C[role].length, version: C.version });
+    }
+    /* publier : nouvelle version datée (le texte reste consultable, rien n'est effacé) */
+    if (action === 'publier') {
+      C.maj = String(b.date || new Date().toISOString().slice(0, 10)).slice(0, 20);
+      C.source = String(b.source || C.source || 'PDG').slice(0, 200);
+      bump('publication', 'v' + (C.version - 1), 'v' + (C.version) + ' du ' + C.maj, b.motif || 'publication des conditions');
+      saveDb();
+      emitAdmin && emitAdmin('info', '📜 Conditions Klean publiées : version ' + C.version + ' du ' + C.maj);
+      return sendJson(res, 200, { ok: true, version: C.version, maj: C.maj, source: C.source });
+    }
+    return sendJson(res, 400, { error: 'Action inconnue', actions: ['exigee', 'article', 'article-ajouter', 'publier'] });
+  }
+
+  /* 🏷️ BASE MARCHÉ — lecture publique : références sourcées et datées + statistiques VALIDÉES par le PDG.
+     Rien d'autre : aucune donnée interne, aucun prix inventé, aucune statistique non validée. */
+  if (p === '/api/marche' && req.method === 'GET') {
+    marcheEnsure();
+    const url = new URL('http://x' + (req.url || '/'));
+    const svc = String(url.searchParams.get('service') || '');
+    const refs = (svc ? marcheRefsPour(svc) : marcheRefsActives()).filter(r => r.statut !== 'desactivee');
+    const stats = marcheStatsPubliques();
+    return sendJson(res, 200, { ok: true, version: db.tarif.version, maj: db.tarif.maj || '',
+      service: svc || null,
+      refs: refs.map(r => ({ id: r.id, nom: r.nom, service: r.service || '', unite: r.unite || '', min: r.min, max: r.max,
+        source: r.source, date: r.date, ville: r.ville || '', statut: r.statut, origine: r.origine || '',
+        note: r.note || '' })),
+      stats: svc ? (stats[svc] || null) : stats,
+      regle: 'Un prix de référence a TOUJOURS une source et une date. Une statistique n’apparaît ici qu’après validation du PDG.',
+      manque: (db.tarif.marcheManque || []).slice(0, 40) });
+  }
+  /* 🏷️ BASE MARCHÉ — tableau de bord : tout voir, ajouter, corriger, désactiver (jamais supprimer) */
+  if (p === '/api/admin/marche' && req.method === 'GET') {
+    if (!hqIdentity(req)) return sendJson(res, 401, { error: 'Connexion requise' });
+    marcheEnsure();
+    const T = db.tarif;
+    T.marcheStats = { maj: nowISO(), parService: marcheStatsCalcul() };   /* recalculé à la lecture : toujours à jour */
+    const stats = Object.keys(T.marcheStats.parService).map(k => Object.assign({}, T.marcheStats.parService[k], {
+      validee: T.marcheStatsValidees[k] ? (T.marcheStatsValidees[k].statut !== 'rejetee') : null,
+      validation: T.marcheStatsValidees[k] || null,
+      refsExistantes: marcheRefsPour(k).length,
+      nomService: (T.svc[k] || {}).nom || k
+    })).sort((a, b) => b.n - a.n);
+    return sendJson(res, 200, { ok: true, version: T.version, maj: T.maj || '',
+      refs: (T.refs || []).filter(r => r && r.type === 'marche').map(r => Object.assign({}, r, { valide: marcheRefValide(r).ok, motifs: marcheRefValide(r).motifs })),
+      nbRefs: (T.refs || []).filter(r => r && r.type === 'marche' && r.statut !== 'desactivee').length,
+      nbDesactivees: (T.refs || []).filter(r => r && r.type === 'marche' && r.statut === 'desactivee').length,
+      stats: stats, statsMaj: T.marcheStats.maj, nbStats: stats.length,
+      services: Object.keys(T.svc).map(k => ({ id: k, nom: T.svc[k].nom })).sort((a, b) => a.nom.localeCompare(b.nom, 'fr')),
+      unites: T.unites, manque: T.marcheManque || [],
+      journal: (T.journal || []).slice(0, 40),
+      versions: (T.versions || []).slice(0, 20),
+      regle: 'SOURCE + DATE obligatoires · aucune référence inventée · rien n’est supprimé (désactivation seulement) · '
+           + 'les statistiques viennent des prix réellement acceptés et ne servent qu’après validation du PDG · aucun prix déjà accepté n’est recalculé.',
+      calculs: { devisAvecMarche: (db.missions || []).filter(m => m.devis && m.devis.marche && m.devis.marche.trouve).length,
+        devisHorsFourchette: (db.missions || []).filter(m => m.devis && m.devis.inhabituelMarche).length } });
+  }
+  if (p === '/api/admin/marche' && req.method === 'POST') {
+    if (!isPdg(req)) return sendJson(res, 403, { error: 'Réservé au compte principal (PDG) — les gestionnaires consultent mais ne fixent pas les références' });
+    const b = await readBody(req);
+    const action = String(b.action || '');
+    marcheEnsure();
+    const T = db.tarif;
+    if (action === 'ref-ajouter' || action === 'ref-modifier') {
+      const r = b.ref || b;
+      const id = action === 'ref-modifier' ? String(r.id || '') : String(r.id || ('MR-' + String(Date.now()).slice(-6)));
+      if (action === 'ref-modifier' && !T.refs.some(x => x && x.id === id)) return sendJson(res, 404, { error: 'Référence introuvable' });
+      const neuve = { id: id, type: 'marche', nom: String(r.nom || '').trim().slice(0, 140),
+        service: String(r.service || '').trim().slice(0, 40), unite: String(r.unite || '').trim().slice(0, 30),
+        min: Math.max(0, Math.round(Number(r.min != null ? r.min : r.montant) || 0)),
+        max: Math.max(0, Math.round(Number(r.max != null ? r.max : r.montant) || 0)),
+        ville: String(r.ville || '').trim().slice(0, 60), source: String(r.source || '').trim().slice(0, 160),
+        date: String(r.date || '').trim().slice(0, 30), note: String(r.note || '').trim().slice(0, 300),
+        statut: 'confirmee', origine: 'pdg', at: nowISO(), par: act(req) };
+      if (neuve.max < neuve.min) neuve.max = neuve.min;
+      const v = marcheRefValide(neuve);
+      if (!v.ok) return sendJson(res, 400, { error: 'Référence INCOMPLÈTE : ' + v.motifs.join(' · '),
+        conseil: 'Règle Klean : un prix sans SOURCE ni DATE n’entre pas dans la base. Indiquez d’où vient le prix et de quand il date.' });
+      if (action === 'ref-modifier') {
+        const i = T.refs.findIndex(x => x && x.id === id);
+        const avant = Object.assign({}, T.refs[i]);
+        T.refs[i] = Object.assign({}, avant, neuve, { statut: avant.statut === 'desactivee' ? 'desactivee' : 'confirmee' });
+        tarifBump('ref-modifier', neuve.nom, avant.min + '–' + avant.max + ' F (' + avant.source + ')',
+          neuve.min + '–' + neuve.max + ' F (' + neuve.source + ')', b.motif || 'correction d’une référence marché', act(req));
+      } else {
+        T.refs.push(neuve);
+        tarifBump('ref-ajouter', neuve.nom, '', neuve.min + '–' + neuve.max + ' F (' + neuve.source + ', ' + neuve.date + ')', b.motif || 'nouvelle référence marché', act(req));
+      }
+      saveDb();
+      return sendJson(res, 200, { ok: true, ref: neuve, version: T.version });
+    }
+    if (action === 'ref-confirmer' || action === 'ref-desactiver' || action === 'ref-reactivier') {
+      const r = T.refs.find(x => x && x.id === String(b.id || ''));
+      if (!r) return sendJson(res, 404, { error: 'Référence introuvable' });
+      const avant = r.statut || 'a_confirmer';
+      r.statut = action === 'ref-desactiver' ? 'desactivee' : 'confirmee';
+      r.par = act(req); r.atStatut = nowISO();
+      tarifBump(action, r.nom || r.id, avant, r.statut, b.motif || ('référence ' + r.statut), act(req));
+      saveDb();
+      return sendJson(res, 200, { ok: true, id: r.id, statut: r.statut, version: T.version });
+    }
+    /* 📊 validation d'une statistique : rien ne devient public sans cette décision */
+    if (action === 'stat-valider' || action === 'stat-rejeter') {
+      const svc = String(b.service || '');
+      const calcul = marcheStatsCalcul()[svc];
+      if (!calcul) return sendJson(res, 404, { error: 'Aucun prix accepté pour ce service : il n’y a rien à valider' });
+      if (action === 'stat-rejeter') {
+        T.marcheStatsValidees[svc] = { service: svc, statut: 'rejetee', rejeteeAt: nowISO(), rejeteePar: act(req), motif: String(b.motif || '').slice(0, 200), calcul: calcul };
+        tarifBump('stat-rejeter', (T.svc[svc] || {}).nom || svc, calcul.n + ' prix acceptés', 'statistique rejetée', b.motif || 'statistique rejetée', act(req));
+        saveDb();
+        return sendJson(res, 200, { ok: true, statut: 'rejetee', version: T.version });
+      }
+      const avant = T.marcheStatsValidees[svc] || null;
+      T.marcheStatsValidees[svc] = Object.assign({}, calcul, { statut: 'validee', valideeAt: nowISO(), valideePar: act(req),
+        motif: String(b.motif || '').slice(0, 200),
+        source: 'Statistiques Klean-Services — ' + calcul.n + ' prix acceptés du ' + (calcul.periode.de || '?') + ' au ' + (calcul.periode.a || '?'),
+        date: String(nowISO()).slice(0, 10) });
+      tarifBump('stat-valider', (T.svc[svc] || {}).nom || svc, avant ? 'validée le ' + String(avant.valideeAt).slice(0, 10) : 'non validée',
+        calcul.n + ' prix acceptés · ' + calcul.min + '–' + calcul.max + ' F (médiane ' + calcul.mediane + ' F)', b.motif || 'statistique validée par le PDG', act(req));
+      saveDb();
+      return sendJson(res, 200, { ok: true, statut: 'validee', statistique: T.marcheStatsValidees[svc], version: T.version });
+    }
+    /* 📈 une statistique validée peut devenir une RÉFÉRENCE (avec sa source et sa date) — jamais en silence */
+    if (action === 'stat-promouvoir') {
+      const svc = String(b.service || '');
+      const V = T.marcheStatsValidees[svc];
+      if (!V || V.statut === 'rejetee') return sendJson(res, 400, { error: 'Validez d’abord la statistique de ce service' });
+      const id = 'stats-' + svc;
+      const ref = { id: id, type: 'marche', nom: 'Prix habituellement pratiqués — ' + ((T.svc[svc] || {}).nom || svc),
+        service: svc, unite: String(b.unite || 'intervention').slice(0, 30), min: V.min, max: V.max,
+        ville: V.ville || '', source: V.source, date: V.date, statut: 'confirmee', origine: 'stats',
+        note: 'Issue des prix réellement acceptés sur Klean (' + V.n + ' prix, médiane ' + V.mediane + ' F), validée par le PDG le ' + String(V.valideeAt).slice(0, 10) + '.',
+        at: nowISO(), par: act(req) };
+      const i = T.refs.findIndex(x => x && x.id === id);
+      if (i >= 0) { const avant = T.refs[i]; T.refs[i] = ref;
+        tarifBump('stat-promouvoir', ref.nom, avant.min + '–' + avant.max + ' F', ref.min + '–' + ref.max + ' F', b.motif || 'mise à jour depuis les statistiques', act(req));
+      } else { T.refs.push(ref);
+        tarifBump('stat-promouvoir', ref.nom, '', ref.min + '–' + ref.max + ' F (' + ref.source + ')', b.motif || 'référence créée depuis les statistiques validées', act(req)); }
+      saveDb();
+      return sendJson(res, 200, { ok: true, ref: ref, version: T.version });
+    }
+    if (action === 'manque-ajouter' || action === 'manque-retirer') {
+      T.marcheManque = T.marcheManque || [];
+      const lib = String(b.libelle || '').trim().slice(0, 80);
+      if (!lib) return sendJson(res, 400, { error: 'Libellé manquant' });
+      if (action === 'manque-ajouter') { if (T.marcheManque.indexOf(lib) < 0) T.marcheManque.push(lib); }
+      else T.marcheManque = T.marcheManque.filter(x => x !== lib);
+      tarifBump(action, lib, '', action === 'manque-ajouter' ? 'ajouté à la liste à compléter' : 'retiré de la liste à compléter', b.motif || '', act(req));
+      saveDb();
+      return sendJson(res, 200, { ok: true, manque: T.marcheManque, version: T.version });
+    }
+    if (action === 'stats-recalculer') {
+      const s2 = marcheStatsMaj();
+      tarifBump('stats-recalculer', 'statistiques marché', '', Object.keys(s2.parService).length + ' service(s) avec des prix acceptés', b.motif || 'recalcul des statistiques', act(req));
+      return sendJson(res, 200, { ok: true, stats: s2, version: T.version });
+    }
+    return sendJson(res, 400, { error: 'Action inconnue', actions: ['ref-ajouter', 'ref-modifier', 'ref-confirmer', 'ref-desactiver', 'ref-reactivier',
+      'stat-valider', 'stat-rejeter', 'stat-promouvoir', 'manque-ajouter', 'manque-retirer', 'stats-recalculer'] });
+  }
+
   if (p === '/api/admin/tarif' && req.method === 'GET') {
     if (!pdgOnly(req, res)) return;
     tarifEnsure();
@@ -8832,12 +10124,16 @@ const server = http.createServer(async (req, res) => {
       ok: true, version: T.version, maj: T.maj, versions: T.versions.slice(0, 40),
       unites: T.unites, coefs: T.coefs, paliers: T.paliers, deplacement: T.deplacement,
       zones: T.zones, seuils: T.seuils, remises: T.remises, refs: (T.refs || []).slice(-60).reverse(),
+      marche: { nbRefs: (T.refs || []).filter(r => r && r.type === 'marche' && r.statut !== 'desactivee').length,
+        nbAConfirmer: (T.refs || []).filter(r => r && r.type === 'marche' && r.statut === 'a_confirmer').length,
+        nbStats: Object.keys(T.marcheStatsValidees || {}).length, manque: T.marcheManque || [] },
       source: T.zonesSrc || null,
       reference: (T.refs || []).find(x => x && x.id === 'deplacement') || null,
       journal: T.journal.slice(0, 120), services: svcs,
       nbServices: svcs.length, nbDevis: svcs.filter(x => x.devis).length,
-      questions: tarifQuestionsToutes().map(q => Object.assign({}, q, { nbServices: Object.keys(T.svc).filter(k => tarifCibleOk(q.cible, T.svc[k])).length })),
+      questions: tarifQuestionsToutes().map(q => Object.assign({}, tarifQuestionAdmin(q), { nbServices: Object.keys(T.svc).filter(k => tarifCibleOk(q.cible, T.svc[k])).length })),
       nbQuestions: tarifQuestionsToutes().filter(q => !q.off).length,
+      nbQuestionsOff: tarifQuestionsToutes().filter(q => q.off).length,
       nbATarifer: svcs.filter(x => !x.devis && !(x.ref > 0)).length,
       nbDesactives: svcs.filter(x => x.off).length,
       questionsPubliques: (() => { const out = {}; Object.keys(T.svc).forEach(k => { const qs = tarifQuestionsDe(T.svc[k]); if (qs.length) out[k] = qs.map(q => q.id); }); return out; })(),
@@ -9683,6 +10979,11 @@ server.listen(PORT, '0.0.0.0', () => {
       console.log('  💰 Moteur de tarification : ' + Object.keys(db.tarif.svc).length + ' services tarifés · version ' + db.tarif.version
         + ' · déplacement : ' + (db.tarif.deplacement || {}).mode
         + ' · ' + Object.keys(db.tarif.zones || {}).length + ' zones (' + (_zsrc.actif ? 'distances validées' : 'distances À VALIDER : source + date') + ')');
+      conditionsEnsure();
+      console.log('  📜 Conditions Klean-Services : version ' + db.conditions.version + ' du ' + (db.conditions.maj || '?')
+        + ' · ' + db.conditions.client.length + ' articles client · ' + db.conditions.pro.length + ' articles pro'
+        + ' · ' + (db.conditions.exigee !== false ? 'acceptation OBLIGATOIRE à l’inscription' : 'acceptation facultative')
+        + ' · ' + (db.conditions.acceptations || []).length + ' preuve(s) d’acceptation');
     } catch (e) { console.error('Tarification :', e.message); }
     console.log('  🔑 Mot de passe HQ : ' + (db.admin ? 'déjà configuré ✓' : 'à créer à /admin'));
     console.log('  💰 Commission  : ' + (feePct() * 100) + '% par mission');

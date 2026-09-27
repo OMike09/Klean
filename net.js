@@ -127,6 +127,25 @@ function devisLignesHtml(d){
       }).join('') + '</div>';
   }).join('');
 }
+/* 🏷️ LOT 112 — LA RÉFÉRENCE MARCHÉ, toujours avec sa source et sa date.
+   Elle ne change aucun prix : elle dit seulement où se situe le montant proposé. */
+function marcheBlocHtml(marche){
+  if(!marche) return '';
+  if(!marche.trouve) return '<div style="background:#f4f7f5;border:1px dashed var(--line);border-radius:10px;padding:8px 10px;margin-top:9px;font-size:11.5px;color:var(--muted)">'
+    + '🏷️ Aucune référence de marché enregistrée pour ce service : aucune comparaison n’est faite sur ce montant.</div>';
+  const src = (marche.sources && marche.sources[0]) ? marche.sources[0] : '';
+  const date = (marche.refs && marche.refs[0]) ? marche.refs[0].date : '';
+  const couleur = marche.dans ? '#0a8a62' : '#b45309';
+  const fond = marche.dans ? '#eefaf3' : '#fff8e6';
+  const bord = marche.dans ? '#9fd8bf' : '#ffe0a3';
+  return '<div style="background:' + fond + ';border:1px solid ' + bord + ';border-radius:11px;padding:9px 10px;margin-top:9px;font-size:12px">'
+    + '<b>🏷️ Référence marché : ' + devisFmt(marche.min) + ' – ' + devisFmt(marche.max) + '</b>'
+    + (date ? ' <span style="color:var(--muted)">(' + date + ')</span>' : '')
+    + '<div style="color:var(--muted);margin-top:3px">Source : ' + src + '</div>'
+    + '<div style="margin-top:4px;font-weight:800;color:' + couleur + '">' + (marche.dans ? '✅ ' : '⚠️ ') + marche.message + '</div>'
+    + (marche.dans ? '' : '<div style="margin-top:3px;color:var(--muted)">Le montant proposé est <b>conservé tel quel</b> : il est simplement signalé aux gestionnaires Klean.</div>')
+    + '</div>';
+}
 function devisHtml(d, infos){
   infos = infos || {};
   const verrou = infos.verrou || null;
@@ -150,6 +169,7 @@ function devisHtml(d, infos){
   h += '<div class="rline" style="font-size:17px;font-weight:800"><span>TOTAL</span><span style="color:var(--p)">' + devisFmt(d.total) + '</span></div>';
   if (d.delai || d.duree) h += '<div class="rline" style="font-size:12.5px"><span>⏱ ' + (d.delai ? 'Délai : ' + d.delai : '') + (d.duree ? (d.delai ? ' · ' : '') + 'Durée : ' + d.duree : '') + '</span><span></span></div>';
   if (d.conditions) h += '<p style="font-size:12px;color:var(--muted);margin:7px 0 0">' + d.conditions + '</p>';
+  h += marcheBlocHtml(d.marche);
   if (d.inhabituel) h += '<div style="background:#fff8e6;border:1px solid #ffe0a3;border-radius:10px;padding:8px 10px;margin-top:9px;font-size:12px">'
     + '⚠️ <b>Prix inhabituel</b> par rapport à l’estimation Klean' + (d.estimation && d.estimation.total ? ' (' + devisFmt(d.estimation.total) + ')' : '')
     + '. Il n’est pas supprimé : demandez une explication au professionnel si besoin.</div>';
@@ -541,9 +561,17 @@ function routeNet(msg){
       kLS.set('k2_agentId', msg.agentId);
       break;
 
+    case 'rel_message':                  // 🤝 lot 118 : la mise en relation bouge (message ou prix)
+      try{
+        if(REL && REL.missionId === msg.missionId && typeof relCharger === 'function') relCharger(REL.missionId, REL.role);
+        if(msg.role === 'pro') toast('💬 Nouveau message du professionnel');
+      }catch(e){}
+      break;
+
     case 'devis':                        // 🧾 nouveau devis, acceptation ou refus (lot 109)
       try{
         const mid = msg.missionId;
+        try{ if(REL && REL.missionId === mid && typeof relCharger === 'function') relCharger(mid, REL.role); }catch(e2){}
         if(mid){ if(mission && mission.id === mid && msg.prixVerrouille){ mission.prixVerrouille = { montant: msg.prixVerrouille, version: msg.version, date: new Date().toISOString(), par: 'client' }; } devisCharger(mid); }
         if(msg.statut === 'envoye') toast('🧾 ' + (msg.version > 1 ? 'Devis modifié (v' + msg.version + ')' : 'Nouveau devis (v' + msg.version + ')') + ' : ' + devisFmt(msg.total) + ' — ouvrez le suivi pour répondre'
           + (msg.motif ? '\nMotif : ' + msg.motif : ''));
@@ -1079,3 +1107,269 @@ window.supSend = supSend;
 window.openKleanServiceReel = function(){ try{ supOpen(); }catch(e){} };
 window.openKleanService = function(){ return window.openKleanServiceReel(); };
 window.addEventListener('load', function(){ try{ supBuild(); const f=document.getElementById('sup-fab'); if(f) f.remove(); }catch(e){} });
+
+/* ═════════════════════════════════════════════════════════════════════════
+   🤝 LOT 118 — MISE EN RELATION CLIENT ↔ PROFESSIONNEL (dans l'application)
+   · une demande → UN professionnel 1 → s'il refuse, UN professionnel 2 → fin ;
+   · la conversation est courte : réponses rapides, 240 caractères, 8 messages ;
+   · le PRIX a sa propre bulle, séparée des messages ;
+   · ce qui sert à sortir de Klean (numéro, lien, WhatsApp…) est refusé.
+   Rien n'est supprimé : le devis du lot 109 reste la seule source du prix.
+   ═════════════════════════════════════════════════════════════════════════ */
+let REL = { missionId: null, role: 'client', d: null, occupe: false, cible: '#trk-rel' };
+function relEntetes(role) {
+  if (role === 'pro') { try { return jetonProHeaders(); } catch (e) { return { 'Content-Type': 'application/json' }; } }
+  return Object.assign({ 'Content-Type': 'application/json' }, devisEnteteClient());
+}
+function relFmt(n) { return Number(n || 0).toLocaleString('fr-FR') + ' FCFA'; }
+const REL_ETAPE = {
+  attente: '1️⃣ Mise en relation', devis: '2️⃣ Prix proposé — décision du client', prix_accepte: '3️⃣ Prix accepté',
+  paiement: '4️⃣ Paiement', prestation: '5️⃣ Prestation en cours', prestation_terminee: '✅ Prestation terminée', annulee: '⛔ Demande arrêtée'
+};
+const REL_SENS = { en_attente: '⏳ en attente de sa réponse', accepte: '✅ a accepté', refuse: '❌ refusé / non disponible' };
+async function relCharger(mid, role, cible) {
+  if (!mid) return null;
+  REL.missionId = mid; REL.role = role === 'pro' ? 'pro' : 'client';
+  if (cible) REL.cible = cible;
+  const box = document.querySelector(REL.cible);
+  try {
+    const r = await fetch('/api/missions/' + mid + '/rel', { cache: 'no-store', headers: relEntetes(REL.role) });
+    if (!r.ok) { if (box) box.innerHTML = ''; return null; }
+    REL.d = await r.json(); relRendre(); return REL.d;
+  } catch (e) { if (box) box.innerHTML = ''; return null; }
+}
+function relRendre() {
+  const box = document.querySelector(REL.cible);
+  if (!box || !REL.d) return;
+  box.innerHTML = relHtml(REL.d, REL.role);
+}
+function relHtml(d, role) {
+  const pro = role === 'pro';
+  const suite = (d.hist || []);
+  const dem = d.demande || { version: 1, modif: null };
+  let h = '<div style="border:1.5px solid rgba(194,65,12,.35);border-radius:16px;padding:12px;background:var(--pl)">'
+    + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    + '<b style="font-size:14px">🤝 Mise en relation</b>'
+    + '<span style="margin-left:auto;font-size:11px;font-weight:900;background:#fff;border-radius:20px;padding:3px 9px;border:1px solid rgba(194,65,12,.35)">' + (REL_ETAPE[d.etape] || '') + '</span></div>'
+    + '<div style="margin-top:7px;font-size:13px;font-weight:900;color:var(--pd)">' + (d.etatTxt || '') + '</div>'
+    + '<p style="font-size:11.5px;color:var(--muted);margin:4px 0 0">Règle Klean : 1 demande → professionnel 1 → s’il refuse, professionnel 2 → fin. '
+    + 'Jamais de 3ᵉ proposition ; après le 2ᵉ essai, la demande reprend le lendemain.</p>';
+  /* ✍️ la demande et ses modifications : jamais perdues, visibles des deux côtés */
+  h += '<div style="margin-top:8px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:8px 9px;font-size:12px">'
+    + '<b>📝 Demande v' + (dem.version || 1) + '</b> · ' + (d.desc ? String(d.desc).slice(0, 160) : '')
+    + (dem.modif && dem.modif.statut === 'en_attente_nouveau_prix'
+        ? '<div style="margin-top:4px;color:#b45309;font-weight:800">✍️ Le client a modifié sa demande le ' + String(dem.modif.at || '').replace('T',' ').slice(0,16)
+          + (dem.modif.motif ? ' (« ' + dem.modif.motif + ' »)' : '') + ' — ' + (pro ? 'proposez un NOUVEAU prix.' : 'le prix accepté reste en vigueur jusqu’à votre décision sur le nouveau prix.') + '</div>'
+        : (dem.modif && dem.modif.statut === 'nouvelle_proposition'
+            ? '<div style="margin-top:4px;color:#b45309;font-weight:800">💰 Nouveau prix proposé pour cette demande modifiée — ' + (pro ? 'en attente de la décision du client.' : 'à accepter ou refuser.') + '</div>'
+            : (dem.modif && dem.modif.statut === 'acceptee' ? '<div style="margin-top:4px;color:#0a8a62;font-weight:800">✅ Demande modifiée, nouveau prix accepté explicitement.</div>' : '')))
+    + ((dem.hist || []).length > 1 ? '<details style="margin-top:4px"><summary style="cursor:pointer;color:var(--muted)">historique des modifications (' + ((dem.hist || []).length) + ')</summary>'
+        + (dem.hist || []).map(function(x){ return '<div style="font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding:3px 0">v' + x.version + ' · ' + String(x.at||'').replace('T',' ').slice(0,16) + ' · ' + (x.par||'') + ' · ' + (x.motif||'') + '</div>'; }).join('')
+        + '</details>' : '')
+    + '</div>'
+    + (REL.role === 'client' ? '<button type="button" onclick="relModifierDemande()" style="margin-top:7px;background:#fff;border:1.5px solid var(--pd);color:var(--pd);border-radius:11px;padding:8px 11px;font-weight:900;font-size:12.5px;cursor:pointer">✍️ Modifier ma demande</button>' : '');
+  /* les professionnels contactés */
+  h += '<div style="margin-top:9px;display:flex;flex-direction:column;gap:5px">'
+    + (d.pros || []).map(function (p) {
+      return '<div style="display:flex;gap:7px;align-items:center;font-size:12.5px;background:#fff;border-radius:10px;padding:7px 9px">'
+        + '<b>Pro ' + p.rang + '</b><span style="flex:1">' + (p.nom || '') + '</span><span style="font-weight:800">' + (REL_SENS[p.sens] || p.sens) + '</span></div>';
+    }).join('') || '<div style="font-size:12.5px">Aucun professionnel encore contacté.</div>'
+    + '</div>';
+  /* 💰 la BULLE PRIX, séparée des messages */
+  if (d.prix && d.prix.version) {
+    const v = d.prix, vf = d.prixVerrouille;
+    h += '<div style="margin-top:10px;border:2px solid ' + (vf ? '#0a8a62' : 'var(--p)') + ';border-radius:13px;padding:11px;background:#fff">'
+      + '<div style="display:flex;align-items:center;gap:6px"><b style="font-size:13px">💰 PRIX</b>'
+      + '<span style="margin-left:auto;font-size:11px;color:var(--muted)">devis v' + v.version + ' · ' + String(v.at || '').slice(0, 10) + '</span></div>'
+      + '<div style="font-size:19px;font-weight:900;margin:6px 0 2px">Prix de devis : ' + relFmt(v.total).replace(' FCFA', ' FCFA') + '</div>'
+      + (v.estModification ? '<div style="font-size:11.5px;color:var(--muted)">↻ nouvelle proposition après le premier prix</div>' : '');
+    if (vf) h += '<div style="font-size:12.5px;font-weight:800;color:#0a8a62;margin-top:5px">🔒 Montant officiel de la prestation : ' + relFmt(vf.montant)
+      + ' (accepté le ' + String(vf.date || '').slice(0, 16).replace('T', ' ') + ')</div>'
+      + '<button type="button" class="act-btn" style="width:100%;margin-top:8px" onclick="relPayerMaintenant()">💳 Aller au paiement</button>';
+    else if (v.statut === 'envoye' && !pro) h += '<div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap">'
+      + '<button type="button" class="act-btn green" style="flex:1;min-width:132px" onclick="relPrixDecision(\'accepter\')">✓ Accepter le prix</button>'
+      + '<button type="button" class="act-btn" style="flex:1;min-width:132px;color:var(--danger);border-color:#f5c6c7" onclick="relBasculerMotif()">✕ Refuser</button>'
+      + '<button type="button" class="act-btn" style="flex:1;min-width:132px" onclick="relPrecision()">↩ Demander une précision</button></div>'
+      + '<div id="rel-motif-zone" style="display:none;margin-top:8px"><input id="rel-motif" placeholder="Pourquoi refusez-vous ce prix ? (facultatif)" style="width:100%;font:inherit;padding:9px;border:1.5px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)">'
+      + '<button type="button" class="act-btn" style="width:100%;margin-top:7px" onclick="relPrixDecision(\'refuser\')">Envoyer mon refus — le droit au 2ᵉ professionnel s’ouvre</button></div>';
+    else if (v.statut === 'envoye') h += '<div style="font-size:12.5px;margin-top:6px;color:var(--muted)">⏳ En attente de la décision du client.</div>';
+    else if (v.statut === 'refuse') h += '<div style="font-size:12.5px;margin-top:6px;color:var(--muted)">🚫 Prix refusé par le client (le professionnel concerné sort du jeu).</div>';
+    h += marcheBlocHtml(v.marche);   /* 🏷️ lot 112 : la référence marché, avec sa source et sa date */
+    if (pro && (d.etat === 'pro1_accepte' || d.etat === 'pro2_accepte'))
+      h += '<div style="margin-top:9px"><input id="rel-prix-montant" type="number" min="500" step="500" placeholder="Montant en FCFA (ex : 25000)" style="width:100%;font:inherit;padding:9px;border:1.5px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)">'
+        + '<input id="rel-prix-libelle" placeholder="Ce que comprend ce prix (ex : main-d’œuvre + produit)" style="width:100%;font:inherit;padding:9px;border:1.5px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);margin-top:6px">'
+        + '<button type="button" class="act-btn green" style="width:100%;margin-top:7px" onclick="relPrixEnvoyer()">💰 Envoyer mon prix au client</button></div>';
+    h += '</div>';
+  }
+  /* le fil des messages */
+  h += '<div style="margin-top:10px;max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:6px" id="rel-fil">'
+    + (d.msgs || []).map(function (m) {
+      if (m.type === 'prix') return '<div style="align-self:' + (m.role === role ? 'flex-end' : 'flex-start') + ';max-width:88%;border-radius:12px;padding:8px 10px;font-size:12.5px;font-weight:800;background:' + (m.decision === 'accepte' ? '#e6f7ef' : (m.decision === 'refuse' ? '#fdeaea' : '#fff8e6')) + ';border:1px solid ' + (m.decision === 'accepte' ? '#9fd8bf' : (m.decision === 'refuse' ? '#f0b5b5' : '#f0d79a')) + '">'
+        + '💰 PRIX : ' + relFmt(m.montant) + (m.decision ? (m.decision === 'accepte' ? ' — ✓ accepté' : ' — ✕ refusé') : ' — proposition') + '</div>';
+      if (m.type === 'systeme' || m.role === 'systeme') return '<div style="align-self:stretch;font-size:11.5px;color:#6b5b45;background:#fff6e8;border:1px dashed #e8cf9f;border-radius:10px;padding:7px 9px">' + m.texte + '</div>';
+      return '<div style="align-self:' + (m.role === role ? 'flex-end' : 'flex-start') + ';max-width:88%;background:' + (m.role === role ? '#fff' : '#f2f6f4') + ';border:1px solid var(--line);border-radius:12px;padding:8px 10px;font-size:13px">'
+        + '<b style="font-size:11px;color:var(--muted);display:block">' + (m.de) + ' · ' + String(m.at || '').slice(11, 16) + '</b>' + m.texte + '</div>';
+    }).join('')
+    + '</div>';
+  /* les réponses rapides (uniquement ce qui est utile à cette étape) */
+  const rp = (d.rapides || {})[role] || [];
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'
+    + rp.map(function (t) { return '<button type="button" class="act-btn" style="font-size:11.5px;padding:6px 9px" onclick="relRapide(' + JSON.stringify(t).replace(/"/g, '&quot;') + ')">' + t + '</button>'; }).join('')
+    + '</div>';
+  /* écrire (court) */
+  const max = (d.limites || {}).msgMaxCar || 240;
+  h += '<div style="display:flex;gap:6px;margin-top:9px;align-items:center">'
+    + '<input id="rel-saisie" maxlength="' + max + '" placeholder="Message court (max ' + max + ' caractères)" style="flex:1;font:inherit;padding:9px;border:1.5px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)">'
+    + '<button type="button" class="act-btn" onclick="relEnvoyer()">Envoyer</button></div>'
+    + '<p style="font-size:11px;color:var(--muted);margin:6px 0 0">✂️ Conversation courte : ' + ((d.limites || {}).msgMaxParCote || 8) + ' messages maximum chacun, '
+    + max + ' caractères par message. 🛡️ Les numéros, liens et contacts extérieurs sont refusés — la prestation et le paiement passent par Klean.</p>';
+  /* fin de recherche : reprise demain */
+  if (d.etat === 'aucun_pro') {
+    h += '<div style="margin-top:9px;border-top:1px dashed rgba(194,65,12,.4);padding-top:9px">';
+    if (d.prochaineLe) h += '<p style="font-size:12px;margin:0 0 7px">⏸️ Après 2 professionnels, la recherche s’arrête. Vous pourrez reprendre <b>le ' + String(d.prochaineLe).slice(0, 10) + ' à ' + String(d.prochaineLe).slice(11, 16) + '</b>.</p>';
+    if (!pro) h += '<button type="button" class="act-btn" style="width:100%" onclick="relRelancer()">🔁 Reprendre la recherche</button>';
+    h += '</div>';
+  }
+  if (d.signale) h += '<div style="margin-top:9px;background:#fdeaea;border:1.5px solid #f0b5b5;border-radius:11px;padding:9px;font-size:12px">⛔ Cette relation a été arrêtée (manquement aux règles ou décision d’un gestionnaire). Aucune autre mise en relation ne reprendra ici.</div>';
+  /* traçabilité visible */
+  if (suite.length) h += '<details style="margin-top:9px"><summary style="font-size:11.5px;color:var(--muted);cursor:pointer">🗂️ Historique (consultable par les gestionnaires en cas de litige)</summary>'
+    + '<div style="font-size:11px;color:var(--muted);margin-top:6px">' + suite.slice(-12).reverse().map(function (x) {
+      return '<div>• ' + String(x.at || '').slice(0, 16).replace('T', ' ') + ' — ' + x.quoi + (x.detail ? ' : ' + x.detail : '') + '</div>';
+    }).join('') + '</div></details>';
+  return h + '</div>';
+}
+/* envois */
+async function relAppel(chemin, corps, okTxt) {
+  if (REL.occupe || !REL.missionId) return null;
+  REL.occupe = true;
+  try {
+    const r = await fetch('/api/missions/' + REL.missionId + '/rel' + chemin, { method: 'POST', headers: relEntetes(REL.role), body: JSON.stringify(corps || {}) });
+    const d = await r.json().catch(function () { return {}; });
+    REL.occupe = false;
+    if (d && d.rel) { REL.d = d.rel; relRendre(); }
+    else { await relCharger(REL.missionId, REL.role); }
+    if (!r.ok) { toast(d.error || 'Action impossible'); return null; }
+    if (okTxt) toast(okTxt);
+    return d;
+  } catch (e) { REL.occupe = false; toast('⚠️ Réseau indisponible — réessayez'); return null; }
+}
+function relEnvoyer() {
+  const i = document.getElementById('rel-saisie'); const t = i ? (i.value || '').trim() : '';
+  if (!t) return toast('Écrivez un message court');
+  return relAppel('/message', { texte: t }, null).then(function (d) { if (d && i) i.value = ''; });
+}
+function relPrecision() { const i = document.getElementById('rel-saisie'); if (i) { i.focus(); i.value = 'J’ai besoin d’une précision : '; } toast('✍️ Écrivez votre précision en une phrase'); }
+function relRapide(t) {
+  const d = REL.d || {};
+  if (REL.role === 'pro') {
+    if (/prix pour ce devis/i.test(t)) { const z = document.getElementById('rel-prix-montant'); if (z) { z.focus(); z.scrollIntoView({ block: 'center' }); } return toast('💰 Écrivez le montant, puis envoyez votre prix'); }
+    if (/précision/i.test(t)) { const i = document.getElementById('rel-saisie'); if (i) { i.focus(); i.value = 'J’ai besoin d’une précision : '; } return; }
+    return relAppel('/reponse', { sens: 'auto', texte: t }, 'Réponse envoyée au client ✓');
+  }
+  if (/J’accepte le prix/.test(t) || /J'accepte le prix/.test(t)) return relPrixDecision('accepter');
+  if (/Je refuse le prix/.test(t)) return relPrixDecision('refuser');
+  if (/une précision à ajouter/i.test(t)) return relPrecision();
+  if (/Modifier ma demande/i.test(t)) return relModifierDemande();
+  if (/^Annuler/.test(t)) return relAnnuler();
+  return relAppel('/message', { texte: t, rapide: true }, null);
+}
+/* ✍️ LOT 112 — MODIFIER MA DEMANDE : le client corrige sa demande ; rien n'est supprimé,
+   tout est conservé (avant/après, motif, date) et un prix déjà accepté n'est jamais touché. */
+function relModifierDemande(){
+  const d = REL.d || {};
+  const ov0 = document.getElementById('rel-modif-ov'); if(ov0) ov0.remove();     /* jamais d’écran invisible qui bloque le tactile */
+  const rep = (d.tarif && d.tarif.reponses) || [];
+  const ch = (k, v, lib) => '<label style="display:block;font-size:12px;font-weight:800;margin-top:9px">' + lib
+    + '</label><input id="rm-' + k + '" value="' + String(v == null ? '' : v).replace(/"/g,'&quot;') + '" style="width:100%;padding:9px;border:1.5px solid var(--line);border-radius:10px;background:#fff;font-size:14px">';
+  const ov = document.createElement('div');
+  ov.id = 'rel-modif-ov';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9998;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:14px';
+  ov.innerHTML = '<div style="background:var(--bg);border-radius:16px;padding:14px;max-width:520px;width:100%;margin:auto 0">'
+    + '<div style="display:flex;align-items:center;gap:8px"><b style="font-size:15px">✍️ Modifier ma demande</b>'
+    + '<button type="button" onclick="document.getElementById(\'rel-modif-ov\')&&document.getElementById(\'rel-modif-ov\').remove()" style="margin-left:auto;border:none;background:#fff;border-radius:9px;padding:6px 10px;font-weight:900;cursor:pointer">Fermer ✕</button></div>'
+    + '<p style="font-size:11.5px;color:var(--muted);margin:6px 0 0">Vous précisez ce qui a changé — l’ancienne version est <b>conservée</b> et peut être consultée. '
+    + 'Le métier ne change pas ici (pour un autre métier, annulez et créez une nouvelle demande).</p>'
+    + '<div id="rm-prix" style="margin-top:8px"></div>'
+    + ch('desc', d.desc || '', 'Ce que vous voulez (description)')
+    + ch('pieces', d.pieces || 1, 'Nombre de pièces / d’éléments')
+    + ch('quartier', d.quartier || '', 'Quartier')
+    + ch('adresse', d.adresse || '', 'Adresse exacte (jamais publique : transmise au seul professionnel en relation)')
+    + '<div style="display:flex;gap:8px">'
+      + '<div style="flex:1">' + ch('date', d.date || '', 'Date souhaitée (AAAA-MM-JJ)') + '</div>'
+      + '<div style="flex:1">' + ch('time', d.time || '', 'Heure (HH:MM)') + '</div>'
+    + '</div>'
+    + '<b style="display:block;font-size:12.5px;margin-top:12px">🔎 Précisions déjà données</b>'
+    + '<div id="rm-rep">' + (rep.length ? rep.map(function(x,i){
+        return '<div style="display:flex;gap:6px;margin-top:6px"><input id="rm-q' + i + '" value="' + String(x.q||'').replace(/"/g,'&quot;') + '" style="flex:1;padding:8px;border:1.5px solid var(--line);border-radius:9px;font-size:12.5px">'
+          + '<input id="rm-v' + i + '" value="' + String(x.v||'').replace(/"/g,'&quot;') + '" style="flex:1;padding:8px;border:1.5px solid var(--line);border-radius:9px;font-size:12.5px"></div>';
+      }).join('') : '<div style="font-size:11.5px;color:var(--muted)">Aucune précision pour l’instant.</div>') + '</div>'
+    + '<div style="display:flex;gap:6px;margin-top:7px"><input id="rm-qn" placeholder="Nouvelle précision (ex : accès au 3ᵉ étage)" style="flex:1;padding:8px;border:1.5px solid var(--line);border-radius:9px;font-size:12.5px">'
+      + '<input id="rm-vn" placeholder="Votre réponse" style="flex:1;padding:8px;border:1.5px solid var(--line);border-radius:9px;font-size:12.5px"></div>'
+    + ch('motif', '', 'Pourquoi ce changement ? (obligatoire, gardé dans l’historique)')
+    + '<button type="button" id="rm-envoyer" style="width:100%;margin-top:12px;background:var(--pd);color:#fff;border:none;border-radius:12px;padding:13px;font-weight:900;font-size:14px;cursor:pointer">✍️ Enregistrer la modification</button>'
+    + '<div id="rm-msg" style="font-size:12px;margin-top:8px"></div></div>';
+  document.body.appendChild(ov);
+  const pv = document.getElementById('rm-prix');
+  if(pv) pv.innerHTML = (d.prixVerrouille || (d.prix && d.prix.statut === 'accepte'))
+    ? '<div style="background:#fff8e6;border:1px solid #ffe0a3;border-radius:11px;padding:8px 10px;font-size:12px">🔒 Un prix a déjà été accepté (<b>' + relFmt(d.prixEnVigueur) + '</b>). Il <b>reste en vigueur</b> : votre modification ouvrira une <b>nouvelle proposition</b>, que vous accepterez ou refuserez vous-même.</div>'
+    : '';
+  const b = document.getElementById('rm-envoyer');
+  if(b) b.onclick = function(){
+    const v = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+    const reps = [];
+    for(let i = 0; i < 20; i++){
+      const q = document.getElementById('rm-q' + i); if(!q) break;
+      const val = document.getElementById('rm-v' + i);
+      if(q.value.trim()) reps.push({ q: q.value.trim(), v: (val ? val.value : '').trim() });
+    }
+    if(v('rm-qn').trim()) reps.push({ q: v('rm-qn').trim(), v: v('rm-vn').trim() });
+    if(!v('rm-motif').trim()) return toast('✍️ Dites pourquoi vous modifiez (une phrase)');
+    b.disabled = true; b.textContent = '⏳ Enregistrement…';
+    fetch('/api/missions/' + REL.missionId + '/demande/modifier', { method:'POST', headers: relEntetes('client'),
+      body: JSON.stringify({ motif: v('rm-motif'), desc: v('rm-desc'), pieces: v('rm-pieces'), quartier: v('rm-quartier'),
+        adresse: v('rm-adresse'), date: v('rm-date'), time: v('rm-time'), reponses: reps }) })
+      .then(r => r.json().then(j => ({ ok:r.ok, j:j })))
+      .then(function(x){
+        b.disabled = false; b.textContent = '✍️ Enregistrer la modification';
+        const msg = document.getElementById('rm-msg');
+        if(!x.ok){ if(msg) msg.innerHTML = '<b style="color:var(--danger)">' + ((x.j && x.j.error) || 'Impossible') + '</b>'; return; }
+        if(msg) msg.innerHTML = '<b style="color:#0a8a62">✅ ' + x.j.message + '</b>';
+        toast('✍️ Demande modifiée (v' + x.j.version + ')');
+        if(x.j.rel){ REL.d = x.j.rel; relRendre(); }
+        setTimeout(function(){ const o = document.getElementById('rel-modif-ov'); if(o) o.remove(); }, 1400);
+      })
+      .catch(function(){ b.disabled = false; b.textContent = '✍️ Enregistrer la modification'; toast('⚠️ Réseau indisponible — réessayez'); });
+  };
+}
+function relPrixEnvoyer() {
+  const m = document.getElementById('rel-prix-montant'), l = document.getElementById('rel-prix-libelle');
+  const montant = m ? Number(m.value) : 0;
+  if (!montant || montant < 500) return toast('Indiquez un montant en FCFA (minimum 500)');
+  return relAppel('/prix', { montant: montant, libelle: l ? l.value : '' }, '💰 Prix envoyé au client ✓');
+}
+function relBasculerMotif() { const z = document.getElementById('rel-motif-zone'); if (z) z.style.display = 'block'; }
+function relPrixDecision(dec) {
+  const z = document.getElementById('rel-motif');
+  const motif = z ? (z.value || '') : '';
+  if (dec === 'accepter' && !confirm('Accepter ce prix ? Il devient le montant OFFICIEL de la prestation et ne pourra plus être changé sans votre accord.')) return;
+  return relAppel('/prix-decision', { decision: dec, motif: motif }, dec === 'accepter' ? '🔒 Prix accepté — montant officiel' : '🚫 Prix refusé — droit à un 2ᵉ professionnel');
+}
+function relAnnuler() {
+  if (!confirm('Annuler cette demande ? La conversation sera fermée.')) return;
+  return relAppel('/annuler', {}, '⛔ Demande annulée');
+}
+function relRelancer() { return relAppel('/relancer', {}, '🔁 Nouvelle recherche lancée'); }
+function relPayerMaintenant() { try { if (typeof payerOuvrir === 'function') payerOuvrir(); else toast('💳 Le paiement s’ouvre à l’étape suivante'); } catch (e) { toast('💳 Le paiement s’ouvre à l’étape suivante'); } }
+/* le professionnel répond depuis SA carte de demande (accepter / refuser) */
+async function relRepondrePro(mid, sens, texte) {
+  try {
+    const r = await fetch('/api/missions/' + mid + '/rel/reponse', { method: 'POST', headers: relEntetes('pro'), body: JSON.stringify({ sens: sens || 'auto', texte: texte || '' }) });
+    const d = await r.json().catch(function () { return {}; });
+    if (!r.ok) return d;
+    return d;
+  } catch (e) { return {}; }
+}
+window.relCharger = relCharger; window.relRendre = relRendre; window.relEnvoyer = relEnvoyer;
+window.relRapide = relRapide; window.relModifierDemande = relModifierDemande; window.relPrixEnvoyer = relPrixEnvoyer; window.relPrixDecision = relPrixDecision;
+window.relBasculerMotif = relBasculerMotif; window.relAnnuler = relAnnuler; window.relRelancer = relRelancer;
+window.relPrecision = relPrecision; window.relPayerMaintenant = relPayerMaintenant; window.relRepondrePro = relRepondrePro;
