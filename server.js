@@ -121,6 +121,10 @@ function poserDefauts() {
   db.agents = db.agents || []; db.missions = db.missions || []; db.clients = db.clients || [];
   if (!db.config || typeof db.config.commission !== 'number') db.config = { commission: 25, updatedAt: null };
   db.config.payDest = db.config.payDest || { wave: ['0100277521', '0709076130'], om: '0709076130', moov: '0100277521', hide: false };
+  /* 📞 coordonnées publiques de Klean-Service (téléphone + WhatsApp), réglées par le PDG.
+     ⚠️ Volontairement VIDES au départ : on n'invente jamais un numéro. Tant qu'elles sont vides,
+     l'application renvoie vers l'assistance interne au lieu d'afficher un faux numéro. */
+  db.config.contact = db.config.contact || { tel: '', whatsapp: '' };
   if (!db.audit) db.audit = [];
   db.supportMsgs = db.supportMsgs || [];
   db.admins = db.admins || [];
@@ -440,6 +444,8 @@ function publicMissionForAgent(m) {
     id: m.id, service: m.service, pieces: m.pieces, depth: m.depth,
     quartier: m.quartier, time: m.time, date: m.date,
     dist: m.dist, prixTotal: m.prixTotal, quote: !!m.quote, quotedPrix: m.quotedPrix || 0,
+    tarif: m.tarif || null, ville: m.ville || '',
+    devis: m.devis || null, prixVerrouille: m.prixVerrouille || null,   /* 🧾 lot 109 : le pro voit le devis et le verrou */
     lat: m.lat, lng: m.lng,               // 📍 position GPS du client (pour l'agent)
     clientNom: m.client.nom,
     desc: m.desc || '',                   // 📝 description/matière précisée par le client
@@ -928,6 +934,636 @@ const CAT_TARIFS_DEF = {
   '47': ['journalier', 'devis'], '48': ['devis']
 };
 /* 🔁 le PDG ajuste : { numService: ['domicile','distance'] } — on garde toujours le défaut en secours */
+/* ═══════════════════════════════════════════════════════════════════════════
+   💰 MOTEUR DE TARIFICATION KLEAN — LOT 107 (« SOCLE »)
+   Demande du PDG (27/09) : « Tu prends encore le prix actuel des services mais tu
+   calcules selon les prix détaillés des services. »
+
+   • Les PRIX restent ceux d'aujourd'hui (aucun prix inventé, aucun prix du marché
+     imposé) : chaque service garde son prix de référence actuel.
+   • Le CALCUL, lui, devient détaillé : unité de facturation, quantité (avec paliers),
+     niveau, état, difficulté, urgence, horaire, accès, zone, déplacement, matériel,
+     options, remise → une ligne par élément, un total, une fourchette, un mode.
+   • Tout est ADMINISTRABLE au tableau de bord (prix, unités, coefficients, paliers,
+     déplacement, zones, devis, seuils) et VERSIONNÉ : une mission garde la version de
+     tarif de son jour.
+   • Le calcul se fait côté SERVEUR (le téléphone ne décide plus du prix). Les anciens
+     appels qui envoient encore un prix sont acceptés mais MARQUÉS « à vérifier ».
+   ═══════════════════════════════════════════════════════════════════════════ */
+const TARIF_PRIX_DEF = {
+  maison: { nom:"Nettoyage maison", ic:"", base:7000, cat:"clean", piecesLabel:"", opts:[] },
+  bureaux: { nom:"Nettoyage bureaux", ic:"", base:15000, cat:"clean", piecesLabel:"", opts:[] },
+  canapes: { nom:"Canapés & fauteuils", ic:"", base:6000, cat:"clean", piecesLabel:"", opts:[] },
+  vitres: { nom:"Vitres & baies", ic:"", base:4500, cat:"clean", piecesLabel:"", opts:[] },
+  demenagement: { nom:"Après déménagement", ic:"", base:15000, cat:"clean", piecesLabel:"", opts:[] },
+  sdb: { nom:"Salles de bains", ic:"", base:5500, cat:"clean", piecesLabel:"", opts:[] },
+  grand: { nom:"Grand ménage", ic:"", base:16000, cat:"clean", piecesLabel:"", opts:[] },
+  plomberie: { nom:"Plomberie", ic:"", base:6000, cat:"tech", piecesLabel:"", opts:[{id:'robinet',nom:"Remplacement robinet",prix:3500}, {id:'fuite',nom:"Réparation fuite",prix:5000}, {id:'debouch',nom:"Débouchage canalisation",prix:7000}, {id:'chauffe',nom:"Chauffe-eau",prix:10000}] },
+  electricite: { nom:"Électricité", ic:"", base:6000, cat:"tech", piecesLabel:"", opts:[{id:'prise',nom:"Prise / interrupteur",prix:2500}, {id:'tableau',nom:"Tableau électrique",prix:9000}, {id:'plaf',nom:"Ventilateur / plafonnier",prix:4500}, {id:'court',nom:"Court-circuit / panne",prix:6000}] },
+  clim: { nom:"Climatisation", ic:"", base:10000, cat:"tech", piecesLabel:"", opts:[{id:'gaz',nom:"Recharge de gaz",prix:16000}, {id:'repar',nom:"Réparation panne",prix:12000}, {id:'instal',nom:"Installation split",prix:25000}, {id:'split2',nom:"Split supplémentaire",prix:5000}] },
+  serrurerie: { nom:"Serrurerie", ic:"", base:5000, cat:"tech", piecesLabel:"", opts:[{id:'ouvert',nom:"Ouverture de porte",prix:5000}, {id:'serrure',nom:"Remplacement serrure",prix:6000}, {id:'cylindre',nom:"Cylindre haute sécurité",prix:9000}] },
+  electro: { nom:"Électroménager", ic:"", base:5000, cat:"tech", piecesLabel:"", opts:[{id:'frigo2',nom:"Réparation frigo/congélo",prix:9000}, {id:'mav',nom:"Machine à laver",prix:8000}, {id:'four2',nom:"Four / cuisinière",prix:7000}] },
+  jardinage: { nom:"Jardinage", ic:"", base:7000, cat:"home", piecesLabel:"", opts:[{id:'tonte',nom:"Tonte de pelouse",prix:4000}, {id:'haie',nom:"Taille de haie",prix:3500}, {id:'desherb',nom:"Désherbage",prix:3500}] },
+  lavageauto: { nom:"Lavage auto à domicile", ic:"", base:4000, cat:"home", piecesLabel:"v\u00e9hicule(s)", opts:[{id:'inter',nom:"Intérieur complet",prix:3000}, {id:'suv',nom:"SUV / 4x4",prix:2500}, {id:'cire',nom:"Cire de protection",prix:2500}, {id:'moteur',nom:"Nettoyage moteur",prix:3500}] },
+  bricolage: { nom:"Bricolage & montage", ic:"", base:6000, cat:"home", piecesLabel:"", opts:[{id:'meuble',nom:"Montage de meuble",prix:6000}, {id:'etagere',nom:"Fixation étagère/TV",prix:2500}, {id:'tringle',nom:"Tringles & rideaux",prix:2000}] },
+  demen: { nom:"Déménagement & portage", ic:"", base:30000, cat:"home", piecesLabel:"pi\u00e8ce(s) \u00e0 vider", opts:[{id:'cartons',nom:"Cartons & emballage",prix:5000}, {id:'porteur',nom:"Porteur supplémentaire",prix:8000}, {id:'demont',nom:"Montage / démontage meubles",prix:6000}] },
+  cuisine: { nom:"Cuisinier à domicile", ic:"", base:10000, cat:"home", piecesLabel:"", opts:[{id:'courses',nom:"Courses incluses",prix:4000}, {id:'groupe',nom:"Repas 5+ personnes",prix:4000}, {id:'patiss',nom:"Pâtisserie / dessert",prix:3500}] },
+  evenement: { nom:"Après événement", ic:"", base:12000, cat:"clean", piecesLabel:"", opts:[] },
+  entretien: { nom:"Entretien régulier", ic:"", base:6000, cat:"clean", piecesLabel:"", opts:[] },
+  placement: { nom:"Placement de personnel", ic:"", base:15000, cat:"home", piecesLabel:"", opts:[{id:'nounou',nom:"Nounou / garde d’enfant",prix:0}, {id:'perso',nom:"Personnel de maison",prix:0}, {id:'gardien',nom:"Gardien / vigile",prix:0}, {id:'aide',nom:"Aide-ménagère",prix:0}, {id:'jardinier2',nom:"Jardinier",prix:0}] },
+  cours: { nom:"Cours ou formation à domicile", ic:"", base:15000, cat:"home", piecesLabel:"", opts:[{id:'college',nom:"Niveau collège",prix:5000}, {id:'lycee',nom:"Niveau lycée",prix:8000}, {id:'eleves2',nom:"2 élèves",prix:10000}, {id:'eleves3',nom:"3 élèves ou plus",prix:15000}, {id:'prof',nom:"Professeur diplômé (au lieu d’un étudiant)",prix:10000}, {id:'coach',nom:"Coach / formateur dans un domaine précis",prix:20000}, {id:'toutes',nom:"Toutes les matières (soutien général)",prix:8000}] },
+  canal: { nom:"Canal+ domicile", ic:"", base:5000, cat:"home", piecesLabel:"", opts:[{id:'depannage',nom:"Dépannage décodeur / parabole",prix:5000}, {id:'placement',nom:"Placement & installation complète",prix:10000}, {id:'point2',nom:"Point TV supplémentaire",prix:5000}, {id:'renouvel',nom:"Aide au renouvellement d’abonnement",prix:2000}, {id:'assistance',nom:"Assistance & réglages (parabole, chaînes)",prix:3000}] }
+};
+/* 🧹 options « ménage » (les mêmes prix que l'application cliente) */
+const TARIF_EXTRAS_DEF = [
+  {id:'frigo',   ic:'🧊', nom:'Intérieur du frigo',   desc:'Vidange + nettoyage', prix:1500},
+  {id:'linge',   ic:'🧺', nom:'Linge & repassage',    desc:'1 panier',            prix:2500},
+  {id:'rideaux', ic:'🪟', nom:'Rideaux & tentures',   desc:'Dépoussiérage',       prix:2000},
+  {id:'cour',    ic:'🌿', nom:'Cour / balcon',        desc:'Balayage + lavage',   prix:1000},
+  {id:'eco',     ic:'🌱', nom:'Produits écologiques', desc:'Sans chimique',       prix:1500}
+];
+const TARIF_REMISES_DEF = { BIENVENUE: 0.15, KLEAN10: 0.10 };
+/* 🧮 UNITÉS DE FACTURATION (administrables : le PDG peut en créer d'autres) */
+const TARIF_UNITES_DEF = [
+  { id: 'piece',        ic: '🔢', nom: 'par pièce',              comptable: true },
+  { id: 'place',        ic: '🛋️', nom: 'par place (canapé, salle)', comptable: true },
+  { id: 'personne',     ic: '👤', nom: 'par personne',           comptable: true },
+  { id: 'vehicule',     ic: '🚗', nom: 'par véhicule',           comptable: true },
+  { id: 'appareil',     ic: '🔌', nom: 'par appareil',           comptable: true },
+  { id: 'tache',        ic: '✅', nom: 'par tâche',               comptable: true },
+  { id: 'kg',           ic: '⚖️', nom: 'par kilogramme',          comptable: true },
+  { id: 'tonne',        ic: '🏗️', nom: 'par tonne',               comptable: true },
+  { id: 'trajet',       ic: '🛵', nom: 'par trajet',              comptable: true },
+  { id: 'chambre',      ic: '🛏️', nom: 'par chambre',             comptable: true },
+  { id: 'etage',        ic: '🪜', nom: 'par étage',               comptable: true },
+  { id: 'm2',           ic: '📐', nom: 'au m²',                   comptable: false },
+  { id: 'ml',           ic: '📏', nom: 'au mètre linéaire',       comptable: false },
+  { id: 'heure',        ic: '⏱️', nom: 'à l’heure',                comptable: false },
+  { id: 'jour',         ic: '📆', nom: 'à la journée',            comptable: false },
+  { id: 'intervention', ic: '🛠️', nom: 'par intervention',        comptable: false },
+  { id: 'forfait',      ic: '📦', nom: 'au forfait',              comptable: false }
+];
+/* ⚙️ COEFFICIENTS — tous réglables par le PDG (1 = aucun changement) */
+const TARIF_COEFS_DEF = {
+  niveau: { nom: 'Niveau d’intervention', ic: '🧽', valeurs: [
+    { id: 'normal', nom: 'Normal / standard', k: 1 },
+    { id: 'complet', nom: 'Complet', k: 1.3 },
+    { id: 'profondeur', nom: 'Profondeur / urgence', k: 1.6 }] },
+  etat: { nom: 'État des lieux', ic: '🧐', comptePour: ['clean'], valeurs: [
+    { id: 'neuf', nom: 'Neuf / normal', k: 1 },
+    { id: 'leger', nom: 'Légèrement sale', k: 1.1 },
+    { id: 'sale', nom: 'Sale', k: 1.25 },
+    { id: 'tres_sale', nom: 'Très sale', k: 1.45 },
+    { id: 'extreme', nom: 'Extrêmement sale', k: 1.7 },
+    { id: 'degrade', nom: 'Dégradation importante', k: 1.9 },
+    { id: 'special', nom: 'Traitement spécial', k: 2.1 }] },
+  difficulte: { nom: 'Difficulté', ic: '🪨', valeurs: [
+    { id: 'facile', nom: 'Facile', k: 0.9 },
+    { id: 'normale', nom: 'Normale', k: 1 },
+    { id: 'difficile', nom: 'Difficile', k: 1.3 }] },
+  urgence: { nom: 'Urgence', ic: '🚨', valeurs: [
+    { id: 'normal', nom: 'Normal (au plus tard à la date choisie)', k: 1 },
+    { id: 'h72', nom: 'Sous 72 h', k: 1.1 },
+    { id: 'h48', nom: 'Sous 48 h', k: 1.2 },
+    { id: 'h24', nom: 'Sous 24 h', k: 1.35 },
+    { id: 'immediat', nom: 'Intervention immédiate', k: 1.5 }] },
+  horaire: { nom: 'Horaire', ic: '🌙', valeurs: [
+    { id: 'normal', nom: 'Heures normales', k: 1 },
+    { id: 'nuit', nom: 'Nuit', k: 1.25 },
+    { id: 'dimanche', nom: 'Dimanche', k: 1.3 },
+    { id: 'ferie', nom: 'Jour férié', k: 1.4 }] },
+  acces: { nom: 'Accès', ic: '🪜', valeurs: [
+    { id: 'rdc', nom: 'Rez-de-chaussée', k: 1 },
+    { id: 'etage', nom: 'Étage (ascenseur disponible)', k: 1.1 },
+    { id: 'sans_ascenseur', nom: 'Étage sans ascenseur', k: 1.2 },
+    { id: 'difficile', nom: 'Accès difficile', k: 1.25 },
+    { id: 'vehicule_impossible', nom: 'Véhicule impossible', k: 1.3 },
+    { id: 'manutention', nom: 'Manutention nécessaire', k: 1.35 }] },
+  materiel: { nom: 'Matériel', ic: '🧰', valeurs: [
+    { id: 'client', nom: 'Fourni par le client', k: 1 },
+    { id: 'pro', nom: 'Fourni par le professionnel', k: 1.08 }] }
+};
+/* 📉 PALIERS DE QUANTITÉ — reproduisent exactement les prix actuels (1→×1, 2→×1,3, 3→×1,6, 5→×2,2) */
+const TARIF_PALIERS_DEF = [{ n: 1, mult: 1 }, { n: 2, mult: 1.3 }, { n: 3, mult: 1.6 }, { n: 5, mult: 2.2 }];
+/* 🛵 DÉPLACEMENT — « inclus » par défaut = le prix d'aujourd'hui. Tranches prêtes (exemple du PDG :
+   0–5 km gratuit, 5–10 km 600 F), à activer d'un clic quand il le décide. */
+const TARIF_DEPLACEMENT_DEF = { mode: 'inclus', km: 200, forfait: 1000, allerRetour: false,
+  tranches: [{ jusqua: 5, prix: 0 }, { jusqua: 10, prix: 600 }, { jusqua: 15, prix: 900 },
+             { jusqua: 25, prix: 1500 }, { jusqua: 40, prix: 2500 }, { jusqua: 100000, prix: 3500 }] };
+/* 🗺️ ZONES — distances routières usuelles depuis Abidjan (km), pour que le DÉPLACEMENT repose sur
+   un chiffre VÉRIFIABLE et non sur un chiffre donné par le client.
+   ⚠️ RÈGLE DU PDG : « référence de marché = source + date obligatoires ». Cette table est donc marquée
+   « proposition » tant que le PDG ne l'a pas validée (source + date). Tant qu'elle n'est pas validée,
+   elle sert d'ESTIMATION (mode fourchette), et le mode de déplacement reste « inclus » = les prix
+   d'aujourd'hui. Rien n'est facturé sans sa décision. */
+const TARIF_ZONES_KM_DEF = {
+  'abidjan': 10, 'plateau': 6, 'cocody': 12, 'adjame': 8, 'treichville': 7, 'marcory': 8,
+  'koumassi': 11, 'port-bouet': 13, 'yopougon': 15, 'abobo': 16, 'attecoube': 9,
+  'bingerville': 22, 'anyama': 24, 'songon': 30, 'grand-bassam': 40, 'dabou': 55, 'agboville': 80,
+  'adzope': 100, 'aboisso': 120, 'toumodi': 200, 'divo': 200, 'abengourou': 210, 'yamoussoukro': 240,
+  'gagnoa': 280, 'bouafle': 300, 'soubre': 300, 'issia': 330, 'bouake': 350, 'san-pedro': 370,
+  'daloa': 380, 'vavoua': 400, 'katiola': 400, 'bondoukou': 420, 'guiglo': 450, 'touba': 500,
+  'seguéla': 500, 'ferkessedougou': 500, 'tabou': 500, 'man': 580, 'korhogo': 630, 'danane': 640, 'odienne': 800
+};
+const TARIF_ZONES_SRC_DEF = { actif: false, source: '', sourceDate: '',
+  note: 'Proposition Klean (distances routières usuelles depuis Abidjan) — à valider par le PDG : indiquez la source et la date.' };
+const TARIF_SEUILS_DEF = { margeAuto: 0.05, margeIncertitude: 0.2, validationAdmin: 100000, ecartAnormal: 0.4 };
+/* 🏗️ services qui se règlent SUR DEVIS (travaux : construction, rénovation, toiture, gros œuvre…) */
+const TARIF_DEVIS_METIERS = ['macon', 'menuiserie', 'alu', 'soudure', 'etancheite'];
+const TARIF_DEVIS_NUMS = ['7', '8', '9', '10', '24', '30', '38', '40', '42', '48'];
+
+/* ─────────── INITIALISATION (une seule fois, ne remplace jamais ce que le PDG a réglé) ─────────── */
+function tarifEnsure() {
+  if (!db.tarif) db.tarif = {};
+  const T = db.tarif;
+  if (typeof T.version !== 'number') T.version = 1;
+  if (!Array.isArray(T.versions) || !T.versions.length)
+    T.versions = [{ n: T.version, at: nowISO(), par: 'Klean', note: 'Version de départ — prix actuels des services, recopiés sans modification' }];
+  if (!Array.isArray(T.journal)) T.journal = [];
+  if (!Array.isArray(T.unites) || !T.unites.length) T.unites = TARIF_UNITES_DEF.map(x => Object.assign({}, x));
+  if (!T.coefs) T.coefs = JSON.parse(JSON.stringify(TARIF_COEFS_DEF));
+  if (!Array.isArray(T.paliers) || !T.paliers.length) T.paliers = TARIF_PALIERS_DEF.map(x => Object.assign({}, x));
+  if (!T.deplacement) T.deplacement = JSON.parse(JSON.stringify(TARIF_DEPLACEMENT_DEF));
+  if (!T.seuils) T.seuils = Object.assign({}, TARIF_SEUILS_DEF);
+  if (!Array.isArray(T.questions) || !T.questions.length) T.questions = TARIF_QUESTIONS_DEF.map(x => JSON.parse(JSON.stringify(x)));
+  if (!T.zones || typeof T.zones !== 'object') T.zones = {};
+  if (!T.zonesSrc || typeof T.zonesSrc !== 'object') T.zonesSrc = JSON.parse(JSON.stringify(TARIF_ZONES_SRC_DEF));
+  /* 🗺️ les zones connues sont créées UNE fois, avec k = 1 (donc AUCUN changement de prix) et leur
+     distance estimée. Si le PDG règle une zone, sa valeur n'est jamais écrasée. */
+  for (const zv in TARIF_ZONES_KM_DEF) {
+    if (!T.zones[zv]) T.zones[zv] = { nom: zv.charAt(0).toUpperCase() + zv.slice(1), k: 1, km: TARIF_ZONES_KM_DEF[zv] };
+    else if (typeof T.zones[zv].km !== 'number') T.zones[zv].km = TARIF_ZONES_KM_DEF[zv];
+  }
+  if (!Array.isArray(T.refs)) T.refs = [];                       /* 🏷️ prix du marché (sourcés) — voir lot 112 */
+  /* 🏷️ référence de MARCHÉ pour le déplacement, avec source ET date (règle du PDG). Elle ne change
+     AUCUN prix : elle sert uniquement à SIGNALER un montant inhabituel (jamais à le corriger). */
+  if (!T.refs.some(x => x && x.id === 'deplacement'))
+    T.refs.push({ id: 'deplacement', nom: 'Déplacement d’un professionnel (Abidjan)', min: 5000, max: 15000,
+      unite: 'intervention', source: 'Yemba Plomberie — grille publiée (Abidjan)', date: '27/09/2026',
+      note: 'Fourchette constatée pour un déplacement de professionnel à Abidjan. À confirmer/compléter par le PDG.' });
+  if (!T.remises || typeof T.remises !== 'object') T.remises = Object.assign({}, TARIF_REMISES_DEF);
+  if (!T.svc || typeof T.svc !== 'object') T.svc = {};
+  const unitOf = id => T.unites.find(u => u.id === id) || T.unites[0];
+  /* ① les MÉTIERS de l'application (prix actuels) */
+  for (const id in TARIF_PRIX_DEF) {
+    if (T.svc[id]) continue;                                     /* ⚠️ jamais écraser un réglage du PDG */
+    const d = TARIF_PRIX_DEF[id];
+    const cat = svcCat(id) || SVC_NOUVEAUX[id] || {};
+    const comptable = (d.cat === 'clean' || !!d.piecesLabel);
+    const unite = d.piecesLabel ? (String(d.piecesLabel).match(/véhicule/i) ? 'vehicule' : 'piece')
+      : (comptable ? 'piece' : 'intervention');
+    T.svc[id] = {
+      id, nom: d.nom || cat.nom || id, ic: cat.ic || '🛠️', type: 'metier',
+      cat: d.cat || '', unite, ref: d.base || 0,
+      min: Math.round((d.base || 0) * 0.75), max: Math.round((d.base || 0) * 1.5),
+      comptable, devis: false, etatCompte: d.cat === 'clean',
+      photos: 'conseillees', photosMin: 2, materielPrix: 0, off: false,
+      opts: (d.opts || []).map(o => Object.assign({}, o)), cree: false
+    };
+  }
+  /* ② les SERVICES du catalogue national (4 niveaux) : ils prennent le prix de leur métier */
+  let arbre = null; try { arbre = catalogueNational(); } catch (e) { arbre = null; }
+  if (arbre && Array.isArray(arbre.services)) {
+    for (const s of arbre.services) {
+      const num = String(s.num);
+      if (T.svc[num]) continue;
+      const metier = svcCanon(s.metier) || s.metier || '';
+      const base = T.svc[metier] || null;
+      const tarifsSvc = catNatTarifs(num).map(x => x.id);
+      const unite = tarifsSvc.indexOf('m2') >= 0 ? 'm2' : (tarifsSvc.indexOf('horaire') >= 0 ? 'heure'
+        : (tarifsSvc.indexOf('journalier') >= 0 ? 'jour' : (tarifsSvc.indexOf('tache') >= 0 ? 'tache'
+        : (tarifsSvc.indexOf('fixe') >= 0 ? 'forfait' : (base ? base.unite : 'intervention')))));
+      const uniteFin = base ? base.unite : unite;          /* ⚠️ le PRIX vient du métier : son unité aussi */
+      const u = unitOf(uniteFin);
+      const devis = TARIF_DEVIS_NUMS.indexOf(num) >= 0
+        || TARIF_DEVIS_METIERS.indexOf(metier) >= 0
+        || (tarifsSvc.length === 1 && tarifsSvc[0] === 'devis');
+      const ref = base ? base.ref : 0;
+      T.svc[num] = {
+        id: num, num, nom: s.nom, ic: s.ic || '🛠️', type: 'catalogue', metier,
+        cat: base ? base.cat : '', unite: uniteFin, uniteNom: u.nom, comptable: !!(u && u.comptable),
+        ref, min: Math.round(ref * 0.75), max: Math.round(ref * 1.5),
+        devis, etatCompte: base ? !!base.etatCompte : false,
+        photos: 'conseillees', photosMin: 2, materielPrix: 0, off: false,
+        tarifs: tarifsSvc, fam: s.famille || '', opts: base ? base.opts.map(o => Object.assign({}, o)) : [], cree: false
+      };
+      /* lignes de facturation d'un service déjà tarifé : on garde une trace (traçabilité) */
+    }
+  }
+  T.maj = T.maj || nowISO();
+  return T;
+}
+function tarifVersion() { tarifEnsure(); return db.tarif.version || 1; }
+/* 📚 VERSIONNAGE : chaque changement de tarif produit une NOUVELLE version, datée et signée.
+   Une mission garde la version de son jour : on ne recalcule jamais une ancienne commande. */
+function tarifBump(action, quoi, avant, apres, motif, par) {
+  tarifEnsure();
+  const T = db.tarif;
+  T.version = (Number(T.version) || 1) + 1;
+  T.maj = nowISO();
+  T.versions.unshift({ n: T.version, at: T.maj, par: par || 'PDG', action: String(action || ''),
+    note: String(motif || '').slice(0, 200) || (quoi ? (quoi + ' : ' + String(avant) + ' → ' + String(apres)) : '') });
+  if (T.versions.length > 200) T.versions = T.versions.slice(0, 200);
+  tarifJournal(action, quoi, avant, apres, motif, par);
+  return T.version;
+}
+function tarifJournal(action, quoi, avant, apres, motif) {
+  tarifEnsure();
+  const T = db.tarif;
+  T.journal.unshift({ at: nowISO(), par: (arguments.length > 5 ? arguments[5] : '') || 'PDG', action: String(action || '').slice(0, 40),
+    quoi: String(quoi || '').slice(0, 80), avant: (avant === undefined ? '' : String(avant).slice(0, 120)),
+    apres: (apres === undefined ? '' : String(apres).slice(0, 120)), motif: String(motif || '').slice(0, 160), version: T.version });
+  if (T.journal.length > 400) T.journal = T.journal.slice(0, 400);
+  try { auditLog('tarif_' + String(action || '').slice(0, 30), { quoi, avant, apres, motif, version: T.version }); } catch (e) {}
+}
+/* 🔎 RÉSOUDRE UN SERVICE : identifiant de métier, numéro du catalogue national, ou nom */
+function tarifSvc(id) {
+  tarifEnsure();
+  const key = String(id == null ? '' : id).trim();
+  if (!key) return null;
+  const T = db.tarif;
+  /* ⚠️ un tarif « désactivé » (off) n'est plus proposé au public, mais son PRIX reste calculable :
+     une commande passée ou un service déjà connu ne doit jamais perdre son prix. */
+  if (T.svc[key]) return T.svc[key];
+  const canon = (() => { try { return svcCanon(key); } catch (e) { return key; } })();
+  if (canon && T.svc[canon] && !T.svc[canon].off) return T.svc[canon];
+  const n = normFr(key);
+  for (const k in T.svc) { const s = T.svc[k]; if (normFr(s.nom) === n) return s; }
+  /* le client peut écrire « Canapés » : on accepte un nom partiel (jamais un mot trop court) */
+  if (n.length >= 5) for (const k in T.svc) { const s = T.svc[k]; if (nfSvc(s).indexOf(n) === 0) return s; }
+  if (n.length >= 6) for (const k in T.svc) { const s = T.svc[k]; if (nfSvc(s).indexOf(n) > 0) return s; }
+  for (const k in T.svc) { const s = T.svc[k]; if (!s.off && s.metier && s.metier === key) return s; }
+  return null;
+}
+/* ═══════════════════════════════════════════════════════════════════════════
+   ❓ LOT 108 — LES QUESTIONS DYNAMIQUES ET LES PHOTOS
+   Règle du PDG : « jamais de question inutile », « Je ne sais pas » toujours accepté,
+   « on n'invente jamais une information » (dimensions, poids, matière → photo possible).
+
+   • Chaque question est ADMINISTRABLE au tableau de bord (ajouter, modifier, désactiver, réordonner).
+   • Une question est posée SEULEMENT si elle est utile à ce service (cible : métier, catégorie,
+     unité, ou « tous »). Aucune question décorative.
+   • Les réponses ne créent PAS un deuxième système de prix : elles remplissent exactement les
+     coefficients déjà en place (état, difficulté, urgence, horaire, accès, matériel) ou une ligne
+     de supplément. Le calcul reste le même, côté serveur.
+   • « Je ne sais pas » est toujours proposé : le moteur donne alors une FOURCHETTE (jamais un
+     prix définitif inventé) — sauf si le PDG déclare la question obligatoire : le prix reste
+     une estimation jusqu'à la confirmation du professionnel.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const TARIF_QUESTIONS_DEF = [
+  { id: 'photos', ordre: 5, type: 'photo', min: 2, cible: { tous: true }, jeNeSaisPas: false,
+    q: 'Pouvez-vous ajouter des photos ?',
+    aide: 'Une photo évite les erreurs : nous ne devinons jamais une dimension, un poids ou une matière. Ce n’est pas obligatoire pour recevoir un prix.' },
+  { id: 'etat_lieux', ordre: 10, type: 'choix', coef: 'etat', cible: { etatCompte: true },
+    q: 'Dans quel état se trouve l’endroit ?',
+    aide: 'Choisissez ce qui ressemble le plus à la réalité. Si vous n’êtes pas sûr, répondez « Je ne sais pas » : le prix deviendra une estimation.' },
+  { id: 'acces', ordre: 20, type: 'choix', coef: 'acces', cible: { tous: true },
+    q: 'Comment se passe l’accès sur place ?',
+    aide: 'Étage, ascenseur, escalier étroit, véhicule impossible… cela change le temps de travail.' },
+  { id: 'urgence', ordre: 30, type: 'choix', coef: 'urgence', cible: { tous: true },
+    q: 'Quand souhaitez-vous l’intervention ?',
+    aide: 'Plus c’est urgent, plus le prix peut augmenter — vous le voyez ligne par ligne avant de confirmer.' },
+  { id: 'horaire', ordre: 40, type: 'choix', coef: 'horaire', cible: { tous: true },
+    q: 'À quel moment de la journée ?' },
+  { id: 'materiel', ordre: 50, type: 'choix', coef: 'materiel', cible: { tous: true },
+    q: 'Qui fournit le matériel et les produits ?' },
+  { id: 'difficulte', ordre: 60, type: 'choix', coef: 'difficulte', cible: { cat: ['tech'] },
+    q: 'Le travail vous paraît-il simple ou compliqué ?',
+    aide: 'Votre réponse est une indication : le professionnel confirme toujours avant de commencer.' },
+  { id: 'surface', ordre: 70, type: 'nombre', unite: 'm2', cible: { unite: ['m2'] }, prixUnite: 0,
+    q: 'Quelle surface, approximativement (en m²) ?',
+    aide: 'Si vous ne savez pas, répondez « Je ne sais pas » : le professionnel mesurera sur place.' },
+  { id: 'nb_elements', ordre: 75, type: 'nombre', unite: 'unite', cible: { unite: ['appareil', 'vehicule', 'tache'] }, prixUnite: 0,
+    q: 'Combien d’éléments au total ?',
+    aide: 'Exemple : nombre d’appareils, de véhicules ou de tâches à traiter.' },
+  { id: 'matiere', ordre: 80, type: 'choix', cible: { tous: true }, valeurs: [
+      { id: 'tissu', nom: 'Tissu / textile' }, { id: 'cuir', nom: 'Cuir' }, { id: 'bois', nom: 'Bois' },
+      { id: 'metal', nom: 'Métal' }, { id: 'verre', nom: 'Verre' }, { id: 'macon', nom: 'Maçonnerie / ciment' },
+      { id: 'plastique', nom: 'Plastique / PVC' }, { id: 'autre', nom: 'Autre / je ne sais pas' }],
+    q: 'En quelle matière est la chose à traiter ?',
+    aide: 'Si vous ne savez pas, répondez « Autre / je ne sais pas » ou envoyez une photo : nous n’inventons jamais une matière.' }
+];
+/* 🔎 QUELLES QUESTIONS POUR CE SERVICE ? (aucune question inutile) */
+function tarifCibleOk(cible, svc) {
+  if (!cible) return true;
+  if (cible.tous) return true;
+  if (cible.etatCompte && !svc.etatCompte) return false;
+  if (cible.cat && (cible.cat || []).indexOf(svc.cat) < 0) return false;
+  if (cible.metier && (cible.metier || []).indexOf(svc.metier || svc.id) < 0) return false;
+  if (cible.unite && (cible.unite || []).indexOf(svc.unite) < 0) return false;
+  if (cible.svc && (cible.svc || []).map(String).indexOf(String(svc.id)) < 0) return false;
+  return true;
+}
+function tarifQuestionsToutes() {
+  tarifEnsure();
+  const T = db.tarif;
+  if (!Array.isArray(T.questions) || !T.questions.length) T.questions = TARIF_QUESTIONS_DEF.map(x => JSON.parse(JSON.stringify(x)));
+  T.questions.forEach(q => { if (typeof q.off === 'undefined') q.off = false; if (!q.ordre) q.ordre = 50; });
+  return T.questions;
+}
+function tarifQuestionsDe(svc, avecPhotos) {
+  if (!svc) return [];
+  const qs = tarifQuestionsToutes().filter(q => !q.off && tarifCibleOk(q.cible, svc));
+  return qs.filter(q => q.type !== 'photo' || avecPhotos !== false).sort((a, b) => (a.ordre || 50) - (b.ordre || 50));
+}
+/* une question publique : ce que le client voit (le calcul reste interne) */
+function tarifQuestionPublique(q) {
+  const T = db.tarif;
+  const out = { id: q.id, q: q.q, type: q.type, aide: q.aide || '', ordre: q.ordre || 50,
+    jeNeSaisPas: q.jeNeSaisPas !== false, obligatoire: !!q.obligatoire, unite: q.unite || '', min: q.min || 0 };
+  if (q.type === 'choix') {
+    if (q.coef && T.coefs[q.coef]) {
+      const B = T.coefs[q.coef];
+      out.bloc = q.coef; out.blocNom = B.nom; out.ic = B.ic || '⚙️';
+      out.valeurs = (B.valeurs || []).map(v => ({ id: v.id, nom: v.nom, k: v.k }));
+    } else out.valeurs = (q.valeurs || []).map(v => ({ id: v.id, nom: v.nom, k: null }));
+  }
+  return out;
+}
+/* 📥 ce que le client répond arrive sous la forme { questionId: valeur } */
+function tarifReponsesTexte(rep) {
+  if (!rep || typeof rep !== 'object') return '';
+  return Object.keys(rep).slice(0, 20).map(k => k + ':' + String(rep[k]).slice(0, 40)).join(' | ');
+}
+
+/* 📉 quantité → multiplicateur (paliers, interpolation entre deux paliers, prolongement au-delà) */
+function tarifMultQuantite(svc, n) {
+  const q = Math.max(1, parseInt(n, 10) || 1);
+  if (!svc || !svc.comptable) return q;                          /* m², heure, jour… : linéaire */
+  const pal = (db.tarif.paliers || []).slice().sort((a, b) => a.n - b.n);
+  if (!pal.length) return q;
+  const ex = pal.find(p => p.n === q); if (ex) return ex.mult;
+  const av = pal.filter(p => p.n < q).pop(), ap = pal.find(p => p.n > q);
+  if (av && ap) { const t = (q - av.n) / (ap.n - av.n); return Math.round((av.mult + (ap.mult - av.mult) * t) * 1000) / 1000; }
+  if (!av) return pal[0].mult;
+  const last = pal[pal.length - 1], prev = pal[pal.length - 2] || { n: Math.max(1, last.n - 1), mult: 0 };
+  const pente = (last.mult - prev.mult) / Math.max(1, last.n - prev.n);
+  return Math.round((last.mult + (q - last.n) * pente) * 1000) / 1000;
+}
+function nfSvc(s) { return normFr(s && s.nom || ''); }
+/* 🔎 retrouver la valeur d'un coefficient même si le client répond avec un mot (« normal », « Sale »…)
+   plutôt qu'avec l'identifiant technique : on n'oblige jamais le client à parler notre langue. */
+function tarifValeurTrouve(blocId, brut) {
+  const B = db.tarif.coefs && db.tarif.coefs[blocId];
+  if (!B || !Array.isArray(B.valeurs)) return null;
+  const k = String(brut == null ? '' : brut).trim();
+  if (!k) return null;
+  const exact = B.valeurs.find(v => v.id === k) || B.valeurs.find(v => normFr(v.id) === normFr(k));
+  if (exact) return exact;
+  const nk = normFr(k);
+  const parNom = B.valeurs.find(v => normFr(v.nom) === nk);
+  if (parNom) return parNom;
+  if (nk.length >= 3) {
+    const debut = B.valeurs.find(v => normFr(v.nom).indexOf(nk) === 0);
+    if (debut) return debut;
+    const dedans = B.valeurs.find(v => normFr(v.nom).indexOf(nk) > 0);
+    if (dedans) return dedans;
+  }
+  return null;
+}
+function tarifCoefTrouve(blocId, valId) {
+  const b = db.tarif.coefs && db.tarif.coefs[blocId];
+  if (!b || !Array.isArray(b.valeurs)) return null;
+  return b.valeurs.find(v => v.id === valId) || null;
+}
+function tarifOptionsDe(entry) {
+  if (!entry) return [];
+  if (entry.opts && entry.opts.length) return entry.opts;
+  if (entry.cat === 'clean') return (db.tarif.extras || TARIF_EXTRAS_DEF);
+  return [];
+}
+/* 📍 quelle zone pour le lieu de prestation ? On regarde la ville PUIS le quartier (une commune
+   d'Abidjan citée comme quartier prend le pas). Aucun chiffre fourni par le client n'est utilisé. */
+function tarifZoneDe(ville, quartier) {
+  const T = db.tarif, essais = [normVille(quartier || ''), normVille(ville || '')];
+  for (const k of essais) {
+    if (k && T.zones[k] && typeof T.zones[k].km === 'number') return { id: k, nom: T.zones[k].nom || k, km: T.zones[k].km, k: T.zones[k].k };
+  }
+  /* la ville n'est pas dans la table : on cherche une zone dont le nom ressemble (ex. « Cocody ») */
+  for (const k of essais) {
+    if (!k) continue;
+    for (const zid in T.zones) if (k.indexOf(zid) >= 0 || zid.indexOf(k) >= 0)
+      return { id: zid, nom: T.zones[zid].nom || zid, km: T.zones[zid].km, k: T.zones[zid].k };
+  }
+  return null;
+}
+function tarifDeplacement(km) {
+  const d = db.tarif.deplacement || {};
+  if (!km || !isFinite(km) || km <= 0) return null;
+  if (d.mode !== 'km' && d.mode !== 'tranches' && d.mode !== 'forfait') return null;   /* « inclus » = prix actuel */
+  let prix = 0;
+  if (d.mode === 'km') prix = Math.round(km * (Number(d.km) || 200));
+  else if (d.mode === 'forfait') prix = Math.round(Number(d.forfait) || 0);
+  else {
+    const tr = (d.tranches || []).slice().sort((a, b) => a.jusqua - b.jusqua);
+    const t = tr.find(x => km <= x.jusqua);
+    prix = t ? t.prix : (tr.length ? tr[tr.length - 1].prix : 0);
+  }
+  if (d.allerRetour) prix = prix * 2;
+  return { prix: Math.round(prix), km: Math.round(km * 10) / 10 };
+}
+/* 🧾 LE CALCUL DÉTAILLÉ — une ligne par élément, jamais un prix global sorti de nulle part. */
+function tarifCalculer(id, o) {
+  o = o || {};
+  tarifEnsure();
+  const T = db.tarif;
+  const svc = tarifSvc(id);
+  const version = T.version;
+  const l = (cle, nom, montant, detail) => ({ cle, nom, montant: Math.round(montant), detail: detail || '' });
+  if (!svc) {
+    return { ok: true, mode: 'devis', total: 0, min: 0, max: 0, fourchette: [0, 0], lignes: [],
+      manque: ['service'], service: null, serviceId: String(id || ''), version,
+      texte: 'Ce service se règle sur devis : décrivez votre besoin, le professionnel vous répond avec un prix détaillé.' };
+  }
+  const u = (T.unites || []).find(x => x.id === svc.unite) || { nom: svc.unite, comptable: !!svc.comptable };
+  const optDispo = tarifOptionsDe(svc);
+  const demandees = Array.isArray(o.options) ? o.options.map(String)
+    : Object.keys(o.options || {}).filter(k => o.options[k]);
+  const options = optDispo.filter(x => demandees.indexOf(String(x.id)) >= 0);
+  const manque = [];
+  if (svc.devis) {
+    return { ok: true, mode: 'devis', total: 0, min: 0, max: 0, fourchette: [0, 0], lignes: [],
+      manque: ['devis'], service: tarifSvcPublic(svc), serviceId: svc.id, version, unite: svc.unite,
+      texte: 'Prix sur devis : pour ce type de travaux, le professionnel examine votre demande et vous envoie un prix détaillé (main-d’œuvre, matériel, déplacement). Vous l’acceptez ou le refusez, sans engagement.' };
+  }
+  /* ⚠️ un service sans prix de référence n'a pas de prix inventé : il passe en DEVIS,
+     et le PDG peut lui donner un prix au tableau de bord (« à tarifer »). */
+  if (!(svc.ref > 0)) {
+    return { ok: true, mode: 'devis', total: 0, min: 0, max: 0, fourchette: [0, 0], lignes: [],
+      manque: ['prix'], service: tarifSvcPublic(svc), serviceId: svc.id, version, unite: svc.unite,
+      aTarifer: true,
+      texte: 'Ce service n’a pas encore de prix de référence : le professionnel vous répond avec un prix détaillé (main-d’œuvre, matériel, déplacement). Vous l’acceptez ou le refusez, sans engagement.' };
+  }
+  const q = Math.max(1, parseInt(o.quantite, 10) || 1);
+  if (svc.comptable && !o.quantite && !o.sansQuantite) manque.push('quantite');
+  /* ❓ LES RÉPONSES AUX QUESTIONS (lot 108) — elles remplissent les MÊMES coefficients que le moteur
+     utilise déjà : aucun second système de prix. « Je ne sais pas » ne bloque rien : le prix
+     devient une fourchette, et on ne devine JAMAIS (dimensions, poids, matière). */
+  const reponses = (o.reponses && typeof o.reponses === 'object') ? o.reponses : {};
+  const questions = tarifQuestionsDe(svc);
+  const suplTxt = [], supLignes = [];
+  let nbPhotosFournies = parseInt(o.photos, 10) || 0;
+  for (const Q of questions) {
+    const brute = reponses[Q.id];
+    const vide = (brute === undefined || brute === null || brute === '' || brute === 'je_ne_sais_pas' || brute === 'sais_pas');
+    const saisPas = (brute === 'je_ne_sais_pas' || brute === 'sais_pas');
+    if (vide) { if (Q.obligatoire) manque.push(Q.id); continue; }
+    if (Q.type === 'photo') { const n2 = parseInt(brute, 10) || 0; if (n2 > nbPhotosFournies) nbPhotosFournies = n2; continue; }
+    if (Q.type === 'choix' && Q.coef) {
+      const v = tarifValeurTrouve(Q.coef, String(brute));
+      if (v) { if (!o[Q.coef]) o[Q.coef] = v.id; }             /* même chemin que les coefficients */
+      continue;
+    }
+    if (Q.type === 'nombre') {
+      const val = parseFloat(String(brute).replace(',', '.'));
+      if (!isFinite(val) || val <= 0) { if (Q.obligatoire) manque.push(Q.id); continue; }
+      suplTxt.push(Q.q.replace(/\(.*?\)/, '').trim() + ' : ' + (Math.round(val * 100) / 100) + (Q.unite === 'm2' ? ' m²' : ''));
+      if (Q.prixUnite > 0) supLignes.push(l('q_' + Q.id, '📐 ' + Q.q.replace(/\(.*?\)/, '').trim(), Math.round(val * Q.prixUnite),
+        (Math.round(val * 100) / 100) + (Q.unite === 'm2' ? ' m²' : '') + ' × ' + (Q.prixUnite) + ' F'));
+      continue;
+    }
+    if (Q.type === 'choix') {                                  /* précision utile (matière, type…) sans prix */
+      const v = (Q.valeurs || []).find(x => x.id === String(brute));
+      if (v) suplTxt.push(Q.q.replace(/\(.*?\)/, '').trim() + ' : ' + v.nom);
+    }
+  }
+  /* les photos demandées par le PDG pour CE service (obligatoires ⇒ sans photo, point de prix ferme) */
+  if (svc.photos === 'obligatoires' && nbPhotosFournies < (svc.photosMin || 2)) manque.push('photos');
+  const mult = tarifMultQuantite(svc, q);
+  const lignes = [];
+  const base = Math.round((svc.ref || 0) * mult);
+  lignes.push(l('base', 'Prestation — ' + svc.nom, base,
+    q + ' ' + (u.nom || svc.unite) + (mult !== q && svc.comptable ? (' · palier ×' + String(mult).replace('.', ',')) : '')));
+  let total = base;
+  /* coefficients, dans l'ordre, chacun ajouté en ligne (transparence totale) */
+  for (const bloc of ['niveau', 'etat', 'difficulte', 'urgence', 'horaire', 'acces']) {
+    const B = T.coefs[bloc]; if (!B || B.actif === false) continue;
+    const valId = o[bloc];
+    if (!valId) { if (bloc === 'etat' && svc.etatCompte) manque.push('etat'); continue; }
+    const v = tarifValeurTrouve(bloc, valId); if (!v) continue;
+    if (bloc === 'etat' && !svc.etatCompte) continue;
+    /* 🪜 ACCÈS : si le PDG a réglé un MONTANT réel pour ce cas (ex. « Étage sans ascenseur : 1 500 F »),
+       c'est ce montant qui s'applique, affiché en clair — au lieu du pourcentage. Sans montant réglé,
+       le pourcentage actuel s'applique : rien ne change tout seul. */
+    if (bloc === 'acces' && Number(v.montant) > 0) {
+      const d = Math.round(Number(v.montant)); total += d;
+      lignes.push(l(bloc, B.ic + ' ' + B.nom + ' : ' + v.nom, d, 'montant réglé par le PDG'));
+      continue;
+    }
+    if (v.k !== 1) { const d = Math.round(total * (v.k - 1)); total += d;
+      lignes.push(l(bloc, B.ic + ' ' + B.nom + ' : ' + v.nom, d, '+' + Math.round((v.k - 1) * 100) + ' %')); }
+  }
+  /* matériel fourni par le professionnel */
+  const mat = String(o.materiel || '');
+  if (mat && mat !== 'client') {
+    const v = tarifCoefTrouve('materiel', mat);
+    const B = T.coefs.materiel || {};
+    if (v && v.k !== 1) { const d = Math.round(total * (v.k - 1)); total += d;
+      lignes.push(l('materiel', (B.ic || '🧰') + ' Matériel : ' + v.nom, d, '+' + Math.round((v.k - 1) * 100) + ' %')); }
+    if (svc.materielPrix > 0) { total += svc.materielPrix;
+      lignes.push(l('materiel', '🧰 Fournitures apportées par le pro', svc.materielPrix, 'forfait')); }
+  }
+  /* suppléments issus des questions (surface × prix au m², etc.) — 0 par défaut, rien d'inventé */
+  for (const l2 of supLignes) { total += l2.montant; lignes.push(l2); }
+  /* options choisies */
+  for (const op of options) { total += (op.prix || 0);
+    lignes.push(l('option:' + op.id, (op.ic || '🔹') + ' ' + op.nom, op.prix || 0, 'option')); }
+  /* 🛵 DÉPLACEMENT — 0 par défaut (« inclus », comme aujourd'hui). Quand le PDG l'active, la distance
+     vient de LA ZONE DU LIEU DE PRESTATION, calculée par le serveur : un chiffre envoyé par le client
+     ne sert que si la zone est inconnue, et il est alors ANNONCÉ comme estimation (jamais caché). */
+  const zoneP = tarifZoneDe(o.ville, o.quartier);
+  let kmInfo = null;
+  if (zoneP) kmInfo = { km: zoneP.km, src: 'zone ' + zoneP.nom, estimation: !(T.zonesSrc && T.zonesSrc.actif) };
+  else if (isFinite(Number(o.distanceKm)) && Number(o.distanceKm) > 0) kmInfo = { km: Number(o.distanceKm), src: 'distance annoncée', estimation: true };
+  const dep = tarifDeplacement(kmInfo && kmInfo.km);
+  let depInclus = true;
+  if (dep && dep.prix > 0) {
+    total += dep.prix; depInclus = false;
+    lignes.push(l('deplacement', '🛵 Déplacement', dep.prix,
+      dep.km + ' km' + (kmInfo ? ' · ' + kmInfo.src : '') + (kmInfo && kmInfo.estimation ? ' · estimation à confirmer' : '')
+      + (T.deplacement.allerRetour ? ' · aller-retour' : '')));
+  }
+  /* zone (coefficient par ville, réglable — 1 par défaut).
+     ⚠️ on réutilise LA MÊME résolution que la distance (tarifZoneDe) : le quartier d'abord.
+     Deux résolutions différentes donneraient deux vérités — le client verrait un prix incohérent. */
+  const z = zoneP || (o.ville ? T.zones[normVille(o.ville)] : null);
+  if (z && Number(z.k) !== 1) { const d = Math.round(total * (Number(z.k) - 1)); total += d;
+    lignes.push(l('zone', '📍 Zone ' + (z.nom || o.ville), d, '+' + Math.round((Number(z.k) - 1) * 100) + ' %')); }
+  /* remise (code promo) */
+  const promo = String(o.promo || '').toUpperCase();
+  let remise = 0;
+  if (promo && T.remises[promo]) { remise = Math.round(total * Number(T.remises[promo])); total -= remise;
+    lignes.push(l('remise', '🎉 Code ' + promo, -remise, '−' + Math.round(Number(T.remises[promo]) * 100) + ' %')); }
+  total = Math.max(0, Math.round(total));
+  const mode = manque.length ? 'fourchette' : 'auto';
+  const marge = manque.length ? Number(T.seuils.margeIncertitude || 0.2) : Number(T.seuils.margeAuto || 0.05);
+  const min = Math.max(0, Math.round(total * (1 - marge)));
+  const max = Math.round(total * (1 + marge));
+  const seuil = Number(T.seuils.validationAdmin) || 0;
+  const haut = seuil > 0 && total >= seuil;
+  const texte = mode === 'auto'
+    ? 'Prix calculé à partir des prix actuels de ' + svc.nom + ' et de vos réponses. Il reste confirmé par le professionnel avant le début de la prestation.'
+    : 'Estimation : certaines informations manquent encore (' + manque.map(tarifManqueTxt).join(', ') + '). Cette estimation n’est pas encore le prix définitif — les professionnels disponibles confirmeront leur tarif après analyse de votre demande.';
+  return {
+    ok: true, mode, total, min, max, fourchette: [min, max], lignes, manque, off: !!svc.off,
+    service: tarifSvcPublic(svc), serviceId: svc.id, version, unite: svc.unite, uniteNom: u.nom,
+    quantite: q, multiplicateur: mult, ref: svc.ref, remise,
+    deplacement: dep ? dep.prix : 0,
+    /* 🛵 information transparente : d'où vient la distance, et si le déplacement est inclus */
+    deplacementInfo: { inclus: depInclus, mode: (db.tarif.deplacement || {}).mode || 'inclus',
+      km: kmInfo ? kmInfo.km : null, source: kmInfo ? kmInfo.src : '', estimation: !!(kmInfo && kmInfo.estimation) },
+    zoneDe: zoneP ? { id: zoneP.id, nom: zoneP.nom, km: zoneP.km, k: zoneP.k } : null,
+    options: options.map(x => ({ id: x.id, nom: x.nom, prix: x.prix })),
+    validationAdmin: haut, seuilValidation: seuil, texte,
+    reponses: Object.keys(reponses).slice(0, 20).map(k => ({ q: k, v: String(reponses[k]).slice(0, 60) })),
+    questions: questions.map(tarifQuestionPublique),
+    precisions: suplTxt.slice(0, 10),
+    photos: nbPhotosFournies, photosMin: svc.photosMin || 0, photosObligatoires: svc.photos === 'obligatoires',
+    resume: tarifResume(svc, o, q, u)
+  };
+}
+/* 📍 distance réelle client ↔ professionnel (GPS des deux côtés) ; null si on ne la connaît pas.
+   On n'invente JAMAIS une distance : sans position vérifiable, on affiche la ville. */
+function distMissionPro(m, ag) {
+  try {
+    const a = (m && typeof m.lat === 'number' && typeof m.lng === 'number' && m.lat !== null) ? { lat: m.lat, lng: m.lng } : null;
+    const p = ag && ag.pos;
+    const b = (p && typeof p.lat === 'number' && typeof p.lng === 'number' && typeof posUsable === 'function' && posUsable(ag)) ? { lat: p.lat, lng: p.lng } : null;
+    if (!a || !b) return null;
+    return Math.round(haversineKm(a.lat, a.lng, b.lat, b.lng) * 10) / 10;
+  } catch (e) { return null; }
+}
+function tarifManqueTxt(k) {
+  return { quantite: 'la quantité', etat: 'l’état des lieux', photos: 'les photos', service: 'le service',
+    devis: 'le devis du professionnel', prix: 'le prix de référence (à régler au tableau de bord)' }[k] || k;
+}
+function tarifResume(svc, o, q, u) {
+  const bouts = [svc.nom];
+  if (svc.comptable) bouts.push('quantité ' + q);
+  if (o.etat) { const v = tarifCoefTrouve('etat', o.etat); if (v && svc.etatCompte) bouts.push('état : ' + v.nom.toLowerCase()); }
+  if (o.niveau) { const v = tarifCoefTrouve('niveau', o.niveau); if (v && v.k !== 1) bouts.push(v.nom.toLowerCase()); }
+  if (o.urgence) { const v = tarifCoefTrouve('urgence', o.urgence); if (v && v.k !== 1) bouts.push('urgence : ' + v.nom.toLowerCase()); }
+  return bouts.join(' · ');
+}
+/* ce que le client/le pro a le droit de voir d'un service tarifé */
+function tarifSvcPublic(s) {
+  if (!s) return null;
+  return { id: s.id, nom: s.nom, ic: s.ic, unite: s.unite, uniteNom: (s.uniteNom || ((db.tarif.unites || []).find(u => u.id === s.unite) || {}).nom || ''),
+    ref: s.ref, min: s.min, max: s.max, devis: !!s.devis, comptable: !!s.comptable,
+    etatCompte: !!s.etatCompte, photos: s.photos, photosMin: s.photosMin, metier: s.metier || s.id,
+    options: tarifOptionsDe(s).map(o => ({ id: o.id, ic: o.ic || '🔹', nom: o.nom, desc: o.desc || '', prix: o.prix || 0 })) };
+}
+/* 🏷️ la liste publique des prix (le client peut tout voir ; rien n'est secret) */
+function tarifPublicList() {
+  tarifEnsure();
+  const T = db.tarif;
+  const out = [];
+  for (const k in T.svc) { const s = T.svc[k]; if (s.off) continue; out.push(tarifSvcPublic(s)); }
+  out.sort((a, b) => String(a.id).localeCompare(String(b.id), 'fr', { numeric: true }));
+  return { version: T.version, unites: T.unites, coefs: T.coefs, paliers: T.paliers,
+    deplacement: T.deplacement, seuils: T.seuils, remises: T.remises, services: out };
+}
+
 function catNatLieux(num) {
   const reg = catNatReglages();
   const perso = (reg.lieux || {})[num];
@@ -3960,6 +4596,60 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, resu);
   }
 
+  /* ═══════════════ 💰 MOTEUR DE TARIFICATION (client) ═══════════════ */
+  /* tout est public côté prix : le client a le droit de voir les prix et leur détail */
+  if (p === '/api/tarif' && req.method === 'GET') {
+    const t = tarifPublicList();
+    return sendJson(res, 200, Object.assign({ ok: true, nb: t.services.length }, t));
+  }
+  /* ❓ les questions à poser pour un service (aucune question inutile) */
+  /* 🗺️ ZONES & DÉPLACEMENT — lecture publique (le client a le droit de savoir sur quoi repose son prix) */
+  if (p === '/api/tarif/zones' && req.method === 'GET') {
+    tarifEnsure();
+    const T = db.tarif, src = T.zonesSrc || {}, dep = T.deplacement || {};
+    const ref = (T.refs || []).find(x => x && x.id === 'deplacement') || null;
+    const zones = Object.keys(T.zones).map(k => ({ id: k, nom: T.zones[k].nom || k,
+      k: Number(T.zones[k].k) || 1, km: typeof T.zones[k].km === 'number' ? T.zones[k].km : null }))
+      .sort((a, b) => (a.km || 0) - (b.km || 0));
+    return sendJson(res, 200, { ok: true,
+      zones, zoneProposee: Object.assign({}, TARIF_ZONES_KM_DEF),
+      source: { actif: !!src.actif, source: src.source || '', date: src.sourceDate || '', note: src.note || '' },
+      deplacement: { mode: dep.mode || 'inclus', km: dep.km, forfait: dep.forfait, allerRetour: !!dep.allerRetour,
+        tranches: (dep.tranches || []).map(t => ({ jusqua: t.jusqua, prix: t.prix })),
+        source: dep.source || '', date: dep.sourceDate || '', note: dep.note || '' },
+      reference: ref ? { min: ref.min, max: ref.max, source: ref.source, date: ref.date } : null,
+      regle: 'Le déplacement est « inclus » (prix d’aujourd’hui) tant que le PDG ne l’active pas. '
+           + 'Activer un mode payant exige une SOURCE et une DATE : une référence de marché sans source n’est pas une référence.' });
+  }
+
+  if (p === '/api/tarif/questions' && req.method === 'GET') {
+    const svc = tarifSvc(url.searchParams.get('service'));
+    if (!svc) return sendJson(res, 404, { error: 'Service inconnu du moteur de tarification' });
+    const qs = tarifQuestionsDe(svc).map(tarifQuestionPublique);
+    return sendJson(res, 200, { ok: true, service: tarifSvcPublic(svc), questions: qs, nb: qs.length,
+      regle: 'Aucune question n’est posée si elle n’est pas utile à ce service. « Je ne sais pas » est toujours accepté : le prix devient alors une estimation, jamais un prix définitif inventé. Vos réponses remplissent les mêmes coefficients que le calcul officiel (aucun second système de prix).' });
+  }
+
+  /* 🧾 le calcul détaillé : une ligne par élément (le téléphone ne calcule plus rien) */
+  if (p === '/api/tarif/devis' && req.method === 'GET') {
+    const ip = clientIp(req);
+    if (!recherchePlafond('tarif:' + ip, 240))
+      return sendJson(res, 429, { error: 'Trop de calculs en une minute — patientez un instant', code: 'plafond' });
+    const qp = url.searchParams;
+    const o = {
+      quantite: qp.get('quantite'), niveau: qp.get('niveau'), etat: qp.get('etat'),
+      difficulte: qp.get('difficulte'), urgence: qp.get('urgence'), horaire: qp.get('horaire'),
+      acces: qp.get('acces'), materiel: qp.get('materiel'),
+      options: String(qp.get('options') || '').split('|').filter(Boolean).slice(0, 30),
+      distanceKm: parseFloat(qp.get('distanceKm')), ville: qp.get('ville') || '', quartier: qp.get('quartier') || '',
+      promo: qp.get('promo') || '', photos: parseInt(qp.get('photos'), 10) || 0,
+      reponses: (() => { const r = {}; String(qp.get('reponses') || '').split('|').filter(Boolean).slice(0, 20)
+        .forEach(x => { const i = x.indexOf(':'); if (i > 0) r[x.slice(0, i)] = x.slice(i + 1); }); return r; })()
+    };
+    const tar = tarifCalculer(qp.get('service'), o);
+    return sendJson(res, 200, { ok: true, tarif: tar, version: tarifVersion() });
+  }
+
   /* ═══════════════ 📚 CATALOGUE NATIONAL (client) ═══════════════ */
   if (p === '/api/catalogue' && req.method === 'GET') {
     const arbre = catalogueNational();
@@ -4486,15 +5176,36 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/missions' && req.method === 'POST') {
     const b = await readBody(req);
     if (!b.nom || !b.service) return sendJson(res, 400, { error: 'données manquantes' });
+    /* 💰 LE PRIX EST CALCULÉ PAR LE SERVEUR (le téléphone ne décide plus du prix).
+       · application à jour (b.detail = true) → le serveur IMPOSE son prix détaillé ;
+       · ancien appel qui envoie encore « prixTotal » (application déjà installée) → le prix est
+         accepté mais MARQUÉ « à vérifier » avec l'écart, pour que le PDG le voie. */
+    const tQ = {
+      quantite: b.pieces, niveau: b.depth, etat: b.etat, difficulte: b.difficulte,
+      urgence: (b.urgence === true || b.urgence === 'immediat' || b.time === 'maintenant') ? 'immediat' : b.urgence,
+      horaire: b.horaire, acces: b.acces, materiel: b.materiel, options: b.extras || {},
+      photos: Array.isArray(b.photos) ? b.photos.length : (parseInt(b.photos, 10) || 0),
+      distanceKm: b.distanceKm, ville: b.ville || b.cityNom || b.city || '', promo: b.promo,
+      reponses: (b.reponses && typeof b.reponses === 'object') ? b.reponses : undefined   /* ❓ lot 108 */
+    };
+    const tar = (b.service === 'custom')
+      ? { mode: 'devis', total: 0, min: 0, max: 0, fourchette: [0, 0], lignes: [], manque: ['service'], version: tarifVersion(),
+          texte: 'Demande sur mesure : décrivez votre besoin, le professionnel vous répond avec un prix.' }
+      : tarifCalculer(b.service, tQ);
+    const duMoteur = (b.detail === true || !!b.reponses);
+    const prixAnnonce = Math.max(0, Math.round(b.prixTotal || 0));
+    const prixFinal = duMoteur ? (tar.mode === 'devis' ? 0 : tar.total) : prixAnnonce;
+    const ecartPct = (tar.total > 0 && prixAnnonce > 0) ? Math.round(((prixAnnonce - tar.total) / tar.total) * 1000) / 10 : 0;
+    const ecartAnormal = Math.abs(ecartPct) > (Number((db.tarif.seuils || {}).ecartAnormal || 0.4) * 100);
     const m = {
       id: uid('KN'), service: b.service, pieces: b.pieces || 2, depth: b.depth || 'normal',
-      extras: b.extras || {}, prixTotal: Math.round(b.prixTotal || 0), promo: b.promo || '',
+      extras: b.extras || {}, prixTotal: prixFinal, promo: b.promo || '',
       date: b.date || '', time: b.time || '', quartier: b.quartier || '', adresse: b.adresse || '',
       paiement: b.paiement || 'cash',
       desc: (typeof b.desc === 'string' ? b.desc : '').slice(0, 280),
       photos: Array.isArray(b.photos) ? b.photos.filter(x => typeof x === 'string' && x.length < 600000).slice(0, 3) : [],
       budget: Math.max(0, parseInt(b.budget) || 0),
-      quote: !!(b.quote || b.service === 'custom'),
+      quote: !!(b.quote || b.service === 'custom' || tar.mode === 'devis'),
       /* 📚 la chaîne comprise (catégorie → service → sous-service → tâche) et les tâches multiples */
       taches: Array.isArray(b.taches) ? b.taches.filter(x => typeof x === 'string' && x).slice(0, 8).map(x => x.slice(0, 80)) : [],
       chaine: (b.chaine && typeof b.chaine === 'object') ? { categorie: String(b.chaine.categorie || '').slice(0, 60),
@@ -4504,10 +5215,22 @@ const server = http.createServer(async (req, res) => {
       lng: typeof b.lng === 'number' ? b.lng : null,
       ville: String(b.ville || b.cityNom || b.city || '').slice(0, 60),
       client: { nom: b.nom, tel: b.tel || '', deviceId: b.deviceId || '' },
-      dist: Math.round((0.5 + Math.random() * 3.5) * 10) / 10,
+      dist: null,                       /* 📍 jamais inventée : remplie avec la distance RÉELLE dès qu'un pro accepte */
       status: 'pending', agentId: null, createdAt: nowISO(), finishedAt: null, note: 0,
       matchScope: 'all'
     };
+    /* 🧾 la trace du calcul : version, mode, lignes, fourchette, ce qui manquait, qui a fixé le prix */
+    m.tarif = {
+      version: tar.version, mode: tar.mode, lignes: (tar.lignes || []).slice(0, 20), total: tar.total || 0,
+      fourchette: tar.fourchette || [tar.min || 0, tar.max || 0], manque: tar.manque || [],
+      unite: tar.unite || '', ref: tar.ref || 0, quantite: tar.quantite || 1,
+      source: duMoteur ? 'moteur' : 'declare', ecartPct: ecartPct, aVerifier: duMoteur ? false : ecartAnormal,
+      texte: tar.texte || '',
+      reponses: tar.reponses || [], precisions: tar.precisions || [], manque: tar.manque || [],
+      questions: duMoteur ? (tar.questions || []).length : 0
+    };
+    if (m.tarif.aVerifier) try { emitAdmin('tarif', '🏷️ Prix à vérifier sur ' + m.id + ' : annoncé ' + prixFinal.toLocaleString('fr-FR') + ' F, calculé ' + (tar.total || 0).toLocaleString('fr-FR') + ' F (' + ecartPct + ' %)'); } catch (e) {}
+
     /* 🎯 demande d'un pro précis (choisi dans la liste ou trouvé par son numéro professionnel) */
     const veutCible = b.agentCible || b.cible || b.cibleId || b.numPro;
     if (veutCible) {
@@ -4529,6 +5252,144 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 201, { id: m.id, dist: m.dist });
   }
 
+  /* ═══════════════════════════════════════════════════════════════════════════════════════════
+     💰 LOT 109 — DEVIS STRUCTURÉ, PRIX VERROUILLÉ, MODIFICATION MOTIVÉE
+     ───────────────────────────────────────────────────────────────────────────────────────────
+     Un seul document fait foi : le devis de la mission (`m.devis`). Il est structuré
+     (main-d'œuvre, matériel, déplacement, autres frais, remise, délai, durée, conditions),
+     et son total est TOUJOURS recalculé ici, à partir des lignes — jamais fourni par l'appareil.
+
+     · Le client ACCEPTE → le prix est VERROUILLÉ (`m.prixVerrouille`) : c'est lui qui fait foi.
+     · Le client REFUSE → le devis est refusé ; s'il y avait un prix déjà accepté, il reste en vigueur.
+     · Après acceptation, PERSONNE ne peut changer le prix en silence : ni le PDG, ni le
+       gestionnaire, ni le professionnel. Toute modification doit porter un MOTIF, crée une
+       NOUVELLE VERSION (v2, v3…) proposée au client, et le prix reste celui qu'il a accepté
+       tant qu'il n'a pas accepté la nouvelle version.
+     · L'imprévu du professionnel passe par le même chemin (motif obligatoire).
+     · Tout est journalisé : qui, quoi, avant, après, quand, pourquoi (db.devisJournal).
+     · Rien n'est supprimé : chaque version et chaque verrou restent dans l'historique.
+     ═══════════════════════════════════════════════════════════════════════════════════════════ */
+  const DEVIS_TYPES = { main_oeuvre: 'Main-d’œuvre', materiel: 'Matériel & produits', deplacement: 'Déplacement', autre: 'Autres frais' };
+
+  function devisJournaliser(m, action, avant, apres, motif, par) {
+    db.devisJournal = db.devisJournal || [];
+    db.devisJournal.push({ at: nowISO(), par: par || 'inconnu', missionId: m.id, action: action,
+      version: (m.devis && m.devis.version) || 0, avant: avant || null, apres: apres || null, motif: motif || '' });
+    if (db.devisJournal.length > 3000) db.devisJournal = db.devisJournal.slice(-3000);
+  }
+  /* les lignes sont nettoyées puis le total est calculé ICI (jamais repris du téléphone) */
+  function devisLignesNettoyer(brut) {
+    const out = [];
+    (Array.isArray(brut) ? brut : []).slice(0, 40).forEach(l => {
+      if (!l || typeof l !== 'object') return;
+      const type = DEVIS_TYPES[l.type] ? l.type : 'autre';
+      const libelle = String(l.libelle || DEVIS_TYPES[type]).trim().slice(0, 140) || DEVIS_TYPES[type];
+      const qte = Math.max(0, Math.min(9999, Number(l.qte) || 1));
+      const pu = Math.max(0, Math.min(50000000, Math.round(Number(l.pu) || Number(l.montant) || 0)));
+      const montant = Math.round(qte * pu);
+      if (montant > 0) out.push({ type: type, typeNom: DEVIS_TYPES[type], libelle: libelle, qte: qte, pu: pu, montant: montant });
+    });
+    return out;
+  }
+  function devisTotaux(lignes, remiseBrute, m) {
+    const brut = lignes.reduce((a, l) => a + l.montant, 0);
+    const parType = { main_oeuvre: 0, materiel: 0, deplacement: 0, autre: 0 };
+    lignes.forEach(l => { parType[l.type] += l.montant; });
+    let remise = Math.max(0, Math.round(Number(remiseBrute) || 0));
+    if (remise > Math.round(brut * 0.5)) remise = Math.round(brut * 0.5);      /* on ne « remise » pas plus de la moitié */
+    const total = Math.max(0, brut - remise);
+    /* 📊 comparaison objective avec l'estimation du moteur : un prix inhabituel est SIGNALÉ, jamais supprimé */
+    let estimation = null, inhabituel = false;
+    try {
+      if (typeof tarifCalculer === 'function') {
+        const c = m || {};
+        const t = tarifCalculer(c.service, { quantite: c.pieces, niveau: c.depth, extras: c.extras,
+          urgence: c.urgence, photos: Array.isArray(c.photos) ? c.photos.length : 0, promo: c.promo, ville: c.ville });
+        if (t && t.mode !== 'devis' && t.total > 0) {
+          estimation = { total: t.total, mode: t.mode, version: t.version };
+          inhabituel = (total > t.total * 1.5 || total < t.total * 0.5);
+        }
+      }
+    } catch (e) {}
+    return { brut: brut, remise: remise, total: total, parType: parType, estimation: estimation, inhabituel: inhabituel };
+  }
+  function devisNettoyerChamp(v, max) { return String(v == null ? '' : v).trim().slice(0, max || 300); }
+  /* création d'une version (v1 ou modification motivée) */
+  function devisCreer(m, b, par, estModification) {
+    const lignes = devisLignesNettoyer(b.lignes);
+    if (!lignes.length) return { error: 'Un devis doit contenir au moins une ligne (main-d’œuvre, matériel, déplacement…)' };
+    const t = devisTotaux(lignes, b.remise, m);
+    if (t.total < 500) return { error: 'Le total du devis est trop faible (minimum 500 F)' };
+    const motif = devisNettoyerChamp(b.motif, 400);
+    const avaitDevis = !!(m.devis && m.devis.version);
+    if (estModification && !motif) return { error: 'Une modification doit être motivée : dites au client POURQUOI (panne imprévue, matériel en plus, accès difficile…)' };
+    if (!estModification && avaitDevis && !motif) return { error: 'Le devis existe déjà : envoyez une modification motivée (le client doit savoir pourquoi)' };
+    const version = ((m.devis && m.devis.version) || 0) + 1;
+    if (m.devis) { (m.devisHisto = m.devisHisto || []).push(m.devis); if (m.devisHisto.length > 30) m.devisHisto = m.devisHisto.slice(-30); }
+    const avant = m.devis ? { version: m.devis.version, total: m.devis.total, statut: m.devis.statut } : null;
+    m.devis = {
+      version: version, statut: 'envoye',
+      lignes: lignes, parType: t.parType, totalAvantRemise: t.brut, remise: t.remise, total: t.total,
+      delai: devisNettoyerChamp(b.delai, 60), duree: devisNettoyerChamp(b.duree, 60),
+      conditions: devisNettoyerChamp(b.conditions, 600),
+      motif: motif, estModification: !!estModification,
+      par: par, at: nowISO(),
+      estimation: t.estimation, inhabituel: t.inhabituel,
+      remplaceVersion: estModification ? version - 1 : null
+    };
+    if (m.prixVerrouille) m.devis.enAttenteSurPrixVerrouille = { montant: m.prixVerrouille.montant, version: m.prixVerrouille.version };
+    devisJournaliser(m, estModification ? 'modification_proposee' : 'devis_envoye', avant,
+      { version: version, total: t.total, lignes: lignes.length, inhabituel: t.inhabituel }, motif, par);
+    saveDb();
+    emitToMission(m, { type: 'devis', missionId: m.id, version: version, total: t.total, statut: 'envoye',
+      motif: motif, prixVerrouille: m.prixVerrouille ? m.prixVerrouille.montant : null });
+    try { emitAdmin('devis', '🧾 ' + par + ' a envoyé le devis v' + version + ' (' + t.total.toLocaleString('fr-FR') + ' F) pour ' + m.id + (motif ? ' — motif : ' + motif : '')); } catch (e) {}
+    return { ok: true, devis: m.devis };
+  }
+  function devisAccepter(m, par) {
+    if (!m.devis || !m.devis.version) return { error: 'Aucun devis à accepter' };
+    if (m.devis.statut === 'accepte') return { error: 'Ce devis est déjà accepté' };
+    if (m.devis.statut === 'refuse') return { error: 'Ce devis a été refusé : demandez un nouveau devis' };
+    const avant = { prixTotal: m.prixTotal || 0, verrou: m.prixVerrouille || null };
+    m.devis.statut = 'accepte'; m.devis.accepteAt = nowISO(); m.devis.acceptePar = par;
+    (m.verrousHisto = m.verrousHisto || []);
+    if (m.prixVerrouille) m.verrousHisto.push(Object.assign({}, m.prixVerrouille, { remplaceAt: nowISO(), remplacePar: par }));
+    m.prixVerrouille = { montant: m.devis.total, version: m.devis.version, date: nowISO(), par: par };
+    m.prixTotal = m.devis.total;                     /* 🔒 le prix accepté devient LE prix de la mission */
+    m.quote = false;
+    if (m.status === 'quoted') m.status = 'pending';
+    devisJournaliser(m, 'devis_accepte', avant, { version: m.devis.version, total: m.devis.total, verrouille: true }, '', par);
+    saveDb();
+    emitToMission(m, { type: 'mission_update', status: m.status, missionId: m.id, prixTotal: m.prixTotal,
+      verrouille: true, devisVersion: m.devis.version });
+    try { emitAdmin('devis', '🔒 ' + par + ' a accepté le devis v' + m.devis.version + ' — prix verrouillé à ' + m.devis.total.toLocaleString('fr-FR') + ' F (' + m.id + ')'); } catch (e) {}
+    return { ok: true, prixTotal: m.prixTotal, verrouille: m.prixVerrouille };
+  }
+  function devisRefuser(m, motif, par) {
+    if (!m.devis || !m.devis.version) return { error: 'Aucun devis à refuser' };
+    const avant = { statut: m.devis.statut, version: m.devis.version, total: m.devis.total };
+    m.devis.statut = 'refuse'; m.devis.refuseAt = nowISO(); m.devis.refusePar = par; m.devis.refuseMotif = devisNettoyerChamp(motif, 300);
+    if (m.prixVerrouille) m.devis.enAttenteSurPrixVerrouille = { montant: m.prixVerrouille.montant, version: m.prixVerrouille.version };
+    devisJournaliser(m, 'devis_refuse', avant, { statut: 'refuse', prixVerrouilleConserve: m.prixVerrouille ? m.prixVerrouille.montant : null }, m.devis.refuseMotif, par);
+    saveDb();
+    emitToMission(m, { type: 'devis', missionId: m.id, version: m.devis.version, total: m.devis.total, statut: 'refuse',
+      motif: m.devis.refuseMotif, prixVerrouille: m.prixVerrouille ? m.prixVerrouille.montant : null });
+    try { emitAdmin('devis', '🚫 ' + par + ' a refusé le devis v' + m.devis.version + ' (' + m.id + ')' + (m.prixVerrouille ? ' — le prix accepté reste en vigueur' : '')); } catch (e) {}
+    return { ok: true, statut: 'refuse', prixEnVigueur: m.prixVerrouille ? m.prixVerrouille.montant : (m.prixTotal || 0) };
+  }
+  /* ce qui est montré au client : le devis, l'historique, le prix verrouillé, et si un changement attend SA réponse */
+  function devisPublique(m) {
+    if (!m || (!m.devis && !m.devisHisto)) return null;
+    return {
+      devis: m.devis || null,
+      historique: (m.devisHisto || []).map(d => ({ version: d.version, total: d.total, statut: d.statut, par: d.par, at: d.at, motif: d.motif || '' })),
+      verrou: m.prixVerrouille || null,
+      verrousPrecedents: (m.verrousHisto || []).slice(-5),
+      enAttenteDeVotreReponse: !!(m.devis && m.devis.statut === 'envoye'),
+      prixEnVigueur: m.prixVerrouille ? m.prixVerrouille.montant : (m.prixTotal || 0)
+    };
+  }
+
   const mAccept = p.match(/^\/api\/missions\/(.+)\/accept$/);
   if (mAccept && req.method === 'POST') {
     const { agentId } = await readBody(req);
@@ -4546,7 +5407,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 403, { error: 'Prestation réglementée (' + (r.nom || m.reglemente) + ') : réservée aux professionnels habilités. Envoyez votre diplôme ou agrément au HQ pour être vérifié.', reglemente: m.reglemente, habilitationRequise: r.exige || '' });
       }
     }
-    m.status = 'accepted'; m.agentId = ag.id; invaliderStats(ag.id); saveDb();
+    m.status = 'accepted'; m.agentId = ag.id; m.dist = distMissionPro(m, ag); invaliderStats(ag.id); saveDb();
     // informer les autres agents que la mission est prise
     broadcast(onlineAgents().filter(s => s.meta.agentId !== ag.id), { type: 'mission_taken', missionId: m.id });
     emitToMission(m, { type: 'mission_update', status: 'accepted', missionId: m.id,
@@ -4555,6 +5416,75 @@ const server = http.createServer(async (req, res) => {
     console.log(`✅ ${ag.nom} a accepté ${m.id}`);
     emitAdmin('accept', `✅ ${ag.nom} a accepté la mission ${m.id} (${m.prixTotal.toLocaleString('fr-FR')} F)`);
     return sendJson(res, 200, { ok: true, missionId: m.id, clientTel: m.client.tel });
+  }
+
+  /* 🧾 LOT 109 — le devis structuré d'une mission */
+  const mDevis = p.match(/^\/api\/missions\/([^/]+)\/devis$/);
+  if (mDevis) {
+    const m = db.missions.find(x => x.id === mDevis[1]);
+    if (!m) return sendJson(res, 404, { error: 'Mission introuvable' });
+    const cli = findClientByToken(req);
+    const jetonAgent = (req.headers && req.headers['x-agent-token']) || '';
+    const agAppelant = jetonAgent ? db.agents.find(a => a.jeton && a.jeton === jetonAgent) : null;
+    const estClient = !!(cli && cli.id === m.clientId);
+    const estPro = !!(agAppelant && m.agentId === agAppelant.id);
+    if (req.method === 'GET') {
+      if (!(isAdminReq(req) || estClient || estPro)) return sendJson(res, 403, { error: 'Ce devis ne vous appartient pas' });
+      return sendJson(res, 200, Object.assign({ ok: true, missionId: m.id }, devisPublique(m) || { devis: null, historique: [], verrou: null, prixEnVigueur: m.prixTotal || 0 }));
+    }
+    if (req.method === 'POST') {
+      /* ⛔ le client ne crée pas de devis : il accepte ou il refuse (routes dédiées) */
+      if (estClient && !isAdminReq(req) && !estPro) return sendJson(res, 403, { error: 'C’est le professionnel qui établit le devis — vous pouvez l’accepter ou le refuser' });
+      if (!(isAdminReq(req) || estPro)) return sendJson(res, 401, { error: 'non autorisé' });
+      const b = await readBody(req);
+      const par = estPro ? (agAppelant.nom || 'professionnel') : act(req);
+      const r = devisCreer(m, b, par, false);
+      if (r.error) return sendJson(res, 400, { error: r.error });
+      return sendJson(res, 200, r);
+    }
+  }
+  const mDevisMod = p.match(/^\/api\/missions\/([^/]+)\/devis\/(modifier|accepter|refuser)$/);
+  if (mDevisMod && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mDevisMod[1]);
+    if (!m) return sendJson(res, 404, { error: 'Mission introuvable' });
+    const quoi = mDevisMod[2];
+    const b = await readBody(req);
+    const cli = findClientByToken(req);
+    const jetonAgent = (req.headers && req.headers['x-agent-token']) || '';
+    const agAppelant = jetonAgent ? db.agents.find(a => a.jeton && a.jeton === jetonAgent) : null;
+    const estClient = !!(cli && cli.id === m.clientId);
+    const estPro = !!(agAppelant && m.agentId === agAppelant.id);
+    if (quoi === 'accepter') {
+      /* seul le client de la mission peut verrouiller le prix */
+      if (!estClient) return sendJson(res, 403, { error: 'Seul le client de la mission peut accepter le devis' });
+      const r = devisAccepter(m, 'client');
+      if (r.error) return sendJson(res, 400, { error: r.error });
+      return sendJson(res, 200, r);
+    }
+    if (quoi === 'refuser') {
+      if (!(estClient || estPro || isAdminReq(req))) return sendJson(res, 403, { error: 'non autorisé' });
+      const par = estClient ? 'client' : (estPro ? (agAppelant.nom || 'professionnel') : act(req));
+      const r = devisRefuser(m, b.motif, par);
+      if (r.error) return sendJson(res, 400, { error: r.error });
+      return sendJson(res, 200, r);
+    }
+    /* modifier : niveau professionnel / PDG / gestionnaire — TOUJOURS motivé, jamais silencieux */
+    if (estClient && !isAdminReq(req)) return sendJson(res, 403, { error: 'Le client ne modifie pas le devis : il l’accepte ou le refuse' });
+    if (!(isAdminReq(req) || estPro)) return sendJson(res, 401, { error: 'non autorisé' });
+    const par = estPro ? (agAppelant.nom || 'professionnel') : act(req);
+    if (!devisNettoyerChamp(b.motif, 400)) return sendJson(res, 400, {
+      error: 'Une modification doit être MOTIVÉE : écrivez POURQUOI (panne imprévue, matériel en plus, accès difficile…) — le client doit le savoir avant d’accepter. On n’invente jamais un motif.' });
+    const r = devisCreer(m, b, par, true);
+    if (r.error) return sendJson(res, 400, { error: r.error });
+    return sendJson(res, 200, r);
+  }
+  /* 🧾 journal des devis (PDG) : qui, quoi, avant, après, quand, pourquoi */
+  if (p === '/api/admin/devis/journal' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const j = (db.devisJournal || []).slice(-200).reverse();
+    return sendJson(res, 200, { ok: true, n: j.length, journal: j,
+      verrous: db.missions.filter(m => m.prixVerrouille).length,
+      enAttente: db.missions.filter(m => m.devis && m.devis.statut === 'envoye').length });
   }
 
   const mStatus = p.match(/^\/api\/missions\/(.+)\/status$/);
@@ -4591,8 +5521,20 @@ const server = http.createServer(async (req, res) => {
     const m = db.missions.find(x => x.id === mGet[1]);
     if (!m) return sendJson(res, 404, {});
     const ag = m.agentId ? db.agents.find(a => a.id === m.agentId) : null;
-    return sendJson(res, 200, { id: m.id, status: m.status, agentId: m.agentId,
-      lat: m.lat, lng: m.lng, agentPos: (ag && ag.pos) || null });
+    /* 🔒 on ne diffuse pas la position d'un professionnel à n'importe qui : il faut être
+       le client de la mission, le professionnel assigné, ou le HQ. */
+    const cli = findClientByToken(req);
+    const jetonAgent = req.headers['x-agent-token'] || '';
+    const agAppelant = jetonAgent ? db.agents.find(a => a.jeton && a.jeton === jetonAgent) : null;
+    const autorise = isAdminReq(req) || (cli && cli.id === m.clientId) || (agAppelant && m.agentId === agAppelant.id);
+    if (!autorise) return sendJson(res, 403, { error: 'Cette mission ne vous appartient pas' });
+    return sendJson(res, 200, { ok: true, id: m.id, status: m.status, agentId: m.agentId,
+      lat: m.lat, lng: m.lng, agentPos: (ag && ag.pos) || null,
+      dist: (typeof m.dist === 'number' ? m.dist : null),
+      prixTotal: m.prixTotal, quote: !!m.quote, tarif: m.tarif || null,
+      devis: m.devis || null, devisHisto: (m.devisHisto || []).length,
+      prixVerrouille: m.prixVerrouille || null,
+      ville: m.ville || '' });
   }
 
   const aSum = p.match(/^\/api\/agents\/(.+)\/summary$/);
@@ -5130,7 +6072,16 @@ const server = http.createServer(async (req, res) => {
       status: m.status, client: m.client && m.client.nom,
       agent: m.agentId ? ((db.agents.find(a => a.id === m.agentId) || {}).nom || '—') : null,
       paiement: m.paiement, gps: !!(m.lat && m.lng),
-      at: m.createdAt
+      at: m.createdAt,
+      /* 💰 la trace du calcul : le PDG voit comment chaque prix a été fait (et pourquoi il est « à vérifier ») */
+      tarif: m.tarif || null, quote: !!m.quote, ville: m.ville || '',
+      /* 🧾 lot 109 : devis structuré + verrou + alerte « prix inhabituel » (signalé, jamais supprimé) */
+      devis: m.devis ? { version: m.devis.version, statut: m.devis.statut, total: m.devis.total, remise: m.devis.remise,
+        lignes: m.devis.lignes, parType: m.devis.parType, delai: m.devis.delai, duree: m.devis.duree,
+        conditions: m.devis.conditions, motif: m.devis.motif, par: m.devis.par, at: m.devis.at,
+        inhabituel: !!m.devis.inhabituel, estimation: m.devis.estimation || null } : null,
+      devisHisto: (m.devisHisto || []).map(d => ({ version: d.version, total: d.total, statut: d.statut, par: d.par, at: d.at, motif: d.motif || '' })),
+      prixVerrouille: m.prixVerrouille || null
     })));
   }
 
@@ -5143,6 +6094,9 @@ const server = http.createServer(async (req, res) => {
       ville: m.ville || '', quartier: m.quartier || '', adresse: m.adresse || '',
       client: m.client && m.client.nom, tel: m.client && m.client.tel,
       agentId: m.agentId || '',
+      /* 🧾 lot 109 : le devis structuré, son historique et le verrou de prix */
+      devis: m.devis || null, prixVerrouille: m.prixVerrouille || null,
+      devisHisto: (m.devisHisto || []).map(d => ({ version: d.version, total: d.total, statut: d.statut, par: d.par, at: d.at, motif: d.motif || '' })),
       agent: m.agentId ? ((db.agents.find(a => a.id === m.agentId) || {}).nom || '') : '',
       at: m.createdAt
     }));
@@ -5153,10 +6107,19 @@ const server = http.createServer(async (req, res) => {
     if (!isAdminReq(req)) return sendJson(res, 401, {});
     const b = await readBody(req);
     const m = db.missions.find(x => x.id === b.id);
+    /* 🔒 lot 109 — AVANT toute autre chose : un prix déjà accepté par le client ne s'écrase pas ici.
+       (Le contrôle est placé en tête pour être atteint dans TOUS les cas, même avec une demande incomplète.) */
+    if (m && b.prix && m.prixVerrouille) return sendJson(res, 400, { error: 'Prix déjà accepté par le client (' +
+      m.prixVerrouille.montant.toLocaleString('fr-FR') + ' F, devis v' + m.prixVerrouille.version +
+      ') : envoyez une modification motivée via le devis, le client devra l’accepter.', verrouille: m.prixVerrouille });
     const ag = db.agents.find(a => a.id === b.agentId && !a.blocked);
     if (!m || !ag) return sendJson(res, 404, { error: 'Mission ou pro introuvable' });
-    m.agentId = ag.id; m.status = 'accepted'; m.assignedBy = act(req); m.assignedAt = nowISO();
-    if (b.prix) { m.prixTotal = Math.round(Number(b.prix) || m.prixTotal || 0); m.quote = false; }
+    m.agentId = ag.id; m.status = 'accepted'; m.dist = distMissionPro(m, ag); m.assignedBy = act(req); m.assignedAt = nowISO();
+    if (b.prix) {
+      if (m.prixVerrouille) return sendJson(res, 400, { error: 'Prix déjà accepté par le client (' + m.prixVerrouille.montant.toLocaleString('fr-FR') +
+        ' F, devis v' + m.prixVerrouille.version + ') : envoyez une modification motivée via le devis.', verrouille: m.prixVerrouille });
+      m.prixTotal = Math.round(Number(b.prix) || m.prixTotal || 0); m.quote = false;
+    }
     saveDb();
     emitToMission(m, { type: 'mission_update', status: 'accepted', missionId: m.id,
       agent: { nom: ag.nom, note: agentStats(ag).rating, missions: agentStats(ag).missionsDone, tel: ag.tel1 || ag.tel, photo: ag.photo || '' },
@@ -5171,6 +6134,11 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const m = db.missions.find(x => x.id === b.id);
     if (!m) return sendJson(res, 404, { error: 'Mission introuvable' });
+    /* 🔒 lot 109 : si le client a déjà accepté un prix, on ne le remplace pas ici.
+       Une modification doit être MOTIVÉE et repasser par le client (route …/devis/modifier). */
+    if (m.prixVerrouille) return sendJson(res, 400, { error: 'Le client a déjà accepté ' + m.prixVerrouille.montant.toLocaleString('fr-FR') +
+      ' F (devis v' + m.prixVerrouille.version + ', verrouillé le ' + String(m.prixVerrouille.date).slice(0, 10) +
+      '). Ce prix ne peut plus être changé directement : envoyez une MODIFICATION MOTIVÉE, le client devra l’accepter.', verrouille: m.prixVerrouille });
     const prix = Math.max(500, Math.round(Number(b.prix) || 0));
     m.quotedPrix = prix; m.status = 'quoted'; m.quoteBy = act(req);
     saveDb();
@@ -5185,13 +6153,22 @@ const server = http.createServer(async (req, res) => {
     const m = db.missions.find(x => x.id === b.id && x.clientId === cli.id);
     if (!m) return sendJson(res, 404, { error: 'Demande introuvable' });
     if (b.accept) {
-      m.prixTotal = m.quotedPrix || m.prixTotal;
-      m.quote = false; m.status = 'pending';
+      /* 🔒 lot 109 : l'ancien chemin simple (un seul montant) passe par le MÊME verrou.
+         Le prix accepté est verrouillé une fois pour toutes : plus personne ne le change en silence. */
+      if (!m.devis) {
+        const lignes = [{ type: 'autre', libelle: 'Montant global proposé', qte: 1, pu: Math.max(500, Math.round(Number(m.quotedPrix) || Number(m.prixTotal) || 0)) }];
+        const rr = devisCreer(m, { lignes: lignes, conditions: 'Montant global (devis simple)' }, 'HQ', false);
+        if (rr.error) return sendJson(res, 400, { error: rr.error });
+      }
+      const rac = devisAccepter(m, 'client');
+      if (rac.error) return sendJson(res, 400, { error: rac.error });
+      m.status = 'pending';
       saveDb();
       broadcastNewMission(m);
-      emitToMission(m, { type: 'mission_update', status: 'pending', missionId: m.id, prixTotal: m.prixTotal });
-      return sendJson(res, 200, { ok: true, prixTotal: m.prixTotal });
+      emitToMission(m, { type: 'mission_update', status: 'pending', missionId: m.id, prixTotal: m.prixTotal, verrouille: true });
+      return sendJson(res, 200, { ok: true, prixTotal: m.prixTotal, verrouille: m.prixVerrouille });
     }
+    if (m.devis) devisRefuser(m, b.motif || '', 'client');
     m.status = 'annulee'; saveDb();
     emitToMission(m, { type: 'mission_update', status: 'annulee', missionId: m.id });
     return sendJson(res, 200, { ok: true, refused: true });
@@ -6143,6 +7120,13 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true, message: img ? '📸 Photo ajoutée à votre victoire' : 'Photo retirée — votre victoire reste validée' });
   }
 
+  /* 📞 coordonnées publiques de Klean-Service — sans mot de passe (ce sont des coordonnées publiques),
+     mais on n'y met JAMAIS autre chose que ce que le PDG a saisi. */
+  if (p === '/api/support/infos' && req.method === 'GET') {
+    const c = (db.config && db.config.contact) || {};
+    return sendJson(res, 200, { ok: true, tel: String(c.tel || ''), whatsapp: String(c.whatsapp || c.tel || '') });
+  }
+
   if (p === '/api/support/send' && req.method === 'POST') {
     if (db.config && db.config.supportChat === false)
       return sendJson(res, 403, { error: 'Messages de la bulle désactivés par le PDG' });
@@ -6187,6 +7171,14 @@ const server = http.createServer(async (req, res) => {
     if (b2.gpsNationOn !== undefined) {
       db.config.gpsNationOn = !!b2.gpsNationOn;
       auditLog('gps_nation', { on: db.config.gpsNationOn, km: db.config.reachKm, par: act(req) });
+    }
+    /* 📞 coordonnées publiques : le PDG peut les renseigner (jamais modifiées par une autre voie) */
+    if (b2.contactTel !== undefined || b2.contactWhatsapp !== undefined) {
+      db.config.contact = db.config.contact || { tel: '', whatsapp: '' };
+      const avant = JSON.stringify(db.config.contact);
+      if (b2.contactTel !== undefined) db.config.contact.tel = String(b2.contactTel || '').trim().slice(0, 30);
+      if (b2.contactWhatsapp !== undefined) db.config.contact.whatsapp = String(b2.contactWhatsapp || '').trim().slice(0, 30);
+      auditLog('contact_modifie', { avant, apres: JSON.stringify(db.config.contact), par: act(req) });
     }
     auditLog('commission_modifiee', { nouveau: db.config.commission, par: act(req) });
     saveDb();
@@ -7823,6 +8815,346 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true, on: !!(db.winBubble2 && db.winBubble2.on) });
   }
 
+  /* ═══════════════ 💰 MOTEUR DE TARIFICATION (tableau de bord PDG) ═══════════════ */
+  if (p === '/api/admin/tarif' && req.method === 'GET') {
+    if (!pdgOnly(req, res)) return;
+    tarifEnsure();
+    const T = db.tarif;
+    const svcs = Object.keys(T.svc).map(k => {
+      const x = T.svc[k];
+      return Object.assign({}, x, {
+        uniteNom: (T.unites.find(u => u.id === x.unite) || {}).nom || x.unite,
+        options: tarifOptionsDe(x), prixMin: x.ref, prixMax: x.max,
+        palierTxt: T.paliers.map(p => p.n + '→×' + String(p.mult).replace('.', ',')).join(' · ')
+      });
+    }).sort((a, b) => String(a.id).localeCompare(String(b.id), 'fr', { numeric: true }));
+    return sendJson(res, 200, {
+      ok: true, version: T.version, maj: T.maj, versions: T.versions.slice(0, 40),
+      unites: T.unites, coefs: T.coefs, paliers: T.paliers, deplacement: T.deplacement,
+      zones: T.zones, seuils: T.seuils, remises: T.remises, refs: (T.refs || []).slice(-60).reverse(),
+      source: T.zonesSrc || null,
+      reference: (T.refs || []).find(x => x && x.id === 'deplacement') || null,
+      journal: T.journal.slice(0, 120), services: svcs,
+      nbServices: svcs.length, nbDevis: svcs.filter(x => x.devis).length,
+      questions: tarifQuestionsToutes().map(q => Object.assign({}, q, { nbServices: Object.keys(T.svc).filter(k => tarifCibleOk(q.cible, T.svc[k])).length })),
+      nbQuestions: tarifQuestionsToutes().filter(q => !q.off).length,
+      nbATarifer: svcs.filter(x => !x.devis && !(x.ref > 0)).length,
+      nbDesactives: svcs.filter(x => x.off).length,
+      questionsPubliques: (() => { const out = {}; Object.keys(T.svc).forEach(k => { const qs = tarifQuestionsDe(T.svc[k]); if (qs.length) out[k] = qs.map(q => q.id); }); return out; })(),
+      règle: 'Le calcul est détaillé et fait par le serveur : unité, quantité (paliers), niveau, état, difficulté, urgence, horaire, accès, zone, déplacement, matériel, options, remise. Les prix restent ceux d’aujourd’hui tant que vous ne les changez pas ; tout changement crée une nouvelle version datée, et aucune ancienne mission n’est recalculée. Rien ne se supprime : on désactive.'
+    });
+  }
+  if (p === '/api/admin/tarif' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    const action = String(b.action || '').slice(0, 24);
+    tarifEnsure();
+    const T = db.tarif;
+    const svc = b.id ? T.svc[String(b.id)] : null;
+    const besoinSvc = () => { if (!svc) { sendJson(res, 404, { error: 'Service inconnu du moteur de tarification', conseil: 'Choisissez un service du catalogue national' }); return false; } return true; };
+    const num = (v, def) => { const x = parseFloat(v); return isFinite(x) ? Math.round(x) : def; };
+    /* 🔒 SUPPRESSION : refusée — une entrée utilisée dans des commandes passées ne disparaît jamais */
+    if (action === 'supprimer') {
+      tarifJournal('supprimer-refuse', b.id, '', '', 'tentative de suppression');
+      return sendJson(res, 400, { error: 'Rien ne se supprime : un tarif peut être désactivé (⏸), jamais effacé — les commandes passées doivent garder leur prix.',
+        conseil: 'basculer' });
+    }
+    if (action === 'prix') {
+      if (!besoinSvc()) return;
+      const avant = { ref: svc.ref, min: svc.min, max: svc.max };
+      if (b.ref !== undefined) svc.ref = Math.max(0, num(b.ref, svc.ref));
+      if (b.min !== undefined) svc.min = Math.max(0, num(b.min, svc.min));
+      if (b.max !== undefined) svc.max = Math.max(0, num(b.max, svc.max));
+      if (svc.min > svc.ref) svc.min = svc.ref;
+      if (svc.max < svc.ref) svc.max = svc.ref;
+      if (b.nom) svc.nom = String(b.nom).slice(0, 80);
+      svc.majPerso = true;
+      /* 🔗 évite le doublon : régler le prix d'un MÉTIER met à jour les services du catalogue qui
+         partagent ce métier, SAUF ceux que le PDG a réglés séparément (majPerso). */
+      let suivis = 0;
+      if (svc.type === 'metier') {
+        for (const k in T.svc) {
+          const x = T.svc[k];
+          if (x !== svc && x.type === 'catalogue' && x.metier === svc.id && !x.majPerso) {
+            x.ref = svc.ref; x.min = svc.min; x.max = svc.max; suivis++;
+          }
+        }
+      }
+      const v = tarifBump('prix', svc.nom, JSON.stringify(avant), JSON.stringify({ ref: svc.ref, min: svc.min, max: svc.max }),
+        (b.motif || 'modification de prix') + (suivis ? (' · ' + suivis + ' service(s) du catalogue mis à jour') : ''));
+      return sendJson(res, 200, { ok: true, service: svc, version: v, suivis });
+    }
+    if (action === 'unite') {
+      if (!besoinSvc()) return;
+      const u = T.unites.find(x => x.id === String(b.unite || ''));
+      if (!u) return sendJson(res, 400, { error: 'Unité inconnue', conseil: 'Créez d’abord l’unité' });
+      const avant = svc.unite;
+      svc.unite = u.id; svc.comptable = !!u.comptable; svc.uniteNom = u.nom;
+      const v = tarifBump('unite', svc.nom, avant, u.id, b.motif || 'changement d’unité');
+      return sendJson(res, 200, { ok: true, service: svc, version: v });
+    }
+    if (action === 'unite-ajouter') {
+      const id = normFr(String(b.nomUnite || b.nom || '')).replace(/[^a-z0-9]+/g, '_').slice(0, 24);
+      if (!id) return sendJson(res, 400, { error: 'Nom d’unité requis' });
+      if (T.unites.some(u => u.id === id)) return sendJson(res, 409, { error: 'Cette unité existe déjà' });
+      T.unites.push({ id, ic: String(b.ic || '🔢').slice(0, 6), nom: String(b.nom || id).slice(0, 60), comptable: !!b.comptable, cree: true });
+      const v = tarifBump('unite-ajouter', id, '', String(b.nom || id), b.motif || 'nouvelle unité');
+      return sendJson(res, 201, { ok: true, unité: T.unites[T.unites.length - 1], version: v });
+    }
+    if (action === 'coef') {
+      const bloc = String(b.bloc || ''); const B = T.coefs[bloc];
+      if (!B) return sendJson(res, 400, { error: 'Coefficient inconnu' });
+      if (b.val) {                                   /* régler une valeur : { bloc:'etat', val:'tres_sale', k:1.45 } */
+        const v0 = B.valeurs.find(x => x.id === String(b.val));
+        if (!v0) return sendJson(res, 404, { error: 'Valeur inconnue' });
+        const avant = v0.k; v0.k = Math.max(0, Number(b.k) || 0);
+        if (b.nom) v0.nom = String(b.nom).slice(0, 60);
+        const v = tarifBump('coef', bloc + ' · ' + v0.nom, avant, v0.k, b.motif || 'réglage du coefficient');
+        return sendJson(res, 200, { ok: true, bloc, valeur: v0, version: v });
+      }
+      if (b.ajouter) {                               /* ajouter une valeur : { bloc:'etat', ajouter:{ id, nom, k } } */
+        const nv = b.ajouter || {};
+        const id = normFr(String(nv.id || nv.nom || '')).replace(/[^a-z0-9]+/g, '_').slice(0, 24);
+        if (!id) return sendJson(res, 400, { error: 'Identifiant de valeur requis' });
+        if (B.valeurs.some(x => x.id === id)) return sendJson(res, 409, { error: 'Cette valeur existe déjà' });
+        B.valeurs.push({ id, nom: String(nv.nom || id).slice(0, 60), k: Math.max(0, Number(nv.k) || 1), cree: true });
+        const v = tarifBump('coef-ajouter', bloc + ' · ' + (nv.nom || id), '', nv.k, b.motif || 'nouvelle valeur de coefficient');
+        return sendJson(res, 201, { ok: true, bloc, valeurs: B.valeurs, version: v });
+      }
+      if (b.actif !== undefined) { B.actif = !!b.actif;
+        const v = tarifBump('coef-basculer', bloc, !B.actif, B.actif, b.motif || 'coefficient activé/désactivé');
+        return sendJson(res, 200, { ok: true, bloc, actif: B.actif, version: v }); }
+      return sendJson(res, 400, { error: 'Précisez la valeur à régler' });
+    }
+    if (action === 'palier') {
+      const arr = Array.isArray(b.paliers) ? b.paliers : null;
+      if (!arr) return sendJson(res, 400, { error: 'Paliers requis' });
+      const avant = JSON.stringify(T.paliers);
+      T.paliers = arr.map(p => ({ n: Math.max(1, parseInt(p.n, 10) || 1), mult: Math.max(0, Number(p.mult) || 1) }))
+        .slice(0, 24).sort((a, b2) => a.n - b2.n);
+      const v = tarifBump('palier', 'paliers de quantité', avant, JSON.stringify(T.paliers), b.motif || 'réglage des paliers');
+      return sendJson(res, 200, { ok: true, paliers: T.paliers, version: v });
+    }
+    if (action === 'option') {
+      if (!besoinSvc()) return;
+      const list = svc.opts || (svc.opts = []);
+      if (b.ajouter) {
+        const nv = b.ajouter || {};
+        const id = normFr(String(nv.id || nv.nom || '')).replace(/[^a-z0-9]+/g, '_').slice(0, 24);
+        if (!id) return sendJson(res, 400, { error: 'Nom d’option requis' });
+        if (list.some(o => o.id === id)) return sendJson(res, 409, { error: 'Cette option existe déjà' });
+        list.push({ id, ic: String(nv.ic || '🔹').slice(0, 6), nom: String(nv.nom || id).slice(0, 60), desc: String(nv.desc || '').slice(0, 80), prix: Math.max(0, num(nv.prix, 0)) });
+        const v = tarifBump('option-ajouter', svc.nom + ' · ' + (nv.nom || id), '', nv.prix, b.motif || 'nouvelle option');
+        return sendJson(res, 201, { ok: true, service: svc, version: v });
+      }
+      const o = list.find(x => x.id === String(b.optId || ''));
+      if (!o) return sendJson(res, 404, { error: 'Option inconnue' });
+      const avant = { nom: o.nom, prix: o.prix };
+      if (b.prix !== undefined) o.prix = Math.max(0, num(b.prix, o.prix));
+      if (b.nom) o.nom = String(b.nom).slice(0, 60);
+      const v = tarifBump('option', svc.nom + ' · ' + o.nom, JSON.stringify(avant), JSON.stringify({ nom: o.nom, prix: o.prix }), b.motif || 'modification d’option');
+      return sendJson(res, 200, { ok: true, service: svc, version: v });
+    }
+    /* 🛵 DÉPLACEMENT — une seule route, enrichie au lot 111 : activer un mode payant exige une
+       référence de marché (SOURCE + DATE). Sans elles, le moteur refuse — c'est la règle du PDG. */
+    if (action === 'deplacement') {
+      const dep0 = T.deplacement || (T.deplacement = JSON.parse(JSON.stringify(TARIF_DEPLACEMENT_DEF)));
+      const avant = JSON.stringify({ mode: dep0.mode, tranches: dep0.tranches, source: dep0.source, date: dep0.sourceDate });
+      const modes = ['inclus', 'km', 'tranches', 'forfait'];
+      if (b.mode !== undefined) {
+        const m = String(b.mode);
+        if (modes.indexOf(m) < 0) return sendJson(res, 400, { error: 'Mode inconnu', conseil: modes.join(' · ') });
+        const src2 = (b.source !== undefined ? String(b.source) : String(dep0.source || '')).trim();
+        const dt2 = (b.sourceDate !== undefined ? String(b.sourceDate) : String(dep0.sourceDate || '')).trim();
+        if (m !== 'inclus' && (!src2 || !dt2))
+          return sendJson(res, 400, { error: 'Source et date obligatoires pour activer un déplacement payant',
+            detail: 'Indiquez d’où vient le montant (ex. « tarif d’un prestataire à Abidjan », « grille Yemba Plomberie ») et sa date.',
+            conseil: 'envoyez source + sourceDate, ou laissez le mode « inclus » (prix d’aujourd’hui, rien de facturé).' });
+        dep0.mode = m;
+      }
+      if (b.source !== undefined) dep0.source = String(b.source).slice(0, 160);
+      if (b.sourceDate !== undefined) dep0.sourceDate = String(b.sourceDate).slice(0, 40);
+      if (b.note !== undefined) dep0.note = String(b.note).slice(0, 300);
+      if (b.km !== undefined) T.deplacement.km = Math.max(0, num(b.km, T.deplacement.km));
+      if (b.forfait !== undefined) T.deplacement.forfait = Math.max(0, num(b.forfait, T.deplacement.forfait));
+      if (b.allerRetour !== undefined) T.deplacement.allerRetour = !!b.allerRetour;
+      if (Array.isArray(b.tranches)) T.deplacement.tranches = b.tranches.map(x => ({ jusqua: Math.max(1, num(x.jusqua, 1)), prix: Math.max(0, num(x.prix, 0)) })).sort((x, y) => x.jusqua - y.jusqua);
+      /* ⚠️ PRIX INHABITUEL : une tranche très au-dessus (ou très en dessous) de la référence sourcée
+         est SIGNALÉE — jamais corrigée, jamais supprimée en douce. */
+      const refD = (T.refs || []).find(x => x && x.id === 'deplacement');
+      let alerte = '';
+      if (refD && refD.max > 0) {
+        const ecart = Number(T.seuils.ecartAnormal) || 0.4;
+        const tr = T.deplacement.tranches || [];
+        const txt = x => 'jusqu’à ' + x.jusqua + ' km → ' + x.prix + ' F';
+        const trop = tr.filter(t => t.prix > Math.round(refD.max * (1 + ecart)));
+        const bas = tr.filter(t => t.prix > 0 && t.prix < Math.round(refD.min * (1 - ecart)));
+        if (trop.length) alerte = 'prix inhabituel (très ÉLEVÉ, conservé tel quel) : ' + trop.map(txt).join(' · ')
+          + ' — référence ' + refD.min + '–' + refD.max + ' F' + (refD.source ? ' (' + refD.source + ', ' + refD.date + ')' : '');
+        if (bas.length) alerte += (alerte ? ' | ' : '') + 'prix inhabituel (très BAS, vérifiez une erreur de saisie) : ' + bas.map(txt).join(' · ')
+          + ' — référence ' + refD.min + '–' + refD.max + ' F';
+      }
+      const v = tarifBump('deplacement', 'frais de déplacement', avant, JSON.stringify({ mode: T.deplacement.mode, source: T.deplacement.source, date: T.deplacement.sourceDate }),
+        (b.motif || 'réglage du déplacement') + (alerte ? ' · ' + alerte : ''));
+      return sendJson(res, 200, { ok: true, deplacement: T.deplacement, version: v, alerte: alerte || null });
+    }
+    if (action === 'devis') {
+      if (!besoinSvc()) return;
+      const avant = !!svc.devis; svc.devis = !!b.devis;
+      const v = tarifBump('devis', svc.nom, avant, svc.devis, b.motif || 'devis obligatoire ou non');
+      return sendJson(res, 200, { ok: true, service: svc, version: v });
+    }
+    if (action === 'photos') {
+      if (!besoinSvc()) return;
+      const avant = svc.photos;
+      if (['obligatoires', 'conseillees', 'non'].indexOf(String(b.photos)) >= 0) svc.photos = String(b.photos);
+      if (b.photosMin !== undefined) svc.photosMin = Math.max(1, Math.min(10, parseInt(b.photosMin, 10) || 2));
+      const v = tarifBump('photos', svc.nom, avant, svc.photos + '/' + svc.photosMin, b.motif || 'réglage des photos');
+      return sendJson(res, 200, { ok: true, service: svc, version: v });
+    }
+    if (action === 'etat') {                          /* est-ce que l'état des lieux compte pour ce service ? */
+      if (!besoinSvc()) return;
+      const avant = !!svc.etatCompte; svc.etatCompte = !!b.etatCompte;
+      const v = tarifBump('etat', svc.nom, avant, svc.etatCompte, b.motif || 'état pris en compte ou non');
+      return sendJson(res, 200, { ok: true, service: svc, version: v });
+    }
+    if (action === 'basculer') {
+      if (!besoinSvc()) return;
+      const avant = !!svc.off; svc.off = !avant;
+      const v = tarifBump('basculer', svc.nom, avant, svc.off, b.motif || (svc.off ? 'tarif désactivé' : 'tarif réactivé'));
+      return sendJson(res, 200, { ok: true, service: svc, version: v });
+    }
+    /* 🗺️ DISTANCES DES ZONES — le PDG règle le km d'une zone, puis valide la table (source + date) */
+    if (action === 'zones-km') {
+      const id = normVille(String(b.zone || ''));
+      if (!id) return sendJson(res, 400, { error: 'Indiquez la zone (ex. « cocody »)' });
+      T.zones[id] = T.zones[id] || { nom: String(b.nom || b.zone).slice(0, 60), k: 1 };
+      const avant = typeof T.zones[id].km === 'number' ? T.zones[id].km : null;
+      if (b.supprimer) { delete T.zones[id].km; }
+      else T.zones[id].km = Math.max(0, num(b.km, avant || 0));
+      const v = tarifBump('zones-km', T.zones[id].nom || id, String(avant), String(T.zones[id].km || ''),
+        b.motif || 'distance de zone');
+      return sendJson(res, 200, { ok: true, zone: { id, nom: T.zones[id].nom, km: T.zones[id].km }, version: v });
+    }
+    if (action === 'zones-source') {
+      const src2 = T.zonesSrc || (T.zonesSrc = JSON.parse(JSON.stringify(TARIF_ZONES_SRC_DEF)));
+      const avant = JSON.stringify(src2);
+      if (b.source !== undefined) src2.source = String(b.source).slice(0, 160);
+      if (b.sourceDate !== undefined) src2.sourceDate = String(b.sourceDate).slice(0, 40);
+      if (b.note !== undefined) src2.note = String(b.note).slice(0, 300);
+      const veutActiver = (b.actif !== undefined) ? !!b.actif : true;
+      if (veutActiver && (!src2.source.trim() || !src2.sourceDate.trim()))
+        return sendJson(res, 400, { error: 'Source et date obligatoires pour valider la table des distances',
+          detail: 'Ex. source « distances routières usuelles depuis Abidjan » et date « 28/09/2026 ».',
+          conseil: 'la table reste une simple estimation tant qu’elle n’est pas validée.' });
+      src2.actif = veutActiver;
+      const v = tarifBump('zones-source', 'Table des distances', avant, JSON.stringify(src2), b.motif || 'validation de la table des distances');
+      return sendJson(res, 200, { ok: true, source: src2, version: v });
+    }
+
+    /* 🪜 ACCÈS — un MONTANT réel pour un cas d'accès (remplace le pourcentage pour ce cas) */
+    if (action === 'acces-montant') {
+      const B = T.coefs && T.coefs.acces;
+      if (!B || !Array.isArray(B.valeurs)) return sendJson(res, 400, { error: 'Bloc « accès » absent' });
+      const vId = String(b.valeur || '');
+      const val = B.valeurs.find(x => x.id === vId);
+      if (!val) return sendJson(res, 400, { error: 'Cas d’accès inconnu', conseil: B.valeurs.map(x => x.id).join(' · ') });
+      const avant = (typeof val.montant === 'number') ? val.montant : ('×' + val.k);
+      if (b.montant === null || b.montant === '') delete val.montant;
+      else val.montant = Math.max(0, num(b.montant, 0));
+      const v = tarifBump('acces-montant', 'Accès : ' + val.nom, String(avant),
+        (typeof val.montant === 'number') ? String(val.montant) : ('×' + val.k), b.motif || 'montant d’accès réglé');
+      return sendJson(res, 200, { ok: true, acces: val, version: v });
+    }
+
+    /* 🧰 MATÉRIEL — le prix réel des fournitures apportées par le pro, service par service */
+    if (action === 'materiel') {
+      if (!besoinSvc()) return;
+      const avant = svc.materielPrix || 0;
+      svc.materielPrix = Math.max(0, num(b.prix, 0));
+      const v = tarifBump('materiel', svc.nom, String(avant), String(svc.materielPrix), b.motif || 'prix du matériel');
+      return sendJson(res, 200, { ok: true, service: svc, version: v });
+    }
+
+    if (action === 'zone') {
+      const ville = normVille(b.ville || '');
+      if (!ville) return sendJson(res, 400, { error: 'Ville requise' });
+      const avant = JSON.stringify(T.zones[ville] || null);
+      if (b.supprimer) delete T.zones[ville];
+      else T.zones[ville] = { nom: String(b.nom || b.ville).slice(0, 60), k: Math.max(0.2, Number(b.k) || 1) };
+      const v = tarifBump('zone', b.ville, avant, JSON.stringify(T.zones[ville] || null), b.motif || 'tarif de zone');
+      return sendJson(res, 200, { ok: true, zones: T.zones, version: v });
+    }
+    if (action === 'seuil') {
+      const avant = JSON.stringify(T.seuils);
+      ['margeAuto', 'margeIncertitude'].forEach(k => { if (b[k] !== undefined) T.seuils[k] = Math.max(0, Math.min(0.9, Number(b[k]) || 0)); });
+      ['validationAdmin', 'ecartAnormal'].forEach(k => { if (b[k] !== undefined) T.seuils[k] = k === 'ecartAnormal' ? Math.max(0.05, Math.min(5, Number(b[k]) || 0)) : Math.max(0, num(b[k], T.seuils[k])); });
+      const v = tarifBump('seuil', 'seuils', avant, JSON.stringify(T.seuils), b.motif || 'réglage des seuils');
+      return sendJson(res, 200, { ok: true, seuils: T.seuils, version: v });
+    }
+    if (action === 'remise') {
+      const code = String(b.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
+      if (!code) return sendJson(res, 400, { error: 'Code requis' });
+      const avant = T.remises[code]; 
+      if (b.taux === 0 || b.supprimer) delete T.remises[code]; else T.remises[code] = Math.max(0.01, Math.min(0.9, Number(b.taux) || 0.1));
+      const v = tarifBump('remise', code, avant, b.taux, b.motif || 'code de remise');
+      return sendJson(res, 200, { ok: true, remises: T.remises, version: v });
+    }
+    if (action === 'refs-ajouter') {                 /* 🏷️ prix du marché : SOURCE et DATE obligatoires */
+      const r = b.ref || b;
+      if (!r.montant || !r.source) return sendJson(res, 400, { error: 'Montant et source obligatoires', conseil: 'Un prix sans source ni date n’entre pas dans la base' });
+      T.refs.push({ at: nowISO(), service: String(r.service || '').slice(0, 80), montant: Math.max(0, num(r.montant, 0)),
+        unite: String(r.unite || '').slice(0, 40), source: String(r.source).slice(0, 120), date: String(r.date || '').slice(0, 30),
+        ville: String(r.ville || '').slice(0, 60), conditions: String(r.conditions || '').slice(0, 160), qualite: String(r.qualite || '').slice(0, 40) });
+      if (T.refs.length > 500) T.refs = T.refs.slice(-500);
+      const v = tarifBump('refs-ajouter', r.service || '', '', r.montant + ' F (' + r.source + ')', 'référence de marché ajoutée');
+      return sendJson(res, 201, { ok: true, refs: T.refs.slice(-20), version: v });
+    }
+    /* ❓ LOT 108 — LES QUESTIONS POSÉES AU CLIENT */
+    if (action === 'question') {
+      const Q = tarifQuestionsToutes();
+      if (b.ajouter) {
+        const nv = b.ajouter || {};
+        const id = normFr(String(nv.id || nv.q || '')).replace(/[^a-z0-9]+/g, '_').slice(0, 24);
+        if (!id || !nv.q) return sendJson(res, 400, { error: 'Identifiant et libellé de la question requis' });
+        if (Q.some(x => x.id === id)) return sendJson(res, 409, { error: 'Cette question existe déjà' });
+        const cible = {};
+        if (nv.metier) cible.metier = [String(nv.metier)];
+        else if (nv.cat) cible.cat = [String(nv.cat)];
+        else if (nv.unite) cible.unite = [String(nv.unite)];
+        else if (nv.svc) cible.svc = [String(nv.svc)];
+        else cible.tous = true;
+        const q = { id, q: String(nv.q).slice(0, 120), type: ['choix', 'nombre', 'photo'].indexOf(String(nv.type)) >= 0 ? String(nv.type) : 'choix',
+          aide: String(nv.aide || '').slice(0, 300), cible, ordre: parseInt(nv.ordre, 10) || 55,
+          jeNeSaisPas: nv.jeNeSaisPas !== false, obligatoire: !!nv.obligatoire, off: false,
+          unite: String(nv.unite2 || '').slice(0, 20), prixUnite: Math.max(0, num(nv.prixUnite, 0)), cree: true };
+        if (q.type === 'choix') { if (nv.coef && T.coefs[nv.coef]) q.coef = String(nv.coef); else q.coef = null; }
+        if (q.type === 'photo') q.min = Math.max(1, parseInt(nv.min, 10) || 2);
+        Q.push(q);
+        const v = tarifBump('question-ajouter', q.q, '', q.id, b.motif || 'nouvelle question');
+        return sendJson(res, 201, { ok: true, question: q, version: v });
+      }
+      const q = Q.find(x => x.id === String(b.qid || '')); 
+      if (!q) return sendJson(res, 404, { error: 'Question inconnue' });
+      const avant = JSON.stringify({ q: q.q, coef: q.coef, obligatoire: !!q.obligatoire, ordre: q.ordre, off: !!q.off });
+      if (b.q !== undefined) q.q = String(b.q).slice(0, 120);
+      if (b.aide !== undefined) q.aide = String(b.aide).slice(0, 300);
+      if (b.coef !== undefined) q.coef = (b.coef && T.coefs[b.coef]) ? String(b.coef) : null;
+      if (b.obligatoire !== undefined) q.obligatoire = !!b.obligatoire;
+      if (b.ordre !== undefined) q.ordre = parseInt(b.ordre, 10) || q.ordre;
+      if (b.prixUnite !== undefined) q.prixUnite = Math.max(0, num(b.prixUnite, q.prixUnite || 0));
+      if (b.min !== undefined) q.min = Math.max(1, parseInt(b.min, 10) || 2);
+      if (b.basculer) q.off = !avant.includes('"off":true');
+      const v = tarifBump('question', q.q, avant, JSON.stringify({ q: q.q, coef: q.coef, obligatoire: !!q.obligatoire, ordre: q.ordre, off: !!q.off }), b.motif || 'réglage d’une question');
+      return sendJson(res, 200, { ok: true, question: q, version: v });
+    }
+    if (action === 'publier') {                      /* une version « majeure », avec la raison du PDG */
+      const v = tarifBump('publier', 'publication', '', '', b.motif || b.note || 'publication des tarifs');
+      return sendJson(res, 200, { ok: true, version: v, versions: T.versions.slice(0, 20) });
+    }
+    return sendJson(res, 400, { error: 'Action inconnue', actions: ['prix', 'unite', 'unite-ajouter', 'coef', 'palier', 'option', 'deplacement', 'devis', 'photos', 'etat', 'basculer', 'zone', 'seuil', 'remise', 'refs-ajouter', 'publier'] });
+  }
+
   if (p === '/api/admin/shield' && req.method === 'GET') {
     if (!pdgOnly(req, res)) return;
     shieldEnsure();
@@ -8345,6 +9677,13 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('');
   initStorage().then(() => {
     try { pubMediaRestaurer(); } catch (e) { }   /* 🖼️ remet en place les médias perdus par un redéploiement (après chargement de la base) */
+    try {
+      tarifEnsure();
+      const _zsrc = db.tarif.zonesSrc || {};
+      console.log('  💰 Moteur de tarification : ' + Object.keys(db.tarif.svc).length + ' services tarifés · version ' + db.tarif.version
+        + ' · déplacement : ' + (db.tarif.deplacement || {}).mode
+        + ' · ' + Object.keys(db.tarif.zones || {}).length + ' zones (' + (_zsrc.actif ? 'distances validées' : 'distances À VALIDER : source + date') + ')');
+    } catch (e) { console.error('Tarification :', e.message); }
     console.log('  🔑 Mot de passe HQ : ' + (db.admin ? 'déjà configuré ✓' : 'à créer à /admin'));
     console.log('  💰 Commission  : ' + (feePct() * 100) + '% par mission');
     try {

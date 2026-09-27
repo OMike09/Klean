@@ -6,10 +6,23 @@
    directement), l'application reste en mode démo/simulation.
    ═══════════════════════════════════════════════════════════════ */
 'use strict';
+/* 🧱 filet : si net.js est chargé sans index.html (outils, tests), la lecture sûre existe quand même */
+if(typeof window.kLS === 'undefined'){
+  window.kLS = (function(){
+    var mem = {}, ok = false;
+    try{ window.localStorage.setItem('__k','1'); window.localStorage.removeItem('__k'); ok = true; }catch(e){}
+    function lire(k, d){ try{ if(ok){ var v = window.localStorage.getItem(k); return v===null?d:v; } }catch(e){} return Object.prototype.hasOwnProperty.call(mem,k)?mem[k]:d; }
+    return { memoire: !ok,
+      get: function(k, d){ return lire(k, d===undefined?null:d); },
+      set: function(k, v){ mem[k]=String(v); if(ok){ try{ window.localStorage.setItem(k,v); }catch(e){} } return true; },
+      del: function(k){ delete mem[k]; if(ok){ try{ window.localStorage.removeItem(k); }catch(e){} } return true; },
+      vider: function(){ mem={}; if(ok){ try{ window.localStorage.clear(); }catch(e){} } return true; } };
+  })();
+}
 const NET = {
   on: false, ws: null,
   deviceId: null,
-  agentId: localStorage.getItem('k2_agentId') || null,
+  agentId: kLS.get('k2_agentId') || null,
   searchTimeout: null, animIv: null,
   posWatch: false, pos: null, pollIv: null
 };
@@ -28,7 +41,7 @@ function netStartPosWatch(){
   navigator.geolocation.watchPosition(pos=>{
     NET.pos = {lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Math.round(pos.coords.accuracy||0)};
     if(agent && agent.online && NET.on)
-      wsSend({type:'agent_pos', agentId:NET.agentId, jeton: (agent.jeton||localStorage.getItem('k2_agent_jeton')||''), lat:NET.pos.lat, lng:NET.pos.lng, acc:NET.pos.acc});
+      wsSend({type:'agent_pos', agentId:NET.agentId, jeton: (agent.jeton||kLS.get('k2_agent_jeton')||''), lat:NET.pos.lat, lng:NET.pos.lng, acc:NET.pos.acc});
   }, ()=>{}, {enableHighAccuracy:true, maximumAge:15000});
 }
 
@@ -38,10 +51,10 @@ function netStartPosWatch(){
     .then(r => { if(!r.ok) throw 0; return r.json(); })
     .then(() => fetch('/api/config', {cache:'no-store'}).then(r=>r.json()).then(d=>{ NET.commission = (d.commission||25)/100; }).catch(()=>{}))
     .then(() => {
-      NET.deviceId = localStorage.getItem('k2_device');
+      NET.deviceId = kLS.get('k2_device');
       if(!NET.deviceId){
         NET.deviceId = (crypto.randomUUID ? crypto.randomUUID() : 'dev-'+Date.now());
-        localStorage.setItem('k2_device', NET.deviceId);
+        kLS.set('k2_device', NET.deviceId);
       }
       connectWS();
     })
@@ -58,7 +71,7 @@ function connectWS(){
     applyNetOverrides();
     toast('🛰️ Connecté au serveur KLEAN — temps réel activé');
     // si un profil agent existe et était en ligne → se réannoncer
-    if (agent && agent.nom && (agent.online || localStorage.getItem('k2_stayOnline')==='1')) {
+    if (agent && agent.nom && (agent.online || kLS.get('k2_stayOnline')==='1')) {
       agent.online = true; try{ saveAll(); }catch(e){}
       netAnnounceOnline(); startProStayAlive();
     }
@@ -88,6 +101,129 @@ function connectWS(){
 }
 function wsSend(o){ if(NET.ws && NET.ws.readyState === 1) NET.ws.send(JSON.stringify(o)); }
 
+/* ═════════════════════════════════════════════════════════════════════════════════════════
+   🧾 LOT 109 — LE DEVIS STRUCTURÉ, VU PAR LE CLIENT
+   Le client voit le détail ligne par ligne (main-d'œuvre, matériel, déplacement, autres
+   frais, remise, délai, durée, conditions), puis :
+     · ✅ il ACCEPTE  → le prix est VERROUILLÉ (plus personne ne le change en silence) ;
+     · 🚫 il REFUSE   → il peut dire pourquoi ; le pro peut proposer une autre version.
+   Une modification doit être MOTIVÉE et repasse par le client : le prix déjà accepté
+   reste en vigueur tant qu'il n'a pas accepté la nouvelle version.
+   ═════════════════════════════════════════════════════════════════════════════════════════ */
+const DEVIS_NOM = { main_oeuvre: 'Main-d’œuvre', materiel: 'Matériel & produits', deplacement: 'Déplacement', autre: 'Autres frais' };
+function devisFmt(n){ return Number(n || 0).toLocaleString('fr-FR') + ' F'; }
+function devisEnteteClient(){
+  return (typeof client !== 'undefined' && client && client.token) ? { 'X-Client-Token': client.token } : {};
+}
+function devisLignesHtml(d){
+  return ['main_oeuvre', 'materiel', 'deplacement', 'autre'].filter(function (t) {
+    return (d.lignes || []).some(function (l) { return l.type === t; });
+  }).map(function (t) {
+    return '<div style="margin:9px 0 0"><b style="font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">' + (DEVIS_NOM[t] || t) + '</b>'
+      + (d.lignes || []).filter(function (l) { return l.type === t; }).map(function (l) {
+        return '<div class="rline" style="font-size:12.5px"><span>' + l.libelle
+          + (l.qte > 1 ? ' <small style="color:var(--muted)">(' + l.qte + ' × ' + devisFmt(l.pu) + ')</small>' : '')
+          + '</span><span>' + devisFmt(l.montant) + '</span></div>';
+      }).join('') + '</div>';
+  }).join('');
+}
+function devisHtml(d, infos){
+  infos = infos || {};
+  const verrou = infos.verrou || null;
+  const enAttente = d.statut === 'envoye';
+  const accepte = d.statut === 'accepte';
+  const modif = d.version > 1 && d.motif;
+  let h = '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px">';
+  h += '<div style="display:flex;align-items:center;gap:8px"><b style="font-size:15px">🧾 Devis v' + d.version + '</b>'
+    + '<span style="margin-left:auto;font-size:11px;padding:3px 9px;border-radius:99px;font-weight:700;'
+    + (enAttente ? 'background:#fff3df;color:#a15c00">⏳ Attend votre réponse'
+      : accepte ? 'background:#e7f6ec;color:#1d7a3d">🔒 Accepté'
+      : 'background:#fdeaea;color:#b3261e">🚫 Refusé') + '</span></div>';
+  if (modif) h += '<div style="background:#fff3df;border:1px solid #ffd591;border-radius:10px;padding:8px 10px;margin:9px 0 0;font-size:12.5px">'
+    + '<b>🔁 Le professionnel demande une modification</b><br>Motif : ' + d.motif
+    + '<br><small style="color:var(--muted)">Cette version remplace le devis v' + (d.version - 1) + '.</small></div>';
+  if (verrou && enAttente) h += '<div style="background:#eef6ff;border:1px solid #bcd8ff;border-radius:10px;padding:8px 10px;margin:9px 0 0;font-size:12.5px">'
+    + '🔒 <b>Vous avez déjà accepté ' + devisFmt(verrou.montant) + '</b> (devis v' + verrou.version + '). Ce prix reste en vigueur : la nouvelle version ne s’appliquera que si VOUS l’acceptez.</div>';
+  h += devisLignesHtml(d);
+  h += '<div class="rline" style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px"><span>Sous-total</span><span>' + devisFmt(d.totalAvantRemise) + '</span></div>';
+  if (d.remise > 0) h += '<div class="rline"><span>Remise</span><span style="color:var(--pd)">− ' + devisFmt(d.remise) + '</span></div>';
+  h += '<div class="rline" style="font-size:17px;font-weight:800"><span>TOTAL</span><span style="color:var(--p)">' + devisFmt(d.total) + '</span></div>';
+  if (d.delai || d.duree) h += '<div class="rline" style="font-size:12.5px"><span>⏱ ' + (d.delai ? 'Délai : ' + d.delai : '') + (d.duree ? (d.delai ? ' · ' : '') + 'Durée : ' + d.duree : '') + '</span><span></span></div>';
+  if (d.conditions) h += '<p style="font-size:12px;color:var(--muted);margin:7px 0 0">' + d.conditions + '</p>';
+  if (d.inhabituel) h += '<div style="background:#fff8e6;border:1px solid #ffe0a3;border-radius:10px;padding:8px 10px;margin-top:9px;font-size:12px">'
+    + '⚠️ <b>Prix inhabituel</b> par rapport à l’estimation Klean' + (d.estimation && d.estimation.total ? ' (' + devisFmt(d.estimation.total) + ')' : '')
+    + '. Il n’est pas supprimé : demandez une explication au professionnel si besoin.</div>';
+  if (enAttente) {
+    h += '<div id="devis-refus-zone" style="display:none;margin-top:10px">'
+      + '<textarea id="devis-motif" rows="2" placeholder="Dites pourquoi vous refusez (facultatif)" style="width:100%;font:inherit;padding:9px;border:1.5px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)"></textarea></div>';
+    h += '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'
+      + '<button type="button" class="act-btn green" style="flex:1;min-width:150px" onclick="devisRepondre(\'' + infos.missionId + '\',true)">✅ J’accepte ce prix</button>'
+      + '<button type="button" class="act-btn" id="devis-refus-btn" style="flex:1;min-width:150px;color:var(--danger);border-color:#f5c6c7" onclick="devisBasculerMotif()">🚫 Je refuse</button></div>'
+      + '<button type="button" id="devis-motif-envoi" class="act-btn" style="display:none;width:100%;margin-top:8px" onclick="devisRepondre(\'' + infos.missionId + '\',false)">Envoyer mon refus</button>'
+      + '<p style="font-size:11.5px;color:var(--muted);margin:8px 0 0">En acceptant, le prix est <b>verrouillé</b> : plus personne (ni Klean, ni le professionnel) ne peut le changer sans vous demander.</p>';
+  } else if (accepte) {
+    h += '<p style="font-size:12.5px;margin:10px 0 0;color:var(--pd)">🔒 <b>Prix accepté et verrouillé</b>'
+      + (d.accepteAt || d.at ? ' le ' + String(d.accepteAt || d.at).slice(0, 10) : '')
+      + '. Toute modification devra être motivée et repassera par vous.</p>';
+  } else {
+    h += '<p style="font-size:12.5px;margin:10px 0 0;color:var(--muted)">Vous avez refusé ce devis'
+      + (d.refuseMotif ? ' (motif : ' + d.refuseMotif + ')' : '') + '. Le professionnel peut en proposer un autre.</p>';
+  }
+  return h + '</div>';
+}
+function devisRendre(infos){
+  const box = document.getElementById('trk-devis'); if (!box) return;
+  infos = infos || {};
+  const d = infos.devis;
+  if (!d || !d.version) { box.innerHTML = ''; return; }
+  box.innerHTML = devisHtml(d, { missionId: infos.missionId || '', verrou: infos.verrou || (typeof mission !== 'undefined' && mission && mission.prixVerrouille) || null });
+}
+async function devisCharger(mid){
+  if (mid === undefined || mid === null || mid === '') return;
+  try {
+    const r = await fetch('/api/missions/' + mid + '/devis', { cache: 'no-store', headers: devisEnteteClient() });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (typeof mission !== 'undefined' && mission && mission.id === mid) { mission.devis = d.devis; mission.prixVerrouille = d.verrou || null; }
+    devisRendre({ missionId: mid, devis: d.devis, verrou: d.verrou });
+    /* un devis qui attend la réponse du client : on le signale aussi à l'accueil */
+    const b = document.getElementById('devis-attente-pastille');
+    if (b) b.style.display = d.enAttenteDeVotreReponse ? 'inline-block' : 'none';
+    return d;
+  } catch (e) { return null; }
+}
+function devisBasculerMotif(){
+  const z = document.getElementById('devis-refus-zone'), b = document.getElementById('devis-motif-envoi');
+  if (z) z.style.display = 'block';
+  if (b) b.style.display = 'block';
+  const t = document.getElementById('devis-motif'); if (t) t.focus();
+}
+async function devisRepondre(mid, accepte){
+  if (!mid) return;
+  const zone = document.getElementById('devis-motif');
+  const motif = (zone && zone.value) ? zone.value : '';
+  try {
+    const r = await fetch('/api/missions/' + mid + '/devis/' + (accepte ? 'accepter' : 'refuser'), {
+      method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, devisEnteteClient()),
+      body: JSON.stringify(accepte ? {} : { motif: motif })
+    });
+    const d = await r.json().catch(function () { return {}; });
+    if (!r.ok) { toast('⚠️ ' + (d.error || 'Action impossible')); return; }
+    if (accepte) {
+      if (typeof mission !== 'undefined' && mission) { mission.prixTotal = d.prixTotal; mission.prixVerrouille = d.verrouille; }
+      toast('🔒 Prix accepté et verrouillé : ' + devisFmt(d.prixTotal));
+    } else {
+      toast('🚫 Devis refusé' + (d.prixEnVigueur ? ' — ' + devisFmt(d.prixEnVigueur) + ' reste en vigueur' : ''));
+    }
+    await devisCharger(mid);
+  } catch (e) { toast('⚠️ Réseau indisponible — réessayez'); }
+}
+window.devisRendre = devisRendre;
+window.devisHtml = devisHtml;
+window.devisRepondre = devisRepondre;
+window.devisBasculerMotif = devisBasculerMotif;
+window.devisCharger = devisCharger;
+
 /* 🔧 AUTO-RÉPARATION DE LA VEILLE — toutes les 30 s :
    - WebSocket coupé → on reconnecte
    - le serveur ne me voit plus (dernier contact > 70 s) → je me réannonce + heartbeat tout de suite
@@ -100,7 +236,7 @@ function veilleAutoRepare(){
     if(!NET.on){ try{ connectWS(); }catch(e){} }
     else { netAnnounceOnline(); }
     if(typeof VEILLE==='object' && VEILLE && VEILLE.ok && VEILLE.lastSeenAge != null && VEILLE.lastSeenAge > 70){
-      const tk = (agent && agent.jeton) || localStorage.getItem('k2_agent_jeton') || '';
+      const tk = (agent && agent.jeton) || kLS.get('k2_agent_jeton') || '';
       try{ fetch('/api/agents/heartbeat',{method:'POST',headers:Object.assign({'Content-Type':'application/json'}, (tk?{'X-Agent-Token':tk}:{})),
         body: JSON.stringify(Object.assign({agentId:NET.agentId, stayOnline:true, jeton:tk, villeService:(agent.villeService||agent.ville||'')}, (NET.pos?{lat:NET.pos.lat,lng:NET.pos.lng,acc:NET.pos.acc}:{})))}).catch(()=>{}); }catch(e){}
       try{ toast('🛰️ Veille relancée — le serveur vous retrouve'); }catch(e){}
@@ -172,7 +308,14 @@ async function netLaunchSearch(){
     if(typeof client!=='undefined' && client && client.token) headers['X-Client-Token'] = client.token;
     const r = await fetch('/api/missions', {
       method:'POST', headers,
-      body: JSON.stringify({...c, prixTotal:p.total, quote: c.service==='custom', photos: c.photos||[], deviceId:NET.deviceId, ville: (typeof cityName==='function'? cityName(c.city): (c.city||'')), cityNom: (typeof cityName==='function'? cityName(c.city): (c.city||''))})
+      /* 💰 le prix affiché vient du MOTEUR DE TARIFICATION (serveur). On envoie les réponses
+         détaillées (detail:true) : le serveur recalcule et c'est SON prix qui fait foi. */
+      body: JSON.stringify({...c, detail:true,
+        reponses:Object.assign({}, c.reponses||{}),      /* ❓ lot 108 : les réponses aux questions partent telles quelles */
+        criteres:{ quantite:c.pieces, niveau:c.depth, etat:c.etat, urgence:c.urgence, options:Object.keys(c.extras||{}).filter(k=>c.extras[k]),
+                   photos:(c.photos||[]).length, promo:c.promo, ville:(typeof cityName==='function'? cityName(c.city):(c.city||'')) },
+        tarifVersion: (typeof TARIF!=='undefined' && TARIF && TARIF.version)||0,
+        prixTotal:p.total, quote: c.service==='custom', photos: c.photos||[], deviceId:NET.deviceId, ville: (typeof cityName==='function'? cityName(c.city): (c.city||'')), cityNom: (typeof cityName==='function'? cityName(c.city): (c.city||''))})
     });
     created = await r.json().catch(()=>({}));
     if(!r.ok) return toast('⚠️ '+(created.error||'Demande refusée'));
@@ -181,7 +324,7 @@ async function netLaunchSearch(){
   mission = {
     id: created.id, ...JSON.parse(JSON.stringify(c)),
     prix: p, status:'recherche', createdAt:Date.now(),
-    agent:null, dist: created.dist || 0, eta: 0, rated: 0
+    agent:null, dist: (typeof created.dist === 'number' ? created.dist : null), eta: 0, rated: 0
   };
   bookings.unshift({...mission}); saveAll();
   showView('view-search', document.querySelector('#nav-client .nav-btn:nth-child(3)'), 'client');
@@ -294,7 +437,8 @@ function netStartRoute(){
   netStartTrackPoll();
   const start = {x: 40+Math.random()*80, y: 30+Math.random()*60};
   const ctrl  = {x:(start.x+CLIENT_POS.x)/2 + 30, y:(start.y+CLIENT_POS.y)/2 - 34};
-  mission._route = {start, ctrl, end:CLIENT_POS, dist0: mission.dist || 2, dur: 45, t: 0};
+  /* 📍 on n'invente PAS de distance : si le serveur n'en connaît pas, la route s'affiche sans chiffre */
+  mission._route = {start, ctrl, end:CLIENT_POS, dist0: (typeof mission.dist === 'number' && mission.dist > 0) ? mission.dist : null, dur: 45, t: 0};
   document.querySelector('#route-path').setAttribute('d', `M${start.x} ${start.y} Q${ctrl.x} ${ctrl.y} ${CLIENT_POS.x} ${CLIENT_POS.y}`);
   renderTrack();
   clearInterval(NET.animIv);
@@ -303,9 +447,10 @@ function netStartRoute(){
     mission._route.t += 1;
     const r = mission._route;
     const k = Math.min(0.9, (r.t / r.dur) * 0.9);      // on avance jusqu'à 90% et on attend l'événement "arrive"
-    const remaining = Math.max(0.2, r.dist0*(1-k));
-    mission.dist = remaining;
-    mission.eta = Math.max(1, Math.round(r.dist0*4*(1-k)));
+    if(r.dist0 !== null && r.dist0 !== undefined){        /* chiffre connu seulement */
+      mission.dist = Math.max(0.2, r.dist0*(1-k));
+      mission.eta = Math.max(1, Math.round(r.dist0*4*(1-k)));
+    }
     if(document.querySelector('#view-track').classList.contains('active')){
       const q = quad(r.start, r.ctrl, r.end, k);
       document.querySelector('#pin-agent').setAttribute('transform',`translate(${q.x},${q.y})`);
@@ -319,7 +464,8 @@ function netStartTrackPoll(){
   NET.pollIv = setInterval(async ()=>{
     if(!mission || mission.status !== 'enroute') return;
     try{
-      const r = await fetch('/api/missions/'+mission.id, {cache:'no-store'});
+      const r = await fetch('/api/missions/'+mission.id, {cache:'no-store',
+        headers: (typeof client!=='undefined' && client && client.token) ? {'X-Client-Token': client.token} : {}});
       if(!r.ok) return;
       const d = await r.json();
       if(d.agentPos && typeof mission.lat === 'number' && mission.lat !== null){
@@ -392,7 +538,18 @@ function routeNet(msg){
 
     case 'agent_registered':
       NET.agentId = msg.agentId;
-      localStorage.setItem('k2_agentId', msg.agentId);
+      kLS.set('k2_agentId', msg.agentId);
+      break;
+
+    case 'devis':                        // 🧾 nouveau devis, acceptation ou refus (lot 109)
+      try{
+        const mid = msg.missionId;
+        if(mid){ if(mission && mission.id === mid && msg.prixVerrouille){ mission.prixVerrouille = { montant: msg.prixVerrouille, version: msg.version, date: new Date().toISOString(), par: 'client' }; } devisCharger(mid); }
+        if(msg.statut === 'envoye') toast('🧾 ' + (msg.version > 1 ? 'Devis modifié (v' + msg.version + ')' : 'Nouveau devis (v' + msg.version + ')') + ' : ' + devisFmt(msg.total) + ' — ouvrez le suivi pour répondre'
+          + (msg.motif ? '\nMotif : ' + msg.motif : ''));
+        else if(msg.statut === 'accepte') toast('🔒 Prix verrouillé : ' + devisFmt(msg.total));
+        else if(msg.statut === 'refuse') toast('🚫 Devis refusé');
+      }catch(e){}
       break;
 
     case 'quote_offer':
@@ -481,7 +638,7 @@ function handleMissionUpdate(msg){
   const st = msg.status;
   if(st === 'accepted' && msg.agent){
     mission.agent = { nom: msg.agent.nom, note: msg.agent.note || 5, missions: msg.agent.missions || 0, tel: (msg.agent.tel||'').replace(/\D/g,''), photo: msg.agent.photo || null };
-    mission.dist = msg.dist || mission.dist || 2;
+    mission.dist = (typeof msg.dist === 'number') ? msg.dist : (typeof mission.dist === 'number' ? mission.dist : null);
     // 📍 distance réelle si le serveur a la position GPS de l'agent
     if(msg.agentPos && typeof mission.lat === 'number' && mission.lat !== null){
       mission.dist = haversineM(mission.lat, mission.lng, msg.agentPos.lat, msg.agentPos.lng)/1000;
@@ -537,7 +694,7 @@ async function netQuickOnboard(){
   toast('🎉 Bienvenue '+nom+' ! Vous êtes en ligne.');
 }
 function startProStayAlive(){
-  try{ localStorage.setItem('k2_stayOnline','1'); }catch(e){}
+  try{ kLS.set('k2_stayOnline','1'); }catch(e){}
   netStartPosWatch();
   try{ if(navigator.wakeLock) navigator.wakeLock.request('screen').then(l=>{ window._kleanLock=l; }).catch(()=>{}); }catch(e){}
   try{ if(typeof agentPushActivate==='function') agentPushActivate(); else if(typeof agentPushEnsure==='function') agentPushEnsure(); }catch(e){}
@@ -545,7 +702,7 @@ function startProStayAlive(){
   const beat=()=>{
     if(!agent || !agent.online || !NET.agentId) return;
     const body={agentId:NET.agentId, stayOnline:true, villeService: (agent && (agent.villeService||agent.ville)) || '',
-      jeton: (agent && agent.jeton) || localStorage.getItem('k2_agent_jeton') || ''};
+      jeton: (agent && agent.jeton) || kLS.get('k2_agent_jeton') || ''};
     if(NET.pos){ body.lat=NET.pos.lat; body.lng=NET.pos.lng; body.acc=NET.pos.acc; }
     fetch('/api/agents/heartbeat',{method:'POST',headers:Object.assign({'Content-Type':'application/json'}, (body.jeton?{'X-Agent-Token':body.jeton}:{})),body:JSON.stringify(body)})
       .then(r=>r.ok?r.json():r.json().then(e=>({erreurHTTP:r.status, ...e})).catch(()=>({erreurHTTP:r.status})))
@@ -559,7 +716,7 @@ function startProStayAlive(){
           }
           return;
         }
-        if(d.jeton && agent){ agent.jeton = d.jeton; try{ localStorage.setItem('k2_agent_jeton', d.jeton); }catch(e){} }
+        if(d.jeton && agent){ agent.jeton = d.jeton; try{ kLS.set('k2_agent_jeton', d.jeton); }catch(e){} }
         if(d.numPro && agent && !agent.numPro) agent.numPro = d.numPro;
         if(d.posRefusee){
           NET._posRefus = (NET._posRefus||0)+1;
@@ -581,7 +738,7 @@ function startProStayAlive(){
   }
 }
 function stopProStayAlive(){
-  try{ localStorage.removeItem('k2_stayOnline'); }catch(e){}
+  try{ kLS.del('k2_stayOnline'); }catch(e){}
   if(NET._hb){ clearInterval(NET._hb); NET._hb=null; }
   try{ window._kleanLock && window._kleanLock.release(); }catch(e){}
 }
@@ -769,7 +926,7 @@ function renderAnnonceBanner(a) {
 }
 window._annId = null;
 function fermerAnnonce() {
-  if (window._annId) try { localStorage.setItem('klean_ann_cachee', window._annId); } catch (e) { }
+  if (window._annId) try { kLS.set('klean_ann_cachee', window._annId); } catch (e) { }
   const el = document.getElementById('ann-bar');
   if (el) el.remove();
 }
@@ -779,15 +936,15 @@ async function checkAnnonce() {
     const d = await r.json();
     if (!d || !d.ok) return;
     if (d.version) {
-      const lastV = localStorage.getItem('klean_version');
-      localStorage.setItem('klean_version', d.version);
-      if (lastV && lastV !== d.version && localStorage.getItem('klean_ann_cachee') !== 'v' + d.version) {
+      const lastV = kLS.get('klean_version');
+      kLS.set('klean_version', d.version);
+      if (lastV && lastV !== d.version && kLS.get('klean_ann_cachee') !== 'v' + d.version) {
         window._annId = 'v' + d.version;
         renderAnnonceBanner({ id: window._annId, type: 'maj', force: true, message: 'KLEAN vient d\u2019être modernisé (' + d.version + '). Rechargez pour profiter des dernières nouveautés.' });
         return;
       }
     }
-    if (d.annonce && localStorage.getItem('klean_ann_cachee') !== d.annonce.id) {
+    if (d.annonce && kLS.get('klean_ann_cachee') !== d.annonce.id) {
       window._annId = d.annonce.id;
       renderAnnonceBanner(d.annonce);
       return;
@@ -812,7 +969,7 @@ function supId() {
   try {
     if (typeof client !== 'undefined' && client && client.token) return { h: { 'X-Client-Token': client.token }, body: {}, qs: '' };
   } catch (e) { }
-  const aid = (NET && NET.agentId) || localStorage.getItem('k2_agentId') || '';
+  const aid = (NET && NET.agentId) || kLS.get('k2_agentId') || '';
   if (aid) return { h: { 'Content-Type': 'application/json' }, body: { agentId: aid }, qs: '?agentId=' + encodeURIComponent(aid) };
   return null;
 }
@@ -916,5 +1073,9 @@ async function supSend() {
   supLoad();
 }
 window.supSend = supSend;
-window.openKleanService = function(){ try{ supOpen(); }catch(e){} };
+/* 📞 deux noms pour le même écran : le secours de la page (index.html) cherche d'abord « ...Reel ».
+   Ainsi, si net.js est chargé, c'est TOUJOURS le vrai écran de contact qui s'ouvre ; sinon le secours
+   prend le relais et le bouton n'est jamais muet. */
+window.openKleanServiceReel = function(){ try{ supOpen(); }catch(e){} };
+window.openKleanService = function(){ return window.openKleanServiceReel(); };
 window.addEventListener('load', function(){ try{ supBuild(); const f=document.getElementById('sup-fab'); if(f) f.remove(); }catch(e){} });

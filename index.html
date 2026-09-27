@@ -37,6 +37,10 @@
   .view{display:none;min-height:100vh;padding-bottom:168px}
   .view.active{display:block}
   .hidden{display:none !important}
+  /* 🛡️ 28/09 : les boutons répondent immédiatement (plus de double-tap qui attend), et le message
+     de passage ne reste jamais devant — il ne doit jamais manger un clic destiné à la page. */
+  button,.pill,a,label,input,select,textarea,.hub-tile,.nav-btn{touch-action:manipulation}
+  .toast{pointer-events:none}
   .wrap{padding:16px}
 
   /* HERO */
@@ -162,6 +166,7 @@
   .pay.sel::after{content:"✓";margin-left:auto;color:var(--p);font-weight:900}
 
   .recap{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);margin-top:16px}
+  #tarif-info .rline{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0}
   .recap h4{font-size:14px;margin-bottom:10px}
   .rline{display:flex;justify-content:space-between;font-size:13.5px;padding:5px 0;color:#33463e;gap:8px}
   .rline span:first-child{color:var(--muted)}
@@ -354,7 +359,9 @@
   .toast.show{transform:translateX(-50%) translateY(0)}
 
 /* ── SPLASH 3 s (ouverture app client & agent) ── */
-#splash{position:fixed;inset:0;z-index:9999;background:linear-gradient(160deg,#08130e,#0c2217);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;transition:opacity .5s ease}
+/* 🛡️ 28/09 : l'écran de marque est PUREMENT décoratif — il laisse passer les touches, donc
+     même s'il restait affiché il ne bloquerait jamais un clic ni le défilement. */
+#splash{position:fixed;inset:0;pointer-events:none;z-index:9999;background:linear-gradient(160deg,#08130e,#0c2217);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;transition:opacity .5s ease}
 #splash.off{opacity:0;pointer-events:none}
 #splash img{width:86px;height:86px;border-radius:24px;box-shadow:0 18px 46px rgba(21,201,138,.4);animation:spPop .7s cubic-bezier(.2,1.4,.4,1)}
 @keyframes spPop{from{transform:scale(.5);opacity:0}to{transform:scale(1);opacity:1}}
@@ -366,7 +373,877 @@
 </style>
 </head>
 <body>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   🧱 MURAILLE DE STOCKAGE + VEILLEUR DE DÉMARRAGE (correctif 28/09, 2ᵉ passe)
+   ───────────────────────────────────────────────────────────────────────────────────────────────
+   POURQUOI : certains navigateurs REFUSENT l'accès au stockage local — aperçu dans un cadre isolé
+   (« sandbox »), « bloquer les cookies et les données de site », navigation privée, stockage plein.
+   Dans ce cas `localStorage` lève une erreur de sécurité. L'application le lisait au démarrage
+   (`let c = {… localStorage.getItem('k2_city') …}`) : l'erreur arrêtait TOUT le script. Les
+   fonctions restaient déclarées, mais tout ce qui dépend des données du téléphone devenait
+   inaccessible — plus de clic, plus de navigation : une page figée. C'était invisible dans nos
+   essais, parce que notre banc de test fournit toujours un stockage.
+   CE QU'ON FAIT : on teste l'accès UNE fois ; s'il est refusé, on installe un stockage de secours
+   en mémoire, et TOUTES les lectures passent par `kLS`, qui n'échoue jamais.
+   ET AUSSI : un veilleur regarde (3 s puis 9 s après le démarrage) si l'application a fini de
+   démarrer. Sinon il retire ce qui bloque l'écran et affiche « touchez ici pour recharger » :
+   plus jamais de page figée et muette.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+(function(){
+  var ok = false;
+  try{ window.localStorage.setItem('__klean_test__','1'); window.localStorage.removeItem('__klean_test__'); ok = true; }catch(e){ ok = false; }
+  var memoire = {};
+  var secours = {
+    getItem: function(k){ k=String(k); return Object.prototype.hasOwnProperty.call(memoire,k)?memoire[k]:null; },
+    setItem: function(k,v){ memoire[String(k)] = String(v); },
+    removeItem: function(k){ delete memoire[String(k)]; },
+    clear: function(){ memoire = {}; },
+    key: function(i){ var ks=Object.keys(memoire); return (i>=0 && i<ks.length)?ks[i]:null; }
+  };
+  try{ Object.defineProperty(secours,'length',{ get:function(){ return Object.keys(memoire).length; } }); }catch(e){}
+  if(!ok){
+    try{ Object.defineProperty(window,'localStorage',{ configurable:true, get:function(){ return secours; } }); }catch(e){}
+    try{ Object.defineProperty(window,'sessionStorage',{ configurable:true, get:function(){ return secours; } }); }catch(e){}
+  }
+  /* 🧯 la lecture sûre : elle ne lève JAMAIS d'erreur, même si le navigateur refuse tout */
+  function lire(k, defaut){
+    try{ if(ok){ var v = window.localStorage.getItem(k); return (v===null||v===undefined) ? defaut : v; } }catch(e){}
+    return Object.prototype.hasOwnProperty.call(memoire,k) ? memoire[k] : defaut;
+  }
+  function ecrire(k,v){
+    memoire[String(k)] = String(v);
+    try{ if(ok) window.localStorage.setItem(k,v); }catch(e){}
+    return true;
+  }
+  window.kLS = {
+    memoire: !ok,
+    get: function(k, defaut){ return lire(k, defaut===undefined ? null : defaut); },
+    set: ecrire,
+    del: function(k){ delete memoire[String(k)]; try{ if(ok) window.localStorage.removeItem(k); }catch(e){} return true; },
+    vider: function(){ memoire = {}; try{ if(ok) window.localStorage.clear(); }catch(e){} return true; }
+  };
+  try{ window.kLJson = function(k, defaut){ try{ var v = window.kLS.get(k, null); return v ? JSON.parse(v) : defaut; }catch(e){ return defaut; } }; }catch(e){}
+  try{ window.__KLEAN_STOCKAGE_SECOURS = ok ? 0 : 1; }catch(e){}
+  /* 📵 on prévient une fois le client, dans ses réglages, que rien ne sera gardé */
+  try{ window.kLSPrevenir = function(){ return !ok; }; }catch(e){}
+
+  /* 🌐 🧯 filet : sur un très vieux navigateur, « fetch » n'existe pas. Sans ce filet, la toute
+     première demande au serveur levait « fetch is not defined » et arrêtait le démarrage — la page
+     restait figée. Ici, la demande échoue proprement : le catalogue enregistré dans le téléphone
+     reste utilisable et l'application continue de fonctionner. */
+  if(typeof window.fetch !== 'function'){
+    window.fetch = function(){
+      try{ return Promise.reject(new Error('Réseau indisponible dans ce navigateur')); }
+      catch(e){ return { then: function(){ return this; }, catch: function(){ return this; } }; }
+    };
+  }
+  /* 🕵️ le veilleur : si l'application n'a pas fini de démarrer, on le DIT et on dégage l'écran.
+     ⚠️ 28/09 (5ᵉ passe) — DÉFAUT CORRIGÉ ICI : la première version vérifiait à 3 s et 9 s, puis
+     laissait son message à l'écran POUR TOUJOURS. Sur un téléphone lent (démarrage en 4 secondes),
+     le client voyait donc « L'application n'a pas fini de démarrer » alors qu'elle avait très bien
+     démarré : une fausse alerte inquiétante, et impossible à retirer. Désormais :
+       ① la vérification commence plus tard (6 s et 12 s) pour ne pas crier au loup sur un téléphone lent ;
+       ② dès que le démarrage se termine, le message s'efface TOUT SEUL ;
+       ③ la durée réelle du démarrage est enregistrée et figure dans le rapport de diagnostic. */
+  var K_VEILLE_EL = null, K_VEILLE_FINI = false, K_T0 = Date.now();
+  function kVeilleRetirer(){
+    K_VEILLE_FINI = true;
+    try{ var d = document.getElementById('klean-veille'); if(d) d.remove(); }catch(e){}
+    try{
+      var sp = document.getElementById('splash');
+      if(sp && !sp.dataset.gone){ sp.dataset.gone = '1'; sp.classList.add('off'); setTimeout(function(){ try{ sp.remove(); }catch(e){} }, 400); }
+    }catch(e){}
+  }
+  function kVeilleDuree(){ try{ return Math.max(0, Date.now() - K_T0); }catch(e){ return 0; } }
+  window.kVeilleRetirer = kVeilleRetirer;
+  window.kVeilleDuree = kVeilleDuree;
+  function veiller(){
+    try{
+      if(window.__kleanInit === 1){ kVeilleRetirer(); return; }     /* ② le démarrage a abouti : plus d'alerte */
+      /* un démarrage est de nouveau en cours : on surveille de nouveau (l'alerte peut revenir si besoin) */
+      K_VEILLE_FINI = false;
+      try{ var sp = document.getElementById('splash'); if(sp) sp.classList.add('off'); }catch(e){}
+      try{
+        document.querySelectorAll('[data-klean-couche]').forEach(function(el){
+          if(el.id === 'splash') return;
+          try{ el.style.display = 'none'; }catch(e){}
+        });
+      }catch(e){}
+      try{ document.body.style.overflow = ''; }catch(e){}
+      if(document.getElementById('klean-veille')) return;
+      var d = document.createElement('div');
+      d.id = 'klean-veille';
+      d.setAttribute('role','alert');
+      d.style.cssText = 'position:fixed;left:10px;right:10px;top:10px;z-index:2147483647;background:#fff;border:2px solid #E85D04;border-radius:14px;padding:12px 14px;font:700 14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1A1410;box-shadow:0 14px 34px rgba(0,0,0,.28);cursor:pointer;text-align:left';
+      d.innerHTML = '⚠️ <b>L\u2019application met du temps à démarrer.</b><br><span style="font-weight:600">Touchez ici pour la recharger.</span>'
+        + (ok ? '' : '<br><small style="font-weight:600;color:#7A6A5E">Ce navigateur refuse le stockage : l\u2019application fonctionne, mais elle ne gardera pas vos réglages à la fermeture.</small>');
+      d.onclick = function(){ try{ location.reload(); }catch(e){} };
+      document.body.appendChild(d);
+      K_VEILLE_EL = d;
+    }catch(e){}
+  }
+  /* ② vérification régulière : si le démarrage aboutit APRÈS l'alerte, elle disparaît toute seule */
+  setInterval(function(){
+    try{ if(window.__kleanInit === 1) kVeilleRetirer(); }catch(e){}
+  }, 1500);
+  setTimeout(veiller, 6000);        /* ① plus tard : un téléphone lent ne déclenche plus de fausse alerte */
+  setTimeout(veiller, 12000);
+  window.kVeiller = veiller;
+})();
+</script>
+
 <div id="splash"><img src="/klean-icon-512.png" alt="KLEAN"><b>KLEAN</b><span>Services à domicile · Côte d'Ivoire 🇨🇮</span><div class="sp-bar"><i></i></div></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   🛡️ BOUCLIER D'INTERACTION (correctif 28/09) — « la page d'accueil ne doit JAMAIS se figer »
+   ───────────────────────────────────────────────────────────────────────────────────────────────
+   Ce qui se passait : la fermeture de certaines fenêtres cherchait la fenêtre par le TEXTE de son
+   attribut style (« div[style*="z-index:9600"] »). Or le navigateur réécrit toujours ce texte avec
+   une espace (« z-index: 9600; »). La recherche ne trouvait donc RIEN : la fenêtre restait ouverte,
+   son voile recouvrait l'accueil et plus aucun clic, aucun défilement ne passait. C'est réparé ici,
+   et rendu impossible à l'avenir :
+
+   ① un seul registre sait quelles fenêtres plein écran sont ouvertes (y compris les écrans dont le
+      contenu plein écran est à l'intérieur d'une coquille : recherche, fiche du pro) ;
+   ② une fenêtre oubliée (fermeture qui échoue, navigation détournée, retour du téléphone) est
+      refermée automatiquement — plus aucun voile invisible ne peut intercepter les clics ;
+   ③ le défilement de la page est rendu dès qu'il n'y a plus rien d'ouvert ;
+   ④ le bouton « retour » du téléphone et le balayage droite → gauche ferment la dernière fenêtre,
+      puis reviennent à l'accueil (jamais de page figée, jamais d'application quittée par surprise) ;
+   ⑤ le balayage est « passif » : il n'annule jamais le défilement, le zoom, ni les autres gestes.
+   Aucune fenêtre n'est supprimée : chacune garde son bouton Fermer, rien de l'existant ne change.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+(function(){
+  var KCOUCHES = [];                    /* fenêtres ouvertes, dans l'ordre d'ouverture */
+  var KHIST = 0;                        /* entrées d'historique posées par le bouclier */
+
+  /* la fermeture de chaque fenêtre connue (jamais par le texte du style !) */
+  var K_FERMETURE = {
+    'ecran-recherche': function(el){ if(typeof window.rechFermer === 'function') window.rechFermer(); else el.style.display = 'none'; },
+    'catnat-box':      function(el){ if(typeof window.catNatFermer === 'function') window.catNatFermer(); else el.style.display = 'none'; },
+    'fiche-pro':       function(el){ if(typeof window.rechFermerFiche === 'function') window.rechFermerFiche(); else el.style.display = 'none'; },
+    'home-win-modal':  function(el){ if(typeof window.closeHomeWin === 'function') window.closeHomeWin(); else el.style.display = 'none'; },
+    'flip-ov':         function(el){ if(typeof window.flipFermer === 'function') window.flipFermer(); else el.classList.add('hidden'); },
+    'splash':          function(el){ el.classList.add('off'); setTimeout(function(){ try{ el.remove(); }catch(e){} }, 400); },
+    'city-modal-bg':   function(el){ el.classList.remove('show'); },
+    'svc-city-bg':     function(el){ el.classList.remove('show'); },
+    'req-modal-bg':    function(el){ el.classList.remove('show'); }
+  };
+  var K_COQUILLES = ['ecran-recherche', 'catnat-box', 'fiche-pro', 'home-win-modal', 'flip-ov'];  /* plein écran à l'intérieur */
+  /* 🛡️ 28/09 : quand NOUS refermons une fenêtre, nous demandons nous-mêmes le retour en arrière.
+     Ce retour nous revient ensuite sous forme d'événement : ce compteur dit « c'est le mien, ignore-le ».
+     Sans lui, le bouton « retour » du téléphone pouvait tomber à côté et rester sans effet. */
+  var K_IGNORE = 0;                       /* conservé pour compatibilité (plus utilisé) */
+  /* 🎯 nombre de retours en arrière que NOUS avons demandés : ils nous reviennent en événement,
+     on les reconnaît par leur nombre exact (aucune minuterie, donc aucun retour du client avalé) */
+  var K_ATTENDUS = 0, K_ATTENDU_T = 0;
+  /* on ne demande un retour en arrière QUE pour libérer une entrée que nous avons nous-mêmes posée,
+     et on ne reconnaît notre propre retour que s'il arrive aussitôt (moins de 300 ms). Un retour du
+     client n'est donc JAMAIS avalé, même si un nettoyage automatique vient d'avoir lieu. */
+  function kRetourArriere(){
+    K_ATTENDUS++; K_ATTENDU_T = Date.now();
+    try{ history.back(); }catch(e){ K_ATTENDUS = Math.max(0, K_ATTENDUS - 1); }
+  }
+  var K_JAMAIS_COUCHE = ['splash'];                                                 /* la marque d'ouverture ne bloque rien */
+
+  /* la fenêtre est-elle ouverte à l'écran ? (une coquille compte quand elle est affichée) */
+  function kOuvert(el){
+    if(!el || !el.style || !document.documentElement.contains(el)) return false;
+    try{
+      var st = getComputedStyle(el);
+      if(st.display === 'none' || st.visibility === 'hidden') return false;
+      if(el.dataset && el.dataset.kleanCouche) return true;
+      if(el.classList && el.classList.contains('modal-bg')) return true;
+      if(el.id && K_COQUILLES.indexOf(el.id) >= 0) return true;
+      return st.position === 'fixed';
+    }catch(e){ return false; }
+  }
+  function kFermerElement(el){
+    if(!el) return;
+    try{ if(typeof el._kleanFerme === 'function'){ el._kleanFerme(); return; } }catch(e){}
+    var f = K_FERMETURE[el.id];
+    if(f){ try{ f(el); return; }catch(e){} }
+    try{
+      if(el.classList && el.classList.contains('modal-bg')){ el.classList.remove('show'); el.style.display = ''; return; }
+      if(el.id) el.style.display = 'none'; else el.remove();
+    }catch(e){}
+  }
+  function kVerrou(){ try{ if(KCOUCHES.length) document.body.style.overflow = 'hidden'; }catch(e){} }
+  function kLiberer(){ if(KCOUCHES.length) return; try{ document.body.style.overflow = ''; }catch(e){} }
+
+  function kAjouter(el, nom, fermer){
+    if(!el) return null;
+    if(el.id && K_JAMAIS_COUCHE.indexOf(el.id) >= 0) return null;      /* la marque d'ouverture ne compte pas */
+    try{ el.dataset.kleanCouche = nom || '1'; }catch(e){}
+    if(typeof fermer === 'function') el._kleanFerme = fermer;
+    if(KCOUCHES.indexOf(el) < 0){
+      KCOUCHES.push(el);
+      try{ history.pushState({ klean: 1, n: ++KHIST }, ''); }catch(e){ KHIST++; }
+    }
+    kVerrou();
+    return el;
+  }
+  function kRetirer(el, sansHistorique){
+    if(!el) return;
+    var i = KCOUCHES.indexOf(el);
+    if(i >= 0) KCOUCHES.splice(i, 1);
+    if(!sansHistorique && KHIST > 0){
+      KHIST--; kRetourArriere();
+    }
+    kLiberer();
+  }
+  /* ferme la dernière fenêtre ouverte ; renvoie true si quelque chose a été fermé */
+  function kFermerDerniere(sansHistorique){
+    for(var i = KCOUCHES.length - 1; i >= 0; i--){
+      var el = KCOUCHES[i];
+      if(!kOuvert(el)){ KCOUCHES.splice(i, 1); continue; }
+      kFermerElement(el);
+      kRetirer(el, sansHistorique);
+      return true;
+    }
+    kLiberer();
+    return false;
+  }
+  /* 🧹 le filet de sécurité : remet la page dans un état utilisable, quoi qu'il arrive */
+  function kResync(){
+    if(document.hidden) return;          /* onglet en arrière-plan : inutile de travailler pour rien */
+    try{
+      /* ① les fenêtres disparues ou refermées sortent du registre */
+      var disparues = 0;
+      for(var i = KCOUCHES.length - 1; i >= 0; i--){
+        var el = KCOUCHES[i];
+        if(!el || !document.documentElement.contains(el) || !kOuvert(el)){ KCOUCHES.splice(i, 1); disparues++; }
+      }
+      /* une fenêtre fermée par l'application elle-même : on libère AUSSI son entrée d'historique,
+         sinon le client appuie sur « retour » et il ne se passe rien (page qui semble figée) */
+      while(disparues-- > 0 && KHIST > 0){ KHIST--; kRetourArriere(); }
+      /* ② un VOILE marqué qui n'est plus déclaré = fenêtre fantôme : on la retire */
+      document.querySelectorAll('[data-klean-couche]').forEach(function(el){
+        if(K_JAMAIS_COUCHE.indexOf(el.id) >= 0) return;
+        if(KCOUCHES.indexOf(el) >= 0) return;
+        if(!kOuvert(el)) return;
+        if(el.id && K_COQUILLES.indexOf(el.id) >= 0){ kFermerElement(el); return; }
+        try{ el.remove(); }catch(e){ try{ el.style.display = 'none'; }catch(_){} }
+      });
+      /* ③ une fenêtre connue restée affichée sans être déclarée : on la ferme proprement */
+      Object.keys(K_FERMETURE).forEach(function(id){
+        if(K_JAMAIS_COUCHE.indexOf(id) >= 0) return;
+        var el = document.getElementById(id);
+        if(el && KCOUCHES.indexOf(el) < 0 && kOuvert(el)) K_FERMETURE[id](el);
+      });
+      /* ④ le défilement suit l'état réel : plus rien d'ouvert = le client fait défiler */
+      kLiberer();
+      /* ⑤ AUCUN élément plein écran INVISIBLE ne doit intercepter les clics.
+         ⚠️ 28/09 (2ᵉ mesure) : la première version lisait le style calculé de TOUS les éléments
+         (1 907 lectures par passage, et ce passage tourne toutes les 4 s, après chaque clic, à chaque
+         retour d'onglet…). Sur un téléphone, cela force le calcul de style des centaines de fois par
+         seconde : le défilement répond mal et les appuis semblent morts — c'est précisément l'écran
+         « statique » signalé. On trie donc d'abord par la seule LECTURE DE L'ATTRIBUT style (immédiate,
+         aucune mise en page demandée) : seuls les éléments qui se déclarent « position:fixed » sont
+         examinés en détail — une vingtaine au lieu de 1 900. Et toute neutralisation est RÉVERSIBLE. */
+      try{
+        var vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+        if(vw > 40 && vh > 40){
+          var candidats = [], tous = document.body.getElementsByTagName('*'), i, el, at;
+          for(i = 0; i < tous.length; i++){
+            el = tous[i];
+            at = el.getAttribute ? (el.getAttribute('style') || '') : '';
+            if(at && kStyleFixe(at)) candidats.push(el);
+          }
+          /* + les rares blocs fixes définis par la feuille de style (liste courte et connue) */
+          try{
+            document.querySelectorAll('.navbar,.toast,.ins-fab,.modal-bg,#splash,#aff-bar,#ad-box,#win-show-banner,#klean-veille,#klean-aide')
+              .forEach(function(x){ if(candidats.indexOf(x) < 0) candidats.push(x); });
+          }catch(e){}
+          for(i = 0; i < candidats.length; i++){
+            el = candidats[i];
+            if(!el || !el.style) continue;
+            if(el.dataset && el.dataset.kleanCouche && KCOUCHES.indexOf(el) >= 0) continue;  /* fenêtre déclarée ouverte */
+            var cs = getComputedStyle(el);
+            if(cs.position !== 'fixed') continue;
+            if(el.dataset && el.dataset.kleanTransparent === '1'){
+              /* cet élément a été neutralisé : dès qu'il redevient UTILE, on lui REND ses touches
+                 (du contenu, une action à toucher, ou un fond visible) */
+              var visible = parseFloat(cs.opacity) > 0.02 && cs.visibility !== 'hidden';
+              var aQuelqueChose = (el.textContent || '').trim().length > 0
+                                  || !!el.querySelector('button,a,input,select,textarea,[onclick]')
+                                  || !/rgba?\(0,\s*0,\s*0,\s*0\)|transparent/.test(cs.backgroundColor || '');
+              if(visible && aQuelqueChose){ el.style.pointerEvents = ''; el.dataset.kleanTransparent = '0'; }
+              continue;
+            }
+            if(cs.display === 'none' || cs.visibility === 'hidden') continue;
+            if(cs.pointerEvents === 'none') continue;
+            var r = el.getBoundingClientRect();
+            if(r.width < vw * 0.9 || r.height < vh * 0.9) continue;     /* pas plein écran : hors sujet */
+            var invisible = parseFloat(cs.opacity) < 0.02;
+            var transparent = /rgba?\(0,\s*0,\s*0,\s*0\)|transparent/.test(cs.backgroundColor || '');
+            var rienAToucher = transparent && !el.querySelector('button,a,input,select,textarea,[onclick]') && !(el.textContent || '').trim();
+            if(invisible || rienAToucher){
+              el.style.pointerEvents = 'none';
+              if(el.dataset) el.dataset.kleanTransparent = '1';
+            }
+          }
+        }
+      }catch(e){}
+    }catch(e){}
+  }
+  /* 👆 revenir en arrière : dernière fenêtre, sinon l'accueil */
+  function kRetour(){
+    if(kFermerDerniere(false)) return true;
+    try{
+      var v = document.querySelector('.view.active');
+      if(v && v.id && v.id !== 'view-home' && typeof window.showView === 'function'){
+        window.showView('view-home', null, 'client');
+        return true;
+      }
+    }catch(e){}
+    return false;
+  }
+  /* 🔙 le bouton « retour » du téléphone (Android, geste système) */
+  /* 🔙 le bouton « retour » du téléphone (Android, geste système).
+     On compare la profondeur RÉELLE de l'historique au nombre de fenêtres ouvertes : le retour
+     du client et celui que nous demandons nous-mêmes retombent toujours juste. Aucun drapeau
+     temporisé, donc aucun retour ne peut être avalé par erreur. */
+  window.addEventListener('popstate', function(ev){
+    if(K_ATTENDUS > 0){
+      /* notre propre retour arrive en quelques millisecondes : on le reconnaît et on l'ignore.
+         Au-delà de 300 ms ce n'est plus le nôtre : c'est un appui du client, on le traite. */
+      if(Date.now() - K_ATTENDU_T < 300){ K_ATTENDUS--; return; }
+      K_ATTENDUS = 0;
+    }
+    var prof = (ev && ev.state && ev.state.klean) ? (ev.state.n || 0) : 0;
+    kResync();
+    KHIST = Math.max(prof, 0);
+    var garde = 0;
+    while(KCOUCHES.length > prof && garde++ < 20){ if(!kFermerDerniere(true)) break; }
+    if(!KCOUCHES.length && prof <= 0){
+      try{
+        var v = document.querySelector('.view.active');
+        if(v && v.id && v.id !== 'view-home' && typeof window.showView === 'function') window.showView('view-home', null, 'client');
+      }catch(e){}
+    }
+  });
+  /* 👆 balayage de la DROITE vers la GAUCHE = revenir en arrière.
+     Écouteurs « passifs » : on n'annule JAMAIS un geste → le défilement, le zoom et les
+     autres interactions tactiles restent intacts. Un geste vertical, un appui court, ou un
+     balayage dans une zone qui défile de gauche à droite ne déclenchent rien. */
+  (function(){
+    var x0 = 0, y0 = 0, t0 = 0, suivi = false, interdit = false;
+    function lire(e, liste){
+      try{ var l = e && e[liste]; return (l && l.length) ? l[0] : null; }catch(_){ return null; }
+    }
+    function horsJeu(el){
+      var p = el, k = 0;
+      while(p && p.nodeType === 1 && k++ < 8){
+        try{
+          if(p.getAttribute && p.getAttribute('data-noswipe') !== null) return true;
+          if(p.scrollWidth && p.clientWidth && p.scrollWidth > p.clientWidth + 12){
+            var st = getComputedStyle(p);
+            if(st && /auto|scroll/.test(st.overflowX || '')) return true;
+          }
+        }catch(e){}
+        p = p.parentNode;
+      }
+      return false;
+    }
+    document.addEventListener('touchstart', function(e){
+      var t = lire(e, 'touches');
+      if(!t || (e.touches && e.touches.length !== 1)){ suivi = false; return; }
+      x0 = t.clientX; y0 = t.clientY; t0 = Date.now(); suivi = true;
+      interdit = horsJeu(e.target);
+    }, { passive: true });
+    document.addEventListener('touchmove', function(e){
+      if(!suivi) return;
+      var t = lire(e, 'touches');
+      if(!t){ suivi = false; return; }
+      var dx = t.clientX - x0, dy = t.clientY - y0;
+      /* le client fait défiler la page : on laisse faire, ce n'est pas un retour */
+      if(Math.abs(dy) > 26 && Math.abs(dy) > Math.abs(dx)) suivi = false;
+    }, { passive: true });
+    document.addEventListener('touchend', function(e){
+      if(!suivi) return;
+      suivi = false;
+      if(interdit) return;
+      var t = lire(e, 'changedTouches') || lire(e, 'touches');
+      if(!t) return;
+      var dx = t.clientX - x0, dy = t.clientY - y0, dt = Date.now() - t0;
+      if(dx > -64) return;                                   /* il faut aller de la droite vers la gauche */
+      if(Math.abs(dx) < Math.abs(dy) * 1.6) return;           /* geste vertical, pas un balayage */
+      if(dt > 900) return;                                    /* un appui long n'est pas un balayage */
+      kRetour();
+    }, { passive: true });
+  })();
+  /* ⌨️ ordinateur : Échap ferme aussi la dernière fenêtre */
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') kFermerDerniere(false); });
+
+  /* 🧷 AUCUNE FENÊTRE PLEIN ÉCRAN NE DOIT ÉCHAPPER AU BOUCLIER (correctif 28/09, 2ᵉ mesure).
+     L'application ouvre une quinzaine de fenêtres en écrivant directement leur style
+     (« position:fixed;inset:0 ») : paiement, historique des paiements, encaissements du pro,
+     signalement, visibilité, jeton, suivi… SEPT d'entre elles n'étaient connues d'AUCUNE liste :
+     ni le balayage de droite à gauche, ni le bouton « retour » du téléphone ne pouvaient les fermer,
+     et si l'une restait affichée elle recouvrait l'accueil — plus rien ne répondait. Désormais toute
+     fenêtre qui s'affiche est enregistrée d'office, y compris celles que du code futur ajouterait.
+     Le tri est fait par lecture d'attribut (immédiate) puis vérification détaillée : quelques
+     éléments seulement, jamais les 1 900 de la page. */
+  var K_JAMAIS_AUTO = ['splash','klean-veille','aff-bar','ad-box','win-show-banner','klean-aide'];
+  /* ⚠️ Le navigateur réécrit « position:fixed » en « position: fixed » quand le style a été posé par
+     le code (et garde le texte d'origine quand il vient du HTML). On accepte les DEUX écritures :
+     c'est exactement le piège qui avait causé le blocage d'origine — il ne nous aura pas deux fois. */
+  function kStyleFixe(at){ return /position\s*:\s*fixed/i.test(at || ''); }
+  function kPleinEcran(el){
+    try{
+      if(!el || el.nodeType !== 1) return false;
+      var cs = getComputedStyle(el);
+      if(cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden') return false;
+      if(cs.pointerEvents === 'none') return false;
+      var r = el.getBoundingClientRect();
+      var vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+      if(!r || r.width < vw * 0.9 || r.height < vh * 0.9) return false;
+      if(parseFloat(cs.opacity) < 0.02) return false;                 /* voile effacé : rien à fermer */
+      if((el.textContent || '').trim().length > 0) return true;        /* vraie fenêtre : elle a du contenu */
+      return !!el.querySelector('button,a,input,select,textarea,[onclick]');
+    }catch(e){ return false; }
+  }
+  function kEstCandidat(n){
+    if(!n || n.nodeType !== 1) return false;
+    try{ if(n.classList && n.classList.contains('modal-bg')) return true; }catch(e){}
+    try{ return kStyleFixe(n.getAttribute && n.getAttribute('style')); }catch(e){ return false; }
+  }
+  function kEnregistrerSiFenetre(el){
+    try{
+      if(!el || el.nodeType !== 1) return;
+      if(el.id && K_JAMAIS_AUTO.indexOf(el.id) >= 0) return;
+      if(!document.documentElement.contains(el)) return;
+      if(KCOUCHES.indexOf(el) >= 0) return;
+      if(!kEstCandidat(el)) return;
+      if(!kPleinEcran(el)) return;
+      kAjouter(el, el.id || 'fenêtre', function(){                    /* fermeture de secours */
+        try{ el.remove(); }catch(e){ try{ el.style.display = 'none'; }catch(_){} }
+      });
+    }catch(e){}
+  }
+  function kAutoEnregistrer(){
+    if(!window.MutationObserver || !document.body) return;
+    var aVoir = [];
+    try{
+      new MutationObserver(function(liste){
+        try{
+          for(var i = 0; i < liste.length; i++){
+            var m = liste[i], noeuds = m.addedNodes || [], j;
+            for(j = 0; j < noeuds.length; j++){
+              var nd = noeuds[j];
+              if(nd && nd.nodeType === 1 && kEstCandidat(nd) && aVoir.indexOf(nd) < 0) aVoir.push(nd);
+            }
+            /* la fenêtre peut être en train de SE REMPLIR : on regarde aussi ses proches parents */
+            var p = m.target, k = 0;
+            while(p && p.nodeType === 1 && k++ < 3){
+              if(kEstCandidat(p) && aVoir.indexOf(p) < 0) aVoir.push(p);
+              p = p.parentNode;
+            }
+          }
+          if(!aVoir.length) return;
+          setTimeout(function(){
+            var lot = aVoir.splice(0, aVoir.length);
+            for(var q = 0; q < lot.length; q++) kEnregistrerSiFenetre(lot[q]);
+          }, 45);
+        }catch(e){}
+      }).observe(document.body, { childList: true, subtree: true });
+    }catch(e){}
+  }
+
+  /* 🔎 toute fenêtre connue qui s'affiche est enregistrée automatiquement, même si un chemin de
+     navigation oublié l'ouvre : aucune fenêtre ne peut rester « hors contrôle ». */
+  function kSurveiller(id){
+    var el = document.getElementById(id);
+    if(!el || !window.MutationObserver) return;
+    new MutationObserver(function(){
+      var ouvert = kOuvert(el), dedans = KCOUCHES.indexOf(el) >= 0;
+      if(ouvert && !dedans) kAjouter(el, id, null);
+      else if(!ouvert && dedans) kRetirer(el, true);
+    }).observe(el, { attributes: true, attributeFilter: ['style', 'class'] });
+  }
+  function kInstallerSurveillance(){
+    ['ecran-recherche','catnat-box','fiche-pro','home-win-modal','flip-ov','req-modal-bg','city-modal-bg','svc-city-bg']
+      .forEach(kSurveiller);
+    /* la marque d'ouverture ne doit jamais coincer le client : elle disparaît, point. */
+    setTimeout(function(){
+      var sp = document.getElementById('splash');
+      if(sp){ try{ sp.classList.add('off'); sp.remove(); }catch(e){} }
+    }, 6000);
+    kAutoEnregistrer();                       /* 🧷 toute fenêtre plein écran, même future */
+    kSurveillerTaps();                        /* ✋ trois appuis sans effet = on propose la réparation */
+    /* 🔎 l'écran est contrôlé EN VRAI au démarrage, puis régulièrement : s'il est recouvert sans
+       raison, la page le répare elle-même et le signale. Plus jamais d'écran figé et muet. */
+    setTimeout(kVeillerEcran, 1500);
+    setTimeout(kVeillerEcran, 4000);
+    setTimeout(kVeillerEcran, 9000);
+    setInterval(kVeillerEcran, 12000);
+    /* le filet tourne aussi régulièrement : si un chemin inconnu laisse un voile, il est balayé */
+    setInterval(kResync, 4000);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', kInstallerSurveillance);
+  else setTimeout(kInstallerSurveillance, 0);
+  window.addEventListener('pageshow', function(){ setTimeout(kResync, 30); });        /* retour depuis un autre onglet */
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) setTimeout(kResync, 30); });
+  window.addEventListener('orientationchange', function(){ setTimeout(kResync, 300); });
+  document.addEventListener('click', function(){ setTimeout(kResync, 60); }, true);   /* après chaque clic : contrôle */
+  /* ═══════════════════════════════════════════════════════════════════════════════════════════════
+     🔎🔧 L'AUDIT DE L'ÉCRAN — la vérification que nos essais ne pouvaient PAS faire
+     ───────────────────────────────────────────────────────────────────────────────────────────────
+     Pourquoi c'est nécessaire : nos essais tournent dans un banc qui ne calcule AUCUNE mise en page
+     (tous les éléments y mesurent 0 × 0). Ils ne peuvent donc pas voir un voile qui recouvre
+     réellement l'écran sur un téléphone. Le navigateur, lui, sait exactement ce qui se trouve sous
+     le doigt : c'est `document.elementFromPoint`. La page se contrôle donc elle-même, EN VRAI,
+     et se répare si quelque chose recouvre l'accueil alors que RIEN n'est déclaré ouvert.
+     ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+  function kElementAuPoint(x, y){
+    try{
+      var vw = window.innerWidth || 1, vh = window.innerHeight || 1;
+      return document.elementFromPoint(Math.min(Math.max(x, 1), vw - 2), Math.min(Math.max(y, 1), vh - 2));
+    }catch(e){ return null; }
+  }
+  /* le plus proche ancêtre qui recouvre presque tout l'écran */
+  function kCouverture(el){
+    var vw = window.innerWidth || 0, vh = window.innerHeight || 0, p = el, k = 0;
+    if(!vw || !vh) return null;
+    while(p && p.nodeType === 1 && p !== document.body && k++ < 40){
+      try{
+        var r = p.getBoundingClientRect();
+        if(r && r.width >= vw * 0.9 && r.height >= vh * 0.9) return p;
+      }catch(e){}
+      p = p.parentNode;
+    }
+    return null;
+  }
+  function kPointsEchantillon(){
+    var vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+    return [[0.5,0.5],[0.5,0.3],[0.5,0.7],[0.15,0.5],[0.85,0.5],[0.5,0.12],[0.5,0.88]]
+      .map(function(c){ return { x: vw * c[0], y: vh * c[1] }; });
+  }
+  function kNomCourt(el){
+    if(!el) return '(rien)';
+    if(el.id) return '#' + el.id;
+    if(el.className && typeof el.className === 'string') return '.' + el.className.trim().split(/\s+/)[0];
+    return '<' + (el.tagName || '?').toLowerCase() + '>';
+  }
+  function kInutile(el){
+    try{
+      if(!el) return true;
+      var vide = !(el.textContent || '').trim() && !el.querySelector('button,a,input,select,textarea,[onclick]');
+      var cs = getComputedStyle(el);
+      var invis = parseFloat(cs.opacity) < 0.02 || cs.visibility === 'hidden';
+      return vide || invis;
+    }catch(e){ return false; }
+  }
+  /* 🔎 l'état réel de l'écran, vu par le navigateur */
+  function kAuditEcran(){
+    var res = { sain: true, defauts: [], couvrant: [], ouvertes: KCOUCHES.length, auCentre: '' };
+    try{
+      if(document.hidden) return res;
+      var vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+      if(vw < 60 || vh < 60) return res;
+      /* ① le défilement reste-t-il verrouillé alors que rien n'est ouvert ? */
+      var ovBody = '', ovHtml = '';
+      try{ ovBody = document.body.style.overflow || ''; ovHtml = document.documentElement.style.overflow || ''; }catch(e){}
+      if(!KCOUCHES.length && (ovBody === 'hidden' || ovHtml === 'hidden')){
+        res.sain = false; res.defauts.push('le défilement reste verrouillé alors que rien n’est ouvert');
+      }
+      /* ① bis AUCUNE page affichée : l'écran est vide, on le dit et on le répare */
+      try{
+        var act = document.querySelector('.view.active');
+        if(!act){
+          res.sain = false; res.defauts.push('aucune page n’est affichée (écran vide)');
+        } else {
+          var cs2 = getComputedStyle(act);
+          if(cs2.display === 'none' || cs2.visibility === 'hidden' || parseFloat(cs2.opacity) < 0.02){
+            res.sain = false; res.defauts.push('la page affichée (' + kNomCourt(act) + ') est masquée');
+          }
+        }
+      }catch(e){}
+      /* ② les touches sont-elles coupées ? */
+      try{
+        if(getComputedStyle(document.body).pointerEvents === 'none'){
+          res.sain = false; res.defauts.push('la page entière ne reçoit plus les touches');
+        }
+        var acc = document.getElementById('view-home');
+        if(acc && getComputedStyle(acc).pointerEvents === 'none'){
+          res.sain = false; res.defauts.push('l’accueil ne reçoit plus les touches');
+        }
+      }catch(e){}
+      /* ③ qu'y a-t-il RÉELLEMENT au-dessus de l'écran ? */
+      var pts = kPointsEchantillon();
+      for(var i = 0; i < pts.length; i++){
+        var el = kElementAuPoint(pts[i].x, pts[i].y);
+        if(!el) continue;
+        if(i === 0) res.auCentre = kNomCourt(el);
+        var c = kCouverture(el);
+        if(c && res.couvrant.indexOf(c) < 0) res.couvrant.push(c);
+      }
+      /* un élément recouvre l'écran alors que RIEN n'est déclaré ouvert : c'est l'écran figé */
+      if(!KCOUCHES.length){
+        for(var j = 0; j < res.couvrant.length; j++){
+          var q = res.couvrant[j];
+          if(!q || q.id === 'splash') continue;
+          if(q.dataset && q.dataset.kleanTransparent === '1') continue;
+          res.sain = false;
+          res.defauts.push(kNomCourt(q) + ' recouvre l’accueil' + (kInutile(q) ? ' (inutile)' : ''));
+        }
+      }
+    }catch(e){}
+    return res;
+  }
+  /* 🔧 la réparation — toujours disponible, même pour le PDG, d'un seul geste */
+  function kReparerEcran(){
+    var faits = [];
+    try{
+      var g = 0;
+      while(KCOUCHES.length && g++ < 25){ if(!kFermerDerniere(false)) break; faits.push('fenêtre fermée'); }
+    }catch(e){}
+    try{
+      var audit = kAuditEcran();
+      for(var i = 0; i < audit.couvrant.length; i++){
+        var q = audit.couvrant[i];
+        if(!q || q.id === 'splash' || !document.documentElement.contains(q)) continue;
+        if(KCOUCHES.indexOf(q) >= 0) continue;
+        if(q.dataset && q.dataset.kleanTransparent === '1') continue;
+        if(kInutile(q)){
+          try{ q.style.pointerEvents = 'none'; q.dataset.kleanTransparent = '1'; faits.push('voile inutile neutralisé'); }catch(e){}
+        }else{
+          try{ kFermerElement(q); faits.push('fenêtre refermée'); }catch(e){}
+        }
+      }
+    }catch(e){}
+    /* on rend TOUJOURS les capacités de base : défiler, toucher, cliquer */
+    try{ document.body.style.overflow = ''; document.documentElement.style.overflow = ''; }catch(e){}
+    try{ if(getComputedStyle(document.body).pointerEvents === 'none') document.body.style.pointerEvents = ''; }catch(e){}
+    try{
+      var acc = document.getElementById('view-home');
+      if(acc && acc.style && getComputedStyle(acc).pointerEvents === 'none'){ acc.style.pointerEvents = ''; faits.push('touches rendues à l’accueil'); }
+    }catch(e){}
+    /* l'accueil doit être visible : si aucune page ne l'est, ou si celle affichée est masquée, on la rétablit */
+    try{
+      var act = document.querySelector('.view.active');
+      var masquee = false;
+      if(act){ try{ var c = getComputedStyle(act); masquee = (c.display === 'none' || c.visibility === 'hidden' || parseFloat(c.opacity) < 0.02); }catch(e){} }
+      if(!act || masquee){
+        document.querySelectorAll('.view').forEach(function(v){ try{ v.style.display = ''; v.style.visibility = ''; v.style.opacity = ''; }catch(e){} });
+        if(typeof window.showView === 'function') window.showView('view-home', null, 'client');
+        faits.push('page d’accueil rétablie');
+      }
+    }catch(e){}
+    try{ if(window.KBouclier) window.KBouclier.resync(); }catch(e){}
+    try{ toast('🔧 Écran réparé' + (faits.length ? ' · ' + faits.length + ' correction(s)' : ' · aucun défaut trouvé')); }catch(e){}
+    return { faits: faits, audit: kAuditEcran() };
+  }
+  /* 👀 une surveillance discrète : l'accueil est-il recouvert sans raison ? On répare, et on prévient. */
+  var K_DEJA_REPARE = 0, K_ALERTE_T = 0;
+  function kVeillerEcran(){
+    try{
+      if(document.hidden) return;
+      var a = kAuditEcran();
+      if(a.sain) return;
+      if(K_DEJA_REPARE < 3){
+        K_DEJA_REPARE++;
+        try{ console.warn('Klean — écran recouvert, réparation automatique :', a.defauts.join(' · ')); }catch(e){}
+        kReparerEcran();
+        return;
+      }
+      kAlerteEcran('Un élément recouvre l’accueil (' + a.defauts.join(' · ') + '). Touchez ici pour réparer.');
+    }catch(e){}
+  }
+  /* 🆘 la barre de secours : jamais un écran figé sans issue */
+  function kAlerteEcran(message){
+    try{
+      if(Date.now() - K_ALERTE_T < 15000) return;          /* pas de harcèlement */
+      K_ALERTE_T = Date.now();
+      var vieux = document.getElementById('klean-secours'); if(vieux) vieux.remove();
+      var d = document.createElement('button');
+      d.id = 'klean-secours';
+      d.type = 'button';
+      d.style.cssText = 'position:fixed;left:10px;right:10px;bottom:96px;z-index:2147483647;background:#fff;border:2px solid #E85D04;border-radius:14px;padding:11px 13px;font:800 13.5px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1A1410;box-shadow:0 14px 34px rgba(0,0,0,.3);text-align:left';
+      d.innerHTML = '🔧 <b>L’écran ne réagit plus ?</b><br><span style="font-weight:600">Touchez ici pour le réparer.</span>';
+      d.onclick = function(){ try{ d.remove(); }catch(e){} kReparerEcran(); };
+      document.body.appendChild(d);
+      setTimeout(function(){ try{ d.remove(); }catch(e){} }, 20000);
+      return d;
+    }catch(e){}
+  }
+  /* ✋ L'APPUI MORT — le signal le plus sûr : le client touche un BOUTON, et il ne se passe RIEN.
+     Comment le savoir sans se tromper : un vrai appui est court et ne bouge pas (ce n'est pas un
+     défilement). S'il vise un élément cliquable et qu'aucun clic n'est délivré ensuite, l'appui a
+     été intercepté ou le bouton est mort. Trois appuis morts d'affilée = l'écran est figé :
+     on propose la réparation, sans jamais rien changer d'autre. (La version précédente guettait
+     un « changement » dans la page : or la page change en permanence, elle ne se déclenchait donc
+     jamais — défaut trouvé par le banc d'essai.) */
+  var K_APPUIS_MORTS = 0, K_CLICS_RECUS = 0, K_TAP_X = 0, K_TAP_Y = 0, K_TAP_T = 0, K_TAP_CIBLE = null;
+  function kCliquable(el){
+    var p = el, k = 0;
+    while(p && p.nodeType === 1 && p !== document.body && k++ < 8){
+      try{
+        if(p.tagName === 'BUTTON' || p.tagName === 'A' || p.tagName === 'INPUT' || p.tagName === 'SELECT' || p.tagName === 'TEXTAREA' || p.tagName === 'LABEL') return true;
+        if(p.hasAttribute && p.hasAttribute('onclick')) return true;
+        var cs = getComputedStyle(p);
+        if(cs && cs.cursor === 'pointer') return true;
+      }catch(e){}
+      p = p.parentNode;
+    }
+    return false;
+  }
+  function kPointDe(e){
+    try{
+      var l = e && (e.changedTouches || e.touches);
+      if(l && l.length){ return { x: l[0].clientX, y: l[0].clientY }; }
+      if(e && typeof e.clientX === 'number'){ return { x: e.clientX, y: e.clientY }; }
+    }catch(_){}
+    return null;
+  }
+  function kSurveillerTaps(){
+    try{
+      document.addEventListener('touchstart', function(e){ var p = kPointDe(e); if(p){ K_TAP_X = p.x; K_TAP_Y = p.y; K_TAP_T = Date.now(); K_TAP_CIBLE = e.target; } }, { capture: true, passive: true });
+      document.addEventListener('touchmove', function(e){
+        var p = kPointDe(e); if(!p || !K_TAP_T) return;
+        if(Math.abs(p.x - K_TAP_X) > 14 || Math.abs(p.y - K_TAP_Y) > 14) K_TAP_T = 0;   /* c'est un défilement, pas un appui */
+      }, { capture: true, passive: true });
+      document.addEventListener('touchend', function(e){
+        if(!K_TAP_T) return;
+        var p = kPointDe(e), dt = Date.now() - K_TAP_T, t = K_TAP_CIBLE;
+        K_TAP_T = 0;
+        if(!p || dt > 600) return;                                        /* appui long : autre chose */
+        if(Math.abs(p.x - K_TAP_X) > 14 || Math.abs(p.y - K_TAP_Y) > 14) return;
+        if(kCliquable(t)) K_APPUIS_MORTS++;   /* appui net sur un bouton : un clic DEVRAIT suivre */
+      }, { capture: true, passive: true });
+      /* souris (ordinateur) : même règle avec l'appui du bouton */
+      document.addEventListener('mousedown', function(e){ var p = kPointDe(e); if(p){ K_TAP_X = p.x; K_TAP_Y = p.y; K_TAP_T = Date.now(); K_TAP_CIBLE = e.target; } }, true);
+      document.addEventListener('mouseup', function(e){
+        if(!K_TAP_T) return;
+        var p = kPointDe(e), dt = Date.now() - K_TAP_T, t = K_TAP_CIBLE; K_TAP_T = 0;
+        if(!p || dt > 800) return;
+        if(Math.abs(p.x - K_TAP_X) > 14 || Math.abs(p.y - K_TAP_Y) > 14) return;
+        if(kCliquable(t)) K_APPUIS_MORTS++;
+      }, true);
+      /* ⛔ si un clic est réellement délivré, ce n'est pas un appui mort */
+      document.addEventListener('click', function(){ K_CLICS_RECUS++; }, true);
+      setInterval(function(){
+        try{
+          if(K_APPUIS_MORTS >= 3 && K_CLICS_RECUS === 0){
+            K_APPUIS_MORTS = 0; K_CLICS_RECUS = 0;
+            kAlerteEcran();
+          } else if(K_CLICS_RECUS > 0 || K_APPUIS_MORTS > 6){
+            K_APPUIS_MORTS = 0; K_CLICS_RECUS = 0;
+          }
+        }catch(e){}
+      }, 2500);
+    }catch(e){}
+  }
+  /* 📋 le rapport lisible : ce que le PDG peut m'envoyer d'un seul geste */
+  function kRapportEcran(){
+    var a = kAuditEcran(), l = [];
+    l.push('Klean Service — rapport d’affichage');
+    l.push('version : ' + (window.KLEAN_VERSION || '?') + ' · cache : ' + (window._kleanCache || 'inconnu'));
+    l.push('écran : ' + (window.innerWidth||0) + ' × ' + (window.innerHeight||0));
+    l.push('stockage : ' + (window.__KLEAN_STOCKAGE_SECOURS ? 'REFUSÉ par le navigateur (mode mémoire)' : 'normal'));
+    l.push('temps de démarrage : ' + (window._kleanBootMs ? (window._kleanBootMs + ' ms') : 'inconnu'));
+    l.push('fenêtres ouvertes : ' + a.ouvertes + (a.ouvertes ? ' → ' + KCOUCHES.map(kNomCourt).join(', ') : ''));
+    l.push('élément au centre de l’écran : ' + (a.auCentre || 'inconnu'));
+    l.push('état : ' + (a.sain ? 'SAIN — l’accueil reçoit bien les touches' : 'BLOQUÉ — ' + a.defauts.join(' · ')));
+    l.push('défilement : body.overflow="' + ((document.body.style.overflow)||'') + '"');
+    l.push('réparations automatiques effectuées : ' + K_DEJA_REPARE);
+    return l.join('\n');
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════════════════════════
+     📞 SECOURS « CONTACTER KLEAN-SERVICE » — pour que ce bouton ne soit JAMAIS muet
+     ───────────────────────────────────────────────────────────────────────────────────────────────
+     Le vrai écran de contact est fourni par net.js. Or SIX boutons « Contactez Klean-Service »
+     l'appellent directement : si net.js ne se charge pas (réseau lent, copie hors-ligne abîmée,
+     fichier refusé), ces six boutons ne faisaient STRICTEMENT RIEN — sans le moindre message.
+     C'est exactement un « bouton muet ». Ici, un secours s'installe : si le vrai écran n'est pas
+     disponible, on ouvre une fenêtre simple avec le numéro de téléphone et le WhatsApp de
+     Klean-Service (modifiables par le PDG depuis le tableau de bord), et un bouton pour écrire.
+     Le vrai écran, quand il est là, garde TOUJOURS la priorité : rien n'est remplacé.
+     ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+  function kContactSecours(){
+    try{
+      fetch('/api/support/infos', { cache:'no-store' }).then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
+        kMontrerContact((d && (d.tel || d.whatsapp)) ? d : null);
+      }).catch(function(){ kMontrerContact(null); });
+    }catch(e){ kMontrerContact(null); }
+    return true;
+  }
+  function kMontrerContact(d){
+    try{
+      var tel = (d && String(d.tel || '').trim()) || '';
+      var wa  = (d && String(d.whatsapp || d.tel || '').trim()) || '';
+      /* ⚠️ aucun numéro réglé par le PDG : on ne fabrique pas un faux numéro, on guide le client
+         vers l'assistance DANS l'application (qui, elle, fonctionne toujours). */
+      if(!tel){
+        var m0 = document.createElement('div');
+        m0.id = 'klean-contact-secours';
+        m0.style.cssText = 'position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:center;justify-content:center;padding:14px';
+        m0.innerHTML = '<div style="background:var(--card,#fff);border-radius:16px;width:100%;max-width:380px;padding:14px">'
+          + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="flex:1">📞 Klean-Service</b><button type="button" style="border:0;background:transparent;font-size:20px;cursor:pointer" data-klean-fermer>×</button></div>'
+          + '<div style="font-size:12.5px;line-height:1.6;color:var(--ink,#1A1410)">Pour nous joindre :<br>• <b>Mon compte</b> → <b>🤝 Assistance</b> (réponse dans l’application)<br>• <b>Mon compte</b> → <b>💬 Écrire à Klean-Service</b></div>'
+          + '<button type="button" class="btn-line" style="justify-content:center;margin-top:10px" data-klean-assistance>🤝 Ouvrir l’assistance</button>'
+          + '<div style="font-size:11px;color:var(--muted,#666);margin-top:8px;text-align:center">Le PDG peut aussi renseigner un numéro de téléphone depuis le tableau de bord.</div></div>';
+        m0.addEventListener('click', function(e){
+          var t = e.target; var f = false, ass = false;
+          while(t && t !== m0){ if(t.hasAttribute && t.hasAttribute('data-klean-fermer')) f = true; if(t.hasAttribute && t.hasAttribute('data-klean-assistance')) ass = true; t = t.parentNode; }
+          if(e.target === m0 || f){ kFermerContact(); return; }
+          if(ass){ kFermerContact(); try{ showView('view-account', null, 'client'); if(typeof accAssistance === 'function') accAssistance(); }catch(_){} }
+        });
+        document.body.appendChild(m0);
+        try{ window.KBouclier.ajouter(m0, 'contact-secours', kFermerContact); }catch(e){}
+        return;
+      }
+      var msg = 'Bonjour Klean-Service, ';
+      var m = document.createElement('div');
+      m.id = 'klean-contact-secours';
+      m.style.cssText = 'position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:center;justify-content:center;padding:14px';
+      m.innerHTML = '<div style="background:var(--card,#fff);border-radius:16px;width:100%;max-width:380px;padding:14px">'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="flex:1">📞 Klean-Service</b>'
+        + '<button type="button" style="border:0;background:transparent;font-size:20px;cursor:pointer" data-klean-fermer>×</button></div>'
+        + '<div style="font-size:12.5px;color:var(--muted,#666);margin-bottom:10px">Nous répondons tous les jours. Écrivez-nous ou appelez-nous.</div>'
+        + '<a href="tel:' + String(tel).replace(/[^+0-9]/g,'') + '" style="display:block;text-align:center;text-decoration:none;background:linear-gradient(135deg,#E85D04,#9A3412);color:#fff;font-weight:800;padding:12px;border-radius:12px;margin-bottom:8px">📞 Appeler ' + tel + '</a>'
+        + '<a href="https://wa.me/' + String(wa).replace(/[^0-9]/g,'') + '?text=' + encodeURIComponent(msg) + '" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;background:#25D366;color:#06301a;font-weight:800;padding:12px;border-radius:12px">💬 Écrire sur WhatsApp</a>'
+        + '<div style="font-size:11px;color:var(--muted,#666);margin-top:9px;text-align:center">Vous pouvez aussi écrire depuis « Mon compte » → Assistance.</div>'
+        + '</div>';
+      m.addEventListener('click', function(e){
+        try{
+          if(e.target === m){ kFermerContact(); return; }
+          var t = e.target;
+          while(t && t !== m){ if(t.hasAttribute && t.hasAttribute('data-klean-fermer')){ kFermerContact(); return; } t = t.parentNode; }
+        }catch(_){}
+      });
+      document.body.appendChild(m);
+      try{ window.KBouclier.ajouter(m, 'contact-secours', kFermerContact); }catch(e){}
+    }catch(e){}
+  }
+  function kFermerContact(){
+    try{
+      var m = document.getElementById('klean-contact-secours');
+      if(m){ try{ window.KBouclier.retirer(m, true); }catch(e){} m.remove(); }
+    }catch(e){}
+  }
+  window.kContactSecours = kContactSecours;
+  /* 🧯 le relais : appelé par TOUS les boutons « Contactez Klean-Service ». Si le vrai écran est là
+     (net.js chargé), on lui passe la main ; sinon le secours prend le relais. Jamais muet. */
+  window.kContactKlean = function(){
+    try{ if(typeof window.openKleanServiceReel === 'function'){ window.openKleanServiceReel(); return true; } }catch(e){}
+    return kContactSecours();
+  };
+
+  /* ce que le reste de l'application utilise */
+  window.KBouclier = { ajouter: kAjouter, retirer: kRetirer, fermerDerniere: kFermerDerniere,
+                       audit: kAuditEcran, reparer: kReparerEcran, rapport: kRapportEcran,
+                       elementAuPoint: kElementAuPoint, secours: kAlerteEcran,
+                       pleinEcran: kPleinEcran, enregistrer: function(el){ kEnregistrerSiFenetre(el); return KCOUCHES.length; },
+                       jamaisAuto: K_JAMAIS_AUTO,
+                       fermerTout: function(){ var g = 0; while(kFermerDerniere(false) && g++ < 20){} },
+                       resync: kResync, retour: kRetour, ouvertes: function(){ return KCOUCHES.slice(); } };
+})();
+</script>
 <script>(function(){function kill(){var s=document.getElementById('splash');if(!s||s.dataset.gone)return;s.dataset.gone='1';s.classList.add('off');setTimeout(function(){s.remove()},400);}setTimeout(kill,3000);document.addEventListener('click',kill,{once:true,capture:true});document.addEventListener('touchstart',kill,{once:true,capture:true});})();</script>
 
 <!-- ═══════ TOP ═══════ -->
@@ -434,6 +1311,9 @@ body.opt-grand{font-size:16.6px}
 @keyframes kleanPubPulse{0%,100%{opacity:1;text-shadow:0 1px 3px rgba(0,0,0,.45)}50%{opacity:.74;text-shadow:0 1px 3px rgba(0,0,0,.45),0 0 12px rgba(255,255,255,.55)}}
 .pub-msg{font-size:14px;line-height:1.5;font-weight:700;letter-spacing:.2px;word-break:break-word}
 .pub-clignote{animation:kleanPubPulse 3.2s ease-in-out infinite}
+/* 🛡️ 28/09 — le bandeau d'informations du bas est PUREMENT informatif (aucun bouton dedans) :
+   il ne doit jamais intercepter une touche destinée à la page qu'il recouvre sur 56 px. */
+#aff-bar,#aff-bar *{pointer-events:none}
 .pub-clignote.pub-rythme-moyen{animation-duration:2.2s}
 .pub-clignote.pub-rythme-net{animation-duration:1.5s}
 .pub-sans-anim{animation:none !important}
@@ -578,6 +1458,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     </div>
     <span class="field-label" id="bk-extras-label">Options supplémentaires</span>
     <div class="extras" id="extras-list"></div>
+    <div id="dyn-questions"></div>
     <div id="bk-photos-wrap" style="display:none">
       <span class="field-label">📷 Photos du besoin (max 3 — très conseillées)</span>
       <input type="file" accept="image/*" multiple id="inp-photos" style="display:none" onchange="onCustomPhotos(this)">
@@ -633,6 +1514,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     <div class="recap">
       <h4>🧾 Récapitulatif</h4>
       <div id="recap-lines"></div>
+      <div id="tarif-info"></div>
       <div class="promo-row">
         <input type="text" id="inp-promo" placeholder="Code promo">
         <button onclick="applyPromo()">Appliquer</button>
@@ -714,6 +1596,8 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
       <a class="act-btn green" id="trk-wa" href="#" target="_blank" rel="noopener">💬 WhatsApp</a>
       <button class="act-btn" style="color:var(--danger);border-color:#f5c6c7" onclick="cancelMission()">✕ Annuler</button>
     </div>
+    <!-- 🧾 lot 109 : le devis structuré du client (détail, accepter, refuser) -->
+    <div id="trk-devis" style="margin-top:12px"></div>
   </div>
   <div id="rate-wrap"></div>
 </div>
@@ -861,7 +1745,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
         <div id="prof-taches" style="margin-top:9px"></div>
       </div>
       <button class="btn-main" style="width:100%;flex:none" onclick="saveProfile()">💾 Enregistrer</button>
-      <button class="btn-line" style="width:100%;margin-top:10px" onclick="openKleanService()">📞 Contactez Klean-Service</button>
+      <button class="btn-line" style="width:100%;margin-top:10px" onclick="kContactKlean()">📞 Contactez Klean-Service</button>
     </div>
     <p class="note">🛡️ Chaque professionnel KLEAN est vérifié (pièce d'identité + références) par le gestionnaire avant activation, puis noté après chaque mission.</p>
   </div>
@@ -1247,13 +2131,13 @@ const CLIENT_NAMES = ['Jean','Moussa','Aïcha','Konan','Salimata','Yaya','Nadia'
 
 /* ══════════ ÉTAT ══════════ */
 let mode = 'client';
-let c = {service:'maison', city: localStorage.getItem('k2_city')||'bouake', pieces:2, depth:'normal', extras:{}, date:'', time:'09:00', quartier:'', adresse:'', paiement:'cash', nom:'', tel:'', promo:'', lat:null, lng:null, desc:''};
+let c = {service:'maison', city: kLS.get('k2_city')||'bouake', pieces:2, depth:'normal', extras:{}, date:'', time:'09:00', quartier:'', adresse:'', paiement:'cash', nom:'', tel:'', promo:'', lat:null, lng:null, desc:''};
 function setCity(id, silent){
   setTimeout(()=>{ try{ if(typeof chargerProches==='function') chargerProches(); }catch(e){} }, 300);
   const city = CITIES.find(x=>x.id===id) || CITIES[0];
   c.city = city.id;
   c.quartier = city.quartiers[0];
-  localStorage.setItem('k2_city', city.id);
+  kLS.set('k2_city', city.id);
   const _cc = $('#city-chip'); if(_cc) _cc.innerHTML = '📍 '+city.nom+' ▾';
   const svcN = $('#svc-city-name'); if(svcN) svcN.textContent = city.nom+' ▾';
   $('#hero-phase').innerHTML = '🇨🇮 Actif à '+city.nom;
@@ -1273,9 +2157,14 @@ function openVilleFor(inputId){
   const inp=document.getElementById('city-search'); if(inp) inp.value='';
   renderCityModal('');
   $('#city-modal-bg').classList.add('show');
+  try{ window.KBouclier.ajouter($('#city-modal-bg'), 'ville', closeCityModal); }catch(e){}
   setTimeout(()=>{ const s=document.getElementById('city-search'); if(s) s.focus(); }, 80);
 }
-function closeCityModal(){ $('#city-modal-bg').classList.remove('show'); _villeTarget=null; }
+function closeCityModal(){
+  const bg = $('#city-modal-bg'); if(bg) bg.classList.remove('show');
+  _villeTarget=null;
+  try{ window.KBouclier.retirer(bg); }catch(e){}
+}
 function pickCity(id){
   const city=CITIES.find(x=>x.id===id)||CITIES[0];
   if(_villeTarget){
@@ -1294,7 +2183,7 @@ function pickCity(id){
 }
 /* ═══════════ 🎫 JETONS (sécurité) — la position et le profil du pro ne partent qu'avec sa preuve ═══════════ */
 function jetonPro(){
-  try{ return (agent && agent.jeton) || localStorage.getItem('k2_agent_jeton') || ''; }catch(e){ return ''; }
+  try{ return (agent && agent.jeton) || kLS.get('k2_agent_jeton') || ''; }catch(e){ return ''; }
 }
 function jetonProHeaders(){
   const h = {'Content-Type':'application/json'};
@@ -1310,15 +2199,17 @@ function ouvrirChoixVilleService(){
   const s = document.getElementById('svc-city-search'); if(s) s.value='';
   renderChoixVilleService('');
   bg.classList.add('show');
+  try{ window.KBouclier.ajouter(bg, 'ville-pro', closeChoixVilleService); }catch(e){}
   setTimeout(()=>{ const i=document.getElementById('svc-city-search'); if(i) i.focus(); }, 120);
 }
 function closeChoixVilleService(){
   const bg = document.getElementById('svc-city-bg');
   if(bg) bg.classList.remove('show');
+  try{ window.KBouclier.retirer(bg); }catch(e){}
 }
 /* « Plus tard » : on ne harcèle pas — on repose la question demain */
 function plusTardVilleService(){
-  try{ localStorage.setItem('k2_vs_skip', new Date().toISOString().slice(0,10)); }catch(e){}
+  try{ kLS.set('k2_vs_skip', new Date().toISOString().slice(0,10)); }catch(e){}
   closeChoixVilleService();
   toast('🛠️ Sans ville de service, les clients ne vous voient pas encore — vous pouvez choisir à tout moment dans votre profil');
 }
@@ -1353,7 +2244,7 @@ async function choisirVilleService(nom){
   closeChoixVilleService();
   toast('🛠️ Ville de service : '+nom+' — les clients de '+nom+' vous voient ✓');
   try{
-    const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
+    const id = (typeof NET!=='undefined' && NET.agentId) || kLS.get('k2_agentId');
     if(id){
       await fetch('/api/agents/me',{method:'PUT',headers:jetonProHeaders(),body:JSON.stringify({agentId:id, villeService:nom, ville: agent.ville||nom})});
       if(typeof netAnnounceOnline==='function' && agent.online && agent.apply && agent.apply.status==='approved') netAnnounceOnline();
@@ -1384,7 +2275,7 @@ function verifierVilleServiceAuto(force){
     if(!(agent.apply && agent.apply.status==='approved')) return;
     if(agent.villeService) return;
     const jour = new Date().toISOString().slice(0,10);
-    if(!force && localStorage.getItem('k2_vs_skip')===jour) return;
+    if(!force && kLS.get('k2_vs_skip')===jour) return;
     setTimeout(ouvrirChoixVilleService, 700);
   }catch(e){}
 }
@@ -1433,8 +2324,8 @@ function renderHomeRoad(){
   el.innerHTML =
     citiesAZ().map(x=>`<button class="city ${c.city===x.id?'ok':'soon'}" style="border:none;font-family:inherit;cursor:pointer;${c.city===x.id?'':'background:var(--pl);color:var(--pd)'}" onclick="pickCity('${x.id}')">${c.city===x.id?'✅':'📍'} ${x.nom}${c.city===x.id?' — Votre ville':''}</button>`).join('');
 }
-let bookings = JSON.parse(localStorage.getItem('k2_bookings')||'[]');
-let agent = JSON.parse(localStorage.getItem('k2_agent')||'null') || {nom:'',quartier:'Koko',tel:'',online:false,rating:5.0,missionsDone:0,gains:{day:'',today:0,total:0,comm:0},hist:[]};
+let bookings = JSON.parse(kLS.get('k2_bookings')||'[]');
+let agent = JSON.parse(kLS.get('k2_agent')||'null') || {nom:'',quartier:'Koko',tel:'',online:false,rating:5.0,missionsDone:0,gains:{day:'',today:0,total:0,comm:0},hist:[]};
 let mission = null;          // mission client en cours
 let sim = null, searchTimers = [];
 let incomingReq = null, reqTimer = null, reqCountdown = null, activeMission = null;
@@ -1517,7 +2408,7 @@ const $ = s => document.querySelector(s);
 const fmt = n => Math.round(n).toLocaleString('fr-FR') + ' F';
 const rnd = (a,b) => a + Math.random()*(b-a);
 const pick = arr => arr[Math.floor(Math.random()*arr.length)];
-function saveAll(){ localStorage.setItem('k2_bookings',JSON.stringify(bookings)); localStorage.setItem('k2_agent',JSON.stringify(agent)); }
+function saveAll(){ kLS.set('k2_bookings',JSON.stringify(bookings)); kLS.set('k2_agent',JSON.stringify(agent)); }
 
 /* ══════════ NAVIGATION ══════════ */
 let _wantProClaim = false;
@@ -1573,8 +2464,21 @@ function ouvrirRubrique(r){
   window.scrollTo({top:0});
 }
 function showView(id, btn, navGroup){
+  /* 🛡️ 28/09 (3ᵉ passe) — DÉFAUT GRAVE CORRIGÉ ICI : l'ancien code retirait la classe « active » de
+     TOUTES les pages AVANT de vérifier que la page demandée existait. Un seul identifiant erroné
+     (appel oublié, page renommée, code futur) laissait donc l'application SANS AUCUNE page visible :
+     écran vide, tous les boutons muets, chaque navigation levait une erreur. Exactement le tableau
+     « l'écran devient statique ». Désormais : page inconnue → on ne touche à RIEN. */
+  const cible = document.getElementById(id);
+  if(!cible){
+    try{ console.warn('Klean : page inconnue « '+id+' » — la page affichée est conservée'); }catch(e){}
+    if(!document.querySelector('.view.active')){
+      const a = document.getElementById('view-home'); if(a) a.classList.add('active');
+    }
+    return;
+  }
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
-  $('#'+id).classList.add('active');
+  cible.classList.add('active');
   const nav = navGroup==='agent' ? '#nav-agent' : '#nav-client';
   document.querySelectorAll(nav+' .nav-btn').forEach(b=>b.classList.remove('on'));
   if(btn) btn.classList.add('on');
@@ -1582,7 +2486,9 @@ function showView(id, btn, navGroup){
   if(id==='view-bookings') renderBookings();
   if(id==='view-agent-hist') renderAgentHist();
   if(id==='view-track') renderTrack();
-  if(id==='view-account') renderAccount();
+  if(id==='view-account'){ renderAccount(); try{ if(window._kleanRapport && document.getElementById('klean-diag') && document.getElementById('klean-diag').style.display === 'block') window.kPanneauEcran(); }catch(e){} }
+  /* 🛡️ après chaque navigation : aucune fenêtre oubliée ne doit rester devant la page */
+  try{ if(window.KBouclier) setTimeout(function(){ window.KBouclier.resync(); }, 80); }catch(e){}
 }
 function startBooking(){
   openIn1s(function(){
@@ -1595,6 +2501,9 @@ function startBooking(){
 function openTrack(btn){
   if(!mission || ['terminee','annulee'].includes(mission.status)) return toast('Aucune mission en cours — réservez d\'abord 🧹');
   showView('view-track', btn, 'client');
+  /* 🧾 lot 109 : on affiche tout de suite le devis s'il y en a un (et on le rafraîchit) */
+  try{ devisRendre({ missionId: mission.id, devis: mission.devis, verrou: mission.prixVerrouille }); }catch(e){}
+  try{ devisCharger(mission.id); }catch(e){}
 }
 function cityName(id){ const x = CITIES.find(v=>v.id===id); return x?x.nom:'Bouaké'; }
 
@@ -1635,6 +2544,8 @@ function goStep(n){
   $('#bb-label').textContent = n===4 ? (c.service==='custom' ? 'Prix à convenir' : 'Total (payé après la mission)') : 'Total estimé';
   if(n===4 && client){ $('#inp-nom').value = client.nom; $('#inp-tel').value = client.tel; }
   updatePriceBar();
+  if(typeof tarifServeur==='function') tarifServeur();
+  if(n===2 && typeof chargerQuestions==='function') chargerQuestions();     /* ❓ lot 108 */
   window.scrollTo({top:0,behavior:'smooth'});
 }
 function prevStep(){ step>1 ? goStep(step-1) : showView('view-home', $('#nav-client .nav-btn'), 'client'); }
@@ -1648,9 +2559,162 @@ function nextStep(){
   if(step===4) return launchSearch();
   goStep(step+1);
 }
+/* ❓ LOT 108 — LES QUESTIONS DYNAMIQUES DANS L'APPLICATION CLIENT
+   Le client ne voit QUE les questions utiles à son service (le serveur les choisit).
+   « Je ne sais pas » est toujours là : le prix devient une estimation, jamais un prix inventé.
+   Les réponses repartent au serveur, qui les transforme en lignes de prix (aucun calcul au téléphone). */
+let QUESTIONS = [], _qSeq = 0;
+function qStore(){ return c.reponses || (c.reponses = {}); }
+function qRepondre(id, val){
+  const r = qStore();
+  if(r[id] === val) delete r[id]; else r[id] = val;      /* re-clic = on retire la réponse */
+  renderQuestions();
+  updatePriceBar();
+}
+async function chargerQuestions(){
+  const box = document.getElementById('dyn-questions');
+  if(!box || c.service === 'custom'){ if(box) box.innerHTML = ''; return; }
+  const seq = ++_qSeq;
+  try{
+    const r = await fetch('/api/tarif/questions?service=' + encodeURIComponent(c.service), {cache:'no-store'});
+    if(!r.ok) return;
+    const d = await r.json().catch(()=>null);
+    if(seq !== _qSeq) return;
+    QUESTIONS = (d && d.ok && d.questions) ? d.questions : [];
+    const r2 = qStore();
+    Object.keys(r2).forEach(k => { if(!QUESTIONS.some(q => q.id === k)) delete r2[k]; });   /* on ne garde que les questions utiles */
+    renderQuestions();
+  }catch(e){}
+}
+function renderQuestions(){
+  const box = document.getElementById('dyn-questions');
+  if(!box) return;
+  if(!QUESTIONS.length){ box.innerHTML = ''; return; }
+  const r = qStore();
+  const nbPhotos = (window._customPhotos || []).length;
+  const bloc = QUESTIONS.map(q=>{
+    const v = r[q.id];
+    let corps = '';
+    if(q.type === 'choix'){
+      corps = '<div class="pills" style="flex-wrap:wrap">' + (q.valeurs||[]).map(x=>{
+        const on = (v === x.id);
+        const delta = (x.k && x.k !== 1) ? ' <b style="font-size:10px;color:'+(x.k>1?'var(--amber)':'var(--p)')+'">'+(x.k>1?'+':'')+Math.round((x.k-1)*100)+'%</b>' : '';
+        return '<button class="pill'+(on?' sel':'')+'" onclick="qRepondre(\''+q.id+'\',\''+x.id+'\')">'+x.nom+delta+'</button>';
+      }).join('') + '</div>';
+    } else if(q.type === 'nombre'){
+      const chiffre = (typeof v === 'string' && v && v !== 'je_ne_sais_pas') ? v : '';
+      corps = '<input class="inp" id="q-inp-'+q.id+'" type="number" min="0" step="any" placeholder="'+(q.unite === 'm2' ? 'ex : 40 m²' : 'votre nombre')+'" value="'+chiffre+'" oninput="qNombre(\''+q.id+'\',this.value)">';
+    } else if(q.type === 'photo'){
+      corps = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+        + '<button class="btn-ghost" style="flex:none;padding:9px 12px" onclick="document.getElementById(\'inp-photos\').click()">📷 Prendre / choisir des photos</button>'
+        + '<span style="font-size:12px;color:var(--muted)">'+(nbPhotos ? ('✓ '+nbPhotos+' photo(s) ajoutée(s)') : 'aucune photo pour l’instant')+'</span></div>';
+    }
+    const saisPas = (q.jeNeSaisPas && q.type !== 'photo')
+      ? '<button class="btn-ghost" style="flex:none;padding:8px 11px;font-size:12px;'+(v === 'je_ne_sais_pas' ? 'border-color:rgba(255,176,32,.6);color:var(--amber)' : '')+'" onclick="qRepondre(\''+q.id+'\',\'je_ne_sais_pas\')">🤷 Je ne sais pas</button>'
+      : '';
+    return '<div style="margin-bottom:12px">'
+      + '<span class="field-label">'+(q.ic||'❓')+' '+q.q+(q.obligatoire ? ' <span style="color:var(--amber)">(confirmation demandée)</span>' : '')+'</span>'
+      + corps
+      + (q.aide ? '<div style="font-size:11.5px;color:var(--muted);margin-top:4px">'+q.aide+'</div>' : '')
+      + (saisPas ? '<div style="margin-top:6px">'+saisPas+'</div>' : '')
+      + '</div>';
+  }).join('');
+  box.innerHTML = '<div style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 13px;margin-bottom:12px">'
+    + '<b style="font-size:13px">❓ Quelques questions sur votre demande</b>'
+    + '<div style="font-size:11.5px;color:var(--muted);margin:3px 0 10px">Seulement celles qui changent le prix de ce service. Vous pouvez répondre « Je ne sais pas » : le prix s’affiche alors en estimation, jamais en faux prix ferme.</div>'
+    + bloc + '</div>';
+}
+function qNombre(id, val){
+  const r = qStore();
+  const v = String(val||'').trim();
+  if(v) r[id] = v; else delete r[id];
+  updatePriceBar();
+}
+
+/* ══════════ 💰 MOTEUR DE TARIFICATION (le prix détaillé vient du SERVEUR) ══════════
+   Le téléphone n'invente plus le prix : il demande le détail au serveur (unité, quantité,
+   niveau, état, urgence, options, déplacement, remise) et affiche EXACTEMENT ce que le
+   serveur répond. Si le serveur est injoignable, on garde l'ancien calcul local (rien ne casse). */
+let TARIF = null, _tarifTimer = null, _tarifSeq = 0;
+function tarifParams(){
+  const svc = SERVICES.find(s=>s.id===c.service) || {id:'', opts:[], cat:''};
+  if(c.service==='custom') return null;
+  const opts = Object.keys(c.extras||{}).filter(k=>c.extras[k]);
+  const p = new URLSearchParams();
+  p.set('service', c.service);
+  p.set('quantite', String(c.pieces||1));
+  if(c.depth) p.set('niveau', c.depth);
+  if(c.etat) p.set('etat', c.etat);
+  if(c.urgence) p.set('urgence', c.urgence);
+  if(opts.length) p.set('options', opts.join('|'));
+  if(c.promo) p.set('promo', c.promo);
+  const repQ = c.reponses || {};
+  const rrQ = Object.keys(repQ).filter(k => repQ[k] !== undefined && repQ[k] !== '').slice(0, 20).map(k => k + ':' + repQ[k]).join('|');
+  if(rrQ) p.set('reponses', rrQ);
+  if(c.photos && c.photos.length) p.set('photos', String(c.photos.length));
+  p.set('ville', cityName(c.city));
+  /* 🗺️ le LIEU DE PRESTATION complet (quartier d'abord) : c'est lui qui donne la distance réelle,
+     pas la ville du compte. Le serveur reste seul juge (un chiffre du téléphone ne décide de rien). */
+  if(c.quartier) p.set('quartier', c.quartier);
+  return p;
+}
+function tarifProgrammer(){
+  clearTimeout(_tarifTimer);
+  _tarifTimer = setTimeout(tarifServeur, 220);
+}
+async function tarifServeur(){
+  const p = tarifParams();
+  if(!p || typeof fetch!=='function'){ TARIF=null; return; }
+  const seq = ++_tarifSeq;
+  try{
+    const r = await fetch('/api/tarif/devis?'+p.toString(), {cache:'no-store'});
+    if(!r.ok) return;
+    const d = await r.json().catch(()=>null);
+    if(seq !== _tarifSeq) return;                    /* une réponse tardive ne doit pas écraser la dernière */
+    if(!d || !d.ok || !d.tarif) return;
+    TARIF = d.tarif;
+    tarifAfficher();
+  }catch(e){}
+}
+function tarifLigne(l){
+  const s = (l.montant<0)?('−'+fmt(-l.montant)):('+'+fmt(l.montant));
+  const montre = (l.cle==='base') ? fmt(l.montant) : s;
+  const coul = (l.cle==='base') ? '' : (l.montant<0 ? 'color:var(--p)' : '');
+  const det = l.detail ? (' <small style="color:var(--muted);font-weight:600">'+l.detail+'</small>') : '';
+  return `<div class="rline"><span>${l.nom}${det}</span><span style="${coul}">${montre}</span></div>`;
+}
+function tarifAfficher(){
+  const box = document.getElementById('tarif-info');
+  if(box){
+    if(!TARIF){ box.innerHTML=''; }
+    else if(TARIF.mode==='devis'){
+      box.innerHTML = '<div style="background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.35);border-radius:12px;padding:11px 13px;margin-top:10px">'
+        + '<b>💬 Prix sur devis</b><br><span style="font-size:12.5px">'+TARIF.texte+'</span></div>';
+    } else {
+      const r = TARIF;
+      box.innerHTML = '<div style="background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-top:10px">'
+        + '<b style="font-size:13px">💰 Le détail de votre prix'+(r.mode==='fourchette'?' <span style="color:var(--amber)">(estimation)</span>':'')+'</b>'
+        + '<div style="margin:7px 0">'+ r.lignes.map(tarifLigne).join('') +'</div>'
+        + (r.mode==='fourchette'
+            ? '<div style="font-size:17px;font-weight:800">Estimation : '+fmt(r.fourchette[0])+' – '+fmt(r.fourchette[1])+'</div>'
+            : '<div style="font-size:17px;font-weight:800">Prix calculé : '+fmt(r.total)+'</div>')
+        + '<div style="font-size:12px;color:var(--muted);margin-top:5px">'+r.texte+'</div>'
+        + '</div>';
+    }
+  }
+  const p = TARIF && TARIF.mode!=='devis' ? TARIF : null;
+  if(p){
+    const val = (p.mode==='fourchette') ? (fmt(p.fourchette[0])+' – '+fmt(p.fourchette[1])) : fmt(p.total);
+    $('#bb-price').textContent = val;
+    const lbl = document.getElementById('bb-label');
+    if(lbl) lbl.textContent = (p.mode==='fourchette') ? 'Estimation (pas encore définitive)' : (step===4 ? 'Total (payé après la mission)' : 'Total estimé');
+  }
+  if(step===4) renderRecap();
+}
 function updatePriceBar(){
   const p = calcPrice(c);
-  $('#bb-price').textContent = (c.service==='custom') ? '💬 À convenir' : fmt(p.total);
+  if(!TARIF) $('#bb-price').textContent = (c.service==='custom') ? '💬 À convenir' : fmt(p.total);
+  tarifProgrammer();
   if(step===4) renderRecap();
 }
 function renderSvcGrids(){
@@ -1769,6 +2833,8 @@ function onCustomPhotos(input){
         cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
         window._customPhotos.push(cv.toDataURL('image/jpeg', .72).slice(0, 580000));
         renderCustomPhotos();
+        if(typeof renderQuestions==='function') renderQuestions();     /* ❓ la question « photos » se met à jour */
+        if(typeof updatePriceBar==='function') updatePriceBar();
       };
       img.src = e.target.result;
     };
@@ -1811,16 +2877,35 @@ function renderRecap(){
   const unitLine = usePieces(p.svc)
     ? `<div class="rline"><span>🛏️ ${c.pieces} ${p.svc.piecesLabel||'pièce(s)'} · ${depthLabel(p.svc,c.depth).replace(/\+.*/,'').trim()}</span><span>${fmt(p.baseSvc)}</span></div>`
     : `<div class="rline"><span>⚙️ Forfait · ${depthLabel(p.svc,c.depth).replace(/\+.*/,'').trim()}</span><span>${fmt(p.baseSvc)}</span></div>`;
-  let h = `<div class="rline"><span>${p.svc.ic} ${p.svc.nom}</span><span>${fmt(p.svc.base)}</span></div>${unitLine}`;
-  ex.forEach(e=> h += `<div class="rline"><span>${e.ic||'🔹'} ${e.nom}</span><span>+${fmt(e.prix)}</span></div>`);
+  /* 💰 une seule liste, jamais deux : quand le serveur a répondu, c'est SON détail qui s'affiche
+     (l'ancien calcul local ne sert plus que de secours si le serveur est injoignable). */
+  const avecServeur = !!(TARIF && TARIF.mode!=='devis' && TARIF.lignes && TARIF.lignes.length);
+  let h = '';
+  if(avecServeur){
+    h += TARIF.lignes.map(tarifLigne).join('');
+  } else {
+    h += `<div class="rline"><span>${p.svc.ic} ${p.svc.nom}</span><span>${fmt(p.svc.base)}</span></div>${unitLine}`;
+    ex.forEach(e=> h += `<div class="rline"><span>${e.ic||'🔹'} ${e.nom}</span><span>+${fmt(e.prix)}</span></div>`);
+    if(p.remise>0) h += `<div class="rline"><span>🎉 Code ${c.promo}</span><span style="color:var(--p);font-weight:700">−${fmt(p.remise)}</span></div>`;
+  }
+  /* 🛵 DÉPLACEMENT : le client voit toujours ce qu'il en est — inclus, ou estimé et à confirmer */
+  try{
+    if(avecServeur && TARIF.deplacementInfo){
+      const di = TARIF.deplacementInfo;
+      if(di.inclus) h += `<div class="rline" style="color:var(--muted)"><span>🛵 Déplacement</span><span>inclus</span></div>`;
+      else if(di.estimation) h += `<div class="rline" style="color:var(--muted)"><span>🛵 Distance estimée (${di.km} km · ${di.source||'zone'})</span><span>à confirmer</span></div>`;
+    }
+  }catch(e){}
   if(c.desc) h += `<div class="rline"><span>📝 ${c.desc.slice(0,60)}${c.desc.length>60?'…':''}</span><span></span></div>`;
   h += `<div class="rline"><span>📅 ${formatDate(c.date)} à ${c.time}</span><span></span></div>
     <div class="rline"><span>📍 ${c.quartier}, ${currentCity().nom}</span><span></span></div>
     ${c.lat?`<div class="rline"><span>📡 Position GPS captée</span><span style="color:var(--p);font-weight:700">✓</span></div>`:''}
     <div class="rline"><span>${pay.txt==='💵'?'💵':'💳'} Paiement : ${pay.nom}</span><span></span></div>`;
-  if(p.remise>0) h += `<div class="rline"><span>🎉 Code ${c.promo}</span><span style="color:var(--p);font-weight:700">−${fmt(p.remise)}</span></div>`;
-  h += `<div class="rline total"><span>Total</span><span>${fmt(p.total)}</span></div>`;
-  $('#recap-lines').innerHTML = h;
+  const totTxt = (TARIF && TARIF.mode!=='devis')
+    ? ((TARIF.mode==='fourchette') ? (fmt(TARIF.fourchette[0])+' – '+fmt(TARIF.fourchette[1])) : fmt(TARIF.total))
+    : fmt(p.total);
+  h += `<div class="rline total"><span>${(TARIF && TARIF.mode==='fourchette')?'Estimation':'Total'}</span><span>${totTxt}</span></div>`;
+  $('#recap-lines').innerHTML = h;   /* (le bloc détaillé est déjà rempli par tarifAfficher : pas de rappel en boucle) */
 }
 function applyPromo(){
   const code = $('#inp-promo').value.trim().toUpperCase();
@@ -1912,10 +2997,15 @@ function assignAgent(){
   $('#search-msg').innerHTML = `✅ <b style="color:var(--pd)">${nom} a accepté votre mission !</b>`;
   searchTimers.push(setTimeout(()=>{ goTrackLive(); }, 2200));
 }
+function distTxt(dist){
+  /* 📍 on n'affiche un chiffre que s'il est RÉEL (position du professionnel connue) */
+  if(typeof dist === 'number' && isFinite(dist) && dist > 0) return '📍 '+dist.toFixed(1)+' km<br><span style="color:var(--muted);font-weight:600">🛵 ~'+Math.max(2,Math.round(dist*4))+' min</span>';
+  return '📍 Distance dès que le pro partage sa position<br><span style="color:var(--muted);font-weight:600">Suivi GPS en direct</span>';
+}
 function agentRowHTML(a, dist){
   return `${avatarHTML(a.photo, a.nom[0], 44)}
     <div><b>🧑‍💼 Professionnel : ${a.nom}</b><small>⭐ ${a.note.toFixed(1)}/5 · ${a.missions} missions</small></div>
-    <div class="dist">📍 ${dist.toFixed(1)} km<br><span style="color:var(--muted);font-weight:600">🛵 ~${Math.max(2,Math.round(dist*4))} min</span></div>`;
+    <div class="dist">${distTxt(dist)}</div>`;
 }
 function cancelSearch(){
   searchTimers.forEach(clearTimeout); clearInterval(sim);
@@ -1995,13 +3085,15 @@ function renderTrack(){
     else $('#trk-avatar').textContent = a.nom[0];
     $('#trk-name').textContent = '🧹 '+a.nom;
     $('#trk-sub').textContent = '⭐ '+a.note.toFixed(1)+'/5 · '+a.missions+' missions';
-    $('#trk-dist').innerHTML = '📍 '+Math.max(mission.dist,0).toFixed(1)+' km<br><span style="color:var(--muted);font-weight:600">🛵 Moto</span>';
+    $('#trk-dist').innerHTML = (typeof mission.dist === 'number')
+      ? '📍 '+Math.max(mission.dist,0).toFixed(1)+' km<br><span style="color:var(--muted);font-weight:600">🛵 Moto</span>'
+      : '📍 Position en attente<br><span style="color:var(--muted);font-weight:600">le pro partage son GPS</span>';
     $('#trk-call').href = 'tel:+225'+a.tel;
     $('#trk-wa').href = 'https://wa.me/225'+a.tel+'?text='+encodeURIComponent('Bonjour '+a.nom+', c\'est pour ma mission KLEAN '+mission.id);
   }
   $('#trk-svc').textContent = SERVICES.find(s=>s.id===mission.service).ic;
-  $('#trk-km').textContent = Math.max(mission.dist,0).toFixed(1)+' km';
-  $('#trk-eta').textContent = st==='enroute' ? '~'+mission.eta+' min' : '—';
+  $('#trk-km').textContent = (typeof mission.dist === 'number') ? (Math.max(mission.dist,0).toFixed(1)+' km') : '— km';
+  $('#trk-eta').textContent = (st==='enroute' && mission.eta) ? '~'+mission.eta+' min' : '—';
 
   const banner = $('#trk-banner'), act = $('#trk-actions'), pw = $('#trk-progress-wrap');
   pw.style.display='none'; act.style.display='flex'; $('#rate-wrap').innerHTML='';
@@ -2368,7 +3460,7 @@ function renderVeille(){
   if(!on && _veilleIv){ clearInterval(_veilleIv); _veilleIv = null; }
 }
 async function verifierVeille(silencieux){
-  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
+  const id = (typeof NET!=='undefined' && NET.agentId) || kLS.get('k2_agentId');
   if(!id) return;
   try{
     const tk = jetonPro();
@@ -2419,7 +3511,7 @@ function testerSonnerie(){
 }
 
 /* ═════════ CANDIDATURE AGENT (vérifiée par le propriétaire) ═════════ */
-agent.apply = agent.apply || {status: agent.nom ? 'approved' : 'none', agentId: localStorage.getItem('k2_agentId')||null, reason:''};
+agent.apply = agent.apply || {status: agent.nom ? 'approved' : 'none', agentId: kLS.get('k2_agentId')||null, reason:''};
 let applySvc = {};
 
 async function claimAgentAccount(){
@@ -2429,9 +3521,9 @@ async function claimAgentAccount(){
     const r = await fetch('/api/agents/claim', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({tel, pin})});
     const d = await r.json().catch(()=>({}));
     if(!r.ok){ toast('⚠️ ' + (d.error || 'Liaison impossible')); return; }
-    localStorage.setItem('k2_agentId', d.agentId);
+    kLS.set('k2_agentId', d.agentId);
     if(typeof NET !== 'undefined') NET.agentId = d.agentId;
-    if(d.jeton){ agent.jeton = d.jeton; try{ localStorage.setItem('k2_agent_jeton', d.jeton); }catch(e){} }
+    if(d.jeton){ agent.jeton = d.jeton; try{ kLS.set('k2_agent_jeton', d.jeton); }catch(e){} }
     if(d.numPro) agent.numPro = d.numPro;
     if(d.zoneKm) agent.zoneKm = d.zoneKm;
     agent.nom = d.nom || agent.nom;
@@ -2658,7 +3750,7 @@ function onAgentAvatar(input){
 async function onClientAvatar(input){
   onAvatarPick(input, async d => {
     client.photo = d;
-    localStorage.setItem('k2_client', JSON.stringify(client));
+    kLS.set('k2_client', JSON.stringify(client));
     renderAccount();
     if(typeof NET!=='undefined' && NET.on && client.id){
       try{
@@ -2715,9 +3807,9 @@ async function submitApplication(){
     try{
       const r = await fetch('/api/agents/apply', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(dossier)});
       const d = await r.json();
-      if(r.status === 409 && d.agentId){ NET.agentId = d.agentId; localStorage.setItem('k2_agentId', d.agentId); agent.apply = {status: d.status || 'pending', agentId: d.agentId, tel: dossier.tel1}; saveAll(); renderAgentGate(); return toast('ℹ️ Dossier déjà existant — statut affiché'); }
+      if(r.status === 409 && d.agentId){ NET.agentId = d.agentId; kLS.set('k2_agentId', d.agentId); agent.apply = {status: d.status || 'pending', agentId: d.agentId, tel: dossier.tel1}; saveAll(); renderAgentGate(); return toast('ℹ️ Dossier déjà existant — statut affiché'); }
       if(!r.ok){ toast('❌ '+(d.error||'Erreur serveur')); return; }
-      NET.agentId = d.agentId; localStorage.setItem('k2_agentId', d.agentId);
+      NET.agentId = d.agentId; kLS.set('k2_agentId', d.agentId);
       agent.apply = {status:'pending', agentId: d.agentId, tel: dossier.tel1};
       saveAll(); renderAgentGate();
       toast('📤 Dossier envoyé ! En vérification 🛡️');
@@ -2732,13 +3824,13 @@ async function submitApplication(){
 }
 function agentLogout(){
   if(!confirm('🚪 Se déconnecter de ce compte professionnel ?\n\nVotre compte reste chez KLEAN — pour revenir : tél + mot de passe, ou code de liaison.')) return;
-  try{ localStorage.removeItem('k2_stayOnline'); }catch(e){}
+  try{ kLS.del('k2_stayOnline'); }catch(e){}
   if(typeof NET !== 'undefined'){ try{ wsSend({type:'agent_offline', agentId:NET.agentId}); }catch(e){} NET.agentId = null; }
-  localStorage.removeItem('k2_agentId'); localStorage.removeItem('k2_agent');
+  kLS.del('k2_agentId'); kLS.del('k2_agent');
   location.reload();
 }
 function proIsIn(){
-  return !!(agent && ((agent.apply && agent.apply.status==='approved' && (agent.apply.agentId||localStorage.getItem('k2_agentId'))) || (agent.nom && localStorage.getItem('k2_agentId'))));
+  return !!(agent && ((agent.apply && agent.apply.status==='approved' && (agent.apply.agentId||kLS.get('k2_agentId'))) || (agent.nom && kLS.get('k2_agentId'))));
 }
 function refreshProOrb(){
   const b=document.getElementById('pro-orb'); if(!b) return;
@@ -2842,7 +3934,7 @@ async function saveProEditor(){
 /* ═══════════ 🎫 MA VISIBILITÉ (pro) : numéro pro, contact, zone d'intervention ═══════════
    Rien n'est publié sans son accord : ni numéro personnel, ni quartier exact. */
 function ouvrirVisibilite(){
-  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId') || '';
+  const id = (typeof NET!=='undefined' && NET.agentId) || kLS.get('k2_agentId') || '';
   if(!id) return toast('🔗 Liez d’abord votre compte professionnel');
   /* on demande au serveur l'état réel (source de vérité) */
   const tk = jetonPro();
@@ -2900,7 +3992,7 @@ function peindreVisibilite(d){
   document.body.appendChild(ov);
 }
 async function sauverVisibilite(){
-  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId') || '';
+  const id = (typeof NET!=='undefined' && NET.agentId) || kLS.get('k2_agentId') || '';
   if(!id) return toast('🔗 Compte pro non lié');
   const body = {
     agentId: id,
@@ -2919,7 +4011,7 @@ async function sauverVisibilite(){
     if(!r.ok){ toast('⚠️ '+(d.error||'Enregistrement impossible')); return; }
     agent.telPro = d.telPro || ''; agent.zoneKm = d.zoneKm || body.zone.km;
     agent.numPro = d.numPro || agent.numPro; agent.privacy = d.privacy;
-    if(d.jeton){ agent.jeton = d.jeton; try{ localStorage.setItem('k2_agent_jeton', d.jeton); }catch(e){} }
+    if(d.jeton){ agent.jeton = d.jeton; try{ kLS.set('k2_agent_jeton', d.jeton); }catch(e){} }
     saveAll();
     const ov = document.getElementById('visi'); if(ov) ov.remove();
     toast('✅ Enregistré — votre visibilité est à jour');
@@ -2937,7 +4029,7 @@ function visibiliteBouton(){
    remis par l'équipe KLEAN (le même que pour lier le compte). */
 function recupererJeton(msg){
   const old = document.getElementById('jeton-recov'); if(old) old.remove();
-  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId') || '';
+  const id = (typeof NET!=='undefined' && NET.agentId) || kLS.get('k2_agentId') || '';
   const ov = document.createElement('div');
   ov.id = 'jeton-recov';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9900;display:flex;align-items:center;justify-content:center;padding:18px';
@@ -2961,8 +4053,8 @@ async function validerJetonRecov(){
     const r = await fetch('/api/agents/claim', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({tel, pin})});
     const d = await r.json().catch(()=>({}));
     if(!r.ok) return toast('⚠️ '+(d.error||'Code refusé'));
-    if(d.agentId){ NET.agentId = d.agentId; localStorage.setItem('k2_agentId', d.agentId); }
-    if(d.jeton){ agent.jeton = d.jeton; try{ localStorage.setItem('k2_agent_jeton', d.jeton); }catch(e){} }
+    if(d.agentId){ NET.agentId = d.agentId; kLS.set('k2_agentId', d.agentId); }
+    if(d.jeton){ agent.jeton = d.jeton; try{ kLS.set('k2_agent_jeton', d.jeton); }catch(e){} }
     if(d.numPro) agent.numPro = d.numPro;
     agent.apply = {status:'approved', agentId: (d.agentId||NET.agentId), nom: d.nom || agent.nom};
     saveAll();
@@ -2990,7 +4082,7 @@ function agentApplyApproved(){
 }
 
 /* ═════════ COMPTE CLIENT ═════════ */
-let client = JSON.parse(localStorage.getItem('k2_client') || 'null');
+let client = JSON.parse(kLS.get('k2_client') || 'null');
 const hpLocal = s => { try{ return btoa(unescape(encodeURIComponent('klean::'+s))); }catch(e){ return btoa('klean::'+s); } };
 
 let accTab = 'register';
@@ -3083,13 +4175,14 @@ function renderAccount(){
     <button class="hub-tile" onclick="accDonnees()"><span class="ic">💾</span><span><b>Mes données & mon compte</b><small>Exporter mes données, désactiver ou supprimer mon compte</small></span><span class="go">›</span></button>
     <button class="hub-tile" onclick="accAssistance()"><span class="ic">🤝</span><span><b>Assistance</b><small>Un problème ? Klean vous répond</small></span><span class="go">›</span></button>
     <button class="btn-line" onclick="clientChangePw()">🔑 <span>Changer mon mot de passe</span></button>
-    <button class="btn-line" onclick="openKleanService()">📞 <span>Contactez Klean-Service</span></button>
-    <button class="btn-line" style="color:var(--danger)" onclick="clientLogout()">⏻ <span>Se déconnecter</span></button>`;
+    <button class="btn-line" onclick="kContactKlean()">📞 <span>Contactez Klean-Service</span></button>
+    <button class="btn-line" style="color:var(--danger)" onclick="clientLogout()">⏻ <span>Se déconnecter</span></button>
+    ${kBlocEcranHTML()}`;
     openIn1s(function(){ try{ paintJeu(); }catch(e){} });   /* 🎮 le jeu apparaît aussi dans le profil (si le PDG l'a choisi) */
     openIn1s(verifierMonCompte);
     return;
   }
-  box.innerHTML = _accHeroHTML() + `<div id="acc-forms-slot"></div>
+  box.innerHTML = _accHeroHTML() + `${kBlocEcranHTML()}<div id="acc-forms-slot"></div>
   ${accTab==='register' ? `
   <div class="gate-card">
     <h4>✨ Créez votre compte KLEAN</h4>
@@ -3157,14 +4250,14 @@ async function clientRegister(){
       if(r.status === 409){ accTab='login'; renderAccount(); return toast('ℹ️ Ce numéro a déjà un compte — connectez-vous'); }
       if(!r.ok) return toast('❌ '+(d.error||'Erreur'));
       client = {id:d.clientId, token:d.token, nom:d.nom, tel, quartier, ville, mail};
-      localStorage.setItem('k2_client', JSON.stringify(client));
+      kLS.set('k2_client', JSON.stringify(client));
       renderAccount(); toast('🎉 Bienvenue '+d.nom.split(' ')[0]+' ! Compte créé ✓');
       return;
     }catch(e){ if(location.protocol.startsWith('http')) return toast('⏳ Serveur momentanément indisponible — AUCUN compte créé. Réessayez dans ~1 minute'); }
   }
   if(location.protocol.startsWith('http')) return toast('⏳ Serveur en cours de démarrage — réessayez votre inscription dans ~1 minute');
   client = {id:'demo-'+Date.now(), local:true, passRef: hpLocal(tel+'::'+pw), nom, tel, quartier, ville, mail};
-  localStorage.setItem('k2_client', JSON.stringify(client));
+  kLS.set('k2_client', JSON.stringify(client));
   renderAccount(); toast('🎉 Compte créé (démo locale) ✓');
 }
 async function clientLogin(){
@@ -3177,19 +4270,19 @@ async function clientLogin(){
       const d = await r.json();
       if(!r.ok){ toast('❌ '+(d.error||'Identifiants incorrects')); return; }
       client = {id:d.clientId, token:d.token, nom:d.nom, tel, quartier:d.quartier, ville:d.ville||'', mail:d.mail||'', photo:d.photo||''};
-      localStorage.setItem('k2_client', JSON.stringify(client));
+      kLS.set('k2_client', JSON.stringify(client));
       renderAccount(); toast('👋 Bon retour '+d.nom.split(' ')[0]+' !');
       return;
     }catch(e){ if(location.protocol.startsWith('http')) return toast('⏳ Serveur momentanément indisponible — réessayez dans ~1 minute'); }
   }
   if(location.protocol.startsWith('http')) return toast('⏳ Serveur en cours de démarrage — réessayez votre connexion dans ~1 minute');
-  const saved = JSON.parse(localStorage.getItem('k2_client')||'null');
+  const saved = JSON.parse(kLS.get('k2_client')||'null');
   if(saved && saved.tel === tel && saved.passRef === hpLocal(tel+'::'+pw)){
     client = saved; renderAccount(); toast('👋 Bon retour !');
   } else toast('❌ Compte introuvable ou mot de passe incorrect (démo)');
 }
 function clientLogout(){
-  client = null; localStorage.removeItem('k2_client');
+  client = null; kLS.del('k2_client');
   renderAccount(); toast('⏻ Déconnecté');
 }
 async function clientChangePw(){
@@ -3200,14 +4293,14 @@ async function clientChangePw(){
   if(client.local){
     if(client.passRef !== hpLocal(client.tel+'::'+cur)) return alert('❌ Mot de passe actuel incorrect');
     client.passRef = hpLocal(client.tel+'::'+n1);
-    localStorage.setItem('k2_client', JSON.stringify(client));
+    kLS.set('k2_client', JSON.stringify(client));
     return alert('✓ Mot de passe modifié !');
   }
   try{
     const r = await fetch('/api/clients/password', {method:'POST', headers:{'Content-Type':'application/json','X-Client-Token':client.token}, body: JSON.stringify({clientId:client.id, current:cur, next:n1})});
     const d = await r.json();
     if(!r.ok) return alert('❌ '+(d.error||'Erreur'));
-    client.token = d.token; localStorage.setItem('k2_client', JSON.stringify(client));
+    client.token = d.token; kLS.set('k2_client', JSON.stringify(client));
     alert('✓ Mot de passe modifié !');
   }catch(e){ alert('📡 Serveur injoignable'); }
 }
@@ -3260,6 +4353,7 @@ function showRequest(){
     <div class="rline total"><span>Montant mission</span><span>${fmt(p.total)}</span></div>`;
   $('#req-gain').textContent = fmt(gain);
   $('#req-modal-bg').classList.add('show');
+  try{ window.KBouclier.ajouter($('#req-modal-bg'), 'demande', hideRequest); }catch(e){}
   // compte à rebours 20 s
   let left = 20; const CIRC = 144.5;
   $('#req-count').textContent = left;
@@ -3276,7 +4370,8 @@ function showRequest(){
 }
 function hideRequest(){
   clearInterval(reqCountdown);
-  $('#req-modal-bg').classList.remove('show');
+  const bg = $('#req-modal-bg'); if(bg) bg.classList.remove('show');
+  try{ window.KBouclier.retirer(bg); }catch(e){}
   incomingReq = null;
 }
 function answerRequest(accept){
@@ -3354,7 +4449,7 @@ function proSvcIc(id){ try{ const s = (typeof SERVICES!=='undefined'?SERVICES:[]
 async function proChargerTaches(){
   const box = document.getElementById('prof-taches'); if(!box) return;
   box.innerHTML = '<small style="color:var(--muted)">Chargement des tâches…</small>';
-  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
+  const id = (typeof NET!=='undefined' && NET.agentId) || kLS.get('k2_agentId');
   if(!id){ box.innerHTML = '<small style="color:var(--amber)">Connectez-vous comme professionnel pour choisir vos tâches.</small>'; return; }
   try{
     const d = await fetch('/api/pros/taches?agentId='+encodeURIComponent(id), { headers: jetonProHeaders(), cache:'no-store' }).then(r=>r.json());
@@ -3385,7 +4480,7 @@ function proBasculeTache(nom){
   proPeindreTaches();
 }
 async function proSaveTaches(){
-  const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
+  const id = (typeof NET!=='undefined' && NET.agentId) || kLS.get('k2_agentId');
   if(!id) return toast('Connectez-vous comme professionnel');
   try{
     const r = await fetch('/api/agents/me', { method:'PUT', headers: jetonProHeaders(), body: JSON.stringify({ agentId:id, taches:PRCAT.choisies }) });
@@ -3416,7 +4511,7 @@ function saveProfile(){
   const pv=document.getElementById('prof-ville'); if(pv) agent.ville = pv.value.trim();
   saveAll(); fillProfile(); toast('✓ Profil enregistré');
   try{
-    const id = (typeof NET!=='undefined' && NET.agentId) || localStorage.getItem('k2_agentId');
+    const id = (typeof NET!=='undefined' && NET.agentId) || kLS.get('k2_agentId');
     if(id) fetch('/api/agents/me',{method:'PUT',headers:jetonProHeaders(),body:JSON.stringify({agentId:id, nom:agent.nom, quartier:agent.quartier, tel:agent.tel, ville:agent.ville, villeService:agent.villeService})}).catch(()=>{});
   }catch(e){}
 }
@@ -3455,6 +4550,13 @@ function fallbackCopy(txt, done){
     }, 900);
   }catch(e){}
 })();
+/* 🛡️ 28/09 — ces deux déclarations sont remontées AVANT le démarrage : sur un téléphone sans réseau,
+   la réponse aux options et au jeu revient tout de suite et le code écrivait dans une variable qui
+   n'existait pas encore → erreur silencieuse au démarrage. Ici, elles existent toujours. */
+let PREFS = { langue:'fr', notif:true, sons:true, vibre:true, tailleTexte:'normal', animReduites:false,
+  partagePosition:true, partageNumero:false, masquerQuartier:false, pub:true, affichageCompact:false, infosVues:[] };
+let FLIP = null, FLIP_SESS = null, FLIP_T0 = 0;
+
 (function init(){
  try{   /* 🛡️ le démarrage ne doit JAMAIS empêcher le reste du script de tourner */
   c.quartier = currentQuartiers()[0];
@@ -3488,9 +4590,127 @@ function fallbackCopy(txt, done){
   if(new URLSearchParams(location.search).get('mode') === 'agent') setMode('agent');
   if(typeof refreshProOrb==='function') refreshProOrb();
   /* ══ PWA : service worker + bouton « Installer l'app » ══ */
+  /* 🛡️ 28/09 (2ᵉ passe) : on force la vérification de la nouvelle version, et on recharge UNE fois
+     dès qu'elle prend la main. Sans cela, un téléphone pouvait rester des jours sur l'ANCIENNE page
+     (celle qui se figeait) sans jamais recevoir le correctif — c'était la deuxième cause du problème. */
   if('serviceWorker' in navigator && location.protocol.startsWith('http')){
-    navigator.serviceWorker.register('/sw.js').catch(()=>{});
+    navigator.serviceWorker.register('/sw.js', { updateViaCache:'none' })
+      .then(function(reg){ try{ reg.update(); }catch(e){} }).catch(function(){});
+    if(!window.__kleanSW){
+      window.__kleanSW = 1;
+      try{
+        navigator.serviceWorker.addEventListener('controllerchange', function(){
+          if(window.__kleanRecharge) return;
+          window.__kleanRecharge = 1;
+          try{ location.reload(); }catch(e){}
+        });
+      }catch(e){}
+    }
   }
+  try{ window.__kleanInit = 1; }catch(e){}     /* ✅ le démarrage est allé au bout */
+  try{ window._kleanBootMs = (window.kVeilleDuree ? window.kVeilleDuree() : 0); }catch(e){}
+  try{ if(window.kVeilleRetirer) window.kVeilleRetirer(); }catch(e){}   /* l'alerte éventuelle s'efface d'elle-même */
+  /* 🔎 « Vérifier les mises à jour » : le client (et le PDG) peut savoir d'un geste s'il a la
+     dernière page. Sans cela, un téléphone pouvait rester sur l'ancienne version sans le dire. */
+  window.KLEAN_VERSION = '116';
+  window.kVerifierVersion = function(){
+    try{ toast('🔍 Vérification de la mise à jour…'); }catch(e){}
+    try{
+      if(!('serviceWorker' in navigator) || !navigator.serviceWorker.getRegistration){
+        setTimeout(function(){ try{ toast('✅ Vous avez la dernière version · ' + window.KLEAN_VERSION); }catch(e){} }, 400);
+        return;
+      }
+      navigator.serviceWorker.getRegistration().then(function(reg){
+        if(!reg){ try{ toast('✅ Vous avez la dernière version · ' + window.KLEAN_VERSION); }catch(e){} return; }
+        return reg.update().then(function(){
+          setTimeout(function(){
+            if(reg.installing || reg.waiting){
+              try{ toast('🔄 Nouvelle version trouvée — la page se recharge…'); }catch(e){}
+              setTimeout(function(){ try{ location.reload(); }catch(e){} }, 500);
+            } else {
+              try{ toast('✅ Vous avez la dernière version · ' + window.KLEAN_VERSION); }catch(e){}
+              try{ if(window.kAfficheCache) window.kAfficheCache(); }catch(e){}
+            }
+          }, 1300);
+        });
+      }).catch(function(){ try{ toast('✅ Vous avez la dernière version · ' + window.KLEAN_VERSION); }catch(e){} });
+    }catch(e){}
+  };
+  /* 🛡️ le bloc « version + diagnostic » : visible dans « Mon compte » QUE LE CLIENT SOIT CONNECTÉ
+     OU NON — c'est un outil de l'appareil, pas du compte. (Défaut trouvé par le banc d'essai :
+     il n'apparaissait que pour un client connecté.) */
+  window.kBlocEcranHTML = function(){
+    return `<div style="background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:11px 13px;margin:14px 0 16px;text-align:center">
+      <div style="font-size:12px;font-weight:800;color:var(--ink)">🛡️ Version vérifiable</div>
+      <div style="font-size:11.5px;color:var(--muted);margin:3px 0 8px">Si vous ne voyez pas <b>version 115</b> ici, votre téléphone garde encore l'ancienne page : touchez le bouton ci-dessous.</div>
+      <div style="font-size:11.5px;color:var(--ink);font-weight:700">Klean Service · version 116 · <span id="klean-ver-cache" style="color:var(--p)">cache klean-v69</span></div>
+      <button class="btn-line" style="margin-top:9px;justify-content:center" onclick="kVerifierVersion()">🔄 <span>Vérifier les mises à jour</span></button>
+      <div style="border-top:1px dashed var(--line);margin:10px 0 8px"></div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Si l'écran ne réagit plus, ces deux boutons le remettent en marche.</div>
+      <button class="btn-line" style="justify-content:center" onclick="kPanneauEcran()">🔧 <span>Diagnostic de l'écran</span></button>
+      <button class="btn-line" style="justify-content:center;color:var(--p);border-color:var(--p)" onclick="kReparerEtDire()">🛠️ <span>Réparer l'écran maintenant</span></button>
+      <div id="klean-diag" style="display:none;text-align:left;font-size:11px;color:var(--ink);background:var(--bg);border:1.5px solid var(--line);border-radius:12px;padding:9px;margin-top:9px;white-space:pre-wrap;line-height:1.5;max-height:210px;overflow:auto"></div>
+      <button class="btn-line" id="klean-diag-copier" style="display:none;justify-content:center;margin-top:7px" onclick="kCopierRapport()">📋 <span>Copier le rapport pour l'envoyer à Klean</span></button>
+    </div>`;
+  };
+  /* 🛠️ réparer et le dire : le PDG (ou n'importe quel client) peut toujours débloquer l'écran */
+  window.kReparerEtDire = function(){
+    try{
+      var r = (window.KBouclier && window.KBouclier.reparer) ? window.KBouclier.reparer() : { faits: [] };
+      var a = (window.KBouclier && window.KBouclier.audit) ? window.KBouclier.audit() : null;
+      var msg = (r.faits && r.faits.length) ? ('🔧 Réparé : ' + r.faits.join(', ')) : '✅ Aucun défaut trouvé : l’écran reçoit bien les touches';
+      try{ toast(msg); }catch(e){}
+      if(a && !a.sain){ try{ toast('⚠️ Il reste : ' + a.defauts.join(' · ')); }catch(e){} }
+      if(typeof window.kPanneauEcran === 'function') setTimeout(window.kPanneauEcran, 300);
+    }catch(e){ try{ toast('Réparation impossible : ' + e.message); }catch(_){} }
+  };
+  /* 📋 le diagnostic affiché dans « Mon compte » */
+  window.kPanneauEcran = function(){
+    var box = document.getElementById('klean-diag'), btn = document.getElementById('klean-diag-copier');
+    if(!box) return;
+    var txt = '';
+    try{ txt = (window.KBouclier && window.KBouclier.rapport) ? window.KBouclier.rapport() : 'Diagnostic indisponible'; }catch(e){ txt = 'Diagnostic indisponible : ' + e.message; }
+    box.textContent = txt;
+    box.style.display = 'block';
+    if(btn) btn.style.display = 'flex';
+    try{ window._kleanRapport = txt; }catch(e){}
+    try{ if(box.scrollIntoView) box.scrollIntoView({ block:'nearest' }); }catch(e){}
+  };
+  window.kCopierRapport = function(){
+    var txt = window._kleanRapport || (window.KBouclier && window.KBouclier.rapport ? window.KBouclier.rapport() : '');
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ toast('📋 Rapport copié — collez-le dans le message'); }).catch(function(){ kMontrerRapport(txt); }); return; }
+    }catch(e){}
+    kMontrerRapport(txt);
+  };
+  function kMontrerRapport(txt){
+    try{
+      var m = document.createElement('div');
+      m.style.cssText = 'position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:center;justify-content:center;padding:14px';
+      m.innerHTML = '<div style="background:var(--card);border-radius:16px;width:100%;max-width:420px;padding:14px">'
+        + '<b style="display:block;margin-bottom:8px">📋 Rapport à copier</b>'
+        + '<textarea readonly style="width:100%;height:190px;font:12px/1.5 monospace;border:1.5px solid var(--line);border-radius:10px;padding:8px"></textarea>'
+        + '<button class="btn-line" style="margin-top:9px;justify-content:center" onclick="this.closest(\'div\').parentNode.remove()">✕ Fermer</button></div>';
+      m.onclick = function(e){ if(e.target === m) m.remove(); };
+      document.body.appendChild(m);
+      var ta = m.querySelector('textarea'); if(ta){ ta.value = txt; try{ ta.focus(); ta.select(); }catch(e){} }
+      try{ if(window.KBouclier && window.KBouclier.ajouter) window.KBouclier.ajouter(m, 'rapport', function(){ try{ m.remove(); }catch(e){} }); }catch(e){}
+    }catch(e){}
+  }
+
+  /* le nom du cache RÉELLEMENT installé sur cet appareil (preuve visible) */
+  window.kAfficheCache = function(){
+    try{
+      if(!('caches' in window) || !caches.keys) return;
+      caches.keys().then(function(ks){
+        var k = (ks || []).filter(function(x){ return /^klean-v/.test(x); }).sort().pop();
+        var el = document.getElementById('klean-ver-cache');
+        if(el && k) el.textContent = 'cache ' + k;
+        try{ window._kleanCache = k || ''; }catch(e){}
+      }).catch(function(){});
+    }catch(e){}
+  };
+  setTimeout(function(){ try{ window.kAfficheCache(); }catch(e){} }, 900);
  }catch(e){ try{ console.warn("Klean : démarrage partiel —", e && e.message); }catch(_){} }
 })();
 
@@ -3517,9 +4737,9 @@ function showInstallFab(){
   try{   /* 🛡️ certains navigateurs anciens n'ont pas matchMedia : on ne casse jamais le script pour ça */
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const standalone = (window.matchMedia ? window.matchMedia('(display-mode: standalone)').matches : false) || navigator.standalone;
-  if(ios && !standalone && !localStorage.getItem('k2_ios_tip')){
+  if(ios && !standalone && !kLS.get('k2_ios_tip')){
     setTimeout(() => {
-      localStorage.setItem('k2_ios_tip', '1');
+      kLS.set('k2_ios_tip', '1');
       toast('📲 iPhone : touchez « Partager » ⬆ puis « Sur l\'écran d\'accueil » pour installer KLEAN comme une app');
     }, 9000);
   }
@@ -3599,16 +4819,16 @@ function paintQuiz(a){
 }
 function quizWho(){
   try{
-    const c=JSON.parse(localStorage.getItem('k2_client')||'null');
+    const c=JSON.parse(kLS.get('k2_client')||'null');
     if(c && (c.nom||c.tel)) return {nom:c.nom||c.tel, accountId:'CL-'+(c.id||c.tel||c.nom)};
-    const ag=JSON.parse(localStorage.getItem('k2_agent')||'null');
-    if(ag && (ag.nom||ag.prenom||ag.tel1)) return {nom:(ag.prenom?ag.prenom+' ':'')+(ag.nom||ag.tel1||'Pro'), accountId:'AG-'+(ag.id||localStorage.getItem('k2_agentId')||ag.tel1||ag.nom)};
+    const ag=JSON.parse(kLS.get('k2_agent')||'null');
+    if(ag && (ag.nom||ag.prenom||ag.tel1)) return {nom:(ag.prenom?ag.prenom+' ':'')+(ag.nom||ag.tel1||'Pro'), accountId:'AG-'+(ag.id||kLS.get('k2_agentId')||ag.tel1||ag.nom)};
   }catch(e){}
-  let gid=''; try{ gid=localStorage.getItem('k2_quiz_gid'); if(!gid){ gid='G-'+Date.now()+'-'+Math.random().toString(36).slice(2,7); localStorage.setItem('k2_quiz_gid', gid);} }catch(e){ gid='G-'+Date.now(); }
+  let gid=''; try{ gid=kLS.get('k2_quiz_gid'); if(!gid){ gid='G-'+Date.now()+'-'+Math.random().toString(36).slice(2,7); kLS.set('k2_quiz_gid', gid);} }catch(e){ gid='G-'+Date.now(); }
   return {nom:'Invité', accountId:gid};
 }
 function quizMyPick(qid){
-  try{ const p=JSON.parse(localStorage.getItem('k2_quiz_pick')||'null'); if(p && p.id===qid) return p.choice; }catch(e){}
+  try{ const p=JSON.parse(kLS.get('k2_quiz_pick')||'null'); if(p && p.id===qid) return p.choice; }catch(e){}
   return null;
 }
 function loadAffiche(){
@@ -3645,7 +4865,7 @@ function loadAffiche(){
     paintAffReact(d);
     if(a.type==='quiz'){
       const w=quizWho();
-      fetch('/api/quiz/eligible?who='+encodeURIComponent(w.accountId),{cache:'no-store', headers:(function(){ const h={}; try{ const c=JSON.parse(localStorage.getItem('k2_client')||'null'); if(c&&c.token) h['X-Client-Token']=c.token; }catch(e){} return h; })()}).then(r=>r.json()).then(e=>{
+      fetch('/api/quiz/eligible?who='+encodeURIComponent(w.accountId),{cache:'no-store', headers:(function(){ const h={}; try{ const c=JSON.parse(kLS.get('k2_client')||'null'); if(c&&c.token) h['X-Client-Token']=c.token; }catch(e){} return h; })()}).then(r=>r.json()).then(e=>{
         window._quizCan=e.can;
         window._quizCanWhy=e.can?'':(e.reason||'');
         if(!e.can) paintQuizBlocked(a);
@@ -3659,12 +4879,12 @@ function paintAffReact(d){
 }
 async function voteAffiche(vote){
   const w=quizWho();
-  let cur=0; try{ cur=JSON.parse(localStorage.getItem('k2_aff_vote')||'0'); }catch(e){}
+  let cur=0; try{ cur=JSON.parse(kLS.get('k2_aff_vote')||'0'); }catch(e){}
   if(cur===vote) vote=0;
   const r=await fetch('/api/annonce/react',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vote, who:w.accountId})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok) return toast(d.error||'Vote impossible');
-  localStorage.setItem('k2_aff_vote', String(d.mine||0));
+  kLS.set('k2_aff_vote', String(d.mine||0));
   if(window._lastAfficheMeta){ window._lastAfficheMeta.likes=d.likes; window._lastAfficheMeta.unlikes=d.unlikes; paintAffReact(window._lastAfficheMeta); }
 }
 loadAffiche();
@@ -3827,7 +5047,7 @@ setInterval(() => { try{ chargerVitesses(); }catch(e){} }, 60000);
 
 /* ─────────────────────── la bulle de jeu ─────────────────────── */
 var JEU_ETAT = null, JEU_SEC = 0, JEU_FEEDBACK = '', JEU_PHOTO = '', JEU_MASQUE = false;
-function jeuHdrs(){ const h={'Content-Type':'application/json'}; try{ const c=JSON.parse(localStorage.getItem('k2_client')||'null'); if(c&&c.token) h['X-Client-Token']=c.token; }catch(e){} return h; }
+function jeuHdrs(){ const h={'Content-Type':'application/json'}; try{ const c=JSON.parse(kLS.get('k2_client')||'null'); if(c&&c.token) h['X-Client-Token']=c.token; }catch(e){} return h; }
 function jeuQui(){ try{ return quizWho(); }catch(e){ return { accountId:'', nom:'' }; } }
 function jeuEnCoursPourMoi(){
   const e = JEU_ETAT; if(!e || !e.partie) return false;
@@ -4096,14 +5316,17 @@ function renderJeux(){
   setTimeout(() => paintJeu(), 400);
 }
 function accModale(titre, corps, large){
+  try{ accModaleClose(); }catch(e){}          /* une seule fenêtre de ce genre à la fois : jamais d'empilement */
   const m = document.createElement('div');
   m.style.cssText='position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:flex-end;justify-content:center';
-  m.onclick = e => { if(e.target===m) m.remove(); };
+  m.dataset.kleanCouche = 'modale';            /* 🛡️ marquée : le bouclier la retrouve toujours */
+  m.onclick = e => { if(e.target===m){ try{ window.KBouclier.retirer(m); }catch(_){} m.remove(); } };
   m.innerHTML='<div style="background:var(--card);border-radius:18px 18px 0 0;width:100%;max-width:'+(large||480)+'px;max-height:88vh;display:flex;flex-direction:column;padding:14px">'
     + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><b style="flex:1;font-size:15px">'+titre+'</b>'
-    + '<button type="button" onclick="this.closest(\'div[style]\').parentNode.remove()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">Fermer</button></div>'
+    + '<button type="button" onclick="accModaleClose()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">Fermer</button></div>'
     + '<div style="overflow:auto;font-size:13.5px;line-height:1.55">'+corps+'</div></div>';
   document.body.appendChild(m);
+  try{ window.KBouclier.ajouter(m, 'modale'); }catch(e){}   /* 🛡️ la fenêtre est déclarée ouverte */
   return m;
 }
 function accInformations(){
@@ -4126,7 +5349,7 @@ async function accInfosSave(){
   if(corps.nom.length < 2) return toast('❌ Indiquez votre nom complet');
   /* on garde tout de suite sur le téléphone : rien n'est perdu si le réseau tombe */
   client = Object.assign(client, { nom: corps.nom, mail: corps.mail, ville: corps.ville, quartier: corps.quartier });
-  try{ localStorage.setItem('k2_client', JSON.stringify(client)); }catch(e){}
+  try{ kLS.set('k2_client', JSON.stringify(client)); }catch(e){}
   let horsLigne = false;
   try{
     /* ⚠️ l'ancienne adresse /api/clients/profil n'existe pas sur le serveur : on utilise PUT /api/clients/me */
@@ -4149,7 +5372,7 @@ function accSecurite(){
     + '<div class="opt-row"><span style="flex:1"><b>Déconnecter les autres appareils</b><small>Un changement de mot de passe invalide immédiatement les autres accès.</small></span>'
     + '<button type="button" onclick="clientChangePw()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--danger);font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">Faire</button></div>'
     + '<div class="opt-row"><span style="flex:1"><b>Compte bloqué ?</b><small>Un blocage se lève avec l’équipe Klean.</small></span>'
-    + '<button type="button" onclick="openKleanService()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">💬 Support</button></div>');
+    + '<button type="button" onclick="kContactKlean()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:800;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px">💬 Support</button></div>');
   const ua = navigator.userAgent || '';
   const tel = /Android/i.test(ua) ? 'Téléphone Android' : (/iPhone|iPad|iPod/i.test(ua) ? 'iPhone / iPad' : 'Ordinateur');
   const nav = /Chrome/i.test(ua) ? 'Chrome' : (/Safari/i.test(ua) ? 'Safari' : (/Firefox/i.test(ua) ? 'Firefox' : 'navigateur'));
@@ -4186,7 +5409,32 @@ function accActivite(){
       + '<button class="hub-tile" onclick="accModaleClose();ouvrirRubrique(\'points\')"><span class="ic">🪙</span><span><b>Mes Klean Points</b><small>Solde, historique, récompenses obtenues</small></span><span class="go">›</span></button>', 440);
   }).catch(()=>toast('Connexion au serveur impossible'));
 }
-function accModaleClose(){ document.querySelectorAll('div[style*="z-index:9600"]').forEach(x=>{ if(x.style.position==='fixed') x.remove(); }); }
+/* 🛡️ 28/09 : ferme la fenêtre à laquelle appartient ce bouton — par le registre du bouclier,
+   JAMAIS en cherchant le texte de l'attribut style (c'était la cause du gel de l'accueil). */
+function kFermeFenetre(btn){
+  try{
+    var p = btn, k = 0;
+    while(p && p.parentNode && p.parentNode !== document.body && k++ < 12) p = p.parentNode;
+    if(!p || p === document.body) return;
+    try{ window.KBouclier.retirer(p); }catch(e){}
+    try{ p.remove(); }catch(e){}
+    try{ window.KBouclier.resync(); }catch(e){}   /* le défilement et l'état sont remis d'aplomb */
+  }catch(e){}
+}
+function accModaleClose(){
+  /* 🛡️ 28/09 — AVANT : on cherchait la fenêtre par le texte de son attribut style
+     (« div[style*="z-index:9600"] »). Le navigateur écrit toujours « z-index: 9600; » avec une
+     espace → la recherche ne trouvait RIEN → la fenêtre restait par-dessus l'accueil et bloquait
+     tous les clics et le défilement. Maintenant on ferme par le registre du bouclier : ça marche
+     toujours, quel que soit le navigateur. */
+  const ouverts = (window.KBouclier ? window.KBouclier.ouvertes() : []);
+  let fermes = 0;
+  ouverts.forEach(el => { if(el.dataset && el.dataset.kleanCouche === 'modale'){ try{ el.remove(); }catch(e){}; try{ window.KBouclier.retirer(el); }catch(e){}; fermes++; } });
+  /* filet : une modale créée avant le bouclier, ou revenue d'un ancien écran */
+  document.querySelectorAll('div[data-klean-couche="modale"]').forEach(el => { try{ el.remove(); }catch(e){} });
+  try{ if(window.KBouclier) window.KBouclier.resync(); }catch(e){}
+  return fermes;
+}
 function accDonnees(){
   accModale('💾 Mes données & mon compte',
     '<div class="opt-row"><span style="flex:1"><b>Exporter mes données</b><small>Fichier lisible : profil, missions, points, réglages.</small></span>'
@@ -4209,12 +5457,12 @@ async function accStatut(type){
     if(!d.ok) return toast('⚠️ ' + (d.error || 'Action impossible'));
     accModaleClose();
     toast('✅ ' + (d.message || 'Enregistré'));
-    if(type === 'desactiver'){ client.desactive = !client.desactive; try{ localStorage.setItem('k2_client', JSON.stringify(client)); }catch(e){} renderAccount(); }
+    if(type === 'desactiver'){ client.desactive = !client.desactive; try{ kLS.set('k2_client', JSON.stringify(client)); }catch(e){} renderAccount(); }
   }catch(e){ toast('Réseau indisponible'); }
 }
 function accAssistance(){
   accModale('🤝 Assistance Klean',
-    '<button class="hub-tile" onclick="accModaleClose();openKleanService()"><span class="ic">💬</span><span><b>Écrire à Klean-Service</b><small>Réponse de l’équipe, du lundi au dimanche</small></span><span class="go">›</span></button>'
+    '<button class="hub-tile" onclick="accModaleClose();kContactKlean()"><span class="ic">💬</span><span><b>Écrire à Klean-Service</b><small>Réponse de l’équipe, du lundi au dimanche</small></span><span class="go">›</span></button>'
     + '<button class="hub-tile" onclick="accModaleClose();ouvrirRubrique(\'urgence\')"><span class="ic">🆘</span><span><b>Urgence</b><small>Police 110 · Pompiers 180 · SAMU 185</small></span><span class="go">›</span></button>'
     + '<button class="hub-tile" onclick="accModaleClose();voirPolitique(\'cgu\')"><span class="ic">📜</span><span><b>Conditions d’utilisation</b><small>Comment Klean fonctionne</small></span><span class="go">›</span></button>'
     + '<button class="hub-tile" onclick="accModaleClose();voirPolitique(\'priv\')"><span class="ic">🛡️</span><span><b>Confidentialité</b><small>Ce qui est enregistré, et ce qui ne l’est jamais</small></span><span class="go">›</span></button>'
@@ -4226,18 +5474,21 @@ function accAssistance(){
 /* ═══════════════════════════════════════════════════════════════════════════
    ⚙️ OPTIONS (paramètres uniquement) — enregistrés sur le compte du client
    ═══════════════════════════════════════════════════════════════════════════ */
-let PREFS = { langue:'fr', notif:true, sons:true, vibre:true, tailleTexte:'normal', animReduites:false,
-  partagePosition:true, partageNumero:false, masquerQuartier:false, pub:true, affichageCompact:false, infosVues:[] };
 function cliHdrs(){ const h={'Content-Type':'application/json'}; try{ if(client && client.token) h['X-Client-Token']=client.token; }catch(e){} return h; }
 async function chargerPrefs(){
   try{
+    if(typeof fetch !== 'function') throw new Error('sans réseau');
     const d = await fetch('/api/prefs', { headers: cliHdrs(), cache:'no-store' }).then(r=>r.json());
     if(d && d.prefs) PREFS = Object.assign(PREFS, d.prefs);
-  }catch(e){ try{ PREFS = Object.assign(PREFS, JSON.parse(localStorage.getItem('k2_prefs')||'{}')); }catch(_){} }
-  appliquerPrefs();
+  }catch(e){ try{ PREFS = Object.assign(PREFS, JSON.parse(kLS.get('k2_prefs')||'{}')); }catch(_){} }
+  /* 🛡️ différé : sur certains téléphones sans réseau (ou sans fetch), cette fonction se termine
+     pendant que le script est encore en train de se charger — PREFS n'existe pas encore à cet
+     instant et tout le démarrage s'arrêtait là. Le report règle le problème, rien ne change
+     pour les autres téléphones. */
+  setTimeout(function(){ try{ appliquerPrefs(); }catch(e){} }, 0);
 }
 function appliquerPrefs(){
-  try{ localStorage.setItem('k2_prefs', JSON.stringify(PREFS)); }catch(e){}
+  try{ kLS.set('k2_prefs', JSON.stringify(PREFS)); }catch(e){}
   const b = document.body;
   b.classList.toggle('opt-anim-off', !!PREFS.animReduites);
   b.classList.toggle('opt-grand', PREFS.tailleTexte==='grand');
@@ -4292,7 +5543,7 @@ function renderOptions(){
   h.push('<button class="hub-tile" onclick="voirPolitique(\'priv\')"><span class="ic">🛡️</span><span><b>Confidentialité des données</b><small>Ce qui est enregistré, et ce qui ne l’est jamais</small></span><span class="go">›</span></button>');
   h.push('<button class="hub-tile" onclick="voirPolitique(\'pts\')"><span class="ic">🪙</span><span><b>Klean Points & récompenses</b><small>Règles du jeu et des points</small></span><span class="go">›</span></button>');
   h.push('<div style="font-size:12px;font-weight:900;color:var(--pd);margin:14px 0 6px">🤝 ASSISTANCE</div>');
-  h.push('<button class="hub-tile" onclick="openKleanService&&openKleanService()"><span class="ic">💬</span><span><b>Contacter Klean-Service</b><small>Réponse de l’équipe Klean</small></span><span class="go">›</span></button>');
+  h.push('<button class="hub-tile" onclick="kContactKlean()"><span class="ic">💬</span><span><b>Contacter Klean-Service</b><small>Réponse de l’équipe Klean</small></span><span class="go">›</span></button>');
   h.push('<button class="hub-tile" onclick="ouvrirRubrique(\'urgence\')"><span class="ic">🆘</span><span><b>Numéros d’urgence</b><small>Police, pompiers, SAMU — en Côte d’Ivoire</small></span><span class="go">›</span></button>');
   h.push('<small style="display:block;margin:12px 0 4px;color:var(--muted);font-size:11px">🔒 Klean ne stocke jamais : code PIN, mot de passe ou données bancaires. Réglages '+(client?'enregistrés sur votre compte':'sur ce téléphone (connectez-vous pour les garder partout)')+'.</small>');
   box.innerHTML = h.join('');
@@ -4313,7 +5564,7 @@ function exporterMesDonnees(){
   }).catch(()=>toast('Export impossible pour le moment'));
 }
 function viderCacheLocal(){
-  try{ ['k2_quiz_pick','k2_aff_vote','k2_seen_intro','k2_ios_tip'].forEach(k=>localStorage.removeItem(k)); }catch(e){}
+  try{ ['k2_quiz_pick','k2_aff_vote','k2_seen_intro','k2_ios_tip'].forEach(k=>kLS.del(k)); }catch(e){}
   toast('🧹 Données locales nettoyées — votre compte et vos missions sont intacts');
 }
 function compteSecurite(){
@@ -4331,9 +5582,10 @@ function voirPolitique(k){
   m.style.cssText='position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:flex-end;justify-content:center';
   m.onclick = e => { if(e.target===m) m.remove(); };
   m.innerHTML='<div style="background:var(--card);border-radius:18px 18px 0 0;width:100%;max-width:480px;max-height:86vh;display:flex;flex-direction:column;padding:14px">'
-    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="flex:1">'+p.t+'</b><button type="button" onclick="this.closest(\'div[style]\').parentNode.remove()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">Fermer</button></div>'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="flex:1">'+p.t+'</b><button type="button" onclick="kFermeFenetre(this)" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:900;padding:8px 12px;border-radius:10px;cursor:pointer">Fermer</button></div>'
     + '<div style="overflow:auto;font-size:13.5px;line-height:1.55;color:var(--ink)">'+p.h+'</div></div>';
   document.body.appendChild(m);
+  try{ window.KBouclier.ajouter(m, 'politique', function(){ try{ m.remove(); }catch(e){} }); }catch(e){}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -4433,12 +5685,24 @@ async function urgContactAjout(){
   const m = document.createElement('div');
   m.style.cssText='position:fixed;inset:0;background:rgba(8,18,14,.6);z-index:9600;display:flex;align-items:center;justify-content:center;padding:14px';
   m.innerHTML='<div style="background:var(--card);border-radius:16px;width:100%;max-width:380px;padding:14px">'
-    + '<b>➕ Contact d’urgence</b>'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="flex:1">➕ Contact d’urgence</b>'
+    + '<button type="button" onclick="urgContactFermer()" style="border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;font-weight:900;padding:7px 12px;border-radius:10px;cursor:pointer">✕ Fermer</button></div>'
     + '<div class="inp-row" style="margin-top:9px"><label>Nom</label><input class="inp" id="uc-nom" placeholder="Ex : ma sœur Awa"></div>'
     + '<div class="inp-row"><label>Téléphone</label><input class="inp" id="uc-tel" type="tel" placeholder="01 02 03 04 05"></div>'
     + '<div class="inp-row"><label>Lien</label><input class="inp" id="uc-lien" placeholder="Famille, ami, voisin…"></div>'
     + '<button class="btn-main" style="width:100%" onclick="urgContactOk(this)">💾 Enregistrer</button></div>';
+  /* 🛡️ 28/09 — AVANT : cette fenêtre n'avait AUCUNE sortie (ni Annuler, ni clic sur le fond) :
+     le client qui changeait d'avis restait bloqué dedans, et avec un réseau absent il ne pouvait
+     plus rien faire du tout. Maintenant : bouton Fermer, clic sur le fond, et le bouclier la suit. */
+  m.onclick = e => { if(e.target===m) urgContactFermer(); };
   document.body.appendChild(m);
+  try{ window.KBouclier.ajouter(m, 'contact-urgence', urgContactFermer); }catch(e){}
+}
+function urgContactFermer(){
+  [...document.querySelectorAll('div[data-klean-couche="contact-urgence"]')].forEach(x => {
+    try{ window.KBouclier.retirer(x); }catch(e){}
+    try{ x.remove(); }catch(e){}
+  });
 }
 async function urgContactOk(btn){
   const nom = document.getElementById('uc-nom').value.trim();
@@ -4447,7 +5711,7 @@ async function urgContactOk(btn){
   try{
     const d = await fetch('/api/urgence/contacts', { method:'POST', headers: cliHdrs(), body: JSON.stringify({ nom, tel, lien }) }).then(r=>r.json());
     if(!d.ok) return toast('⚠️ ' + (d.error||'Enregistrement impossible'));
-    btn.closest('div[style]').parentNode.remove();
+    if(typeof urgContactFermer === 'function') urgContactFermer();   /* 🛡️ 28/09 : fermeture réelle */
     toast('✅ Contact enregistré');
     renderUrgence();
   }catch(e){ toast('Réseau indisponible'); }
@@ -4602,8 +5866,9 @@ async function qzClassement(){
         + '<span style="flex:1"><b>'+rechEch(x.nom)+'</b><small>'+x.bonnes+' bonne(s) sur '+x.reponses+'</small></span><b class="pill-pts">🪙 '+x.pts+'</b></div>').join('')
       : '<p style="color:var(--muted);font-size:13px;margin-top:8px">Personne au classement pour l’instant : soyez le premier !</p>')
     + '<small style="display:block;margin-top:10px;color:var(--muted);font-size:11px">Les points du classement sont ceux gagnés au Quiz Klean (hors Flip Fizz).</small>'
-    + '<button class="btn-line" style="width:100%;margin-top:9px" onclick="this.closest(\'div[style]\').parentNode.remove()">Fermer</button></div>';
+    + '<button class="btn-line" style="width:100%;margin-top:9px" onclick="kFermeFenetre(this)">Fermer</button></div>';
   document.body.appendChild(m);
+  try{ window.KBouclier.ajouter(m, 'classement', function(){ try{ m.remove(); }catch(e){} }); }catch(e){}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -4674,7 +5939,6 @@ async function ptsEchanger(id){
    🎮 FLIP FIZZ — invisible par défaut : rien ne s'affiche tant que le PDG
    n'a pas activé le jeu ET coché « afficher sur la page d'accueil ».
    ═══════════════════════════════════════════════════════════════════════════ */
-let FLIP = null, FLIP_SESS = null, FLIP_T0 = 0;
 async function chargerFlipAccueil(){
   let f = null;
   try{ f = await fetch('/api/flip', { headers: cliHdrs(), cache:'no-store' }).then(r=>r.json()); }catch(e){ f = null; }
@@ -4769,12 +6033,14 @@ async function flipTerminer(){
   toast(d && d.pts>0 ? ('🪙 +' + d.pts + ' Klean Points') : 'Partie enregistrée');
 }
 function flipFermer(){
-  const ov = document.getElementById('flip-ov'); if(ov) ov.classList.add('hidden');
+  const ov = document.getElementById('flip-ov');
+  if(ov){ ov.classList.add('hidden'); try{ window.KBouclier.retirer(ov); }catch(e){} }
   if(window.__flipTimer){ clearInterval(window.__flipTimer); window.__flipTimer = null; }
 }
 window.flipLancer = flipLancer; window.flipFermer = flipFermer; window.flipOuvrir = function(){
   const ov = document.getElementById('flip-ov'); if(!ov) return;
   ov.classList.remove('hidden');
+  try{ window.KBouclier.ajouter(ov, 'flip', flipFermer); }catch(e){}
   const t = document.getElementById('flip-ov-titre'); if(t) t.textContent = '🎮 ' + ((FLIP && FLIP.titre) || 'Flip Fizz');
   const q = document.getElementById('flip-ov-quota'); if(q) q.textContent = FLIP ? (FLIP.partiesRestantes + ' partie(s) restante(s)') : '';
   flipLancer();
@@ -4796,7 +6062,7 @@ function pingPresence(){
   try{
     const w=quizWho();
     const cid=(typeof client!=='undefined' && client && client.id)?client.id:'';
-    const aid=(typeof agent!=='undefined' && agent && (agent.id|| (agent.apply&&agent.apply.agentId))) || (typeof localStorage!=='undefined' && localStorage.getItem('k2_agentId')) || '';
+    const aid=(typeof agent!=='undefined' && agent && (agent.id|| (agent.apply&&agent.apply.agentId))) || (typeof localStorage!=='undefined' && kLS.get('k2_agentId')) || '';
     const tel=(mode==='agent'?(agent&& (agent.tel||agent.tel1)):(client&&client.tel))||'';
     fetch('/api/presence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({who:w.accountId, nom:w.nom, role:(mode==='agent'?'agent':'client'), screen:'home', id: (mode==='agent'?aid:cid), tel})}).catch(()=>{});
   }catch(e){}
@@ -4880,11 +6146,16 @@ function openHomeWinChat(){
     m.style.cssText='position:fixed;inset:0;z-index:96;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;padding:12px';
     m.innerHTML='<div style="background:#fff;border-radius:18px 18px 8px 8px;width:100%;max-width:480px;max-height:70vh;display:flex;flex-direction:column;padding:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><b style="flex:1">🏆 Message du PDG</b><button type="button" onclick="closeHomeWin()" style="border:1px solid #ddd;background:#f3f3f3;border-radius:9px;padding:6px 10px;font-weight:800">Fermer</button></div><div id="home-win-msgs" style="flex:1;min-height:140px;overflow:auto;margin-bottom:8px"></div><div style="display:flex;gap:6px;flex-wrap:wrap"><input id="home-win-in" placeholder="Répondre au PDG…" style="flex:1;min-width:120px;padding:10px;border-radius:10px;border:1.5px solid #ddd;font:inherit" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendHomeWin();}"><button type="button" onclick="sendHomeWin()" style="background:#E85D04;color:#fff;border:none;border-radius:10px;padding:10px 12px;font-weight:900">Envoyer</button><button type="button" onclick="document.getElementById(\'home-win-gal\').click()" style="background:#fff4e5;border:1.5px solid #ffb020;color:#9a5b00;border-radius:10px;padding:10px 12px;font-weight:900">📷 Galerie</button><input type="file" id="home-win-gal" accept="image/*" style="display:none" onchange="sendWinGallery(this)"></div></div>';
     m.onclick=function(e){ if(e.target===m) closeHomeWin(); };
+    try{ window.KBouclier.ajouter(m, 'pdg', closeHomeWin); }catch(e){}
     document.body.appendChild(m);
   }
   m.style.display='flex'; window._homeWinOpen=true; pollWinBubble();
 }
-function closeHomeWin(){ const m=document.getElementById('home-win-modal'); if(m) m.style.display='none'; window._homeWinOpen=false; }
+function closeHomeWin(){
+  const m=document.getElementById('home-win-modal'); if(m) m.style.display='none';
+  window._homeWinOpen=false;
+  try{ window.KBouclier.retirer(m); }catch(e){}
+}
 function paintHomeWin(d){
   const box=document.getElementById('home-win-msgs'); if(!box||!d) return;
   box.innerHTML=(d.messages||[]).map(m=>{
@@ -4935,17 +6206,19 @@ function markQuizOrange(i){
 async function sendQuiz(i){
   const qid=window._annonceId||'cur';
   if(quizMyPick(qid)!=null) return;
-  try{ localStorage.setItem('k2_quiz_pick', JSON.stringify({id:qid, choice:i})); }catch(e){}
+  try{ kLS.set('k2_quiz_pick', JSON.stringify({id:qid, choice:i})); }catch(e){}
   markQuizOrange(i);
   const w=quizWho();
   try{
     const hdr={'Content-Type':'application/json'};
-    try{ const c=JSON.parse(localStorage.getItem('k2_client')||'null'); if(c&&c.token) hdr['X-Client-Token']=c.token; }catch(e){}
+    try{ const c=JSON.parse(kLS.get('k2_client')||'null'); if(c&&c.token) hdr['X-Client-Token']=c.token; }catch(e){}
     const r=await fetch('/api/quiz/answer',{method:'POST',headers:hdr,body:JSON.stringify({choice:i, nom:w.nom, accountId:w.accountId, deviceId:w.accountId})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok){ toast(d.error||'Participation refusée'); window._quizCan=false; if(window._lastQuizA) paintQuizBlocked(window._lastQuizA); }
   }catch(e){}
 }
+/* ✅ le bloc principal est allé jusqu'au bout : tout est déclaré et branché */
+try{ window.__kleanInit = 1; }catch(e){}
 </script>
 <script src="net.js"></script>
 <script>
@@ -5216,14 +6489,15 @@ try{ accueilInit(); }catch(e){}
 function ouvrirRecherche(){
   const b = rechBox(); if(!b) return;
   b.style.display = 'block';
-  document.body.style.overflow = 'hidden';
+  try{ window.KBouclier.ajouter(b, 'recherche', rechFermer); }catch(e){ document.body.style.overflow = 'hidden'; }
   RECH.etape = RECH.svc ? 'pos' : 'q';
   rechPeindre();
 }
 function rechFermer(){
   const b = rechBox(); if(!b) return;
   b.style.display = 'none';
-  document.body.style.overflow = '';
+  document.body.style.overflow = '';                       /* le défilement revient TOUJOURS au client */
+  try{ window.KBouclier.retirer(b); }catch(e){}
 }
 function rechPeindre(){
   const b = rechBox(); if(!b) return;
@@ -5291,13 +6565,15 @@ function catNatBox(){
 }
 function catNatOuvrir(){
   const b = catNatBox(); if(!b) return;
-  b.style.display = 'block'; document.body.style.overflow = 'hidden';
+  b.style.display = 'block';
+  try{ window.KBouclier.ajouter(b, 'catalogue', catNatFermer); }catch(e){ document.body.style.overflow = 'hidden'; }
   if(!CATU.charge) catNatCharger(); else catNatPeindre();
   try{ window.scrollTo(0,0); }catch(e){}
 }
 function catNatFermer(){
   const b = catNatBox(); if(b) b.style.display = 'none';
   document.body.style.overflow = '';
+  try{ window.KBouclier.retirer(b); }catch(e){}
 }
 async function catNatCharger(){
   const b = catNatBox(); if(!b) return;
@@ -6321,6 +7597,7 @@ function rechPeindreFiche(contact, chargement, err){
   let m = document.getElementById('fiche-pro');
   if(!m){ m = document.createElement('div'); m.id = 'fiche-pro'; document.body.appendChild(m); }
   m.style.display = 'block';
+  try{ window.KBouclier.ajouter(m, 'fiche', rechFermerFiche); }catch(e){}
   const p = RECH.fiche;
   if(chargement){
     m.innerHTML = '<div onclick="rechFermerFiche()" style="position:fixed;inset:0;background:rgba(12,32,26,.55);z-index:10000"></div>'
@@ -6378,7 +7655,10 @@ function rechPeindreFiche(contact, chargement, err){
     + '</div></div>';
   m.innerHTML = h;
 }
-function rechFermerFiche(){ const m = document.getElementById('fiche-pro'); if(m) m.style.display='none'; }
+function rechFermerFiche(){
+  const m = document.getElementById('fiche-pro'); if(m) m.style.display='none';
+  try{ window.KBouclier.retirer(m); }catch(e){}
+}
 
 /* ═══════════ DEMANDER LE SERVICE DEPUIS LA FICHE ═══════════ */
 function rechDemander(){

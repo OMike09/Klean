@@ -180,6 +180,100 @@
 </style>
 </head>
 <body>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   🧱 MURAILLE DE STOCKAGE + VEILLEUR DE DÉMARRAGE (correctif 28/09, 2ᵉ passe)
+   ───────────────────────────────────────────────────────────────────────────────────────────────
+   POURQUOI : certains navigateurs REFUSENT l'accès au stockage local — aperçu dans un cadre isolé
+   (« sandbox »), « bloquer les cookies et les données de site », navigation privée, stockage plein.
+   Dans ce cas `localStorage` lève une erreur de sécurité. L'application le lisait au démarrage
+   (`let c = {… localStorage.getItem('k2_city') …}`) : l'erreur arrêtait TOUT le script. Les
+   fonctions restaient déclarées, mais tout ce qui dépend des données du téléphone devenait
+   inaccessible — plus de clic, plus de navigation : une page figée. C'était invisible dans nos
+   essais, parce que notre banc de test fournit toujours un stockage.
+   CE QU'ON FAIT : on teste l'accès UNE fois ; s'il est refusé, on installe un stockage de secours
+   en mémoire, et TOUTES les lectures passent par `kLS`, qui n'échoue jamais.
+   ET AUSSI : un veilleur regarde (3 s puis 9 s après le démarrage) si l'application a fini de
+   démarrer. Sinon il retire ce qui bloque l'écran et affiche « touchez ici pour recharger » :
+   plus jamais de page figée et muette.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+(function(){
+  var ok = false;
+  try{ window.localStorage.setItem('__klean_test__','1'); window.localStorage.removeItem('__klean_test__'); ok = true; }catch(e){ ok = false; }
+  var memoire = {};
+  var secours = {
+    getItem: function(k){ k=String(k); return Object.prototype.hasOwnProperty.call(memoire,k)?memoire[k]:null; },
+    setItem: function(k,v){ memoire[String(k)] = String(v); },
+    removeItem: function(k){ delete memoire[String(k)]; },
+    clear: function(){ memoire = {}; },
+    key: function(i){ var ks=Object.keys(memoire); return (i>=0 && i<ks.length)?ks[i]:null; }
+  };
+  try{ Object.defineProperty(secours,'length',{ get:function(){ return Object.keys(memoire).length; } }); }catch(e){}
+  if(!ok){
+    try{ Object.defineProperty(window,'localStorage',{ configurable:true, get:function(){ return secours; } }); }catch(e){}
+    try{ Object.defineProperty(window,'sessionStorage',{ configurable:true, get:function(){ return secours; } }); }catch(e){}
+  }
+  /* 🧯 la lecture sûre : elle ne lève JAMAIS d'erreur, même si le navigateur refuse tout */
+  function lire(k, defaut){
+    try{ if(ok){ var v = window.localStorage.getItem(k); return (v===null||v===undefined) ? defaut : v; } }catch(e){}
+    return Object.prototype.hasOwnProperty.call(memoire,k) ? memoire[k] : defaut;
+  }
+  function ecrire(k,v){
+    memoire[String(k)] = String(v);
+    try{ if(ok) window.localStorage.setItem(k,v); }catch(e){}
+    return true;
+  }
+  window.kLS = {
+    memoire: !ok,
+    get: function(k, defaut){ return lire(k, defaut===undefined ? null : defaut); },
+    set: ecrire,
+    del: function(k){ delete memoire[String(k)]; try{ if(ok) window.localStorage.removeItem(k); }catch(e){} return true; },
+    vider: function(){ memoire = {}; try{ if(ok) window.localStorage.clear(); }catch(e){} return true; }
+  };
+  try{ window.kLJson = function(k, defaut){ try{ var v = window.kLS.get(k, null); return v ? JSON.parse(v) : defaut; }catch(e){ return defaut; } }; }catch(e){}
+  try{ window.__KLEAN_STOCKAGE_SECOURS = ok ? 0 : 1; }catch(e){}
+  /* 📵 on prévient une fois le client, dans ses réglages, que rien ne sera gardé */
+  try{ window.kLSPrevenir = function(){ return !ok; }; }catch(e){}
+
+  /* 🌐 🧯 filet : sur un très vieux navigateur, « fetch » n'existe pas. Sans ce filet, la toute
+     première demande au serveur levait « fetch is not defined » et arrêtait le démarrage — la page
+     restait figée. Ici, la demande échoue proprement : le catalogue enregistré dans le téléphone
+     reste utilisable et l'application continue de fonctionner. */
+  if(typeof window.fetch !== 'function'){
+    window.fetch = function(){
+      try{ return Promise.reject(new Error('Réseau indisponible dans ce navigateur')); }
+      catch(e){ return { then: function(){ return this; }, catch: function(){ return this; } }; }
+    };
+  }
+  /* 🕵️ le veilleur : si l'application n'a pas fini de démarrer, on le DIT et on dégage l'écran */
+  function veiller(){
+    try{
+      if(window.__kleanInit === 1) return;
+      try{ var sp = document.getElementById('splash'); if(sp) sp.classList.add('off'); }catch(e){}
+      try{
+        document.querySelectorAll('[data-klean-couche]').forEach(function(el){
+          if(el.id === 'splash') return;
+          try{ el.style.display = 'none'; }catch(e){}
+        });
+      }catch(e){}
+      try{ document.body.style.overflow = ''; }catch(e){}
+      if(document.getElementById('klean-veille')) return;
+      var d = document.createElement('div');
+      d.id = 'klean-veille';
+      d.setAttribute('role','alert');
+      d.style.cssText = 'position:fixed;left:10px;right:10px;top:10px;z-index:2147483647;background:#fff;border:2px solid #E85D04;border-radius:14px;padding:12px 14px;font:700 14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1A1410;box-shadow:0 14px 34px rgba(0,0,0,.28);cursor:pointer;text-align:left';
+      d.innerHTML = '⚠️ <b>L\u2019application n\u2019a pas fini de démarrer.</b><br><span style="font-weight:600">Touchez ici pour la recharger.</span>'
+        + (ok ? '' : '<br><small style="font-weight:600;color:#7A6A5E">Ce navigateur refuse le stockage : l\u2019application fonctionne, mais elle ne gardera pas vos réglages à la fermeture.</small>');
+      d.onclick = function(){ try{ location.reload(); }catch(e){} };
+      document.body.appendChild(d);
+    }catch(e){}
+  }
+  setTimeout(veiller, 3000);
+  setTimeout(veiller, 9000);
+  window.kVeiller = veiller;
+})();
+</script>
+
 <div id="hq-splash"><img src="/hq-icon-512.png" alt=""></div>
 <script>
 (function(){
@@ -766,6 +860,32 @@
       <button type="button" onclick="ouvrirFenetreVilles()" style="width:100%;margin-top:7px;background:linear-gradient(135deg,#4aa3ff,#1f6fd0);border:none;color:#fff;font-weight:900;padding:12px;border-radius:10px;cursor:pointer;font-family:inherit;font-size:13px">🏙️ Ouvrir la fenêtre des villes (créer · lister · déployer)</button>
       <small id="nv-deploy-state" style="display:block;margin-top:7px;font-weight:800;color:var(--amber)">État : —</small>
       <div id="nv-list" style="margin-top:10px;font-size:13px"></div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px;display:none" id="panel-tarif">
+    <h3>💰 Moteur de tarification</h3>
+    <div class="body" style="padding:12px 14px">
+      <p style="font-size:12px;color:var(--muted);margin:0 0 8px;line-height:1.5">
+        Les <b>prix restent ceux d’aujourd’hui</b> : vous ne changez que ce que vous voulez. Le <b>calcul</b>, lui, est détaillé et fait par le
+        <b>serveur</b> : unité, quantité (paliers), niveau, état, difficulté, urgence, horaire, accès, zone, déplacement, matériel, options, remise.
+        Chaque changement crée une <b>nouvelle version datée</b> ; les missions passées <b>gardent le prix et la version de leur jour</b>.
+        Rien ne se supprime : on <b>désactive</b>.
+      </p>
+      <div id="tf-resume" style="font-size:12.5px;font-weight:800;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:9px">Chargement…</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px">
+        <input id="tf-q" placeholder="Chercher un service (nom, n°…)" oninput="renderTarif()" style="flex:1;min-width:150px;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+        <select id="tf-filtre" onchange="renderTarif()" style="padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <option value="">Tous les services</option>
+          <option value="prix">Avec un prix réglé</option>
+          <option value="atarifer">⚠️ À tarifer (aucun prix)</option>
+          <option value="devis">💬 Sur devis</option>
+          <option value="off">⏸ Désactivés</option>
+        </select>
+        <button class="btn-main" style="padding:10px 13px" onclick="chargerTarif()">🔄 Actualiser</button>
+      </div>
+      <div id="tf-services" style="max-height:420px;overflow:auto"></div>
+      <div id="tf-moteur"></div>
     </div>
   </div>
 
@@ -1399,6 +1519,7 @@ async function loadAll(){
     etape('Villes', ()=>loadVillesHQ());
     etape('Services', ()=>loadCatalogHQ());
     if(ME && ME.role==='pdg') etape('Bouclier', ()=>loadShield());
+    if(ME && ME.role==='pdg') etape('Tarification', ()=>chargerTarif());
     etape('Sauvegardes', ()=>loadSauvegardes());
     etape('Litiges', ()=>loadLitiges());
     etape('Jeux', ()=>loadJeux());
@@ -1425,8 +1546,8 @@ async function changePwd(){
   const n2 = prompt('✅ Confirmez le nouveau mot de passe :');
   if(n1 !== n2) return alert('❌ Les deux saisies ne correspondent pas');
   if(OFFLINE){
-    if(hp2(cur) !== localStorage.getItem('k2_hq_pass')) return alert('❌ Mot de passe actuel incorrect');
-    localStorage.setItem('k2_hq_pass', hp2(n1));
+    if(hp2(cur) !== kLS.get('k2_hq_pass')) return alert('❌ Mot de passe actuel incorrect');
+    kLS.set('k2_hq_pass', hp2(n1));
     return alert('✓ Mot de passe modifié !');
   }
   const r = await fetch('/api/admin/password', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({current: cur, next: n1})});
@@ -1437,7 +1558,7 @@ async function changePwd(){
   }
 }
 async function logout(){
-  localStorage.removeItem('k2_hq_ok');
+  kLS.del('k2_hq_ok');
   await fetch('/api/admin/logout', {method:'POST'}).catch(()=>{});
   location.href = (ME && ME.role==='gest') ? '/gest' : '/admin';
 }
@@ -1492,6 +1613,7 @@ const HQ_MENU = [
   { g:'🧰 Services & territoires', items:[
     ['panel-svc-browse','📂 Services & professionnels','catalogue catégories tarifs pros par service'],
     ['panel-catnat','📚 Catalogue national des services','catalogue national catégories services sous-services tâches mots-clés synonymes ajouter renommer désactiver activer'],
+    ['panel-tarif','💰 Moteur de tarification','prix tarifs unités coefficients paliers déplacement zones devis seuils versions estimation marché', true],
     ['panel-svc-create','🛠️ Créer / déployer un service','nouveau service prix déployer villes'],
     ['panel-villes','🏙️ Villes & quartiers','zones déployables inscription GPS'],
     ['panel-match','🎯 Mise en relation GPS','rayon km zone distance contact']
@@ -1546,7 +1668,7 @@ HQ_MENU.forEach(g => g.items.forEach(it => { if(!HQ_GO.some(x => x[0] === it[0] 
    les « Revenus » (panel-ca7) sont rangés avec les Paiements & finances, leur vraie catégorie. */
 const HQ_ORDER = ['panel-home','panel-search','kpis','substrip',
   'people','panel-online-cli','panel-pros','panel-cands','panel-team','panel-roles',
-  'panel-svc-browse','panel-svc-create','panel-catnat','panel-villes','panel-match',
+  'panel-svc-browse','panel-svc-create','panel-catnat','panel-tarif','panel-villes','panel-match',
   'panel-missions','panel-quotes','panel-litiges',
   'panel-ca7','panel-pay','panel-paydest',
   'panel-ann','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
@@ -2176,7 +2298,7 @@ function hqPliage(){
   try{ hqEtatsInitiaux(); }catch(e){}
   const cle = 'klean_hq_plies';
   let plies = {};
-  try{ plies = JSON.parse(localStorage.getItem(cle) || '{}'); }catch(e){ plies = {}; }
+  try{ plies = JSON.parse(kLS.get(cle) || '{}'); }catch(e){ plies = {}; }
   const secs = [...document.querySelectorAll('.wrap > .hq-sec')];
   secs.forEach(t => {
     const nom = t.dataset.nom || t.textContent.trim();
@@ -2198,8 +2320,8 @@ function hqPliage(){
       t.appendChild(f);
       t.addEventListener('click', () => {
         const on = t.classList.toggle('hq-sec-ferme');
-        let p = {}; try{ p = JSON.parse(localStorage.getItem(cle) || '{}'); }catch(e) { p = {}; }
-        p[nom] = on ? 1 : 0; try{ localStorage.setItem(cle, JSON.stringify(p)); }catch(e) {}
+        let p = {}; try{ p = JSON.parse(kLS.get(cle) || '{}'); }catch(e) { p = {}; }
+        p[nom] = on ? 1 : 0; try{ kLS.set(cle, JSON.stringify(p)); }catch(e) {}
         hqPliageAppliquer();
       });
     }
@@ -2248,7 +2370,7 @@ function hqPliageTout(fermer){
     t.classList.toggle('hq-sec-ferme', !!fermer);
     p[t.dataset.nom || t.textContent.replace('▾', '').trim()] = fermer ? 1 : 0;
   });
-  try{ localStorage.setItem(cle, JSON.stringify(p)); }catch(e) {}
+  try{ kLS.set(cle, JSON.stringify(p)); }catch(e) {}
   hqPliageAppliquer();
 }
 /* ═══════════ 🟠 LITIGES & REMBOURSEMENTS (lot 99) ═══════════ */
@@ -2527,6 +2649,7 @@ var HQ_ACTIONS = [
   {l:'🪙 Klean Points & limites de jeu (clients)', m:'points klean solde piece client recompense limites', p:'panel-flip'},
   {l:'💾 Sauvegarder les données maintenant', m:'sauvegarde sauvegarder backup copie secours export telecharger', p:'panel-sauvegardes'},
   {l:'📜 Journal d’audit (qui a fait quoi)', m:'audit journal trace historique actions', p:'panel-audit'},
+  {l:'💰 Moteur de tarification', m:'tarif tarification prix unités coefficients paliers déplacement zone devis estimation marché version', p:'panel-tarif'},
   {l:'🛡️ Bouclier anti-malveillance', m:'bouclier ip attaque protection malveillance', p:'panel-shield'},
   {l:'⛔ Bloquer l’entreprise (lecture seule)', m:'bloquer entreprise lecture seule moderation tout arreter couper', p:'panel-freeze'},
   {l:'🔑 Changer mon mot de passe', m:'mot de passe changer securite pdg', p:'panel-cfg', f:'changePwd'},
@@ -2805,9 +2928,9 @@ function hqSectionOuvrirPour(id){
   while(t && !t.classList.contains('hq-sec')) t = t.previousElementSibling;
   if(!t || !t.classList.contains('hq-sec-ferme')) return;
   t.classList.remove('hq-sec-ferme');
-  let p = {}; try{ p = JSON.parse(localStorage.getItem('klean_hq_plies') || '{}'); }catch(e){ p = {}; }
+  let p = {}; try{ p = JSON.parse(kLS.get('klean_hq_plies') || '{}'); }catch(e){ p = {}; }
   p[t.dataset.nom || ''] = 0;
-  try{ localStorage.setItem('klean_hq_plies', JSON.stringify(p)); }catch(e){}
+  try{ kLS.set('klean_hq_plies', JSON.stringify(p)); }catch(e){}
   try{ hqPliageAppliquer(); }catch(e){}
 }
 function jumpPanel(id){
@@ -3443,7 +3566,7 @@ async function loadQuotesHQ(){
     const list=d.list||[];
     box.innerHTML=list.length? list.map(x=>{
       const st=x.status||'';
-      return '<button type="button" onclick="openQuoteCard(\''+x.id+'\')" style="display:block;width:100%;text-align:left;padding:10px 8px;border:none;border-bottom:1px solid var(--line);background:transparent;color:inherit;font:inherit;cursor:pointer"><b>#'+x.n+' · '+(x.client||'?')+'</b> <span class="badge">'+st+'</span><br><small style="color:var(--muted)">'+(x.desc||'').slice(0,90)+' · '+(x.ville||'')+' · budget '+(x.budget||0)+' F'+(x.quotedPrix?(' · proposé '+x.quotedPrix+' F'):'')+'</small></button>';
+      return '<button type="button" onclick="openQuoteCard(\''+x.id+'\')" style="display:block;width:100%;text-align:left;padding:10px 8px;border:none;border-bottom:1px solid var(--line);background:transparent;color:inherit;font:inherit;cursor:pointer"><b>#'+x.n+' · '+(x.client||'?')+'</b> <span class="badge">'+st+'</span><br><small style="color:var(--muted)">'+(x.desc||'').slice(0,90)+' · '+(x.ville||'')+' · budget '+(x.budget||0)+' F'+(x.quotedPrix?(' · proposé '+x.quotedPrix+' F'):'')+(x.prixVerrouille?(' · 🔒 accepté '+x.prixVerrouille.montant+' F (v'+x.prixVerrouille.version+')'):'')+(x.devis?(' · 🧾 devis v'+x.devis.version+' ('+x.devis.statut+')'):'')+'</small></button>';
     }).join('') : '<div class="empty">Aucune demande sur mesure.</div>';
   }catch(e){}
 }
@@ -3458,6 +3581,128 @@ async function openQuoteCard(id){
   m.innerHTML='<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;max-width:440px;width:100%;max-height:88vh;overflow:auto;padding:14px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><b style="flex:1">🛠️ #'+x.n+' · '+(x.client||'')+'</b><button type="button" onclick="document.getElementById(\'quote-modal\').style.display=\'none\'" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-weight:800;cursor:pointer;font-family:inherit">Fermer</button></div><p style="font-size:13px;line-height:1.45">'+(x.desc||'')+'</p><div style="margin:8px 0">'+photos+'</div><small style="color:var(--muted)">'+ (x.ville||'')+' · '+(x.quartier||'')+' · '+(x.adresse||'')+' · tél '+(x.tel||'')+' · budget '+(x.budget||0)+' F</small><hr style="border:none;border-top:1px solid var(--line);margin:12px 0"><b style="font-size:13px">💰 Proposer un prix au client</b><div style="display:flex;gap:6px;margin:8px 0"><input id="q-prix" type="number" min="500" placeholder="FCFA" value="'+(x.quotedPrix||x.budget||'')+'" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"><button type="button" class="btn-main" style="flex:none" onclick="quotePrix(\''+x.id+'\')">Envoyer le prix</button></div><b style="font-size:13px">👑 Attribuer à un professionnel</b><select id="q-pro" style="width:100%;margin:8px 0;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit">'+pros.map(a=>'<option value="'+a.id+'">'+(a.nom||'')+' · '+(a.ville||'')+(a.online?' ●':'')+'</option>').join('')+'</select><button type="button" class="btn-main" style="width:100%" onclick="quoteAssign(\''+x.id+'\')">Attribuer maintenant</button></div>';
   m.style.display='flex';
 }
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+   🧾 LOT 109 — LE DEVIS STRUCTURÉ (côté PDG / gestionnaire)
+   ─ Le devis se construit LIGNE PAR LIGNE : main-d'œuvre, matériel, déplacement, autres frais.
+   ─ Le TOTAL est recalculé par le serveur : ce que l'on voit ici n'est qu'un aperçu.
+   ─ Un devis déjà envoyé ne se remplace pas en silence : la nouvelle version exige un MOTIF
+     et c'est le CLIENT qui l'accepte. Le prix déjà accepté reste affiché et reste en vigueur.
+   ═══════════════════════════════════════════════════════════════════════════════════════════ */
+const DEVIS_TYPES_HQ = [['main_oeuvre', 'Main-d’œuvre'], ['materiel', 'Matériel & produits'], ['deplacement', 'Déplacement'], ['autre', 'Autres frais']];
+function devisHQF(n){ return (Number(n) || 0).toLocaleString('fr-FR'); }
+function devisHQLignes(){ const b = document.getElementById('devis-hq-lignes'); return b ? b.querySelectorAll('[data-devis-ligne]') : []; }
+function devisHQAjouterLigne(type, libelle, qte, pu){
+  const box = document.getElementById('devis-hq-lignes'); if(!box) return;
+  const d = document.createElement('div');
+  d.setAttribute('data-devis-ligne', '1');
+  d.style.cssText = 'display:flex;gap:5px;align-items:center;margin-bottom:5px;flex-wrap:wrap';
+  d.innerHTML = '<select data-f="type" style="flex:none;padding:7px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px">'
+      + DEVIS_TYPES_HQ.map(t => '<option value="' + t[0] + '"' + (t[0] === type ? ' selected' : '') + '>' + t[1] + '</option>').join('') + '</select>'
+    + '<input data-f="libelle" value="' + String(libelle || '').replace(/"/g, '&quot;') + '" placeholder="Ce que vous facturez (ex. carrelage 12 m²)" style="flex:1;min-width:120px;padding:7px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px">'
+    + '<input data-f="qte" type="number" min="1" step="1" value="' + (qte || 1) + '" oninput="devisHQApercu()" style="width:56px;padding:7px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px">'
+    + '<input data-f="pu" type="number" min="0" step="50" value="' + (pu || 0) + '" oninput="devisHQApercu()" placeholder="P.U." style="width:86px;padding:7px;border-radius:8px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:12px">'
+    + '<b data-f="total" style="min-width:74px;text-align:right;font-size:12px">0 F</b>'
+    + '<button type="button" onclick="this.closest(\'[data-devis-ligne]\').remove();devisHQApercu()" style="background:none;border:none;color:var(--danger);font-weight:900;cursor:pointer;font-size:14px">✕</button>';
+  box.appendChild(d);
+  devisHQApercu();
+}
+function devisHQLire(){
+  const out = [];
+  devisHQLignes().forEach(d => {
+    const g = f => d.querySelector('[data-f="' + f + '"]');
+    const type = (g('type') || {}).value || 'autre';
+    const libelle = ((g('libelle') || {}).value || '').trim();
+    const qte = Math.max(1, parseInt((g('qte') || {}).value, 10) || 1);
+    const pu = Math.max(0, parseInt((g('pu') || {}).value, 10) || 0);
+    out.push({ type: type, libelle: libelle, qte: qte, pu: pu });
+  });
+  return out;
+}
+function devisHQApercu(){
+  const lignes = devisHQLire();
+  let brut = 0;
+  devisHQLignes().forEach((d, i) => {
+    const l = lignes[i] || { qte: 1, pu: 0 };
+    const m = Math.round(l.qte * l.pu);
+    brut += m;
+    const t = d.querySelector('[data-f="total"]'); if(t) t.textContent = devisHQF(m) + ' F';
+  });
+  const remise = Math.max(0, parseInt((document.getElementById('devis-hq-remise') || {}).value, 10) || 0);
+  const total = Math.max(0, brut - remise);
+  const z = document.getElementById('devis-hq-apercu');
+  if(z) z.innerHTML = 'Sous-total <b>' + devisHQF(brut) + ' F</b> · remise <b>' + devisHQF(remise) + ' F</b> · <span style="font-size:15px">TOTAL <b>' + devisHQF(total) + ' F</b></span>'
+    + '<small style="display:block;color:var(--muted)">Aperçu — le montant qui compte est recalculé par le serveur à l’envoi.</small>';
+  return total;
+}
+function devisHQOuvrir(id){
+  const m = (MISSIONS || []).find(x => x.id === id) || {};
+  let w = document.getElementById('devis-hq-win');
+  if(!w){
+    w = document.createElement('div');
+    w.id = 'devis-hq-win';
+    w.style.cssText = 'position:fixed;inset:0;z-index:98;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:14px';
+    w.onclick = function(e){ if(e.target === w) devisHQFermer(); };
+    document.body.appendChild(w);
+  }
+  const d = m.devis || null;
+  const v = m.prixVerrouille || null;
+  const hist = (m.devisHisto || []).map(h => '<div style="font-size:11px;color:var(--muted)">v' + h.version + ' · ' + devisHQF(h.total) + ' F · ' + (h.statut || '') + ' · ' + String(h.at || '').slice(0, 10) + ' · ' + (h.par || '') + (h.motif ? ' — ' + h.motif : '') + '</div>').join('');
+  w.innerHTML = '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;max-width:520px;width:100%;max-height:90vh;overflow:auto;padding:14px">'
+    + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><b style="flex:1">🧾 Devis structuré · #' + id + '</b>'
+    + '<button type="button" onclick="devisHQFermer()" style="background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-weight:800;cursor:pointer;font-family:inherit">✕ Fermer</button></div>'
+    + '<div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">' + (m.client || '') + ' · ' + (m.service || '') + ' · ' + (m.quartier || '') + ' ' + (m.ville || '') + '</div>'
+    + (v ? '<div style="background:rgba(21,201,138,.12);border:1px solid rgba(21,201,138,.45);border-radius:10px;padding:8px 10px;margin-bottom:9px;font-size:12.5px">🔒 <b>Le client a accepté ' + devisHQF(v.montant) + ' F</b> (devis v' + v.version + ', le ' + String(v.date || '').slice(0, 10) + '). Ce prix ne peut plus être changé directement : envoyez une modification MOTIVÉE, il devra l’accepter.</div>' : '')
+    + (d ? '<div style="background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:9px;font-size:12.5px">Devis actuel : <b>v' + d.version + '</b> · ' + devisHQF(d.total) + ' F · statut <b>' + (d.statut || '') + '</b>' + (d.motif ? '<br>Motif : ' + d.motif : '') + (hist ? '<div style="border-top:1px solid var(--line);margin-top:6px;padding-top:5px">' + hist + '</div>' : '') + '</div>' : '')
+    + '<b style="font-size:13px">Les lignes (main-d’œuvre, matériel, déplacement, autres frais)</b>'
+    + '<div id="devis-hq-lignes" style="margin:7px 0"></div>'
+    + '<button type="button" onclick="devisHQAjouterLigne(\'main_oeuvre\',\'\',1,0)" style="background:var(--card2);border:1.5px dashed var(--line);border-radius:9px;padding:8px;width:100%;font-weight:800;cursor:pointer;font-family:inherit;color:var(--p)">➕ Ajouter une ligne</button>'
+    + '<div style="display:flex;gap:7px;margin:9px 0;flex-wrap:wrap">'
+    + '<label style="flex:1;min-width:120px;font-size:12px">Remise (F)<input id="devis-hq-remise" type="number" min="0" step="500" value="' + ((d && d.remise) || 0) + '" oninput="devisHQApercu()" style="width:100%;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></label>'
+    + '<label style="flex:1;min-width:120px;font-size:12px">Délai<input id="devis-hq-delai" value="' + ((d && d.delai) || '') + '" placeholder="ex. 3 jours" style="width:100%;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></label>'
+    + '<label style="flex:1;min-width:120px;font-size:12px">Durée sur place<input id="devis-hq-duree" value="' + ((d && d.duree) || '') + '" placeholder="ex. 2 jours" style="width:100%;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></label></div>'
+    + '<label style="display:block;font-size:12px">Conditions (acompte, garantie…)<textarea id="devis-hq-conditions" rows="2" style="width:100%;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit">' + ((d && d.conditions) || '') + '</textarea></label>'
+    + '<label style="display:block;font-size:12px;margin-top:7px">Motif ' + (d ? '<b>(obligatoire : le client doit savoir pourquoi)</b>' : '(si modification)') + '<input id="devis-hq-motif" placeholder="ex. tuyau percé découvert sur place" style="width:100%;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></label>'
+    + '<div id="devis-hq-apercu" style="font-size:12.5px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:9px 0">—</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn-main" style="flex:1;min-width:170px" onclick="devisHQEnvoyer(\'' + id + '\')">' + (d ? '📤 Envoyer la modification motivée' : '📤 Envoyer le devis au client') + '</button>'
+    + '<button type="button" onclick="devisHQFermer()" style="background:var(--card2);border:1.5px solid var(--line);border-radius:11px;padding:11px 14px;font-weight:800;cursor:pointer;font-family:inherit">Annuler</button></div>'
+    + '<small style="display:block;color:var(--muted);margin-top:7px">Rien ne s’applique sans le client : il reçoit le devis, l’accepte (le prix est alors verrouillé) ou le refuse.</small>'
+    + '</div>';
+  w.style.display = 'flex';
+  const box = document.getElementById('devis-hq-lignes');
+  if(box) box.innerHTML = '';
+  const lignes = (d && d.lignes && d.lignes.length) ? d.lignes : [{ type: 'main_oeuvre', libelle: '', qte: 1, pu: 0 }, { type: 'materiel', libelle: '', qte: 1, pu: 0 }];
+  lignes.forEach(l => devisHQAjouterLigne(l.type, l.libelle, l.qte, l.pu));
+  devisHQApercu();
+  try{ document.body.style.overflow = 'hidden'; }catch(e){}
+}
+function devisHQFermer(){
+  const w = document.getElementById('devis-hq-win');
+  if(w) w.style.display = 'none';
+  try{ document.body.style.overflow = ''; }catch(e){}
+}
+async function devisHQEnvoyer(id){
+  const lignes = devisHQLire().filter(l => l.pu > 0);
+  if(!lignes.length) return alert('Ajoutez au moins une ligne avec un prix (main-d’œuvre, matériel, déplacement…)');
+  const corps = {
+    lignes: lignes,
+    remise: Math.max(0, parseInt((document.getElementById('devis-hq-remise') || {}).value, 10) || 0),
+    delai: (document.getElementById('devis-hq-delai') || {}).value || '',
+    duree: (document.getElementById('devis-hq-duree') || {}).value || '',
+    conditions: (document.getElementById('devis-hq-conditions') || {}).value || '',
+    motif: (document.getElementById('devis-hq-motif') || {}).value || ''
+  };
+  const m = (MISSIONS || []).find(x => x.id === id) || {};
+  const modifier = !!(m.devis && m.devis.version);
+  const url = '/api/missions/' + id + '/devis' + (modifier ? '/modifier' : '');
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+  const d = await r.json().catch(() => ({}));
+  if(!r.ok) return alert(d.error || 'Impossible d’envoyer le devis');
+  alert('🧾 Devis v' + (d.devis ? d.devis.version : 1) + ' envoyé — ' + devisHQF(d.devis ? d.devis.total : 0) + ' F. Le client doit l’accepter.');
+  devisHQFermer();
+  try{ if(typeof chargerMissions === 'function') chargerMissions(); }catch(e){}
+  try{ loadQuotesHQ(); }catch(e){}
+}
+
 async function quotePrix(id){
   const prix=parseInt((document.getElementById('q-prix')||{}).value,10);
   if(!prix) return alert('Indiquez un prix');
@@ -3826,7 +4071,7 @@ function applyRole(){
   if(ME && ME.role !== 'pdg'){
     document.body.classList.add('role-gest');
     window._hqMasquesRole = window._hqMasquesRole || {};
-    ['panel-cfg','panel-audit','panel-ca7','panel-shield'].forEach(id=>{
+    ['panel-cfg','panel-audit','panel-ca7','panel-shield','panel-tarif'].forEach(id=>{
       window._hqMasquesRole[id] = 1;
       const p=document.getElementById(id); if(p) p.style.display='none';
     });
@@ -3892,6 +4137,334 @@ async function loadShield(){
     }).join('') || '<div class="empty">RAS</div>';
   }catch(e){}
 }
+/* ═══════════ 💰 MOTEUR DE TARIFICATION (affichage + actions PDG) ═══════════ */
+let TF = null;
+const tfFmt = n => (Number(n)||0).toLocaleString('fr-FR') + ' F';
+const tfEchap = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+async function chargerTarif(){
+  try{
+    const d = await fetch('/api/admin/tarif', {cache:'no-store'}).then(r=>r.json());
+    if(!d || !d.ok) return;
+    TF = d;
+    const r = document.getElementById('tf-resume');
+    if(r) r.innerHTML = 'Version <b>' + d.version + '</b> · <b>' + d.nbServices + '</b> services tarifés'
+      + ' · <b>' + (d.nbATarifer||0) + '</b> à tarifer · <b>' + (d.nbDevis||0) + '</b> sur devis'
+      + ' · déplacement : <b>' + ((d.deplacement||{}).mode || '—') + '</b>'
+      + '<br><small style="color:var(--muted);font-weight:600">' + tfEchap(d.règle || '') + '</small>';
+    renderTarif();
+    renderMoteur();
+  }catch(e){}
+}
+function tfSvcLigne(s){
+  const off = s.off ? ' style="opacity:.55"' : '';
+  const opt = (s.options||[]).map(o => '<span style="display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:3px 7px;margin:2px 3px 0 0;font-size:11.5px">'
+    + (o.ic||'🔹') + ' ' + tfEchap(o.nom) + ' <b>' + tfFmt(o.prix) + '</b>'
+    + ' <a href="#" onclick="tfPrixOption(\'' + s.id + '\',\'' + o.id + '\');return false" style="color:var(--p)">✏️</a></span>').join('');
+  const etat = s.devis ? '<span style="color:var(--amber)">💬 sur devis</span>'
+    : ((s.ref>0) ? '<span style="color:var(--p)">✅ prix réglé</span>' : '<span style="color:var(--red)">⚠️ à tarifer (aucun prix)</span>');
+  return '<div' + off + ' style="border:1px solid var(--line);border-radius:11px;padding:9px 11px;margin-bottom:8px">'
+    + '<div style="font-size:13px;font-weight:800">' + (s.ic||'🛠️') + ' ' + tfEchap(s.nom) + ' <small style="color:var(--muted)">n° ' + tfEchap(s.id) + (s.metier?(' · métier ' + tfEchap(s.metier)):'') + '</small> ' + etat + (s.off?' <b style="color:var(--red)">⏸ désactivé</b>':'') + '</div>'
+    + '<div style="font-size:12px;margin-top:4px">Unité : <b>' + tfEchap(s.uniteNom || s.unite) + '</b>'
+    + ' · <a href="#" onclick="tfUnite(\'' + s.id + '\');return false" style="color:var(--p)">changer</a>'
+    + ' · Quantité : <b>' + (s.comptable?'comptable (paliers)':'linéaire (× la quantité)') + '</b></div>'
+    + '<div style="font-size:12px;margin-top:3px">Prix de référence : <b>' + tfFmt(s.ref) + '</b>'
+    + ' <small style="color:var(--muted)">bornes ' + tfFmt(s.min) + ' – ' + tfFmt(s.max) + '</small>'
+    + ' <a href="#" onclick="tfPrix(\'' + s.id + '\');return false" style="color:var(--p);font-weight:800">✏️ changer</a></div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:11.5px">'
+    + '<a href="#" onclick="tfAction(\'devis\',{id:\'' + s.id + '\',devis:' + (s.devis?'false':'true') + '});return false" style="color:var(--p)">' + (s.devis?'✅ prix calculable':'💬 rendre « sur devis »') + '</a>'
+    + '<a href="#" onclick="tfAction(\'etat\',{id:\'' + s.id + '\',etatCompte:' + (s.etatCompte?'false':'true') + '});return false" style="color:var(--p)">' + (s.etatCompte?'🧐 état pris en compte':'état ignoré') + '</a>'
+    + '<a href="#" onclick="tfPhotos(\'' + s.id + '\');return false" style="color:var(--p)">📷 photos : ' + tfEchap(s.photos) + '</a>'
+    + '<a href="#" onclick="tfMateriel(\'' + s.id + '\');return false" style="color:var(--p)">🧰 matériel : ' + tfFmt(s.materielPrix||0) + '</a>'
+    + '<a href="#" onclick="tfAction(\'option\',{id:\'' + s.id + '\',ajouter:{nom:prompt(\'Nom de la nouvelle option ?\')||\'\',prix:parseInt(prompt(\'Prix de cette option, en F CFA ?\')||\'0\',10)||0}});return false" style="color:var(--p)">➕ option</a>'
+    + '<a href="#" onclick="tfAction(\'basculer\',{id:\'' + s.id + '\'});return false" style="color:' + (s.off?'var(--p)':'var(--amber)') + '">' + (s.off?'▶️ réactiver':'⏸ désactiver') + '</a>'
+    + '</div>'
+    + (opt?('<div style="margin-top:5px">'+opt+'</div>'):'')
+    + '</div>';
+}
+function renderTarif(){
+  const box = document.getElementById('tf-services'); if(!box || !TF) return;
+  const q = (document.getElementById('tf-q')||{}).value || '';
+  const f = (document.getElementById('tf-filtre')||{}).value || '';
+  const nq = q.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  let list = (TF.services||[]).filter(s => {
+    if(!nq) return true;
+    return (String(s.nom)+' '+s.id+' '+(s.metier||'')).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').includes(nq);
+  });
+  if(f==='prix') list = list.filter(s => s.ref>0 && !s.devis);
+  if(f==='atarifer') list = list.filter(s => !s.devis && !(s.ref>0));
+  if(f==='devis') list = list.filter(s => s.devis);
+  if(f==='off') list = list.filter(s => s.off);
+  box.innerHTML = list.length ? list.slice(0,60).map(tfSvcLigne).join('') : '<div class="empty">Aucun service ne correspond.</div>';
+}
+function renderMoteur(){
+  const box = document.getElementById('tf-moteur'); if(!box || !TF) return;
+  const d = TF;
+  const bloc = (titre, corps, ouvert) => '<details ' + (ouvert?'open':'') + ' style="margin-top:9px;border:1.5px dashed var(--line);border-radius:12px;padding:9px 11px">'
+    + '<summary style="cursor:pointer;font-weight:900;font-size:12.5px">' + titre + '</summary>' + corps + '</details>';
+  /* coefficients */
+  let co = '';
+  for(const k in d.coefs){
+    const B = d.coefs[k];
+    co += '<div style="margin-top:7px"><b style="font-size:12px">' + (B.ic||'⚙️') + ' ' + tfEchap(B.nom) + '</b>'
+      + (B.actif===false?' <span style="color:var(--amber)">(désactivé)</span>':'') + '<br>';
+    co += (B.valeurs||[]).map(v => '<span style="display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:3px 7px;margin:2px 3px 0 0;font-size:11.5px">'
+      + tfEchap(v.nom) + ' <b>×' + String(v.k).replace('.',',') + '</b>'
+      + ' <a href="#" onclick="tfCoef(\'' + k + '\',\'' + v.id + '\');return false" style="color:var(--p)">✏️</a></span>').join('');
+    co += '</div>';
+  }
+  co += '<div style="margin-top:8px"><a href="#" onclick="tfCoefAjouter();return false" style="color:var(--p);font-weight:800">➕ ajouter une valeur (ex. « extrêmement sale »)</a></div>';
+  /* paliers */
+  let pa = '<div style="font-size:12px;margin:6px 0">' + (d.paliers||[]).map(p => '<span style="display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:3px 7px;margin:2px 3px 0 0">' + p.n + ' → <b>×' + String(p.mult).replace('.',',') + '</b></span>').join('') + '</div>'
+    + '<div style="font-size:12px;color:var(--muted)">Entre deux paliers, le moteur interpole (2→1,3 · 3→1,6 ⇒ 4 = 1,9) : les prix actuels sont donc reproduits à l’identique.</div>'
+    + '<div style="margin-top:6px"><a href="#" onclick="tfPaliers();return false" style="color:var(--p);font-weight:800">✏️ régler les paliers</a></div>';
+  /* déplacement */
+  const dep = d.deplacement||{};
+  let de = '<div style="font-size:12px;margin:6px 0">Mode : <b>' + tfEchap(dep.mode) + '</b>'
+    + ' · <a href="#" onclick="tfDeplacement();return false" style="color:var(--p)">changer</a>'
+    + ' · aller-retour : <b>' + (dep.allerRetour?'oui':'non') + '</b></div>'
+    + '<div style="font-size:12px">Tranches prêtes : ' + (dep.tranches||[]).map(t => '<span style="display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:3px 7px;margin:2px 3px 0 0">≤ ' + (t.jusqua>=100000?'∞':t.jusqua+' km') + ' → <b>' + tfFmt(t.prix) + '</b></span>').join('') + '</div>'
+    + '<div style="font-size:12px;margin-top:4px">Référence : <b>' + (((TF.reference||{}).min)||'?') + ' – ' + (((TF.reference||{}).max)||'?') + ' F</b>'
+    + ' <small style="color:var(--muted)">' + tfEchap((TF.reference||{}).source || 'aucune source') + ' · ' + tfEchap((TF.reference||{}).date || '') + '</small>'
+    + ' · <a href="#" onclick="tfAction(\'deplacement\',{mode:\'inclus\',motif:\'retour au prix d\\\'aujourd\\\'hui\'});return false" style="color:var(--p)">remettre inclus</a></div>'
+    + '<div style="font-size:12px;margin-top:4px">Source du déplacement : <b>' + tfEchap(dep.source || '—') + '</b> — date : <b>' + tfEchap(dep.date || '—') + '</b></div>'
+    + '<div style="font-size:12px;color:var(--muted);margin-top:4px">« inclus » = le prix d’aujourd’hui (aucun frais ajouté). Activez « tranches » quand vous voulez facturer le déplacement.</div>';
+  /* zones + seuils + remises */
+  const zones = Object.keys(d.zones||{});
+  let zo = '<div style="font-size:12px">' + (zones.length ? zones.map(v => '<span style="display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:3px 7px;margin:2px 3px 0 0">'
+      + tfEchap((d.zones[v]||{}).nom || v) + ' <b>×' + String((d.zones[v]||{}).k).replace('.',',') + '</b>'
+      + (typeof (d.zones[v]||{}).km === 'number' ? (' <small style="color:var(--muted)">' + (d.zones[v]||{}).km + ' km</small>') : ' <small style="color:var(--amber)">km ?</small>')
+      + ' <a href="#" onclick="tfZone(\'' + v + '\');return false" style="color:var(--p)">✏️</a></span>').join('') : '<span style="color:var(--muted)">Aucune zone particulière : tout le pays est au même prix (×1).</span>') + '</div>'
+    + '<div style="margin-top:4px;font-size:11.5px;color:var(--muted)">Table des distances : '
+    + (((TF.source||{}).actif) ? ('✅ validée · ' + tfEchap((TF.source||{}).source||'') + ' · ' + tfEchap((TF.source||{}).date||''))
+                              : '⚠️ estimation non validée (le déplacement payant s’appuiera dessus une fois validée)')
+    + ' · <a href="#" onclick="tfZonesValider();return false" style="color:var(--p);font-weight:800">valider (source + date)</a></div>'
+    + '<div style="margin-top:6px"><a href="#" onclick="tfZoneAjouter();return false" style="color:var(--p);font-weight:800">➕ ajouter une ville / zone</a></div>';
+  let se = '<div style="font-size:12px">Marge « prix calculé » : <b>±' + Math.round((d.seuils.margeAuto||0)*100) + ' %</b>'
+    + ' · marge « estimation » : <b>±' + Math.round((d.seuils.margeIncertitude||0)*100) + ' %</b>'
+    + ' · validation au-delà de <b>' + tfFmt(d.seuils.validationAdmin) + '</b>'
+    + ' · écart « prix inhabituel » : <b>' + Math.round((d.seuils.ecartAnormal||0)*100) + ' %</b>'
+    + ' · <a href="#" onclick="tfSeuils();return false" style="color:var(--p)">changer</a></div>';
+  const rem = Object.keys(d.remises||{});
+  se += '<div style="font-size:12px;margin-top:5px">Codes de remise : ' + (rem.length ? rem.map(c => '<span style="display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:3px 7px;margin:2px 3px 0 0">' + tfEchap(c) + ' <b>−' + Math.round((d.remises[c]||0)*100) + ' %</b></span>').join('') : '—')
+    + ' <a href="#" onclick="tfRemise();return false" style="color:var(--p)">➕ code</a></div>';
+  /* prix du marché */
+  let re = '<div style="font-size:12px;color:var(--muted);margin-bottom:5px">Chaque référence garde sa <b>source</b> et sa <b>date</b> : un prix sans source n’entre jamais ici.</div>'
+    + '<div style="font-size:12px">' + ((d.refs||[]).length ? (d.refs||[]).slice(0,20).map(r => '<div style="border-bottom:1px solid var(--line);padding:4px 0"><b>' + tfEchap(r.service||'—') + '</b> · ' + tfFmt(r.montant) + ' · ' + tfEchap(r.unite||'') + '<br><small style="color:var(--muted)">' + tfEchap(r.source||'') + (r.date?(' · ' + tfEchap(r.date)):'') + (r.ville?(' · ' + tfEchap(r.ville)):'') + '</small></div>').join('') : 'Aucune référence enregistrée pour l’instant.') + '</div>'
+    + '<div style="margin-top:6px"><a href="#" onclick="tfRefAjouter();return false" style="color:var(--p);font-weight:800">➕ ajouter un prix du marché (source + date obligatoires)</a></div>';
+  /* versions + journal */
+  let ve = '<div style="font-size:12px">' + (d.versions||[]).slice(0,12).map(v => '<div style="border-bottom:1px solid var(--line);padding:4px 0"><b>Version ' + v.n + '</b> · ' + (v.at||'').slice(0,16).replace('T',' ') + ' · ' + tfEchap(v.par||'') + '<br><small style="color:var(--muted)">' + tfEchap(v.note||v.action||'') + '</small></div>').join('') + '</div>';
+  let jo = '<div style="font-size:12px">' + (d.journal||[]).slice(0,20).map(j => '<div style="border-bottom:1px solid var(--line);padding:4px 0"><b>' + tfEchap(j.action) + '</b> · ' + tfEchap(j.quoi) + '<br><small style="color:var(--muted)">' + tfEchap(j.avant) + ' → ' + tfEchap(j.apres) + (j.motif?(' · ' + tfEchap(j.motif)):'') + ' · ' + (j.at||'').slice(0,16).replace('T',' ') + ' · v' + j.version + '</small></div>').join('') + '</div>';
+  /* ❓ les questions posées au client (lot 108) */
+  const qs = d.questions || [];
+  let qu = '<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Chaque question n’est posée qu’aux services concernés. « Je ne sais pas » est toujours proposé : le prix devient alors une <b>estimation</b>. Aucune réponse ne peut modifier le prix ailleurs que par les lignes visibles.</div>'
+    + (qs.length ? qs.map(q => {
+        const cible = q.cible ? (q.cible.tous ? 'tous les services' : (q.cible.etatCompte ? 'les services où l’état compte' : (q.cible.cat ? ('catégorie ' + q.cible.cat.join(', ')) : (q.cible.unite ? ('unité ' + q.cible.unite.join(', ')) : (q.cible.metier ? ('métier ' + q.cible.metier.join(', ')) : 'ciblée'))))) : 'tous';
+        return '<div style="border:1px solid var(--line);border-radius:11px;padding:8px 10px;margin-bottom:7px' + (q.off ? ';opacity:.55' : '') + '">'
+          + '<div style="font-size:12.5px;font-weight:800">' + tfEchap(q.q) + (q.off ? ' <b style="color:var(--red)">⏸ désactivée</b>' : '') + '</div>'
+          + '<div style="font-size:11.5px;color:var(--muted);margin-top:3px">posée pour : <b>' + tfEchap(cible) + '</b> · ' + (q.nbServices || 0) + ' service(s)'
+          + (q.type ? ' · type ' + tfEchap(q.type) : '') + (q.coef ? (' · coefficient <b>' + tfEchap(q.coef) + '</b>') : '')
+          + (q.obligatoire ? ' · <b style="color:var(--amber)">confirmation demandée</b>' : '') + (q.prixUnite ? (' · ' + tfFmt(q.prixUnite) + ' / unité') : '') + '</div>'
+          + (q.aide ? '<div style="font-size:11.5px;color:var(--muted)">' + tfEchap(q.aide) + '</div>' : '')
+          + '<div style="margin-top:5px;font-size:11.5px">'
+          + '<a href="#" onclick="tfQuestion(\'' + q.id + '\');return false" style="color:var(--p)">✏️ modifier le libellé / l’aide</a> · '
+          + '<a href="#" onclick="tfAction(\'question\',{qid:\'' + q.id + '\',obligatoire:' + (q.obligatoire ? 'false' : 'true') + '});return false" style="color:var(--p)">' + (q.obligatoire ? '✅ réponse facultative' : '⚠️ demander une confirmation') + '</a> · '
+          + '<a href="#" onclick="tfAction(\'question\',{qid:\'' + q.id + '\',basculer:true});return false" style="color:' + (q.off ? 'var(--p)' : 'var(--amber)') + '">' + (q.off ? '▶️ réactiver' : '⏸ désactiver') + '</a>'
+          + '</div></div>';
+      }).join('') : '<div style="color:var(--muted)">Aucune question réglée.</div>')
+    + '<div style="margin-top:7px"><a href="#" onclick="tfQuestionAjouter();return false" style="color:var(--p);font-weight:800">➕ ajouter une question pour un service précis</a></div>';
+  box.innerHTML = bloc('❓ Questions posées au client (' + (d.nbQuestions || 0) + ')', qu, false)
+    + bloc('⚙️ Coefficients (état, difficulté, urgence, horaire, accès, matériel)', co, false)
+    + bloc('📉 Paliers de quantité', pa, false)
+    + bloc('🛵 Déplacement', de, false)
+    + bloc('🏙️ Zones (prix par ville)', zo, false)
+    + bloc('🎯 Seuils, marges et codes de remise', se, false)
+    + bloc('🏷️ Prix du marché (références sourcées)', re, false)
+    + bloc('📚 Versions des tarifs', ve, false)
+    + bloc('📜 Journal des changements de tarif', jo, false);
+}
+async function tfAction(action, corps){
+  /* (voir plus bas : après l'enregistrement, une éventuelle alerte « prix inhabituel » est affichée) */
+  const r = await fetch('/api/admin/tarif', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(Object.assign({action}, corps||{}))});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) return alert((d.error || 'Impossible') + (d.detail ? ('\n\n' + d.detail) : '') + (d.conseil ? ('\n👉 ' + d.conseil) : ''));
+  /* ⚠️ « prix inhabituel » : le moteur le SIGNALE, il ne le corrige jamais tout seul. Le PDG doit le voir. */
+  if(d.alerte) alert('⚠️ Attention — ' + d.alerte);
+  if(d.version) alert('✅ Enregistré — nouvelle version de tarif : v' + d.version);
+  chargerTarif();
+}
+async function tfPrix(id){
+  const s = (TF.services||[]).find(x => String(x.id)===String(id)) || {};
+  const ref = prompt('Prix de référence de « ' + s.nom + ' » (' + (s.uniteNom||s.unite) + ') en F CFA ?', String(s.ref||0));
+  if(ref===null) return;
+  const min = prompt('Prix MINIMUM autorisé (bornes pour les professionnels) ?', String(s.min||0));
+  if(min===null) return;
+  const max = prompt('Prix MAXIMUM autorisé ?', String(s.max||0));
+  if(max===null) return;
+  const motif = prompt('Motif du changement (il sera écrit au journal) ?', 'mise à jour du prix') || '';
+  tfAction('prix', {id, ref:parseInt(ref,10)||0, min:parseInt(min,10)||0, max:parseInt(max,10)||0, motif});
+}
+async function tfUnite(id){
+  const s = (TF.services||[]).find(x => String(x.id)===String(id)) || {};
+  const liste = (TF.unites||[]).map(u => u.id + ' = ' + u.nom).join('\n');
+  const u = prompt('Unité de facturation pour « ' + s.nom + ' » :\n' + liste + '\n\n(tapez l’identifiant, ex. « place »)', s.unite||'piece');
+  if(u===null) return;
+  tfAction('unite', {id, unite:String(u).trim()});
+}
+async function tfPhotos(id){
+  const s = (TF.services||[]).find(x => String(x.id)===String(id)) || {};
+  const p = prompt('Photos pour « ' + s.nom +' » : obligatoires / conseillees / non', s.photos||'conseillees');
+  if(p===null) return;
+  const n = prompt('Nombre minimum de photos (si obligatoires) ?', String(s.photosMin||2));
+  tfAction('photos', {id, photos:String(p).trim(), photosMin:parseInt(n,10)||2});
+}
+async function tfPrixOption(id, optId){
+  const s = (TF.services||[]).find(x => String(x.id)===String(id)) || {};
+  const o = (s.options||[]).find(x => x.id===optId) || {};
+  const prix = prompt('Prix de l’option « ' + o.nom + ' » (F CFA) ?', String(o.prix||0));
+  if(prix===null) return;
+  tfAction('option', {id, optId, prix:parseInt(prix,10)||0});
+}
+async function tfCoef(bloc, val){
+  const B = (TF.coefs||{})[bloc] || {}; const v = (B.valeurs||[]).find(x => x.id===val) || {};
+  const k = prompt('Coefficient pour « ' + v.nom + ' » (1 = aucun changement)', String(v.k));
+  if(k===null) return;
+  tfAction('coef', {bloc, val, k:parseFloat(String(k).replace(',','.'))});
+}
+async function tfCoefAjouter(){
+  const bloc = prompt('Quel coefficient ? (' + Object.keys(TF.coefs||{}).join(' / ') + ')', 'etat');
+  if(!bloc) return;
+  const nom = prompt('Nom de la nouvelle valeur (ex. « Extrêmement sale ») ?');
+  if(!nom) return;
+  const k = prompt('Coefficient (ex. 1,7) ?', '1.2');
+  if(k===null) return;
+  tfAction('coef', {bloc, ajouter:{id:nom, nom, k:parseFloat(String(k).replace(',','.'))}});
+}
+async function tfPaliers(){
+  const s = (TF.paliers||[]).map(p => p.n + ':' + p.mult).join(', ');
+  const v = prompt('Paliers de quantité (n:multiplicateur, séparés par des virgules)', s);
+  if(v===null) return;
+  const paliers = v.split(',').map(x => { const [a,b]=x.split(':'); return {n:parseInt(a,10)||1, mult:parseFloat(String(b).replace(',','.'))||1}; }).filter(x=>x.n>0);
+  tfAction('palier', {paliers});
+}
+async function tfDeplacement(){
+  const m = prompt('Mode de facturation du déplacement : inclus / tranches / km / forfait', (TF.deplacement||{}).mode || 'inclus');
+  if(m===null) return;
+  const corps = {mode:String(m).trim()};
+  /* 📛 RÈGLE : activer un déplacement payant exige une référence — source + date. Le moteur refuse sinon. */
+  if(corps.mode!=='inclus'){
+    const src = prompt('D’où vient ce montant ? (source obligatoire — ex. « grille Yemba Plomberie, Abidjan »)', (TF.deplacement||{}).source || '');
+    if(src===null) return;
+    const dt = prompt('Date de cette référence (obligatoire — ex. 28/09/2026)', (TF.deplacement||{}).date || new Date().toLocaleDateString('fr-FR'));
+    if(dt===null) return;
+    corps.source = src; corps.sourceDate = dt;
+  }
+  if(corps.mode==='km'){ const km=prompt('Prix au kilomètre (F CFA) ?', String((TF.deplacement||{}).km||200)); if(km===null) return; corps.km=parseInt(km,10)||200; }
+  if(corps.mode==='forfait'){ const f=prompt('Forfait déplacement (F CFA) ?', String((TF.deplacement||{}).forfait||1000)); if(f===null) return; corps.forfait=parseInt(f,10)||0; }
+  const ar = prompt('Facturer l’aller-retour ? (oui / non)', (TF.deplacement||{}).allerRetour ? 'oui' : 'non');
+  if(ar!==null) corps.allerRetour = /^o/i.test(ar);
+  tfAction('deplacement', corps);
+}
+async function tfZoneAjouter(){
+  const ville = prompt('Ville ou zone (ex. Abidjan, Korhogo) ?');
+  if(!ville) return;
+  const k = prompt('Coefficient de prix pour ' + ville + ' (1 = même prix partout ; 1,15 = +15 %)', '1');
+  if(k===null) return;
+  const km = prompt('Distance depuis Abidjan en km pour ' + ville + ' (0 = inconnue · sert au déplacement)', '0');
+  if(km===null) return;
+  tfAction('zone', {ville, nom:ville, k:parseFloat(String(k).replace(',','.'))||1});
+  if(parseInt(String(km),10) > 0) tfAction('zones-km', {zone:ville, nom:ville, km:parseInt(String(km),10)});
+}
+async function tfZone(ville){
+  const z = (TF.zones||{})[ville] || {};
+  const k = prompt('Coefficient pour ' + ville + ' (0,8 = −20 % · 1 = même prix)', String(z.k||1));
+  if(k===null) return;
+  const km = prompt('Distance depuis Abidjan en km pour ' + ville + ' (sert au déplacement quand il sera activé)', String((typeof z.km==='number')?z.km:''));
+  tfAction('zone', {ville, nom:z.nom||ville, k:parseFloat(String(k).replace(',','.'))||1});
+  if(km!==null && String(km).trim()!=='') tfAction('zones-km', {zone:ville, nom:z.nom||ville, km:parseInt(String(km),10)||0});
+}
+/* 🗺️ valider la table des distances (source + date obligatoires) */
+async function tfZonesValider(){
+  const s = (TF.source||{});
+  const src = prompt('Source de la table des distances (obligatoire — ex. « distances routières usuelles depuis Abidjan »)', s.source || '');
+  if(src===null) return;
+  const dt = prompt('Date de cette table (obligatoire)', s.date || new Date().toLocaleDateString('fr-FR'));
+  if(dt===null) return;
+  tfAction('zones-source', {source:src, sourceDate:dt, actif:true, motif:'validation de la table des distances'});
+}
+/* 🧰 le prix réel des fournitures apportées par le pro, service par service */
+async function tfMateriel(id){
+  const s = ((TF.services||[]).find(x=>x.id===id)||{});
+  const p = prompt('Prix des fournitures apportées par le professionnel pour « ' + (s.nom||id) + ' » (0 = aucun frais)', String(s.materielPrix||0));
+  if(p===null) return;
+  tfAction('materiel', {id, prix:parseInt(String(p).replace(/\D/g,''),10)||0, motif:'prix du matériel'});
+}
+async function tfSeuils(){
+  const a = prompt('Marge du prix calculé (± % — ex. 0,05 = 5 %)', String((TF.seuils||{}).margeAuto||0.05));
+  if(a===null) return;
+  const i = prompt('Marge de l’estimation (± %)', String((TF.seuils||{}).margeIncertitude||0.2));
+  if(i===null) return;
+  const v = prompt('Montant à partir duquel VOTRE validation est demandée (F CFA)', String((TF.seuils||{}).validationAdmin||100000));
+  if(v===null) return;
+  const e = prompt('Écart qui déclenche « prix inhabituel » (ex. 0,40 = 40 %)', String((TF.seuils||{}).ecartAnormal||0.4));
+  if(e===null) return;
+  tfAction('seuil', {margeAuto:parseFloat(String(a).replace(',','.')), margeIncertitude:parseFloat(String(i).replace(',','.')), validationAdmin:parseInt(v,10)||0, ecartAnormal:parseFloat(String(e).replace(',','.'))});
+}
+async function tfRemise(){
+  const code = prompt('Code de remise (ex. KLEAN10) ?');
+  if(!code) return;
+  const taux = prompt('Remise en % (ex. 10) ?', '10');
+  if(taux===null) return;
+  tfAction('remise', {code, taux:(parseFloat(String(taux).replace(',','.'))||10)/100});
+}
+async function tfQuestion(id){
+  const q = (TF.questions || []).find(x => x.id === id) || {};
+  const lib = prompt('Libellé de la question ?', q.q || '');
+  if(lib === null || !lib.trim()) return;
+  const aide = prompt('Petite explication affichée sous la question (facultatif) ?', q.aide || '') || '';
+  tfAction('question', {qid: id, q: lib.trim(), aide});
+}
+async function tfQuestionAjouter(){
+  const svc = prompt('Pour quel service ? (numéro du catalogue ou métier — laissez « tous » pour tout le monde)', 'tous');
+  if(svc === null) return;
+  const lib = prompt('Quelle question poser ?');
+  if(!lib) return;
+  const type = prompt('Type de réponse : choix / nombre / photo', 'choix');
+  if(type === null) return;
+  const corps = {ajouter: {q: lib.trim(), type: String(type).trim(), ordre: 55}};
+  const t = String(type).trim();
+  if(t === 'choix'){
+    const coef = prompt('Sur quel coefficient cette réponse agit-elle ? (' + Object.keys(TF.coefs || {}).join(' / ') + ' — vide = simple précision)', 'acces');
+    if(coef && TF.coefs[coef]) corps.ajouter.coef = coef;
+  }
+  if(t === 'nombre'){
+    const u = prompt('Unité de la réponse (m2, appareil, tâche…) ?', 'appareil');
+    if(u === null) return;
+    corps.ajouter.unite2 = u;
+    const p = prompt('Prix par unité en F CFA (0 = simple information, aucun prix ajouté) ?', '0');
+    if(p === null) return;
+    corps.ajouter.prixUnite = parseInt(p, 10) || 0;
+  }
+  const cible = String(svc || '').trim();
+  if(cible && cible !== 'tous'){
+    /* si le PDG a tapé un service connu (numéro du catalogue ou métier), on vise CE service ;
+       sinon on vise tout le métier tapé. */
+    if((TF.services || []).some(s => String(s.id) === cible) || /^\d+$/.test(cible)) corps.ajouter.svc = cible;
+    else corps.ajouter.metier = cible;
+  }
+  tfAction('question', corps);
+}
+async function tfRefAjouter(){
+  const service = prompt('Service concerné (nom) ?');
+  if(!service) return;
+  const montant = prompt('Prix relevé (F CFA) ?');
+  if(!montant) return;
+  const unite = prompt('Unité (ex. par intervention, au m²) ?', 'par intervention') || '';
+  const source = prompt('SOURCE (obligatoire) : site, entreprise, devis, observation ?');
+  if(!source) return;
+  const date = prompt('Date du relevé (AAAA-MM-JJ) ?', new Date().toISOString().slice(0,10)) || '';
+  const ville = prompt('Zone (ex. Abidjan, Bouaké — laissez vide si non précisé) ?', '') || '';
+  tfAction('refs-ajouter', {ref:{service, montant:parseInt(montant,10)||0, unite, source, date, ville, conditions:''}});
+}
 async function shieldAct(kind, ip){
   let minutes=60;
   if(kind==='recaler'){
@@ -3924,6 +4497,7 @@ async function loadTeam(){
     });
   }
   if(ME && ME.role==='pdg') loadShield();
+  if(ME && ME.role==='pdg' && document.getElementById('panel-tarif') && document.getElementById('panel-tarif').style.display!=='none') chargerTarif();
   const st=document.getElementById('frz-state');
   if(st && ME) st.textContent = ME.gestFrozen ? '⛔ Écritures actuellement coupées (tous)' : '✅ Écritures actuellement actives';
   if(ME && ME.role==='gest' && ME.gestFrozen){
@@ -4265,6 +4839,47 @@ function missionsFiltre(f){
   });
   renderMissions();
 }
+/* 💰 LOT 107 — le PDG voit COMMENT chaque prix a été calculé (et repère les prix à vérifier) */
+function tarifBadgeM(m){
+  /* 🔒 lot 109 : le prix que le client a ACCEPTÉ est verrouillé — le PDG le voit d'un coup d'œil */
+  const v = m.prixVerrouille;
+  const lock = v ? ' <span class="badge" style="font-size:8.5px;font-weight:900;padding:3px 7px;border-radius:99px;border:1px solid rgba(21,201,138,.5);background:rgba(21,201,138,.16);color:var(--p)">🔒 accepté ' + (Number(v.montant) || 0).toLocaleString('fr-FR') + ' F · devis v' + v.version + '</span>' : '';
+  const t = m.tarif; if(!t) return lock;
+  const st = 'font-size:8.5px;font-weight:900;padding:3px 7px;border-radius:99px;border:1px solid ';
+  if(t.aVerifier) return ' <span class="badge" style="' + st + 'rgba(255,176,32,.45);background:rgba(255,176,32,.16);color:var(--amber)">🏷️ prix à vérifier ' + (t.ecartPct > 0 ? '+' : '') + t.ecartPct + ' %</span>' + lock;
+  if(t.mode === 'devis') return ' <span class="badge" style="' + st + 'rgba(255,176,32,.4);background:rgba(255,176,32,.14);color:var(--amber)">💬 sur devis</span>' + lock;
+  if(t.mode === 'fourchette') return ' <span class="badge" style="' + st + 'rgba(43,127,224,.4);background:rgba(43,127,224,.14);color:#2f6fd0">💰 estimation (fourchette)</span>' + lock;
+  return ' <span class="badge" style="' + st + 'rgba(21,201,138,.4);background:rgba(21,201,138,.14);color:var(--p)">🧾 calcul détaillé v' + t.version + '</span>' + lock;
+}
+function tarifDetailM(m){
+  const t = m.tarif;
+  /* 🧾 lot 109 : le bloc « devis structuré » existe même quand la mission n'a pas de trace de
+     tarif (les demandes sur mesure n'en ont jamais) — sinon le PDG n'avait aucun accès. */
+  const blocDevis = (function(){
+    const F0 = n => (Number(n) || 0).toLocaleString('fr-FR');
+    let h = '<div style="border-top:1px solid var(--line);margin-top:5px;padding-top:5px">'
+      + '<a href="#" onclick="devisHQOuvrir(\'' + m.id + '\');return false" style="color:var(--p);font-weight:800">🧾 Devis structuré (détail ligne par ligne)</a>';
+    if(m.devis) h += '<div style="color:var(--muted)">Devis v' + m.devis.version + ' · ' + F0(m.devis.total) + ' F · ' + (m.devis.statut || '') + (m.devis.motif ? ' — motif : ' + m.devis.motif : '') + '</div>';
+    if(m.prixVerrouille) h += '<div style="color:var(--p);font-weight:800">🔒 Prix accepté par le client : ' + F0(m.prixVerrouille.montant) + ' F (devis v' + m.prixVerrouille.version + ') — toute modification devra être motivée et repasser par lui.</div>';
+    else if(m.devis && m.devis.statut === 'envoye') h += '<div style="color:var(--amber);font-weight:800">⏳ Devis v' + m.devis.version + ' envoyé, en attente de la réponse du client.</div>';
+    return h + '</div>';
+  })();
+  if(!t) return '<details style="margin-top:5px"><summary style="cursor:pointer;font-size:10.5px;font-weight:800;color:var(--p)">🧾 Devis & prix</summary>' + blocDevis + '</details>';
+  const F = n => (Number(n) || 0).toLocaleString('fr-FR');
+  const li = (t.lignes || []).map(x => '<div style="display:flex;justify-content:space-between;gap:8px"><span>' + x.nom + (x.detail ? ' <small style="color:var(--muted)">' + x.detail + '</small>' : '') + '</span><b>' + (x.montant < 0 ? '−' : '') + F(Math.abs(x.montant)) + ' F</b></div>').join('');
+  let h = '<details style="margin-top:5px"><summary style="cursor:pointer;font-size:10.5px;font-weight:800;color:var(--p)">🧾 Voir le détail du prix — '
+    + ((t.lignes || []).length) + ' ligne(s) · version ' + t.version
+    + (t.source === 'declare' ? ' · ⚠️ prix annoncé par l’ancienne application' : ' · calculé par le serveur') + '</summary>'
+    + '<div style="font-size:11px;background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:7px 9px;margin-top:5px">'
+    + (li || '<i>Aucune ligne (devis)</i>')
+    + '<div style="display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--line);margin-top:5px;padding-top:5px"><b>Total enregistré</b><b>' + F(m.prixTotal) + ' F</b></div>';
+  if(t.mode === 'fourchette' && t.fourchette) h += '<div style="color:var(--muted)">Fourchette du moteur : ' + F(t.fourchette[0]) + ' – ' + F(t.fourchette[1]) + ' F · il manquait : ' + ((t.manque || []).join(', ') || '—') + '</div>';
+  if(t.aVerifier) h += '<div style="color:var(--amber);font-weight:800">Écart de ' + t.ecartPct + ' % avec le calcul du moteur : ce prix vient de l’ancienne application, il reste à vérifier.</div>';
+  if(t.texte) h += '<div style="color:var(--muted);margin-top:4px">' + t.texte + '</div>';
+  /* 🧾 lot 109 : le PDG peut envoyer un devis structuré (et voir le verrou) depuis n'importe quelle mission */
+  h += blocDevis;
+  return h + '</div></details>';
+}
 function renderMissions(list){
   if(Array.isArray(list)) MISSIONS = list;
   const cnt = document.querySelector('#m-cnt'); if(cnt) cnt.textContent = MISSIONS.length ? MISSIONS.length + ' récente(s)' : '—';
@@ -4297,7 +4912,8 @@ function renderMissions(list){
       <div>
         <b>${SVC_N[m.service] || m.service} · ${m.quartier || '—'}</b>
         <small>#${m.id} · ${m.client || '—'}${m.agent ? ' → ' + m.agent : ''} · ${hhmm(m.at)}${m.paiement ? ' · ' + (PAYTAG[m.paiement] || m.paiement) : ''}${m.gps ? ' · 📡GPS' : ''}</small>
-        <span class="badge ${cls}">${txt}</span>
+        <span class="badge ${cls}">${txt}</span>${tarifBadgeM(m)}
+        ${m.tarif ? tarifDetailM(m) : ''}
       </div>
       <div class="right"><b>${fmt(m.prixTotal)}</b><small>+${fmt(m.comm)} KLEAN</small>${['accepted', 'enroute'].includes(m.status) ? `<br><button title="Réattribuer d'urgence à un autre professionnel" style="margin-top:5px;background:var(--card2);border:1px solid rgba(255,176,32,.45);color:var(--amber);font-size:9.5px;font-weight:800;padding:4px 8px;border-radius:7px;cursor:pointer;font-family:inherit" onclick="reassignMission('${m.id}','${(m.client || '').replace(/'/g, '')}')">🔁 Réaff.</button>` : ''}</div>
     </div>`;
@@ -4720,6 +5336,38 @@ async function savePayDest(){
   await fetch('/api/admin/paydest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({wave, om:document.getElementById('pay-om').value, moov:document.getElementById('pay-moov').value, hide:document.getElementById('pay-hide').checked})});
   alert('✓ Numéros enregistrés');
 }
+/* ═══════════════════════════════════════════════════════════════════════════════
+   🛡️ 28/09 — FILET DE DÉFILEMENT DU TABLEAU DE BORD
+   Même famille de panne que celle qui figeait l'accueil du client : un chemin de fermeture
+   oublié laissait la page immobilisée (impossible de faire défiler, clics perdus sur le fond).
+   Ici : dès qu'AUCUNE fenêtre plein écran n'est affichée, la page défile de nouveau.
+   Le filet ne ferme rien et ne cache rien : il rend seulement le défilement au PDG.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+(function(){
+  function uneFenetreVisible(){
+    var l = document.querySelectorAll('.modal-ov, .modal-bg, #sheet, #hq-pal, [id^="win-"]');
+    for(var i=0;i<l.length;i++){
+      var el=l[i];
+      if(el.classList && el.classList.contains('hidden')) continue;
+      try{
+        var st=getComputedStyle(el);
+        if(st.display==='none' || st.visibility==='hidden') continue;
+        if(st.position!=='fixed' || st.pointerEvents==='none') continue;
+        return true;
+      }catch(e){}
+    }
+    return false;
+  }
+  function liberer(){
+    try{ if(document.body.style.overflow==='hidden' && !uneFenetreVisible()) document.body.style.overflow=''; }catch(e){}
+  }
+  document.addEventListener('click', function(){ setTimeout(liberer, 70); }, true);
+  window.addEventListener('pageshow', function(){ setTimeout(liberer, 50); });
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) setTimeout(liberer, 50); });
+  window.addEventListener('popstate', function(){ setTimeout(liberer, 50); });
+  setInterval(liberer, 4000);
+})();
+
 document.addEventListener('keydown', function(e){
   if(e.key!=='Escape') return;
   ['quote-modal','field-thread-modal','vues-modal','win-chat-modal','cd-win-modal','bulle-msg-modal','quiz-who-modal','qz-modal'].forEach(function(id){
@@ -4745,8 +5393,8 @@ setInterval(loadAll, 12000); // secours
    — la préférence est mémorisée sur cet appareil (lien : klean_hq_fold_v2) */
 (function(){
   const STORE = 'klean_hq_fold_v4';
-  function load(){ try{ return JSON.parse(localStorage.getItem(STORE) || '{}'); }catch(e){ return {}; } }
-  function save(m){ try{ localStorage.setItem(STORE, JSON.stringify(m)); }catch(e){} }
+  function load(){ try{ return JSON.parse(kLS.get(STORE) || '{}'); }catch(e){ return {}; } }
+  function save(m){ try{ kLS.set(STORE, JSON.stringify(m)); }catch(e){} }
   /* ouvert par défaut : le quotidien — fermé par défaut : tout ce qui est long/archivé */
   const FOLD_BY_DEFAULT = ['équipe dirigeante', "chiffre d'affaires", 'réglages', "journal d'audit", 'journal temps réel', 'professionnels', 'personnes inscrites'];
   const OPEN_BY_DEFAULT = ['vérification', 'support', 'missions', 'affiche', 'sur mesure', 'terrain', 'bouclier'];
@@ -5797,6 +6445,7 @@ async function ugStatut(id, statut){
   }
   try{ jxNouveau(); }catch(e){}
 })();
+try{ window.__kleanInit = 1; }catch(e){}      /* ✅ le tableau de bord est allé au bout de son démarrage */
 </script>
 
 </body>
