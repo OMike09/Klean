@@ -2605,26 +2605,145 @@ function clientIp(req) {
 const _hitMap = new Map();
 const _SCAN = /(\.env|wp-admin|wp-login|phpmyadmin|xmlrpc|\.git|\/\.aws|\.htaccess|eval-stdin|phpunit|cgi-bin|actuator\/env|\/etc\/passwd)/i;
 const _INJECT = /(\.\.\/|\.\.\\|%00|<script|javascript:|union\s+select|drop\s+table|or\s+1=1|\$\{jndi|;os\.system|`)/i;
+/* ═══════════════════════════════════════════════════════════════════════════
+   🛡️ BOUCLIER KLEAN — RÈGLES FIXÉES PAR LE PDG (26/09/2026)
+   · une adresse IP NORMALE est TOUJOURS autorisée : « inconnue » n'est PAS un motif ;
+   · une adresse PARTAGÉE (cybercafé, hôtel, entreprise, réseau mobile ivoirien) n'est
+     JAMAIS bloquée automatiquement — elle est seulement RALENTIE (429) pour protéger
+     le serveur : bloquer une IP partagée punirait des clients honnêtes ;
+   · le blocage automatique n'existe QUE sur un comportement réellement suspect :
+     sondage de fichiers réservés, injection dans l'adresse, rafale de requêtes ;
+   · tout blocage automatique est TEMPORAIRE : 15 min → 1 h → 6 h → 24 h au maximum ;
+   · la RAISON du blocage et sa DURÉE sont écrites en français, visibles dans le tableau
+     de bord, et rappelées au client bloqué (avec le temps restant).
+   ═══════════════════════════════════════════════════════════════════════════ */
+const SHIELD_DUREES = [15, 60, 360, 1440];              // minutes (palier 1 → 4, plafond 24 h)
+const SHIELD_MOTIFS = {
+  scan: 'sondage de fichiers réservés (.env, wp-admin, .git…)',
+  injection: 'tentative d’injection dans l’adresse',
+  flood: 'rafale de requêtes (trop de demandes en quelques secondes)',
+  'kp-inconnu': 'code professionnel inconnu (erreur normale : jamais bloquante)',
+  'fiche-inconnue': 'fiche professionnelle inexistante (erreur normale : jamais bloquante)',
+  'pdg-recale': 'blocage décidé par le PDG',
+  'pdg-aneanti': 'accès coupé définitivement par le PDG'
+};
+const SHIELD_SERIEUX = 18;                              // en dessous : curiosité/erreur, aucun poids
+/* 🔒 réseaux privés et locaux : par nature PARTAGÉS (bureau, cybercafé, la machine elle-même).
+   On les ralentit si besoin, mais on ne les bloque jamais tout seuls. */
+function ipPartagee(ip) {
+  const s = String(ip || '');
+  return s === '::1' || s === 'localhost' || /^127\./.test(s) || /^10\./.test(s)
+    || /^192\.168\./.test(s) || /^172\.(1[6-9]|2\d|3[01])\./.test(s) || /^169\.254\./.test(s);
+}
+let _shieldMigre = false;
 function shieldEnsure() {
   db.shield = db.shield || { events: [], ips: {} };
   if (!Array.isArray(db.shield.events)) db.shield.events = [];
   if (!db.shield.ips) db.shield.ips = {};
+  /* 🔓 LES ANCIENS BLOCAGES AUTOMATIQUES SANS DURÉE SONT ROUVERTS (une seule fois) :
+     le bouclier v1 bloquait pour toujours dès 50 points, y compris une IP partagée qui
+     accumulait de simples codes inconnus. Cette façon de faire est terminée. */
+  if (!_shieldMigre) {
+    _shieldMigre = true;
+    let n = 0;
+    for (const ip of Object.keys(db.shield.ips)) {
+      const r = db.shield.ips[ip];
+      if (r && r.blocked && !r.annihilated && !r.blockedUntil) {
+        r.blocked = false; r.blockBy = ''; r.blockReason = ''; r.legacyReouvert = true;
+        r.last = nowISO(); n++;
+        db.shield.events.unshift({ id: uid('SH'), at: nowISO(), ip, kind: 'reouverture', path: '/hq',
+          detail: 'ancien blocage automatique sans durée rouvert (il ne respectait pas la nouvelle règle)',
+          score: r.score || 0, action: 'reouverture', raison: 'ancien blocage sans durée', minutes: 0 });
+      }
+    }
+    if (db.shield.events.length > 250) db.shield.events = db.shield.events.slice(0, 250);
+    if (n) { try { saveDb(); } catch (e) {} console.log('🛡️ ' + n + ' ancien(s) blocage(s) sans durée rouvert(s)'); }
+  }
+}
+/* ⏳ le score fond quand l'IP se calme (demi-vie : 10 minutes) : une IP partagée qui reçoit
+   des erreurs normales de clients ne peut plus « s'accumuler » jusqu'à un blocage. */
+function shieldDecay(rec) {
+  const t0 = Number(rec.scoreAt) || Date.now();
+  const k = Math.pow(0.5, Math.max(0, Date.now() - t0) / (10 * 60 * 1000));
+  if (k < 1) { rec.score = Math.round((Number(rec.score) || 0) * k * 100) / 100; rec.scoreAt = Date.now(); }
+  return rec;
 }
 function shieldLog(ip, kind, path, detail, score) {
   shieldEnsure();
-  const rec = db.shield.ips[ip] || { score: 0, hits: 0, blocked: false, annihilated: false, last: nowISO(), kind };
+  const rec = db.shield.ips[ip] || { score: 0, hits: 0, blocked: false, annihilated: false,
+    firstSeen: nowISO(), last: nowISO(), kind, bloqueCount: 0, serieux: 0 };
+  shieldDecay(rec);
   rec.hits += 1;
-  rec.score += score;
+  rec.score = Math.round(((Number(rec.score) || 0) + score) * 100) / 100;
+  rec.scoreAt = Date.now();
   rec.last = nowISO();
   rec.kind = kind;
-  let action = 'veille';
+  const grave = score >= SHIELD_SERIEUX;                      // vraie attaque / abus
+  if (grave) rec.serieux = (Number(rec.serieux) || 0) + 1;
+  let action = 'veille', minutes = 0;
   if (rec.annihilated) action = 'aneanti';
-  else if (rec.score >= 50) { rec.blocked = true; action = 'auto-recale'; }
+  else if (rec.blocked) action = 'deja-bloque';
+  else if (grave && rec.serieux >= 2 && rec.score >= 50) {
+    /* ⚠️ deux signaux graves au moins, et JAMAIS sur une adresse partagée ou la machine elle-même */
+    /* une adresse PARTAGÉE n'est jamais bloquée automatiquement… sauf si le PDG l'a explicitement demandé */
+    if (ipPartagee(ip) && !(db.config && db.config.shieldPartagees)) action = 'surveille';
+    else {
+      minutes = SHIELD_DUREES[Math.min(Number(rec.bloqueCount) || 0, SHIELD_DUREES.length - 1)];
+      db.shield.ips[ip] = rec;
+      shieldBloquer(ip, kind, minutes, 'auto');
+      action = 'auto-blocage';
+    }
+  }
   db.shield.ips[ip] = rec;
-  db.shield.events.unshift({ id: uid('SH'), at: nowISO(), ip, kind, path: String(path || '').slice(0, 180), detail: String(detail || '').slice(0, 160), score: rec.score, action });
+  db.shield.events.unshift({ id: uid('SH'), at: nowISO(), ip, kind, path: String(path || '').slice(0, 180),
+    detail: String(detail || '').slice(0, 160), score: rec.score, action,
+    raison: SHIELD_MOTIFS[kind] || 'comportement suspect', minutes: minutes || (rec.blocked ? (rec.blockMinutes || 0) : 0) });
   if (db.shield.events.length > 250) db.shield.events = db.shield.events.slice(0, 250);
-  if (action !== 'veille') try { saveDb(); } catch (e) {}
+  if (action !== 'veille' && action !== 'surveille') try { saveDb(); } catch (e) {}
   return rec;
+}
+/* 🚫 BLOQUER — toujours AVEC une durée et une raison écrites (jamais d'IP « recalée » muette). */
+function shieldBloquer(ip, kind, minutes, par) {
+  shieldEnsure();
+  const rec = db.shield.ips[ip] || (db.shield.ips[ip] = { score: 0, hits: 0, firstSeen: nowISO(), serieux: 0, bloqueCount: 0 });
+  const duree = Math.max(1, Math.min(43200, parseInt(minutes, 10) || SHIELD_DUREES[0]));
+  rec.blocked = true;
+  rec.annihilated = !!rec.annihilated && par !== 'debloque';
+  rec.blockBy = par === 'pdg' ? 'pdg' : 'auto';
+  rec.blockKind = kind || rec.blockKind || 'scan';
+  rec.blockReason = SHIELD_MOTIFS[rec.blockKind] || 'comportement suspect';
+  rec.blockedAt = nowISO();
+  rec.blockMinutes = duree;
+  rec.blockedUntil = new Date(Date.now() + duree * 60000).toISOString();
+  if (par !== 'pdg-aneanti') rec.bloqueCount = (Number(rec.bloqueCount) || 0) + 1;
+  rec.last = nowISO();
+  db.shield.ips[ip] = rec;
+  try { shieldKickIp(ip); } catch (e) {}
+  try { saveDb(); } catch (e) {}
+  /* 🔔 le PDG voit le blocage arriver en direct dans ses alertes (avec la raison et la durée) */
+  if (par === 'auto') { try { emitAdmin('bouclier', '🛡️ Adresse ' + ip + ' bloquée ' + duree + ' min — ' + rec.blockReason); } catch (e) {} }
+  return rec;
+}
+/* ⏰ L'ÉTAT RÉEL D'UNE IP — un blocage temporaire se lève TOUT SEUL quand sa durée est passée. */
+function shieldEtat(ip) {
+  shieldEnsure();
+  const rec = db.shield.ips[ip];
+  if (!rec) return null;
+  if (rec.blocked && !rec.annihilated && rec.blockedUntil && Date.parse(rec.blockedUntil) <= Date.now()) {
+    rec.blocked = false;
+    rec.last = nowISO();
+    db.shield.events.unshift({ id: uid('SH'), at: nowISO(), ip, kind: 'fin-blocage', path: '/',
+      detail: 'durée écoulée (' + (rec.blockMinutes || 0) + ' min) — adresse de nouveau autorisée',
+      score: rec.score || 0, action: 'debloque', raison: 'durée de blocage écoulée', minutes: 0 });
+    if (db.shield.events.length > 250) db.shield.events = db.shield.events.slice(0, 250);
+    try { saveDb(); } catch (e) {}
+  }
+  return rec;
+}
+function shieldBloque(ip) { const r = shieldEtat(ip); return !!(r && (r.annihilated || r.blocked)); }
+function shieldResteMin(rec) {
+  if (!rec || !rec.blocked || !rec.blockedUntil) return 0;
+  return Math.max(0, Math.ceil((Date.parse(rec.blockedUntil) - Date.now()) / 60000));
 }
 function viewsOrdered(map) {
   const rows = [];
@@ -2650,19 +2769,27 @@ function shieldKickIp(ip) {
     }
   }
 }
+/* 🚪 LE PASSAGE OBLIGÉ DE TOUTE REQUÊTE : c'est ici que le bouclier décide — et il dit POURQUOI. */
 function shieldGate(req, res, p) {
   const ip = clientIp(req);
   req._ip = ip;
-  shieldEnsure();
-  const rec = db.shield.ips[ip];
+  const rec = shieldEtat(ip);
   const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
-  if (rec && rec.annihilated && !(hq && hq.role === 'pdg')) {
-    sendJson(res, 403, { error: 'Accès anéanti par le PDG' });
-    return true;
-  }
-  if (rec && rec.blocked && !(hq && hq.role === 'pdg')) {
-    sendJson(res, 403, { error: 'IP recalée par le bouclier KLEAN' });
-    return true;
+  const estPdg = !!(hq && hq.role === 'pdg');
+  /* 🚫 une IP bloquée reçoit la raison ET le temps restant (le PDG peut toujours passer) */
+  if (rec && !estPdg) {
+    if (rec.annihilated)
+      return (sendJson(res, 403, { ok: false, code: 'bouclier', error: 'Accès coupé par le PDG (décision définitive)',
+        raison: SHIELD_MOTIFS['pdg-aneanti'], par: 'PDG', definitive: true }), true);
+    if (rec.blocked) {
+      const reste = shieldResteMin(rec);
+      try { res.setHeader('Retry-After', String(Math.max(1, reste) * 60)); } catch (e) {}
+      return (sendJson(res, 403, { ok: false, code: 'bouclier',
+        error: 'Accès temporairement bloqué (' + reste + ' min) — ' + (rec.blockReason || 'comportement suspect'),
+        raison: rec.blockReason || 'comportement suspect', resteMin: reste, fin: rec.blockedUntil,
+        par: rec.blockBy === 'pdg' ? 'PDG' : 'automatique',
+        aide: 'Ce blocage se lève tout seul à la fin du temps indiqué. Si c’est une erreur : « Contactez Klean-Service ».' }), true);
+    }
   }
   if (_SCAN.test(p) || _SCAN.test(req.url || '')) {
     shieldLog(ip, 'scan', p, 'sonde (cms/env/git)', 28);
@@ -2671,19 +2798,31 @@ function shieldGate(req, res, p) {
   }
   if (_INJECT.test(req.url || '')) {
     const r2 = shieldLog(ip, 'injection', p, 'charge dans l’URL', 22);
-    if (r2.blocked && !(hq && hq.role === 'pdg')) {
-      sendJson(res, 403, { error: 'IP recalée' });
+    if (r2.blocked && !estPdg && !r2.annihilated) {
+      const reste = shieldResteMin(r2);
+      sendJson(res, 403, { ok: false, code: 'bouclier', error: 'Accès temporairement bloqué (' + reste + ' min) — ' + r2.blockReason,
+        raison: r2.blockReason, resteMin: reste, fin: r2.blockedUntil, par: 'automatique' });
       return true;
     }
   }
+  /* 🚦 TROP DE REQUÊTES : on RALENTIT d'abord (le client réessaie), on ne bloque pas d'emblée.
+     Le blocage temporaire n'arrive que si la rafale continue (3 fois de suite). */
   const now = Date.now();
   const h = _hitMap.get(ip) || { t: now, n: 0 };
   if (now - h.t > 10000) { h.t = now; h.n = 0; }
   h.n += 1;
   _hitMap.set(ip, h);
   if (h.n > 160) {
-    shieldLog(ip, 'flood', p, h.n + ' req / 10 s', 18);
-    sendJson(res, 429, { error: 'Trop de requêtes' });
+    const rec2 = shieldLog(ip, 'flood', p, h.n + ' req / 10 s', 18);
+    const reste = rec2.blocked ? shieldResteMin(rec2) : 0;
+    try { res.setHeader('Retry-After', '10'); } catch (e) {}
+    sendJson(res, 429, { ok: false, code: rec2.blocked ? 'bouclier' : 'limite',
+      error: rec2.blocked
+        ? ('Accès temporairement bloqué (' + reste + ' min) — ' + rec2.blockReason)
+        : ('Trop de requêtes : ' + h.n + ' en 10 secondes — patientez un instant'),
+      raison: rec2.blocked ? rec2.blockReason : 'trop de requêtes en quelques secondes',
+      resteMin: reste, fin: rec2.blocked ? rec2.blockedUntil : null,
+      par: rec2.blocked ? 'automatique' : '' });
     return true;
   }
   return false;
@@ -7687,31 +7826,78 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/admin/shield' && req.method === 'GET') {
     if (!pdgOnly(req, res)) return;
     shieldEnsure();
-    const ips = Object.keys(db.shield.ips).map(ip => Object.assign({ ip }, db.shield.ips[ip]));
-    ips.sort((a, b) => (b.score || 0) - (a.score || 0));
+    /* 🗣️ le PDG voit, POUR CHAQUE IP : l'état en clair, la RAISON, la DURÉE et le temps restant.
+       Un blocage temporaire dont la durée est écoulée est déjà rouvert (shieldEtat). */
+    const ips = Object.keys(db.shield.ips).map(ip => {
+      const r = shieldEtat(ip) || {};
+      const resteMin = shieldResteMin(r);
+      const etat = r.annihilated ? 'aneanti' : (r.blocked ? (r.blockBy === 'pdg' ? 'bloque-pdg' : 'bloque-auto')
+        : ((Number(r.serieux) || 0) > 0 ? 'surveille' : 'normale'));
+      const etatTxt = {
+        aneanti: '⛔ Anéantie — décision du PDG, sans limite de temps',
+        'bloque-pdg': '🚫 Bloquée par vous (PDG)' + (r.blockedUntil ? (' — ' + (r.blockMinutes || 0) + ' min') : ' — sans limite'),
+        'bloque-auto': '⏸️ Bloquée automatiquement (' + (r.blockMinutes || 0) + ' min)',
+        surveille: '👁️ Surveillée — aucune restriction en cours',
+        normale: '✅ Normale — autorisée'
+      }[etat];
+      const raisonTxt = r.annihilated ? SHIELD_MOTIFS['pdg-aneanti']
+        : r.blocked ? (SHIELD_MOTIFS[r.blockKind] || r.blockReason || 'comportement suspect')
+          : ((Number(r.serieux) || 0) > 0
+            ? ((SHIELD_MOTIFS[r.kind] || 'signalement passé') + ' — surveillance seulement, cette adresse n’est PAS bloquée'
+              + (ipPartagee(ip) ? ' · adresse partagée (cybercafé, hôtel, entreprise, réseau local) : jamais bloquée pour cette raison' : ''))
+            : 'aucune raison de bloquer (erreurs normales de clients ne comptent pas)');
+      const finTxt = r.blocked && r.blockedUntil ? ('se termine ' + r.blockedUntil.slice(11, 16) + ' UTC') : '';
+      return Object.assign({ ip, etat, etatTxt, raisonTxt, resteMin, finTxt,
+        dureeTxt: resteMin ? (resteMin + ' min restantes') : (r.blocked ? 'sans limite (PDG)' : '—'),
+        partagee: ipPartagee(ip) }, r);
+    });
+    const rang = { 'bloque-auto': 0, 'bloque-pdg': 1, aneanti: 2, surveille: 3, normale: 4 };
+    ips.sort((a, b) => (rang[a.etat] - rang[b.etat]) || ((b.score || 0) - (a.score || 0)));
+    const nBloquees = ips.filter(x => (x.etat === 'bloque-auto' || x.etat === 'bloque-pdg')).length;
+    const nSurv = ips.filter(x => x.etat === 'surveille').length;
     return sendJson(res, 200, {
       ok: true,
       events: db.shield.events.slice(0, 80),
       ips: ips.slice(0, 80),
-      nBlocked: ips.filter(x => x.blocked && !x.annihilated).length,
-      nAneanti: ips.filter(x => x.annihilated).length,
-      nEvents: db.shield.events.length
+      nBlocked: nBloquees,
+      nAneanti: ips.filter(x => x.etat === 'aneanti').length,
+      nEvents: db.shield.events.length,
+      nSurveillees: nSurv,
+      durees: SHIELD_DUREES,
+      bloquerPartagees: !!(db.config && db.config.shieldPartagees),
+      regle: 'Une adresse inconnue ou partagée n’est jamais bloquée pour cette seule raison. Les erreurs normales des clients (code inconnu, fiche inexistante) ne comptent pas. Seuls un sondage de fichiers réservés, une tentative d’injection ou une rafale de requêtes déclenchent un blocage — toujours temporaire (15 min, puis 1 h, 6 h, 24 h au maximum) et toujours expliqué ici.',
+      resume: nBloquees ? (nBloquees + ' adresse(s) bloquée(s) temporairement' + (nSurv ? (' · ' + nSurv + ' surveillée(s) sans restriction') : ''))
+        : (nSurv ? ('Aucune adresse bloquée · ' + nSurv + ' surveillée(s) sans restriction') : 'Aucune adresse bloquée — tout le monde passe normalement')
     });
+  }
+  /* 🚫 LE PDG BLOQUE UNE ADRESSE : avec une DURÉE (minutes, plafond 24 h) — jamais un blocage muet.
+     Il peut aussi viser une adresse encore inconnue du bouclier (elle est créée avec sa raison). */
+  /* ⚙️ RÉGLAGE DU PDG : bloquer AUSSI les adresses partagées (cybercafé, hôtel, réseau mobile).
+     Par défaut : NON — bloquer une adresse partagée punirait des inconnus honnêtes. */
+  if (p === '/api/admin/shield/regle' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const b = await readBody(req);
+    db.config = db.config || {};
+    db.config.shieldPartagees = !!b.bloquerPartagees;
+    saveDb();
+    auditLog('shield_regle', { bloquerPartagees: db.config.shieldPartagees, par: 'PDG' });
+    return sendJson(res, 200, { ok: true, bloquerPartagees: db.config.shieldPartagees,
+      message: db.config.shieldPartagees
+        ? 'Le bouclier bloque maintenant aussi les adresses partagées (déconseillé)'
+        : 'Les adresses partagées ne sont plus jamais bloquées automatiquement (règle normale)' });
   }
   if (p === '/api/admin/shield/recaler' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
     const b = await readBody(req);
     const ip = String(b.ip || '').slice(0, 64);
     shieldEnsure();
-    if (!ip || !db.shield.ips[ip]) return sendJson(res, 404, { error: 'IP inconnue' });
-    db.shield.ips[ip].blocked = true;
-    db.shield.ips[ip].annihilated = false;
-    db.shield.ips[ip].last = nowISO();
-    shieldLog(ip, 'pdg-recale', '/hq', 'PDG a recalé', 0);
-    shieldKickIp(ip);
-    saveDb();
-    auditLog('shield_recale', { ip, par: 'PDG' });
-    return sendJson(res, 200, { ok: true });
+    if (!ip) return sendJson(res, 400, { error: 'Adresse IP requise' });
+    const minutes = Math.max(1, Math.min(1440, parseInt(b.minutes, 10) || 60));
+    const rec = shieldBloquer(ip, 'pdg-recale', minutes, 'pdg');
+    rec.annihilated = false;
+    shieldLog(ip, 'pdg-recale', '/hq', 'PDG a bloqué ' + minutes + ' min', 0);
+    auditLog('shield_recale', { ip, par: 'PDG', minutes });
+    return sendJson(res, 200, { ok: true, ip, minutes, jusqua: rec.blockedUntil, raison: rec.blockReason });
   }
   if (p === '/api/admin/shield/aneantir' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
@@ -7720,7 +7906,9 @@ const server = http.createServer(async (req, res) => {
     shieldEnsure();
     if (!ip) return sendJson(res, 400, { error: 'IP requise' });
     const prev = db.shield.ips[ip] || { score: 0, hits: 0 };
-    db.shield.ips[ip] = Object.assign(prev, { blocked: true, annihilated: true, last: nowISO(), kind: 'pdg-aneanti' });
+    db.shield.ips[ip] = Object.assign(prev, { blocked: true, annihilated: true, last: nowISO(), kind: 'pdg-aneanti',
+      blockBy: 'pdg', blockKind: 'pdg-aneanti', blockReason: SHIELD_MOTIFS['pdg-aneanti'],
+      blockedAt: nowISO(), blockMinutes: 0, blockedUntil: '' });
     shieldLog(ip, 'pdg-aneanti', '/hq', 'PDG a anéanti', 0);
     shieldKickIp(ip);
     saveDb();
@@ -7732,15 +7920,23 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const ip = String(b.ip || '').slice(0, 64);
     shieldEnsure();
-    if (!ip || !db.shield.ips[ip]) return sendJson(res, 404, { error: 'IP inconnue' });
+    if (!ip) return sendJson(res, 400, { error: 'Adresse IP requise' });
+    shieldEnsure();
+    if (!db.shield.ips[ip]) db.shield.ips[ip] = { score: 0, hits: 0, firstSeen: nowISO() };
     db.shield.ips[ip].blocked = false;
     db.shield.ips[ip].annihilated = false;
     db.shield.ips[ip].score = 0;
+    db.shield.ips[ip].serieux = 0;
+    db.shield.ips[ip].bloqueCount = 0;
+    db.shield.ips[ip].blockBy = '';
+    db.shield.ips[ip].blockedUntil = '';
+    db.shield.ips[ip].blockReason = '';
+    db.shield.ips[ip].legacyReouvert = false;
     db.shield.ips[ip].last = nowISO();
-    shieldLog(ip, 'pdg-pardon', '/hq', 'PDG a gracié', 0);
+    shieldLog(ip, 'pdg-pardon', '/hq', 'PDG a rétabli l’adresse', 0);
     saveDb();
     auditLog('shield_pardon', { ip, par: 'PDG' });
-    return sendJson(res, 200, { ok: true });
+    return sendJson(res, 200, { ok: true, ip, etat: 'normale' });
   }
 
   if (p === '/api/field/login' && req.method === 'POST') {
@@ -8108,8 +8304,8 @@ server.on('upgrade', (req, sock) => {
   if (!req.url.startsWith('/ws')) { sock.end(); return; }
   try {
     const ip0 = clientIp(req);
-    const rec0 = db.shield && db.shield.ips && db.shield.ips[ip0];
-    if (rec0 && (rec0.annihilated || rec0.blocked)) { sock.end(); return; }
+    /* 🛡️ même règle que pour les requêtes : état RÉEL (un blocage temporaire expiré est déjà rouvert) */
+    if (shieldBloque(ip0)) { sock.end(); return; }
   } catch (e) {}
   const key = req.headers['sec-websocket-key'];
   const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
