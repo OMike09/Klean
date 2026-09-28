@@ -1167,6 +1167,82 @@
       <div id="jt-corps"></div>
     </div>
   </div>
+  <!-- ═══ 🧩 29/09 (lot 123) — LES GRANDES OPTIONS DE LA PAGE D'ACCUEIL ═══ -->
+  <div class="panel" style="margin-bottom:14px" id="panel-accueil">
+    <h3>🧩 Options de la page d’accueil <span class="cnt" id="oa-cnt">—</span></h3>
+    <p class="sub">Chaque grande option de l’accueil (la recherche, les raccourcis, <b>et les deux
+      nouvelles options du bas</b>) : vous décidez si elle est <b>activée</b>, <b>visible</b>, dans quel
+      <b>ordre</b>, et vous voyez son <b>état réel</b> tel que les téléphones le rapportent.
+      Une option désactivée n’apparaît jamais comme un bouton cassé : l’application annonce clairement
+      son état.</p>
+    <div class="body" style="padding:12px 14px">
+      <div id="oa-resume" style="font-size:13px;font-weight:800;margin:0 0 10px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px">
+        <button type="button" class="btn-soft" onclick="oaCharge()">🔄 Rafraîchir l’état</button>
+        <button type="button" class="btn-soft" onclick="oaOrdre('')">🛰️ Actualiser les écrans ouverts</button>
+        <button type="button" class="btn-main" onclick="oaReparer('')">🔧 Réparer / reconnecter tout</button>
+        <button type="button" class="btn-soft" onclick="oaReset('')">♻️ Réinitialiser toutes les options</button>
+      </div>
+      <div id="oa-surveillance"></div>
+      <div id="oa-liste"></div>
+      <div id="oa-journal"></div>
+    </div>
+  </div>
+
+  <!-- ═══ 💼 29/09 (lot 123) — LES OFFRES DE TRAVAIL (option « Je cherche un job près de moi ») ═══ -->
+  <div class="panel" style="margin-bottom:14px" id="panel-jobs">
+    <h3>💼 Jobs &amp; offres de travail <span class="cnt" id="oj-cnt">—</span></h3>
+    <p class="sub">Les offres publiées ici apparaissent <b>immédiatement</b> dans « 🔎 Je cherche un job
+      près de moi » sur la page d’accueil, à côté des demandes de clients encore libres.
+      Les candidatures reçues arrivent en dessous, avec le téléphone du candidat.</p>
+    <div class="body" style="padding:12px 14px">
+      <b style="font-size:14.5px">➕ Publier une offre</b>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
+        <input id="oj-titre" placeholder="Titre (ex. Plombier pour chantier)" style="flex:2;min-width:220px;padding:10px;border-radius:11px;border:1.5px solid var(--line);font:inherit">
+        <input id="oj-metier" placeholder="Métier (ex. plomberie)" style="flex:1;min-width:150px;padding:10px;border-radius:11px;border:1.5px solid var(--line);font:inherit">
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <input id="oj-ville" placeholder="Ville (obligatoire)" style="flex:1;min-width:150px;padding:10px;border-radius:11px;border:1.5px solid var(--line);font:inherit">
+        <input id="oj-quartier" placeholder="Quartier" style="flex:1;min-width:150px;padding:10px;border-radius:11px;border:1.5px solid var(--line);font:inherit">
+        <input id="oj-quand" placeholder="Quand (ex. cette semaine)" style="flex:1;min-width:150px;padding:10px;border-radius:11px;border:1.5px solid var(--line);font:inherit">
+        <input id="oj-prix" placeholder="Prix (ex. 45 000 F)" style="flex:1;min-width:130px;padding:10px;border-radius:11px;border:1.5px solid var(--line);font:inherit">
+      </div>
+      <textarea id="oj-desc" placeholder="Description du travail attendu" style="width:100%;box-sizing:border-box;margin-top:8px;min-height:70px;padding:10px;border-radius:11px;border:1.5px solid var(--line);font:inherit"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <input id="oj-contact" placeholder="Qui contacter (nom)" style="flex:1;min-width:160px;padding:10px;border-radius:11px;border:1.5px solid var(--line);font:inherit">
+        <input id="oj-tel" placeholder="Téléphone" style="flex:1;min-width:150px;padding:10px;border-radius:11px;border:1.5px solid var(--line);font:inherit">
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:9px;font-size:13px;font-weight:700">
+        <label style="display:flex;gap:7px;align-items:center"><input id="oj-telpub" type="checkbox" style="width:18px;height:18px"> Afficher le téléphone publiquement</label>
+        <label style="display:flex;gap:7px;align-items:center"><input id="oj-urgent" type="checkbox" style="width:18px;height:18px"> Urgent</label>
+      </div>
+      <button type="button" class="btn-main" id="oj-publier" style="margin-top:10px" onclick="oaOffreCreer()">📢 Publier l’offre</button>
+      <div style="margin-top:14px"><b style="font-size:14.5px">📋 Offres publiées</b><div id="oj-liste" style="margin-top:8px"></div></div>
+      <div style="margin-top:14px"><b style="font-size:14.5px">📨 Candidatures reçues</b><div id="oj-cand" style="margin-top:8px"></div></div>
+    </div>
+  </div>
+
+  <!-- ═══ 📢 29/09 (lot 123) — LES AVIS DE RECHERCHE ═══ -->
+  <div class="panel" style="margin-bottom:14px" id="panel-avis">
+    <h3>📢 Avis de recherche <span class="cnt" id="ov-cnt">—</span></h3>
+    <p class="sub">Personnes disparues et objets recherchés publiés par les utilisateurs.
+      Vous pouvez <b>publier</b>, <b>suspendre</b>, <b>retirer</b>, marquer <b>retrouvé</b>, <b>vérifier</b>
+      ou <b>supprimer</b> un avis. ⚠️ Publier une fausse alerte est puni par la loi : gardez ce pouvoir
+      de retrait à portée de main.</p>
+    <div class="body" style="padding:12px 14px">
+      <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <label style="font-size:13px;font-weight:800">Publication des nouveaux avis :</label>
+        <select id="ov-mod" onchange="oaAvisModeration()" style="padding:9px;border-radius:11px;border:1.5px solid var(--line);font:inherit">
+          <option value="auto">Immédiate (recommandé pour une urgence)</option>
+          <option value="avant">Après ma validation</option>
+        </select>
+        <button type="button" class="btn-soft" onclick="oaAvisCharge()">🔄 Rafraîchir</button>
+      </div>
+      <div id="ov-stats"></div>
+      <div id="ov-liste"></div>
+    </div>
+  </div>
+
   <div class="panel" style="margin-bottom:14px" id="panel-freeze">
     <h3>⛔ Bloquer l’entreprise</h3>
     <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Action de <b>modération la plus forte</b> : tout Klean passe en lecture seule — plus aucune écriture (missions, comptes, paiements, chat) sauf la vôtre. À utiliser en cas d’attaque, de bug grave ou de fuite de données.</p>
@@ -1711,6 +1787,7 @@ const HQ_MENU = [
   { g:'🏠 Tableau de bord', items:[
     ['panel-home','🏠 Vue générale','résumé chiffres clients pros revenus paiements alertes à traiter aujourd hui'],
     ['panel-search','🔎 Recherche rapide','chercher nom téléphone mission compte code client pro'],
+    ['panel-accueil','🧩 Options de la page d’accueil','activer désactiver actualiser réparer reconnecter surveiller état bouton accueil visibilité ordre'],
     ['kpis','📊 Vue en direct','pros en ligne missions du jour chiffre commission direct kpi']
   ]},
   { g:'👥 Utilisateurs', items:[
@@ -1746,6 +1823,8 @@ const HQ_MENU = [
   ]},
   { g:'📣 Communication', items:[
     ['panel-ann','📣 Affiche aux utilisateurs','bandeau message annonce défilant accueil'],
+    ['panel-avis','📢 Avis de recherche','avis recherche personne disparue objet perdu publier modérer retrouvé'],
+    ['panel-jobs','💼 Jobs & offres de travail','job travail offre mission candidature recrutement'],
     ['panel-ads','📢 Publicité sur l’accueil','image vidéo fond vert aperçu publier'],
     ['panel-field-inbox','🧭 Messages agents de terrain','recenseurs répondre fil terrain'],
     ['panel-support','💬 Support & messages','conversations clients pros assistance'],
@@ -1782,12 +1861,12 @@ HQ_MENU.forEach(g => g.items.forEach(it => { if(!HQ_GO.some(x => x[0] === it[0] 
 /* ordre d'affichage du tableau de bord (du plus utile au plus rare) */
 /* ⚠️ l'ordre physique doit suivre les catégories du menu, sinon une catégorie apparaîtrait deux fois :
    les « Revenus » (panel-ca7) sont rangés avec les Paiements & finances, leur vraie catégorie. */
-const HQ_ORDER = ['panel-home','panel-search','kpis','substrip',
+const HQ_ORDER = ['panel-home','panel-search','panel-accueil','kpis','substrip',
   'people','panel-online-cli','panel-pros','panel-cands','panel-team','panel-roles',
   'panel-svc-browse','panel-svc-create','panel-catnat','panel-tarif','panel-marche','panel-villes','panel-match',
   'panel-missions','panel-quotes','panel-litiges',
   'panel-ca7','panel-pay','panel-paydest',
-  'panel-ann','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
+  'panel-ann','panel-avis','panel-jobs','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
   'panel-flip','panel-quizbank','panel-jeux','panel-promo',
   'panel-urgences','panel-demande-comptes','panel-trash','panel-shield','panel-audit','panel-sauvegardes',
   'panel-entreprise','panel-cfg','panel-vitesse','panel-rel','panel-conditions','panel-justif','panel-freeze'];   /* 🤝 Mise en relation, 📜 Conditions AVANT le blocage (le blocage reste le dernier, règle du PDG) */
@@ -3254,6 +3333,9 @@ function jumpPanel(id){
     if(id==='panel-vitesse' || id==='panel-cfg'){ try{ loadJeux(); }catch(e){} }
     if(id==='panel-vitesse'){ try{ loadJeux(); paintVitesses(); }catch(e){} }
     if(id==='panel-justif'){ try{ jtCharge(); }catch(e){} }        /* 🪚 lot 122 : justificatifs professionnels et identités */
+    if(id==='panel-accueil'){ try{ oaCharge(); }catch(e){} }       /* 🧩 lot 123 : les grandes options de l'accueil */
+    if(id==='panel-jobs'){ try{ oaJobsCharge(); }catch(e){} }      /* 💼 lot 123 : offres de travail et candidatures */
+    if(id==='panel-avis'){ try{ oaAvisCharge(); }catch(e){} }      /* 📢 lot 123 : avis de recherche */
   }catch(e){}
 }
 async function runSearchHQ(){
@@ -7111,6 +7193,378 @@ async function ugStatut(id, statut){
    vérifier les identités en doublon.
    Aucun document n'est téléchargeable publiquement : tout passe par la session PDG.
    ═══════════════════════════════════════════════════════════════════════════════ */
+/* ═══ 🧩 29/09 — LOT 123 (tableau de bord) : options de la page d'accueil, jobs, avis ═══ */
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   🧩 29/09 — LOT 123 (tableau de bord) : « Options de la page d'accueil »
+   Le PDG contrôle : activer · désactiver · actualiser · réparer · visibilité · ordre ·
+   paramètres · état actuel — pour CHAQUE grande option, sans jamais toucher au code.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+let OA = { ok: false, options: [], journal: [], rapports: [], ordres: [], resume: {}, stats: {}, pdg: false, etats: {} };
+let OAJOBS = { ok: false, offres: [], candidatures: [], stats: {}, pdg: false };
+let OAAVIS = { ok: false, avis: [], stats: {}, moderation: 'auto', pdg: false };
+
+async function oaCharge() {
+  try {
+    const d = await fetch('/api/admin/accueil', { cache: 'no-store' }).then(r => r.json());
+    if (!d || !d.ok) return;
+    OA = Object.assign(OA, d, { ok: true });
+    const c = document.getElementById('oa-cnt');
+    if (c) c.textContent = OA.resume.total + ' option(s) · ' + OA.resume.actives + ' active(s)'
+      + (OA.resume.enPanne ? ' · ' + OA.resume.enPanne + ' en panne' : '')
+      + (OA.resume.aVerifier ? ' · ' + OA.resume.aVerifier + ' à vérifier' : '');
+    oaPeint();
+  } catch (e) { }
+}
+window.oaCharge = oaCharge;
+
+function oaCouleur(etat) {
+  return etat === 'panne' ? '#e5484d' : etat === 'attention' ? '#b45309' : etat === 'off' ? '#6b7280' :
+    etat === 'ok' ? '#0d7a5f' : '#6b7280';
+}
+function oaFond(etat) {
+  return etat === 'panne' ? '#fdecec' : etat === 'attention' ? '#FFF7ED' : etat === 'off' ? '#f3f4f6' :
+    etat === 'ok' ? '#e9f7ef' : '#f3f4f6';
+}
+function oaQuand(t) {
+  if (!t) return 'jamais';
+  try {
+    const d = new Date(t), n = Date.now() - d.getTime();
+    if (n < 60000) return 'à l’instant';
+    if (n < 3600000) return 'il y a ' + Math.round(n / 60000) + ' min';
+    if (n < 86400000) return 'il y a ' + Math.round(n / 3600000) + ' h';
+    return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  } catch (e) { return t; }
+}
+/* 🔒 seul le PDG modifie les réglages globaux : les autres administrateurs consultent l'état.
+   (Le serveur refuse de toute façon, mais l'écran le dit AVANT — aucun bouton inutile.) */
+function oaPeint() {
+  /* ① la zone de SURVEILLANCE */
+  const sv = document.getElementById('oa-surveillance');
+  if (sv) {
+    const parEtat = { ok: 0, attention: 0, panne: 0, off: 0, inconnu: 0 };
+    OA.options.forEach(o => { parEtat[o.etat] = (parEtat[o.etat] || 0) + 1; });
+    const probs = OA.options.filter(o => o.etat === 'panne' || o.etat === 'attention');
+    sv.innerHTML = '<div style="border:1.5px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px">'
+      + '<b style="font-size:14.5px">🩺 Surveillance des fonctions</b>'
+      + '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px;font-size:12.5px;font-weight:900">'
+      + '<span style="background:#e9f7ef;color:#0d7a5f;padding:6px 10px;border-radius:99px">🟢 Fonctionnelle : ' + parEtat.ok + '</span>'
+      + '<span style="background:#FFF7ED;color:#b45309;padding:6px 10px;border-radius:99px">🟠 À vérifier : ' + parEtat.attention + '</span>'
+      + '<span style="background:#fdecec;color:#e5484d;padding:6px 10px;border-radius:99px">🔴 Problème détecté : ' + parEtat.panne + '</span>'
+      + '<span style="background:#f3f4f6;color:#6b7280;padding:6px 10px;border-radius:99px">⚪ Désactivée volontairement : ' + parEtat.off + '</span>'
+      + '</div>'
+      + (probs.length ? probs.map(o => '<div style="margin-top:9px;background:' + oaFond(o.etat) + ';border-radius:12px;padding:10px">'
+        + '<b style="color:' + oaCouleur(o.etat) + '">' + (o.icone || '') + ' ' + o.titre + ' — ' + (OA.etats[o.etat] || o.etat) + '</b>'
+        + '<div style="font-size:12.5px;margin-top:4px">' + (o.message || '') + '</div>'
+        + '<div style="font-size:11.5px;color:var(--muted);margin-top:4px">dernier contrôle : ' + oaQuand(o.controleAt) + (o.appareil ? ' · ' + o.appareil : '') + '</div>'
+        + '<button type="button" class="btn-soft" style="margin-top:7px" onclick="oaReparer(\'' + o.id + '\')">🔧 Réparer / reconnecter</button>'
+        + '</div>').join('')
+        : '<div style="font-size:13px;color:#0d7a5f;margin-top:9px">✅ Aucun problème détecté sur les grandes options.</div>')
+      /* les réparations rapportées par les téléphones */
+      + (OA.rapports && OA.rapports.length ? '<div style="margin-top:10px;font-size:12.5px"><b>Dernières réparations :</b>'
+        + OA.rapports.slice(0, 3).map(r => '<div style="margin-top:5px;color:' + (r.ok ? '#0d7a5f' : '#b45309') + '">' + (r.ok ? '✅' : '⚠️') + ' ' + oaQuand(r.at)
+          + (r.reussies && r.reussies.length ? ' — ' + r.reussies.join(' · ') : '') + (r.echecs && r.echecs.length ? ' — échecs : ' + r.echecs.join(' · ') : '') + '</div>').join('') + '</div>' : '')
+      + (OA.ordres && OA.ordres.length ? '<div style="margin-top:9px;font-size:12px;color:var(--muted)">Dernier ordre envoyé : ' + OA.ordres[0].action + ' — ' + oaQuand(OA.ordres[0].at) + '</div>' : '')
+      + '</div>';
+  }
+  /* ② la liste des grandes options avec tous les gestes */
+  const L = document.getElementById('oa-liste');
+  if (L) {
+    L.innerHTML = OA.options.map(o => {
+      const off = !o.actif;
+      return '<div id="oa-' + o.id + '" style="border:1.5px solid var(--line);border-radius:14px;padding:11px;margin-bottom:9px;background:' + (off ? '#fafafa' : '#fff') + '">'
+        + '<div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">'
+        + '  <b style="font-size:15px;flex:1;min-width:180px">' + (o.icone || '') + ' ' + o.titre
+        + (o.essentielle ? ' <span style="font-size:11px;font-weight:900;background:#eef6ff;color:#1d4ed8;padding:2px 7px;border-radius:99px">essentielle</span>' : '')
+        + (o.grande ? ' <span style="font-size:11px;font-weight:900;background:#FFF1E6;color:#b45309;padding:2px 7px;border-radius:99px">en bas de l’accueil</span>' : '')
+        + '</b>'
+        + '  <span style="font-size:12px;font-weight:900;padding:5px 10px;border-radius:99px;background:' + oaFond(o.etat) + ';color:' + oaCouleur(o.etat) + '">' + (OA.etats[o.etat] || o.etat) + '</span>'
+        + '</div>'
+        + '<div style="font-size:12.5px;color:var(--muted);margin-top:5px">' + (o.ou || '') + ' · ' + (o.sous || '') + '</div>'
+        + (o.message ? '<div style="font-size:12px;margin-top:4px;color:' + oaCouleur(o.etat) + '">' + o.message + '</div>' : '')
+        + '<div style="font-size:11.5px;color:var(--muted);margin-top:4px">état : ' + (o.actif ? 'ACTIVÉE' : 'DÉSACTIVÉE') + ' · ' + (o.visible ? 'visible sur l’accueil' : 'masquée') + ' · ordre ' + o.ordre
+        + ' · dernier contrôle : ' + oaQuand(o.controleAt) + '</div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">'
+        + (OA.pdg ? (o.actif
+          ? '<button type="button" class="btn-soft" onclick="oaAction(\'' + o.id + '\',\'desactiver\')">⏸️ DÉSACTIVER</button>'
+          : '<button type="button" class="btn-main" onclick="oaAction(\'' + o.id + '\',\'activer\')">✅ ACTIVER</button>') : '')
+        + '<button type="button" class="btn-soft" onclick="oaOrdre(\'' + o.id + '\')">🔄 ACTUALISER</button>'
+        + '<button type="button" class="btn-soft" onclick="oaReparer(\'' + o.id + '\')">🔧 RÉPARER</button>'
+        + (OA.pdg ? ((o.visible
+          ? '<button type="button" class="btn-soft" onclick="oaAction(\'' + o.id + '\',\'masquer\')">🙈 Masquer de l’accueil</button>'
+          : '<button type="button" class="btn-soft" onclick="oaAction(\'' + o.id + '\',\'visible\')">👁️ Afficher sur l’accueil</button>')
+        + '<button type="button" class="btn-soft" onclick="oaAction(\'' + o.id + '\',\'ordre\',{sens:\'haut\'})">⬆️</button>'
+        + '<button type="button" class="btn-soft" onclick="oaAction(\'' + o.id + '\',\'ordre\',{sens:\'bas\'})">⬇️</button>'
+        + '<button type="button" class="btn-soft" onclick="oaReset(\'' + o.id + '\')">♻️ Réinitialiser</button>'
+        + (o.id === 'job_pres' || o.id === 'avis_recherche' ? '<button type="button" class="btn-soft" onclick="oaParams(\'' + o.id + '\')">⚙️ Réglages</button>' : '')) : '')
+        + '</div>'
+        + (OA.pdg ? '' : '<div class="sub" style="font-size:12px;margin-top:6px">🔒 Vous pouvez consulter et réparer ; seuls le PDG et les personnes qu’il autorise modifient les réglages globaux de l’accueil.</div>')
+        + '<div id="oa-params-' + o.id + '"></div>'
+        + '</div>';
+    }).join('') || '<div class="sub">Aucune option — appuyez sur « Rafraîchir l’état ».</div>';
+  }
+  /* ③ le journal */
+  const J = document.getElementById('oa-journal');
+  if (J) {
+    J.innerHTML = '<div style="margin-top:12px"><b style="font-size:14.5px">📜 Journal des réglages de l’accueil</b>'
+      + ((OA.journal || []).slice(0, 15).map(j => '<div style="font-size:12.5px;margin-top:6px;border-bottom:1px dashed var(--line);padding-bottom:5px">'
+        + '<b>' + j.action + '</b> — ' + j.texte + '<div style="color:var(--muted);font-size:11.5px">' + oaQuand(j.at) + (j.par ? ' · ' + (j.par === true ? 'PDG' : j.par) : '') + '</div></div>').join('') || '<div class="sub">Rien pour l’instant.</div>')
+      + '</div>';
+  }
+}
+window.oaPeint = oaPeint;
+
+async function oaAction(id, action, extra) {
+  const noms = {
+    activer: 'ACTIVER', desactiver: 'DÉSACTIVER', visible: 'afficher sur l’accueil', masquer: 'masquer de l’accueil',
+    ordre: 'changer l’ordre', reinitialiser: 'remettre au réglage d’origine'
+  };
+  if (action === 'desactiver' && !confirm('DÉSACTIVER cette option ?\n\nLe bouton restera visible et annoncera clairement ' +
+    '« temporairement désactivée » — jamais un bouton qui semble cassé. Vous pourrez la réactiver à tout moment.')) return;
+  if (action === 'masquer' && !confirm('MASQUER cette option de la page d’accueil ?\n\nElle ne s’affichera plus du tout (elle reste active dans l’application).')) return;
+  try {
+    const r = await fetch('/api/admin/accueil', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ id, action }, extra || {}))
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+    if (d.message) try { console.log('HQ · accueil : ' + d.message); } catch (e) { }
+    oaCharge();
+  } catch (e) { alert('⚠️ Réseau indisponible'); }
+}
+window.oaAction = oaAction;
+
+async function oaOrdre(id) {
+  /* « ACTUALISER » : on redemande l'état réel + on force les écrans à recharger leurs options */
+  await oaAction(id, 'actualiser');
+  oaCharge();
+}
+window.oaOrdre = oaOrdre;
+
+async function oaReparer(id) {
+  const r = await fetch('/api/admin/accueil', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'reparer', id: id || '' })
+  }).then(x => x.json()).catch(() => ({}));
+  alert(r.message || '🔧 Ordre envoyé');
+  oaCharge();
+}
+window.oaReparer = oaReparer;
+
+async function oaReset(id) {
+  if (!confirm(id ? 'Remettre CETTE option à son réglage d’origine ?' : 'Remettre TOUTES les options de l’accueil à leur réglage d’origine ?')) return;
+  await oaAction(id || 'x', 'reinitialiser_tout');
+  oaCharge();
+}
+window.oaReset = oaReset;
+
+function oaParams(id) {
+  const o = OA.options.find(x => x.id === id); if (!o) return;
+  const z = document.getElementById('oa-params-' + id); if (!z) return;
+  if (z.innerHTML) { z.innerHTML = ''; return; }
+  const p = o.params || {};
+  z.innerHTML = '<div style="background:var(--card2);border-radius:12px;padding:11px;margin-top:9px">'
+    + '<b style="font-size:13.5px">⚙️ Réglages — ' + o.titre + '</b>'
+    + (id === 'job_pres'
+      ? '<label style="display:block;font-size:12.5px;margin-top:8px">Rayon de recherche par défaut (km)</label>'
+      + '<input id="oa-p-rayon" type="number" min="1" max="300" value="' + (p.rayonKm || 30) + '" style="width:100%;padding:9px;border-radius:10px;border:1.5px solid var(--line);font:inherit">'
+      + '<label style="display:block;font-size:12.5px;margin-top:8px">Nombre d’opportunités affichées</label>'
+      + '<input id="oa-p-limite" type="number" min="1" max="120" value="' + (p.limite || 60) + '" style="width:100%;padding:9px;border-radius:10px;border:1.5px solid var(--line);font:inherit">'
+      : '<label style="display:block;font-size:12.5px;margin-top:8px">Publication des avis</label>'
+      + '<select id="oa-p-mod" style="width:100%;padding:9px;border-radius:10px;border:1.5px solid var(--line);font:inherit">'
+      + '<option value="auto"' + ((p.moderation || 'auto') === 'auto' ? ' selected' : '') + '>Immédiate (recommandé pour une urgence)</option>'
+      + '<option value="avant"' + (p.moderation === 'avant' ? ' selected' : '') + '>Après ma validation</option></select>'
+      + '<div style="font-size:12px;color:var(--muted);margin-top:6px">En « publication immédiate », vous recevez l’avis dans « 📢 Avis de recherche » et pouvez le retirer à tout moment.</div>')
+    + '<button type="button" class="btn-main" style="margin-top:9px" onclick="oaParamsEnreg(\'' + id + '\')">💾 Enregistrer</button>'
+    + '</div>';
+}
+window.oaParams = oaParams;
+
+async function oaParamsEnreg(id) {
+  const params = {};
+  if (id === 'job_pres') {
+    const r = document.getElementById('oa-p-rayon'), l = document.getElementById('oa-p-limite');
+    params.rayonKm = r ? Number(r.value) : 30; params.limite = l ? Number(l.value) : 60;
+  } else {
+    const m = document.getElementById('oa-p-mod');
+    params.moderation = m ? m.value : 'auto';
+  }
+  await oaAction(id, 'params', { params });
+  alert('✅ Réglages enregistrés');
+}
+window.oaParamsEnreg = oaParamsEnreg;
+
+/* ─────────────── 💼 Jobs & offres de travail ─────────────── */
+async function oaJobsCharge() {
+  try {
+    const d = await fetch('/api/admin/jobs', { cache: 'no-store' }).then(r => r.json());
+    if (!d || !d.ok) return;
+    OAJOBS = Object.assign(OAJOBS, d, { ok: true });
+    const c = document.getElementById('oj-cnt');
+    if (c) c.textContent = (d.stats.offres || 0) + ' offre(s) · ' + (d.stats.candidatures || 0) + ' candidature(s)';
+    oaJobsPeint();
+  } catch (e) { }
+}
+window.oaJobsCharge = oaJobsCharge;
+
+function oaJobsPeint() {
+  const pub = document.getElementById('oj-publier');
+  if (pub) {
+    pub.disabled = !OAJOBS.pdg;
+    pub.textContent = OAJOBS.pdg ? '📢 Publier l’offre' : '🔒 La publication d’offres est réservée au PDG';
+  }
+  const L = document.getElementById('oj-liste');
+  if (L) {
+    L.innerHTML = (OAJOBS.offres || []).map(o => '<div style="border:1.5px solid var(--line);border-radius:13px;padding:10px;margin-bottom:8px' + (o.retire ? ';background:#fafafa;opacity:.72' : '') + '">'
+      + '<b style="font-size:14.5px">' + o.titre + '</b>' + (o.retire ? ' <span style="font-size:11px;font-weight:900;color:#6b7280">RETIRÉE</span>' : '')
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:4px">' + [o.quartier, o.ville].filter(Boolean).join(' · ') + (o.metier ? ' · ' + o.metier : '') + (o.prix ? ' · ' + o.prix : '') + (o.quand ? ' · ' + o.quand : '') + '</div>'
+      + (o.description ? '<div style="font-size:13px;margin-top:5px">' + o.description + '</div>' : '')
+      + '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + (o.tel ? ('📞 ' + o.tel + (o.telPublic ? ' (public)' : ' (interne)')) : 'sans téléphone') + ' · publiée ' + oaQuand(o.at) + '</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+      + (o.retire ? '<button type="button" class="btn-soft" onclick="oaJobsAction(\'offre_remettre\',\'' + o.id + '\')">↩️ Republier</button>'
+        : '<button type="button" class="btn-soft" onclick="oaJobsAction(\'offre_retirer\',\'' + o.id + '\')">🗑️ Retirer</button>')
+      + (OAJOBS.pdg ? '<button type="button" class="btn-soft" onclick="oaJobsAction(\'offre_supprimer\',\'' + o.id + '\')">❌ Supprimer</button>' : '')
+      + '</div></div>').join('') || '<div class="sub">Aucune offre publiée. Créez-en une ci-dessus : elle apparaîtra aussitôt dans « Je cherche un job près de moi ».</div>';
+  }
+  const C = document.getElementById('oj-cand');
+  if (C) {
+    C.innerHTML = (OAJOBS.candidatures || []).map(c => '<div style="border:1.5px solid var(--line);border-radius:13px;padding:10px;margin-bottom:8px">'
+      + '<b style="font-size:14.5px">' + c.nom + '</b> <span style="font-size:11.5px;font-weight:900;background:' + (c.statut === 'recue' ? '#FFF1E6;color:#b45309' : c.statut === 'retenue' ? '#e9f7ef;color:#0d7a5f' : '#f3f4f6;color:#6b7280') + ';padding:3px 8px;border-radius:99px">' + c.statut + '</span>'
+      + '<div style="font-size:13px;margin-top:5px"><a href="tel:' + String(c.tel || '').replace(/\s/g, '') + '">📞 ' + c.tel + '</a>' + (c.ville ? ' · ' + c.ville : '') + '</div>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:3px">pour : ' + (c.titre || '—') + ' · ' + oaQuand(c.at) + '</div>'
+      + (c.message ? '<div style="font-size:13px;margin-top:6px;background:var(--card2);border-radius:10px;padding:8px">' + c.message + '</div>' : '')
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+      + '<button type="button" class="btn-soft" onclick="oaJobsAction(\'cand_statut\',\'' + c.id + '\',\'vue\')">👁️ Vue</button>'
+      + '<button type="button" class="btn-soft" onclick="oaJobsAction(\'cand_statut\',\'' + c.id + '\',\'retenue\')">✅ Retenue</button>'
+      + '<button type="button" class="btn-soft" onclick="oaJobsAction(\'cand_statut\',\'' + c.id + '\',\'ecartee\')">✖️ Écartée</button>'
+      + '<button type="button" class="btn-soft" onclick="oaJobsAction(\'cand_supprimer\',\'' + c.id + '\')">❌ Supprimer</button>'
+      + '</div></div>').join('') || '<div class="sub">Aucune candidature pour l’instant.</div>';
+  }
+}
+window.oaJobsPeint = oaJobsPeint;
+
+async function oaJobsAction(action, id, statut) {
+  if (action.indexOf('supprimer') > 0 && !confirm('Supprimer définitivement ?')) return;
+  const r = await fetch('/api/admin/jobs', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, id, statut })
+  }).then(x => x.json()).catch(() => ({}));
+  if (!r.ok) alert('⚠️ ' + (r.error || 'Impossible'));
+  oaJobsCharge();
+}
+window.oaJobsAction = oaJobsAction;
+
+async function oaOffreCreer() {
+  const g = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+  const c = id => { const e = document.getElementById(id); return !!(e && e.checked); };
+  const corps = {
+    action: 'offre_creer', titre: g('oj-titre'), ville: g('oj-ville'), quartier: g('oj-quartier'),
+    metier: g('oj-metier'), description: g('oj-desc'), quand: g('oj-quand'), prix: g('oj-prix'),
+    contact: g('oj-contact'), tel: g('oj-tel'), telPublic: c('oj-telpub'), urgent: c('oj-urgent')
+  };
+  if (!corps.titre || !corps.ville) return alert('⚠️ Titre et ville sont obligatoires');
+  const r = await fetch('/api/admin/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) })
+    .then(x => x.json()).catch(() => ({}));
+  if (!r.ok) return alert('⚠️ ' + (r.error || 'Impossible'));
+  ['oj-titre', 'oj-desc', 'oj-prix', 'oj-quand'].forEach(i => { const e = document.getElementById(i); if (e) e.value = ''; });
+  alert('✅ Offre publiée — elle apparaît tout de suite sur l’accueil');
+  oaJobsCharge();
+}
+window.oaOffreCreer = oaOffreCreer;
+
+/* ─────────────── 📢 Avis de recherche (modération) ─────────────── */
+async function oaAvisCharge() {
+  try {
+    const d = await fetch('/api/admin/avis', { cache: 'no-store' }).then(r => r.json());
+    if (!d || !d.ok) return;
+    OAAVIS = Object.assign(OAAVIS, d, { ok: true });
+    const c = document.getElementById('ov-cnt');
+    if (c) c.textContent = (d.stats.total || 0) + ' avis · ' + (d.stats.publies || 0) + ' publié(s)' + (d.stats.attente ? ' · ' + d.stats.attente + ' à valider' : '');
+    oaAvisPeint();
+  } catch (e) { }
+}
+window.oaAvisCharge = oaAvisCharge;
+
+function oaAvisPeint() {
+  const m = document.getElementById('ov-mod');
+  if (m) { m.value = OAAVIS.moderation || 'auto'; m.disabled = !OAAVIS.pdg; }
+  const s = document.getElementById('ov-stats');
+  if (s) {
+    const t = OAAVIS.stats || {};
+    s.innerHTML = '<div style="display:flex;gap:7px;flex-wrap:wrap;font-size:12.5px;font-weight:900;margin-bottom:10px">'
+      + '<span style="background:#FFF1E6;color:#b45309;padding:6px 10px;border-radius:99px">🔎 Publiés : ' + (t.publies || 0) + '</span>'
+      + '<span style="background:#f3f4f6;color:#6b7280;padding:6px 10px;border-radius:99px">⏳ À valider : ' + (t.attente || 0) + '</span>'
+      + '<span style="background:#e9f7ef;color:#0d7a5f;padding:6px 10px;border-radius:99px">✅ Retrouvés : ' + (t.retrouves || 0) + '</span>'
+      + '<span style="background:#f3f4f6;color:#6b7280;padding:6px 10px;border-radius:99px">🗑️ Retirés : ' + (t.retires || 0) + '</span>'
+      + '<span style="background:#eef6ff;color:#1d4ed8;padding:6px 10px;border-radius:99px">👁️ Consultations : ' + (t.vues || 0) + '</span>'
+      + '<span style="background:#eef6ff;color:#1d4ed8;padding:6px 10px;border-radius:99px">📷 Photos : ' + (t.photos || 0) + '</span>'
+      + '</div>';
+  }
+  const L = document.getElementById('ov-liste');
+  if (!L) return;
+  L.innerHTML = (OAAVIS.avis || []).map(a => {
+    const nom = (a.nom || a.prenom) ? (a.nom + ' ' + a.prenom).trim() : (a.type === 'objet' ? 'Objet recherché' : 'Personne non identifiée');
+    const coul = a.statut === 'publie' ? '#b45309' : a.statut === 'retrouve' ? '#0d7a5f' : a.statut === 'en_attente' ? '#1d4ed8' : '#6b7280';
+    const fond = a.statut === 'publie' ? '#FFF1E6' : a.statut === 'retrouve' ? '#e9f7ef' : a.statut === 'en_attente' ? '#eef6ff' : '#f3f4f6';
+    return '<div style="border:1.5px solid var(--line);border-radius:13px;padding:10px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start">'
+      + (a.photo ? '<img src="' + a.photo + '" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:10px;flex:none">' : '')
+      + '<div style="flex:1;min-width:0">'
+      + '<b style="font-size:14.5px">' + nom + '</b> <span style="font-size:11.5px;font-weight:900;background:' + fond + ';color:' + coul + ';padding:3px 8px;border-radius:99px">' + a.statut + '</span>'
+      + (a.verifie ? ' <span style="font-size:11px;font-weight:900;background:#eef6ff;color:#1d4ed8;padding:3px 8px;border-radius:99px">vérifié</span>' : '')
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:4px">' + [a.lieu, a.quartier, a.ville].filter(Boolean).join(' · ') + (a.date ? ' · ' + a.date : '') + ' · ' + (a.vues || 0) + ' vue(s)</div>'
+      + (a.description ? '<div style="font-size:13px;margin-top:5px">' + a.description.slice(0, 220) + '</div>' : '')
+      + '<div style="font-size:12.5px;margin-top:5px">📞 ' + (a.contactTel || 'contact non publié') + (a.contactNom ? ' (' + a.contactNom + ')' : '') + ' · code de suivi ' + (a.code || '—') + ' · ' + oaQuand(a.at) + '</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+      + (a.statut !== 'publie' ? '<button type="button" class="btn-main" onclick="oaAvisAction(\'publier\',\'' + a.id + '\')">✅ Publier</button>' : '')
+      + '<button type="button" class="btn-soft" onclick="oaAvisAction(\'verifier\',\'' + a.id + '\')">🛡️ Marquer vérifié</button>'
+      + '<button type="button" class="btn-soft" onclick="oaAvisAction(\'retrouve\',\'' + a.id + '\')">✅ Retrouvé</button>'
+      + '<button type="button" class="btn-soft" onclick="oaAvisAction(\'suspendre\',\'' + a.id + '\')">⏸️ Suspendre</button>'
+      + '<button type="button" class="btn-soft" onclick="oaAvisAction(\'retirer\',\'' + a.id + '\')">🗑️ Retirer</button>'
+      + (OAAVIS.pdg ? '<button type="button" class="btn-soft" onclick="oaAvisAction(\'supprimer\',\'' + a.id + '\')">❌ Supprimer</button>' : '')
+      + '</div></div></div>';
+  }).join('') || '<div class="sub">Aucun avis de recherche pour l’instant.</div>';
+}
+window.oaAvisPeint = oaAvisPeint;
+
+async function oaAvisAction(action, id) {
+  let motif = '';
+  if (action === 'retirer' || action === 'suspendre') {
+    motif = prompt('Motif (il sera conservé au journal, l’auteur peut le voir) :') || '';
+    if (motif === null) return;
+  }
+  if (action === 'supprimer' && !confirm('Supprimer définitivement cet avis et sa photo ?')) return;
+  const r = await fetch('/api/admin/avis', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, id, motif })
+  }).then(x => x.json()).catch(() => ({}));
+  if (!r.ok) alert('⚠️ ' + (r.error || 'Impossible'));
+  oaAvisCharge();
+}
+window.oaAvisAction = oaAvisAction;
+
+async function oaAvisModeration() {
+  const m = document.getElementById('ov-mod'); if (!m) return;
+  const r = await fetch('/api/admin/avis', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'moderation', valeur: m.value })
+  }).then(x => x.json()).catch(() => ({}));
+  alert(r.message || 'Réglage enregistré');
+  oaAvisCharge(); oaCharge();
+}
+window.oaAvisModeration = oaAvisModeration;
+
+/* 🔄 le tableau de bord suit ce que les téléphones rapportent (contrôle discret toutes les 60 s) */
+setInterval(function () {
+  try {
+    const p = document.getElementById('panel-accueil');
+    if (p && p.offsetParent !== null) oaCharge();
+    const j = document.getElementById('panel-jobs');
+    if (j && j.offsetParent !== null) oaJobsCharge();
+    const a = document.getElementById('panel-avis');
+    if (a && a.offsetParent !== null) oaAvisCharge();
+  } catch (e) { }
+}, 60000);
+
 let JT = { ok: false, tab: 'docs', actif: false, docs: [], dossiers: [], metiers: [], identites: [], journal: [], stats: null };
 
 function jtPct(x) { return String(x == null ? '' : x); }

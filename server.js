@@ -138,6 +138,7 @@ function poserDefauts() {
   db.fieldChat = db.fieldChat || [];
   db.cities = db.cities || [];
   justifEnsure();     /* 🪚 justificatifs professionnels (lot 122) : poses au demarrage */
+  accueilEnsure();    /* 🧩 grandes options de l'accueil + jobs + avis de recherche (lot 123) */
   db.catalog = db.catalog || [];
   /* ═══ 🎮 FLIP FIZZ · KLEAN POINTS · RÉCOMPENSES · QUIZ · INFOS · URGENCE (lot 96) ═══
      ⚠️ Par défaut le jeu est DÉSACTIVÉ et INVISIBLE sur l'accueil : seul le PDG l'active. */
@@ -5260,10 +5261,776 @@ async function jeuGenererIA(opt) {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   🧩 29/09 — LOT 123 : LES GRANDES OPTIONS DE LA PAGE D'ACCUEIL (registre centralisé)
+   ═══════════════════════════════════════════════════════════════════════════════════
+   Objectif du PDG : « chaque grande option de la page d'accueil doit fonctionner, et je
+   dois pouvoir contrôler son état depuis mon tableau de bord — sans toucher au code ».
+
+   Ce module est LA source unique de vérité :
+     · ACCUEIL_OPTIONS_DEF  : la liste des grandes options (identifiants STABLES, jamais
+                              renommés — c'est ce qui protège des futures mises à jour) ;
+     · db.accueil           : l'état réel (activé / visible / ordre / réglages) + le journal ;
+     · db.accueilVeille     : ce que les téléphones ont rapporté de leur dernier contrôle ;
+     · les routes           : /api/accueil/*  (public + tableau de bord).
+
+   RÈGLE : une option ne disparaît JAMAIS du registre. On la désactive, on la masque, on la
+   répare — on ne la supprime pas. Ainsi une mise à jour d'une partie de l'application ne peut
+   pas faire « oublier » une autre partie.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+
+/* ── la liste des grandes options. `defaut` = réglage d'origine (réversible à tout moment). ── */
+const ACCUEIL_OPTIONS_DEF = [
+  { id: 'recherche', titre: 'Recherche d’un service', icone: '🔎', ou: 'la barre de recherche + le bouton « Rechercher un service »',
+    sous: 'Trouver un professionnel près du lieu de la prestation', essentielle: true,
+    defaut: { actif: true, visible: true, ordre: 10 }, params: { placeholder: 'Écrivez ce dont vous avez besoin…' } },
+  { id: 'tous_services', titre: 'Tous les services', icone: '📚', ou: 'le bouton « Voir tous les services »',
+    sous: 'Le catalogue national complet, métiers et prix', defaut: { actif: true, visible: true, ordre: 20 }, params: {} },
+  { id: 'job_pres', titre: 'Je cherche un job près de moi', icone: '🔎', ou: 'la grande option du bas de l’accueil',
+    sous: 'Trouver du travail ou une mission près de chez soi', defaut: { actif: true, visible: true, ordre: 30 },
+    params: { rayonKm: 30, limite: 60 } },
+  { id: 'avis_recherche', titre: 'Avis de recherche', icone: '📢', ou: 'la grande option du bas de l’accueil',
+    sous: 'Publier, consulter et partager les avis de recherche', defaut: { actif: true, visible: true, ordre: 40 },
+    params: { moderation: 'auto' } },      /* auto = publication immédiate · avant = validation par le PDG avant publication */
+  { id: 'urgence', titre: 'Urgence', icone: '🆘', ou: 'le raccourci « Urgence »',
+    sous: 'Alertes et contacts d’urgence', defaut: { actif: true, visible: true, ordre: 50 }, params: {} },
+  { id: 'points', titre: 'Klean Points', icone: '🪙', ou: 'le raccourci « Klean Points »',
+    sous: 'Solde de points et récompenses', defaut: { actif: true, visible: true, ordre: 60 }, params: {} },
+  { id: 'quiz', titre: 'Quiz Klean', icone: '🧠', ou: 'le raccourci « Quiz »',
+    sous: 'Questions, défi du jour et séries', defaut: { actif: true, visible: true, ordre: 70 }, params: {} },
+  { id: 'jeux', titre: 'Jeux', icone: '🎮', ou: 'le raccourci « Jeux »',
+    sous: 'Jeux en direct de KLEAN', defaut: { actif: true, visible: true, ordre: 80 }, params: {} },
+  { id: 'flip', titre: 'Flip Fizz', icone: '🎮', ou: 'le bloc de jeu sur l’accueil',
+    sous: 'Jeu Flip Fizz et parties gratuites', defaut: { actif: true, visible: true, ordre: 90 }, params: {} },
+  { id: 'infos', titre: 'Informations', icone: 'ℹ️', ou: 'le raccourci « Infos »',
+    sous: 'Actualités et conseils publiés par KLEAN', defaut: { actif: true, visible: true, ordre: 100 }, params: {} },
+  { id: 'options_client', titre: 'Options & réglages', icone: '⚙️', ou: 'le raccourci « Options »',
+    sous: 'Réglages du client', defaut: { actif: true, visible: true, ordre: 110 }, params: {} },
+  { id: 'publicite', titre: 'Publicité de l’accueil', icone: '📣', ou: 'le bloc de publicité',
+    sous: 'Affiche publicitaire choisie par le PDG', defaut: { actif: true, visible: true, ordre: 120 }, params: {} },
+  { id: 'annonce', titre: 'Affiche aux utilisateurs', icone: '📣', ou: 'le bandeau de message défilant',
+    sous: 'Message de KLEAN à tous les utilisateurs', defaut: { actif: true, visible: true, ordre: 130 }, params: {} },
+  { id: 'support', titre: 'Support', icone: '💬', ou: 'la bulle « Support »',
+    sous: 'Parler à l’équipe KLEAN', defaut: { actif: true, visible: true, ordre: 140 }, params: {} },
+  { id: 'espace_pro', titre: 'Vous êtes professionnel ?', icone: '🧑‍💼', ou: 'le bouton vers l’espace professionnel',
+    sous: 'Recevoir des missions près de chez soi', defaut: { actif: true, visible: true, ordre: 150 }, params: {} },
+  { id: 'langues', titre: 'Langues', icone: '🌍', ou: 'la barre de langues de l’accueil',
+    sous: 'Changer la langue de l’application', defaut: { actif: true, visible: true, ordre: 160 }, params: {} }
+];
+
+/* Les options du bas de l'accueil, dans l'ordre où elles doivent apparaître (grandes, tactiles) */
+const ACCUEIL_GRANDES = ['job_pres', 'avis_recherche'];
+
+const ACCUEIL_ETATS = ['ok', 'attention', 'panne', 'off', 'inconnu'];
+const ACCUEIL_ETAT_TXT = {
+  ok: '🟢 Fonctionnelle', attention: '🟠 À vérifier', panne: '🔴 Problème détecté',
+  off: '⚪ Désactivée volontairement', inconnu: '⚪ Pas encore contrôlée'
+};
+
+/* ── pose / répare la mémoire des options (appelée au démarrage, comme les autres lots) ── */
+function accueilEnsure() {
+  db.accueil = db.accueil || {};
+  const A = db.accueil;
+  A.version = (A.version || 0);
+  A.options = A.options || {};
+  A.journal = A.journal || [];
+  A.at = A.at || null;
+  A.par = A.par || null;
+  db.accueilVeille = db.accueilVeille || {};     /* { id: { etat, message, at, appareil, version } } */
+  db.accueilRapports = db.accueilRapports || []; /* derniers rapports bruts (borné) */
+  db.accueilOrdres = db.accueilOrdres || [];     /* ordres envoyés aux téléphones (réparer / actualiser) */
+  /* on (re)pose chaque option : une option nouvelle arrive avec ses défauts, une option
+     existante garde exactement ce que le PDG a décidé (rien n'est jamais réinitialisé en douce) */
+  ACCUEIL_OPTIONS_DEF.forEach(d => {
+    const cur = A.options[d.id] || {};
+    A.options[d.id] = {
+      actif: (typeof cur.actif === 'boolean') ? cur.actif : d.defaut.actif,
+      visible: (typeof cur.visible === 'boolean') ? cur.visible : d.defaut.visible,
+      ordre: (typeof cur.ordre === 'number') ? cur.ordre : d.defaut.ordre,
+      params: Object.assign({}, d.params || {}, cur.params || {}),
+      at: cur.at || null, par: cur.par || null
+    };
+  });
+  db.jobs = db.jobs || [];         /* 💼 offres de travail publiées par le PDG */
+  db.jobCand = db.jobCand || [];   /* 📨 candidatures reçues */
+  db.avis = db.avis || [];         /* 📢 avis de recherche */
+  db.avisFiles = db.avisFiles || {}; /* photos des avis (une par avis, taille maîtrisée) */
+  db.avisVues = db.avisVues || 0;  /* compteur global de consultations */
+  return A;
+}
+
+function accueilDef(id) { return ACCUEIL_OPTIONS_DEF.find(d => d.id === id) || null; }
+function accueilReglages(id) {
+  accueilEnsure();
+  const d = accueilDef(id); if (!d) return null;
+  const o = db.accueil.options[id];
+  return { def: d, reg: o, actif: o.actif, visible: o.visible, ordre: o.ordre, params: o.params || {} };
+}
+/* l'app ne reçoit QUE ce dont elle a besoin */
+function accueilPubliques() {
+  accueilEnsure();
+  return ACCUEIL_OPTIONS_DEF
+    .map(d => {
+      const o = db.accueil.options[d.id];
+      const v = db.accueilVeille[d.id] || {};
+      return {
+        id: d.id, titre: d.titre, icone: d.icone, sous: d.sous || '', ou: d.ou || '',
+        essentielle: !!d.essentielle, actif: !!o.actif, visible: !!o.visible, ordre: o.ordre,
+        grande: ACCUEIL_GRANDES.indexOf(d.id) >= 0,
+        etat: v.etat || (o.actif ? 'inconnu' : 'off'), message: v.message || '', controleAt: v.at || null,
+        params: (d.id === 'job_pres' || d.id === 'avis_recherche') ? { rayonKm: o.params.rayonKm, limite: o.params.limite, moderation: o.params.moderation } : {}
+      };
+    })
+    .sort((a, b) => a.ordre - b.ordre);
+}
+function accueilJournal(action, texte, par) {
+  accueilEnsure();
+  db.accueil.journal.unshift({ at: nowISO(), action, texte, par: par || null, pdg: (par === true) });
+  db.accueil.journal = db.accueil.journal.slice(0, 400);
+}
+/* 📣 prévient tous les écrans connectés qu'une option a changé (aucun rechargement nécessaire) */
+function emitAccueilMaj(quoi, id) {
+  broadcast([...sockets], { type: 'accueil_maj', quoi: quoi || 'options', id: id || null, at: nowISO() });
+}
+/* 🔧 ordre de réparation : le téléphone se répare lui-même et renvoie son résultat */
+function emitAccueilOrdre(action) {
+  const ordre = { id: uid('OR'), action, at: nowISO() };
+  db.accueilOrdres.unshift(ordre);
+  db.accueilOrdres = db.accueilOrdres.slice(0, 60);
+  broadcast([...sockets], { type: 'accueil_ordre', action, ordreId: ordre.id });
+  emitAdmin('accueil', '🔧 Ordre « ' + action + ' » envoyé aux écrans');
+  return ordre;
+}
+/* 🩺 le veilleur d'un téléphone rapporte l'état réel de chaque option */
+function accueilSanteMaj(id, etat, message, meta) {
+  accueilEnsure();
+  if (!accueilDef(id)) return;
+  if (ACCUEIL_ETATS.indexOf(etat) < 0) etat = 'inconnu';
+  const r = accueilReglages(id);
+  if (!r.actif) etat = 'off';       /* désactivée volontairement : jamais présentée comme une panne */
+  db.accueilVeille[id] = {
+    etat, message: String(message || '').slice(0, 300), at: nowISO(),
+    appareil: String((meta && meta.appareil) || '').slice(0, 40),
+    version: String((meta && meta.version) || '').slice(0, 20)
+  };
+  return db.accueilVeille[id];
+}
+function accueilResume(id) {
+  const d = accueilDef(id); const v = db.accueilVeille[id] || {};
+  const r = accueilReglages(id);
+  return Object.assign({
+    id, titre: d.titre, icone: d.icone, ou: d.ou, sous: d.sous, essentielle: !!d.essentielle,
+    actif: r.actif, visible: r.visible, ordre: r.ordre, params: r.params,
+    grande: ACCUEIL_GRANDES.indexOf(id) >= 0,
+    etat: r.actif ? (v.etat || 'inconnu') : 'off',
+    etatTexte: ACCUEIL_ETAT_TXT[r.actif ? (v.etat || 'inconnu') : 'off'],
+    message: v.message || '', controleAt: v.at || null, appareil: v.appareil || '', version: v.version || ''
+  }, { reparable: true });
+}
+
+/* ══════════════════════ 💼 « JE CHERCHE UN JOB PRÈS DE MOI » ══════════════════════ */
+
+/* Les opportunités = les offres publiées par le PDG + les demandes de clients encore libres.
+   Aucune donnée sensible n'est exposée : jamais le téléphone du client avant qu'il l'ait accepté. */
+function jobsOpportunites(q) {
+  accueilEnsure();
+  const lat = (typeof q.lat === 'number' && isFinite(q.lat)) ? q.lat : null;
+  const lng = (typeof q.lng === 'number' && isFinite(q.lng)) ? q.lng : null;
+  const villeQ = String(q.ville || '').trim().toLowerCase();
+  const texte = String(q.q || '').trim().toLowerCase();
+  const type = String(q.type || '').trim();
+  const rayon = Math.max(1, Math.min(300, Number(q.rayonKm) || (accueilReglages('job_pres').params.rayonKm || 30)));
+  const limite = Math.max(1, Math.min(120, Number(q.limite) || 60));
+  const out = [];
+
+  /* ① les offres publiées depuis le tableau de bord */
+  (db.jobs || []).forEach(j => {
+    if (j.retire || j.statut === 'retire') return;
+    let d = null;
+    if (lat !== null && typeof j.lat === 'number') d = haversineKm(lat, lng, j.lat, j.lng);
+    out.push({
+      id: j.id, source: 'offre', titre: j.titre, metier: j.metier || '', description: j.description || '',
+      quartier: j.quartier || '', ville: j.ville || '', quand: j.quand || '', prix: j.prix || '',
+      contact: j.contact || '', tel: j.telPublic ? String(j.tel || '') : '', at: j.at,
+      urgent: !!j.urgent, dist: d, type: 'offre'
+    });
+  });
+
+  /* ② les demandes de clients pas encore prises : du travail immédiat */
+  (db.missions || []).forEach(m => {
+    if (m.status !== 'pending' && m.status !== 'searching') return;
+    if (m.candidaturesFermees) return;
+    let d = null;
+    if (lat !== null && typeof m.lat === 'number' && m.lat !== null) d = haversineKm(lat, lng, m.lat, m.lng);
+    out.push({
+      id: m.id, source: 'demande', titre: (SVC_NAMES[m.service] || m.service || 'Service demandé'),
+      metier: m.service || '', description: m.description || m.besoin || '',
+      quartier: m.quartier || '', ville: m.ville || '',
+      quand: (m.date || '') + (m.time ? ' à ' + m.time : ''), prix: m.prixTotal ? (m.prixTotal + ' F') : '',
+      contact: '', tel: '', at: m.createdAt, urgent: !!m.urgent, dist: d, type: 'demande',
+      pieces: m.pieces || 0
+    });
+  });
+
+  let liste = out.filter(o => {
+    if (type && o.type !== type) return false;
+    if (villeQ && String(o.ville || '').toLowerCase().indexOf(villeQ) < 0) return false;
+    if (texte) {
+      const gros = (o.titre + ' ' + o.metier + ' ' + o.description + ' ' + o.quartier + ' ' + o.ville).toLowerCase();
+      if (gros.indexOf(texte) < 0) return false;
+    }
+    if (lat !== null) { if (o.dist === null) return false; if (o.dist > rayon) return false; }
+    return true;
+  });
+  liste.sort((a, b) => {
+    if (a.dist !== null && b.dist !== null && a.dist !== b.dist) return a.dist - b.dist;
+    if (a.dist !== null && b.dist === null) return -1;
+    if (a.dist === null && b.dist !== null) return 1;
+    return String(b.at || '').localeCompare(String(a.at || ''));
+  });
+  return { liste: liste.slice(0, limite), total: liste.length, rayon, lat, lng };
+}
+
+/* ══════════════════════ 📢 AVIS DE RECHERCHE ══════════════════════ */
+function avisPublies() {
+  accueilEnsure();
+  /* « publie » = visible · « retrouve » = toujours visible, mais annoncé RETROUVÉ (on n'efface jamais
+     un avis : ceux qui cherchent encore doivent savoir que c'est fini) */
+  return (db.avis || []).filter(a => a.statut === 'publie' || a.statut === 'retrouve');
+}
+function avisPublic(a) {
+  /* ⚠️ on n'expose JAMAIS le code de suivi ni les notes internes */
+  return {
+    id: a.id, type: a.type, statut: a.statut, nom: a.nom || '', prenom: a.prenom || '', age: a.age || '',
+    sexe: a.sexe || '', description: a.description || '', lieu: a.lieu || '', ville: a.ville || '',
+    quartier: a.quartier || '', date: a.date || '', heure: a.heure || '',
+    derniereLieu: a.derniereLieu || '', derniereDate: a.derniereDate || '',
+    signes: a.signes || '', objets: a.objets || '', vetements: a.vetements || '',
+    contactNom: a.contactNom || '', contactTel: a.publierContact === false ? '' : (a.contactTel || ''),
+    contactWhatsapp: a.publierContact === false ? '' : (a.contactWhatsapp || ''),
+    photo: a.photo ? ('/api/avis/photo?id=' + encodeURIComponent(a.id)) : '',
+    at: a.at, majAt: a.majAt || a.at, vues: a.vues || 0, verifie: !!a.verifie,
+    moderation: a.moderation || 'auto'
+  };
+}
+function avisTrouve(q) {
+  const texte = String(q.q || '').trim().toLowerCase();
+  const type = String(q.type || '').trim();
+  const villeQ = String(q.ville || '').trim().toLowerCase();
+  const id = String(q.id || '').trim();
+  let liste = avisPublies();
+  if (id) return (db.avis || []).filter(a => a.id === id);
+  if (type === 'personne' || type === 'objet') liste = liste.filter(a => a.type === type);
+  if (villeQ) liste = liste.filter(a => String(a.ville || '').toLowerCase().indexOf(villeQ) >= 0);
+  if (texte) liste = liste.filter(a => (a.nom + ' ' + a.prenom + ' ' + a.description + ' ' + a.lieu + ' ' + a.derniereLieu + ' ' + a.signes + ' ' + a.objets + ' ' + a.ville + ' ' + a.quartier).toLowerCase().indexOf(texte) >= 0);
+  return liste;
+}
+function avisPhotoUrl(a) { return a.photo ? ('/api/avis/photo?id=' + encodeURIComponent(a.id)) : ''; }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   🧩 ROUTES CENTRALISÉES DES GRANDES OPTIONS (lot 123) — un seul point d'entrée.
+   Renvoie `true` si la requête a été traitée : rien d'autre dans le serveur ne bouge.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+function accueilReponseOptions() {
+  accueilEnsure();
+  const grandes = ACCUEIL_GRANDES.map(id => accueilResume(id));
+  return {
+    ok: true, version: db.accueil.version || 0, at: db.accueil.at || null, par: db.accueil.par || null,
+    options: accueilPubliques(), grandes,
+    etats: ACCUEIL_ETAT_TXT,
+    /* ce qui n'est PAS actif est dit clairement : l'application montre l'état au lieu d'un bouton mort */
+    indisponibles: accueilPubliques().filter(o => !o.actif).map(o => o.id)
+  };
+}
+function accueilPhotoEnvoi(res, b64) {
+  const buf = Buffer.from(String(b64).split(',').pop() || '', 'base64');
+  res.writeHead(200, {
+    'Content-Type': 'image/jpeg', 'Content-Length': buf.length,
+    'Cache-Control': 'public, max-age=600', 'X-Content-Type-Options': 'nosniff'
+  });
+  res.end(buf);
+}
+function avisCode(secret) {
+  const s = String(secret || '');
+  let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 1000000007;
+  return ('K' + (h % 1000000)).padStart(7, '0').slice(0, 7);
+}
+/* qui peut modifier/retirer un avis ? son auteur (code de suivi, ou même compte client) ou le PDG */
+function avisDroits(req, url, b, a) {
+  const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+  if (hq) return { ok: true, qui: hq.role === 'pdg' ? 'PDG' : 'gestionnaire', pdg: hq.role === 'pdg' };
+  const code = String((b && b.code) || url.searchParams.get('code') || '');
+  if (code && a.code && code.toUpperCase() === String(a.code).toUpperCase()) return { ok: true, qui: 'auteur (code de suivi)' };
+  const cli = (() => { try { return findClientByToken(req); } catch (e) { return null; } })();
+  if (cli && a.clientId && cli.id === a.clientId) return { ok: true, qui: 'auteur (compte KLEAN)' };
+  return { ok: false };
+}
+function avisValider(b) {
+  const v = {};
+  v.type = (b.type === 'objet') ? 'objet' : 'personne';
+  const net = (x, n) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().slice(0, n);
+  v.nom = net(b.nom, 60); v.prenom = net(b.prenom, 60);
+  v.age = net(b.age, 12); v.sexe = net(b.sexe, 12);
+  v.description = net(b.description, 1200);
+  v.ville = net(b.ville, 60); v.quartier = net(b.quartier, 60); v.lieu = net(b.lieu, 160);
+  v.date = net(b.date, 20); v.heure = net(b.heure, 10);
+  v.derniereLieu = net(b.derniereLieu, 160); v.derniereDate = net(b.derniereDate, 30);
+  v.signes = net(b.signes, 300); v.vetements = net(b.vetements, 300); v.objets = net(b.objets, 300);
+  v.contactNom = net(b.contactNom, 60);
+  v.contactTel = String(b.contactTel || '').replace(/[^\d+ ]/g, '').slice(0, 20).trim();
+  v.contactWhatsapp = String(b.contactWhatsapp || '').replace(/[^\d+ ]/g, '').slice(0, 20).trim();
+  v.relation = net(b.relation, 60);
+  v.publierContact = b.publierContact !== false;
+  return v;
+}
+function avisErreur(v) {
+  if (v.type === 'personne') {
+    if (!v.nom && !v.prenom) return { champ: 'nom', error: 'Indiquez au moins le nom ou le prénom de la personne (écrivez « inconnu » si vous ne le savez pas)' };
+  } else {
+    if (!v.description) return { champ: 'description', error: 'Décrivez l’objet recherché (marque, couleur, numéro de série…)' };
+  }
+  if (!v.lieu || !v.date) return { champ: 'lieu', error: 'Le LIEU et la DATE sont obligatoires : ce sont eux qui permettent de retrouver' };
+  if (!v.contactTel || v.contactTel.replace(/\D/g, '').length < 8) return { champ: 'contactTel', error: 'Un numéro de téléphone joignable est obligatoire' };
+  return null;
+}
+function jobsNotifierClient(m, cand) {
+  try {
+    const cible = [...sockets].filter(s => s.meta && s.meta.clientId && m.clientId && s.meta.clientId === m.clientId);
+    if (cible.length) broadcast(cible, { type: 'job_candidature', missionId: m.id, nom: cand.nom, at: cand.at });
+  } catch (e) { }
+}
+
+async function accueilRoutes(req, res, p, url) {
+  const commence = p.indexOf('/api/accueil') === 0 || p.indexOf('/api/jobs') === 0 || p.indexOf('/api/avis') === 0 ||
+    p.indexOf('/api/admin/accueil') === 0 || p.indexOf('/api/admin/jobs') === 0 || p.indexOf('/api/admin/avis') === 0;
+  if (!commence) return false;
+  accueilEnsure();
+  const B = (req.method === 'POST' || req.method === 'PATCH') ? await readBody(req).catch(() => ({})) : {};
+  const ip = req._ip || clientIp(req);
+
+  /* ─────────────── PUBLIC : l'état des grandes options ─────────────── */
+  if (p === '/api/accueil/options' && req.method === 'GET') return sendJson(res, 200, accueilReponseOptions()), true;
+  /* 🩺 le veilleur d'un appareil rapporte l'état réel des options (et récupère les ordres en attente) */
+  if (p === '/api/accueil/etat' && req.method === 'POST') {
+    const appareil = { appareil: B.appareil, version: B.version };
+    (Array.isArray(B.options) ? B.options.slice(0, 40) : []).forEach(o => {
+      if (!o || !accueilDef(o.id)) return;
+      accueilSanteMaj(o.id, o.etat, o.message, appareil);
+    });
+    if (B.reparation && B.reparation.ordreId) {
+      const rap = {
+        at: nowISO(), ordreId: String(B.reparation.ordreId).slice(0, 40), appareil: appareil.appareil || '',
+        ok: !!B.reparation.ok, reussies: (B.reparation.reussies || []).slice(0, 20),
+        echecs: (B.reparation.echecs || []).slice(0, 20), avant: (B.reparation.avant || []).slice(0, 40)
+      };
+      db.accueilRapports.unshift(rap);
+      db.accueilRapports = db.accueilRapports.slice(0, 60);
+      accueilJournal('reparation', '🔧 Réparation rapportée par un appareil : ' + (rap.ok ? '✅ réussie' : '⚠️ partielle') +
+        (rap.reussies.length ? ' — ' + rap.reussies.join(' · ') : '') + (rap.echecs.length ? ' — échecs : ' + rap.echecs.join(' · ') : ''));
+      emitAdmin('accueil', '🔧 Réparation ' + (rap.ok ? 'réussie' : 'partielle') + ' sur un appareil' +
+        (rap.reussies.length ? ' (' + rap.reussies.length + ' réparation(s))' : ''));
+    }
+    saveDb();
+    /* les ordres donnés par le PDG arrivent aussi par ici : la réparation marche même sans temps réel */
+    const depuis = Number(B.depuis) || 0;
+    const ordres = (db.accueilOrdres || []).filter(o => new Date(o.at).getTime() > depuis).slice(0, 5);
+    return sendJson(res, 200, { ok: true, version: db.accueil.version || 0, ordres }), true;
+  }
+
+  /* ─────────────── 💼 JE CHERCHE UN JOB PRÈS DE MOI ─────────────── */
+  if (p === '/api/jobs' && req.method === 'GET') {
+    const r = accueilReglages('job_pres');
+    if (!r.actif) return sendJson(res, 200, { ok: true, actif: false, liste: [], total: 0, message: 'Cette option est désactivée par KLEAN pour le moment.' }), true;
+    if (!hitsAutorises('jobs:' + ip, 60)) return sendJson(res, 429, { error: 'Trop de recherches — patientez une minute' }), true;
+    const lat = url.searchParams.get('lat'), lng = url.searchParams.get('lng');
+    const q = {
+      lat: (lat !== null && lat !== '' && isFinite(Number(lat))) ? Number(lat) : null,
+      lng: (lng !== null && lng !== '' && isFinite(Number(lng))) ? Number(lng) : null,
+      q: url.searchParams.get('q') || '', ville: url.searchParams.get('ville') || '',
+      type: url.searchParams.get('type') || '', rayonKm: url.searchParams.get('rayonKm') || r.params.rayonKm,
+      limite: url.searchParams.get('limite') || r.params.limite
+    };
+    const d = jobsOpportunites(q);
+    return sendJson(res, 200, {
+      ok: true, actif: true, liste: d.liste, total: d.total, rayon: d.rayon,
+      geo: (d.lat !== null), message: d.total ? '' : 'Aucune opportunité dans ce secteur pour l’instant — élargissez le rayon ou changez de ville.'
+    }), true;
+  }
+  if (p === '/api/jobs/postuler' && req.method === 'POST') {
+    const r = accueilReglages('job_pres');
+    if (!r.actif) return sendJson(res, 200, { ok: false, code: 'desactive', error: 'Cette option est désactivée par KLEAN pour le moment.' }), true;
+    if (!hitsAutorises('jobpost:' + ip, 10)) return sendJson(res, 429, { error: 'Trop de candidatures d’un coup — patientez une minute' }), true;
+    const nom = String(B.nom || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const tel = String(B.tel || '').replace(/[^\d+ ]/g, '').trim().slice(0, 20);
+    const msg = String(B.message || '').replace(/\s+/g, ' ').trim().slice(0, 700);
+    if (nom.length < 2) return sendJson(res, 400, { error: 'Indiquez votre nom (au moins 2 lettres)' }), true;
+    if (tel.replace(/\D/g, '').length < 8) return sendJson(res, 400, { error: 'Indiquez un numéro de téléphone joignable' }), true;
+    const offre = B.offreId ? (db.jobs || []).find(j => j.id === B.offreId) : null;
+    const mission = B.missionId ? (db.missions || []).find(m => m.id === B.missionId) : null;
+    if (!offre && !mission) return sendJson(res, 404, { error: 'Cette opportunité n’est plus disponible' }), true;
+    const cand = {
+      id: uid('CD'), offreId: offre ? offre.id : null, missionId: mission ? mission.id : null,
+      titre: offre ? offre.titre : (SVC_NAMES[mission.service] || mission.service || ''),
+      nom, tel, message: msg, ville: String(B.ville || (offre ? offre.ville : mission.ville) || '').slice(0, 60),
+      metier: String(B.metier || '').slice(0, 60),
+      lat: (typeof B.lat === 'number') ? B.lat : null, lng: (typeof B.lng === 'number') ? B.lng : null,
+      statut: 'recue', at: nowISO(), ip
+    };
+    db.jobCand.unshift(cand);
+    db.jobCand = db.jobCand.slice(0, 3000);
+    if (mission) jobsNotifierClient(mission, cand);
+    emitAdmin('jobs', '📨 Candidature de ' + nom + (cand.titre ? ' — ' + cand.titre : ''));
+    accueilJournal('job_candidature', '📨 Nouvelle candidature de ' + nom + (cand.titre ? ' pour « ' + cand.titre + ' »' : ''));
+    saveDb();
+    return sendJson(res, 201, {
+      ok: true, id: cand.id,
+      message: offre ? 'Votre candidature est envoyée. KLEAN vous rappellera au ' + tel + ' si votre profil correspond.'
+        : 'Votre proposition est envoyée au client. S’il est intéressé, il vous contactera au ' + tel + '.'
+    }), true;
+  }
+
+  /* ─────────────── 📢 AVIS DE RECHERCHE ─────────────── */
+  if (p === '/api/avis' && req.method === 'GET') {
+    const r = accueilReglages('avis_recherche');
+    if (!r.actif) return sendJson(res, 200, { ok: true, actif: false, liste: [], total: 0, message: 'Cette option est désactivée par KLEAN pour le moment.' }), true;
+    if (!hitsAutorises('avis:' + ip, 90)) return sendJson(res, 429, { error: 'Trop de consultations — patientez une minute' }), true;
+    const texte = String(url.searchParams.get('q') || '');
+    const type = String(url.searchParams.get('type') || '');
+    const ville = String(url.searchParams.get('ville') || '');
+    const liste = avisTrouve({ q: texte, type, ville }).sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 80);
+    return sendJson(res, 200, {
+      ok: true, actif: true, liste: liste.map(avisPublic), total: liste.length,
+      moderation: r.params.moderation || 'auto', vues: db.avisVues || 0,
+      message: liste.length ? '' : 'Aucun avis de recherche ne correspond pour l’instant.'
+    }), true;
+  }
+  if (p === '/api/avis/photo' && req.method === 'GET') {
+    const id = String(url.searchParams.get('id') || '');
+    const a = (db.avis || []).find(x => x.id === id);
+    if (!a || !a.photo || !db.avisFiles || !db.avisFiles[id]) return sendJson(res, 404, { error: 'Photo introuvable' }), true;
+    if (a.statut !== 'publie' && a.statut !== 'retrouve') {
+      const d = avisDroits(req, url, {}, a);
+      if (!d.ok) return sendJson(res, 403, { error: 'Photo non publiée' }), true;
+    }
+    if (!hitsAutorises('avisph:' + ip, 240)) return sendJson(res, 429, { error: 'Trop de consultations' }), true;
+    return accueilPhotoEnvoi(res, db.avisFiles[id].b64), true;
+  }
+  if (p === '/api/avis/fiche' && req.method === 'GET') {
+    const id = String(url.searchParams.get('id') || '');
+    const a = (db.avis || []).find(x => x.id === id);
+    if (!a) return sendJson(res, 404, { error: 'Avis introuvable' }), true;
+    const d = avisDroits(req, url, {}, a);
+    if (a.statut !== 'publie' && a.statut !== 'retrouve' && !d.ok) return sendJson(res, 404, { error: 'Avis introuvable' }), true;
+    a.vues = (a.vues || 0) + 1;
+    db.avisVues = (db.avisVues || 0) + 1;
+    if (a.vues % 10 === 0) saveDb();
+    return sendJson(res, 200, { ok: true, avis: avisPublic(a), mesDroits: d.ok, suivi: d.ok ? (a.code ? 'code' : 'compte') : '' }), true;
+  }
+  if (p === '/api/avis/suivi' && req.method === 'GET') {
+    const id = String(url.searchParams.get('id') || '');
+    const a = (db.avis || []).find(x => x.id === id);
+    if (!a) return sendJson(res, 404, { error: 'Avis introuvable' }), true;
+    const d = avisDroits(req, url, {}, a);
+    if (!d.ok) return sendJson(res, 403, { error: 'Code de suivi incorrect' }), true;
+    return sendJson(res, 200, { ok: true, avis: avisPublic(a), statut: a.statut, motif: a.motif || '', vu: a.vues || 0, qui: d.qui }), true;
+  }
+  if (p === '/api/avis' && req.method === 'POST') {
+    const r = accueilReglages('avis_recherche');
+    if (!r.actif) return sendJson(res, 200, { ok: false, code: 'desactive', error: 'Cette option est désactivée par KLEAN pour le moment.' }), true;
+    if (!hitsAutorises('avisnew:' + ip, 5)) return sendJson(res, 429, { error: 'Trop d’avis publiés d’un coup — patientez quelques minutes' }), true;
+    if (B.certifie !== true) return sendJson(res, 400, { error: 'Vous devez certifier que les informations sont exactes' }), true;
+    const v = avisValider(B);
+    const e = avisErreur(v);
+    if (e) return sendJson(res, 400, e), true;
+    /* 📷 la photo est facultative ; elle est limitée en taille (une seule par avis) */
+    let photo = null;
+    if (B.photo && /^data:image\/(jpeg|png|webp);base64,/.test(String(B.photo))) {
+      const b64 = String(B.photo).split(',').pop();
+      if (b64.length > 1400 * 1024) return sendJson(res, 413, { error: 'Photo trop lourde — reprenez-la, elle doit rester lisible' }), true;
+      photo = 1;
+    }
+    const cli = (() => { try { return findClientByToken(req); } catch (x) { return null; } })();
+    const a = Object.assign(v, {
+      id: uid('AV'), statut: (r.params.moderation === 'avant') ? 'en_attente' : 'publie',
+      moderation: r.params.moderation || 'auto',
+      code: String(Math.floor(100000 + Math.random() * 899999)),
+      clientId: cli ? cli.id : null, parTel: v.contactTel,
+      photo: !!photo, at: nowISO(), majAt: nowISO(), vues: 0, verifie: false,
+      ip, journal: [{ at: nowISO(), quoi: 'création', par: cli ? 'client' : 'visiteur' }]
+    });
+    db.avis.unshift(a);
+    db.avis = db.avis.slice(0, 5000);
+    if (photo) {
+      db.avisFiles[a.id] = { b64: String(B.photo).split(',').pop(), at: nowISO() };
+      /* on ne garde que les 120 photos les plus récentes : la base ne grossit pas sans fin */
+      const cles = Object.keys(db.avisFiles);
+      if (cles.length > 120) cles.sort((x, y) => String(db.avisFiles[x].at).localeCompare(String(db.avisFiles[y].at)))
+        .slice(0, cles.length - 120).forEach(k => { delete db.avisFiles[k]; });
+    }
+    emitAdmin('avis', '📢 Nouvel avis de recherche (' + (a.type === 'objet' ? 'objet' : 'personne') + ') — ' +
+      (a.statut === 'publie' ? 'publié' : '⏳ en attente de votre validation'));
+    if (a.statut === 'en_attente') broadcast(adminSockets(), { type: 'avis_maj', id: a.id, quoi: 'nouveau' });
+    saveDb();
+    return sendJson(res, 201, {
+      ok: true, id: a.id, code: a.code, statut: a.statut,
+      message: (a.statut === 'publie')
+        ? '✅ Votre avis est publié. Conservez votre code de suivi pour le modifier ou le retirer.'
+        : '⏳ Votre avis est envoyé à KLEAN pour vérification. Il sera publié très vite.'
+    }), true;
+  }
+  if ((p === '/api/avis/modifier' || p === '/api/avis/retirer' || p === '/api/avis/retrouve') && req.method === 'POST') {
+    const id = String(B.id || '');
+    const a = (db.avis || []).find(x => x.id === id);
+    if (!a) return sendJson(res, 404, { error: 'Avis introuvable' }), true;
+    const d = avisDroits(req, url, B, a);
+    if (!d.ok) return sendJson(res, 403, { error: 'Code de suivi incorrect — seul l’auteur (ou KLEAN) peut modifier cet avis' }), true;
+    if (p === '/api/avis/retirer') {
+      a.statut = 'retire'; a.majAt = nowISO(); a.motif = String(B.motif || '').slice(0, 200);
+    } else if (p === '/api/avis/retrouve') {
+      a.statut = 'retrouve'; a.majAt = nowISO();
+      a.suite = String(B.suite || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    } else {
+      /* ✍️ modification : l'auteur ne redonne que ce qu'il change — le reste de son avis est conservé */
+      const fusion = Object.assign({}, {
+        type: a.type, nom: a.nom, prenom: a.prenom, age: a.age, sexe: a.sexe, description: a.description,
+        lieu: a.lieu, ville: a.ville, quartier: a.quartier, date: a.date, heure: a.heure,
+        derniereLieu: a.derniereLieu, derniereDate: a.derniereDate, signes: a.signes, vetements: a.vetements,
+        objets: a.objets, contactNom: a.contactNom, contactTel: a.contactTel, contactWhatsapp: a.contactWhatsapp,
+        publierContact: a.publierContact !== false
+      }, B || {});
+      const v = avisValider(fusion);
+      const e = avisErreur(v);
+      if (e) return sendJson(res, 400, e), true;
+      Object.assign(a, v); a.majAt = nowISO();
+      if (B.photo && /^data:image\/(jpeg|png|webp);base64,/.test(String(B.photo))) {
+        db.avisFiles[a.id] = { b64: String(B.photo).split(',').pop(), at: nowISO() }; a.photo = true;
+      }
+      a.statut = (a.moderation === 'avant' && !d.pdg) ? 'en_attente' : 'publie';
+    }
+    a.journal = a.journal || [];
+    a.journal.push({ at: nowISO(), quoi: p.split('/').pop(), par: d.qui });
+    accueilJournal('avis_' + p.split('/').pop(), '📢 Avis ' + a.id + ' — ' + p.split('/').pop() + ' par ' + d.qui);
+    saveDb();
+    emitAccueilMaj('avis', a.id);
+    return sendJson(res, 200, { ok: true, statut: a.statut, message: a.statut === 'retrouve' ? '✅ Merci — l’avis est marqué « retrouvé »' : (a.statut === 'retire' ? '🗑️ Avis retiré' : '✅ Avis mis à jour') }), true;
+  }
+
+  /* ─────────────── TABLEAU DE BORD ─────────────── */
+  const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+  if (p.indexOf('/api/admin/accueil') === 0 || p.indexOf('/api/admin/jobs') === 0 || p.indexOf('/api/admin/avis') === 0) {
+    if (!hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise', code: 'session' }), true;
+  }
+
+  if (p === '/api/admin/accueil' && req.method === 'GET') {
+    const dispo = ACCUEIL_OPTIONS_DEF.map(d => accueilResume(d.id));
+    const enPanne = dispo.filter(o => o.etat === 'panne').length;
+    const aVerifier = dispo.filter(o => o.etat === 'attention').length;
+    return sendJson(res, 200, {
+      ok: true, role: hq.role, pdg: hq.role === 'pdg',
+      version: db.accueil.version || 0, at: db.accueil.at || null,
+      options: dispo, journal: (db.accueil.journal || []).slice(0, 120),
+      veille: db.accueilVeille || {}, ordres: (db.accueilOrdres || []).slice(0, 12),
+      rapports: (db.accueilRapports || []).slice(0, 12),
+      etats: ACCUEIL_ETAT_TXT,
+      resume: { enPanne, aVerifier, actives: dispo.filter(o => o.actif).length, total: dispo.length, off: dispo.filter(o => !o.actif).length },
+      stats: {
+        jobs: (db.jobs || []).filter(j => !j.retire).length,
+        candidatures: (db.jobCand || []).length,
+        avis: (db.avis || []).length, avisPublies: avisPublies().length,
+        avisAttente: (db.avis || []).filter(a => a.statut === 'en_attente').length,
+        avisVues: db.avisVues || 0
+      },
+      moderation: accueilReglages('avis_recherche').params.moderation
+    }), true;
+  }
+  if (p === '/api/admin/accueil' && req.method === 'POST') {
+    const id = String(B.id || '');
+    const action = String(B.action || '');
+    const clesPdg = ['activer', 'desactiver', 'visible', 'masquer', 'ordre', 'params', 'reinitialiser', 'reinitialiser_tout', 'essentielle_protegee'];
+    if (clesPdg.indexOf(action) >= 0 && hq.role !== 'pdg')
+      return sendJson(res, 403, { error: 'Réservé au PDG : seul le compte principal règle les options de l’accueil', code: 'pdg' }), true;
+    if (action === 'actualiser') {
+      emitAccueilOrdre('actualiser');
+      return sendJson(res, 200, { ok: true, message: '🔄 Demande d’actualisation envoyée aux écrans ouverts' }), true;
+    }
+    if (action === 'reparer') {
+      if (id && !accueilDef(id)) return sendJson(res, 404, { error: 'Option inconnue' }), true;
+      emitAccueilOrdre(id ? ('reparer:' + id) : 'reparer');
+      accueilSanteMaj(id || 'recherche', 'attention', 'Réparation demandée par le tableau de bord…', {});
+      if (!id) ACCUEIL_OPTIONS_DEF.forEach(d => accueilSanteMaj(d.id, 'attention', 'Réparation demandée par le tableau de bord…', {}));
+      accueilJournal('reparer', '🔧 Réparation demandée' + (id ? ' (' + id + ')' : ' (toutes les options)'));
+      emitAccueilMaj('reparation', id || '');
+      saveDb();
+      return sendJson(res, 200, { ok: true, message: '🔧 Ordre de réparation envoyé' + (id ? '' : ' à toutes les options') + ' — le résultat s’affichera ici' }), true;
+    }
+    const d = accueilDef(id);
+    if (!d) return sendJson(res, 404, { error: 'Option inconnue : ' + id }), true;
+    const o = db.accueil.options[id];
+    if (action === 'activer') {
+      o.actif = true; if (d.essentielle) o.visible = true;
+    } else if (action === 'desactiver') {
+      o.actif = false;
+      if (d.essentielle) o.visible = true;   /* les options essentielles restent visibles mais annoncent leur état */
+    } else if (action === 'visible' || action === 'masquer') {
+      o.visible = (action === 'visible');
+      if (!o.visible && !o.actif) return sendJson(res, 200, { ok: true, message: 'Option déjà désactivée — visible ou non, elle n’apparaît pas.' }), true;
+    } else if (action === 'ordre') {
+      const liste = ACCUEIL_OPTIONS_DEF.map(x => x.id).sort((a, b) => db.accueil.options[a].ordre - db.accueil.options[b].ordre);
+      const i = liste.indexOf(id);
+      const sens = (B.sens === 'haut') ? -1 : 1;
+      const j = i + sens;
+      if (j < 0 || j >= liste.length) return sendJson(res, 200, { ok: true, message: 'Déjà en ' + (sens < 0 ? 'tête' : 'fin') + ' de liste' }), true;
+      const autre = liste[j];
+      const t = db.accueil.options[autre].ordre;
+      db.accueil.options[autre].ordre = o.ordre; o.ordre = t;
+    } else if (action === 'params') {
+      const p2 = Object.assign({}, o.params || {});
+      if (B.params && typeof B.params === 'object') {
+        Object.keys(B.params).slice(0, 12).forEach(k => {
+          if (!(k in (d.params || {}))) return;
+          const v = B.params[k];
+          if (typeof (d.params[k]) === 'number') { const n = Number(v); if (isFinite(n)) p2[k] = Math.max(0, Math.min(300, n)); }
+          else if (typeof (d.params[k]) === 'string') p2[k] = String(v).slice(0, 40);
+          else p2[k] = v;
+        });
+      }
+      o.params = p2;
+    } else if (action === 'reinitialiser') {
+      o.actif = d.defaut.actif; o.visible = d.defaut.visible; o.ordre = d.defaut.ordre;
+      o.params = Object.assign({}, d.params);
+    } else if (action === 'reinitialiser_tout') {
+      ACCUEIL_OPTIONS_DEF.forEach(x => {
+        const oo = db.accueil.options[x.id];
+        oo.actif = x.defaut.actif; oo.visible = x.defaut.visible; oo.ordre = x.defaut.ordre;
+        oo.params = Object.assign({}, x.params);
+      });
+    } else {
+      return sendJson(res, 400, { error: 'Action inconnue : ' + action }), true;
+    }
+    o.at = nowISO(); o.par = hq.nom || hq.role;
+    db.accueil.version = (db.accueil.version || 0) + 1;
+    db.accueil.at = nowISO(); db.accueil.par = hq.nom || hq.role;
+    accueilSanteMaj(id, o.actif ? 'inconnu' : 'off', o.actif ? 'Nouveau réglage — contrôle en cours' : 'Désactivée par le PDG', {});
+    accueilJournal(action, (d.icone || '') + ' ' + d.titre + ' → ' + action + (action === 'params' ? ' ' + JSON.stringify(o.params) : ''), hq.nom || true);
+    emitAccueilMaj('options', id);
+    saveDb();
+    return sendJson(res, 200, { ok: true, option: accueilResume(id), message: '✅ « ' + d.titre + ' » : ' + (
+      action === 'activer' ? 'ACTIVÉE' : action === 'desactiver' ? 'DÉSACTIVÉE' : action === 'visible' ? 'affichée sur l’accueil' :
+        action === 'masquer' ? 'masquée de l’accueil' : action === 'ordre' ? 'ordre modifié' : action === 'params' ? 'réglages enregistrés' :
+          'remise au réglage d’origine') }), true;
+  }
+
+  /* 💼 les offres de travail (tableau de bord) */
+  if (p === '/api/admin/jobs' && req.method === 'GET') {
+    return sendJson(res, 200, {
+      ok: true, pdg: hq.role === 'pdg',
+      offres: (db.jobs || []).slice(0, 300), candidatures: (db.jobCand || []).slice(0, 300),
+      stats: { offres: (db.jobs || []).filter(j => !j.retire).length, candidatures: (db.jobCand || []).length,
+        nouvelles: (db.jobCand || []).filter(c => c.statut === 'recue').length }
+    }), true;
+  }
+  if (p === '/api/admin/jobs' && req.method === 'POST') {
+    if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG', code: 'pdg' }), true;
+    const a = String(B.action || 'offre_creer');
+    if (a === 'offre_creer' || a === 'offre_modifier') {
+      const net = (x, n) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().slice(0, n);
+      const titre = net(B.titre, 90), ville = net(B.ville, 60);
+      if (titre.length < 3) return sendJson(res, 400, { error: 'Donnez un titre à l’offre' }), true;
+      if (!ville) return sendJson(res, 400, { error: 'Indiquez la ville' }), true;
+      let j = a === 'offre_modifier' ? (db.jobs || []).find(x => x.id === B.id) : null;
+      if (a === 'offre_modifier' && !j) return sendJson(res, 404, { error: 'Offre introuvable' }), true;
+      const corps = {
+        titre, ville, quartier: net(B.quartier, 60), metier: net(B.metier, 60),
+        description: net(B.description, 900), quand: net(B.quand, 60), prix: net(B.prix, 40),
+        contact: net(B.contact, 60), tel: String(B.tel || '').replace(/[^\d+ ]/g, '').slice(0, 20).trim(),
+        telPublic: !!B.telPublic, urgent: !!B.urgent, lat: (typeof B.lat === 'number') ? B.lat : null, lng: (typeof B.lng === 'number') ? B.lng : null
+      };
+      if (j) Object.assign(j, corps, { majAt: nowISO() });
+      else { j = Object.assign({ id: uid('OF'), statut: 'publie', at: nowISO(), par: hq.nom || 'PDG', vues: 0 }, corps); db.jobs.unshift(j); }
+      accueilJournal('offre', '💼 Offre « ' + titre + ' » ' + (a === 'offre_modifier' ? 'modifiée' : 'publiée'), hq.nom || true);
+      emitAccueilMaj('jobs', j.id);
+      saveDb();
+      return sendJson(res, 200, { ok: true, offre: j }), true;
+    }
+    if (a === 'offre_retirer' || a === 'offre_remettre') {
+      const j = (db.jobs || []).find(x => x.id === B.id);
+      if (!j) return sendJson(res, 404, { error: 'Offre introuvable' }), true;
+      j.retire = (a === 'offre_retirer'); j.statut = j.retire ? 'retire' : 'publie'; j.majAt = nowISO();
+      emitAccueilMaj('jobs', j.id); saveDb();
+      return sendJson(res, 200, { ok: true, message: j.retire ? '🗑️ Offre retirée de l’accueil' : '✅ Offre de nouveau publiée' }), true;
+    }
+    if (a === 'offre_supprimer') {
+      const i = (db.jobs || []).findIndex(x => x.id === B.id);
+      if (i < 0) return sendJson(res, 404, { error: 'Offre introuvable' }), true;
+      db.jobs.splice(i, 1); saveDb();
+      return sendJson(res, 200, { ok: true, message: 'Offre supprimée' }), true;
+    }
+    if (a === 'cand_statut' || a === 'cand_supprimer') {
+      const c = (db.jobCand || []).find(x => x.id === B.id);
+      if (!c) return sendJson(res, 404, { error: 'Candidature introuvable' }), true;
+      if (a === 'cand_supprimer') { db.jobCand = db.jobCand.filter(x => x.id !== c.id); }
+      else { c.statut = ['recue', 'vue', 'retenue', 'ecartee'].indexOf(B.statut) >= 0 ? B.statut : 'vue'; c.majAt = nowISO(); }
+      saveDb();
+      return sendJson(res, 200, { ok: true }), true;
+    }
+    return sendJson(res, 400, { error: 'Action inconnue' }), true;
+  }
+
+  /* 📢 les avis de recherche (tableau de bord) */
+  if (p === '/api/admin/avis' && req.method === 'GET') {
+    return sendJson(res, 200, {
+      ok: true, pdg: hq.role === 'pdg',
+      avis: (db.avis || []).slice(0, 300).map(a => Object.assign(avisPublic(a), { code: a.code, ip: a.ip, journal: a.journal || [], motif: a.motif || '', contactPublie: a.publierContact !== false })),
+      moderation: accueilReglages('avis_recherche').params.moderation,
+      stats: {
+        total: (db.avis || []).length, publies: avisPublies().length,
+        attente: (db.avis || []).filter(a => a.statut === 'en_attente').length,
+        retrouves: (db.avis || []).filter(a => a.statut === 'retrouve').length,
+        retires: (db.avis || []).filter(a => a.statut === 'retire').length,
+        vues: db.avisVues || 0, photos: Object.keys(db.avisFiles || {}).length
+      }
+    }), true;
+  }
+  if (p === '/api/admin/avis' && req.method === 'POST') {
+    if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG', code: 'pdg' }), true;
+    const a = String(B.action || '');
+    if (a === 'moderation') {
+      const v = (B.valeur === 'avant') ? 'avant' : 'auto';
+      db.accueil.options['avis_recherche'].params.moderation = v;
+      db.accueil.version = (db.accueil.version || 0) + 1;
+      accueilJournal('avis_moderation', '📢 Avis de recherche → publication ' + (v === 'avant' ? 'après validation du PDG' : 'immédiate'), hq.nom || true);
+      emitAccueilMaj('options', 'avis_recherche'); saveDb();
+      return sendJson(res, 200, { ok: true, moderation: v, message: v === 'avant' ? 'Les nouveaux avis attendront votre validation' : 'Les avis sont publiés immédiatement' }), true;
+    }
+    const x = (db.avis || []).find(z => z.id === B.id);
+    if (!x) return sendJson(res, 404, { error: 'Avis introuvable' }), true;
+    if (a === 'publier' || a === 'retirer' || a === 'suspendre' || a === 'retrouve') {
+      x.statut = { publier: 'publie', retirer: 'retire', suspendre: 'suspendu', retrouve: 'retrouve' }[a];
+      x.motif = String(B.motif || '').slice(0, 200); x.majAt = nowISO(); x.verifie = true;
+    } else if (a === 'verifier') {
+      x.verifie = true; x.majAt = nowISO();
+    } else if (a === 'supprimer') {
+      db.avis = db.avis.filter(z => z.id !== x.id); delete db.avisFiles[x.id];
+      accueilJournal('avis_suppr', '📢 Avis ' + x.id + ' supprimé', hq.nom || true); saveDb();
+      return sendJson(res, 200, { ok: true, message: 'Avis supprimé définitivement' }), true;
+    } else if (a === 'photo_suppr') {
+      delete db.avisFiles[x.id]; x.photo = false; x.majAt = nowISO();
+    } else return sendJson(res, 400, { error: 'Action inconnue' }), true;
+    x.journal = x.journal || []; x.journal.push({ at: nowISO(), quoi: a, par: 'PDG' });
+    accueilJournal('avis_' + a, '📢 Avis ' + x.id + ' → ' + a + (x.motif ? ' (' + x.motif + ')' : ''), hq.nom || true);
+    emitAccueilMaj('avis', x.id); saveDb();
+    return sendJson(res, 200, { ok: true, statut: x.statut, message: '✅ Avis mis à jour : ' + x.statut }), true;
+  }
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
   if (shieldGate(req, res, p)) return;
+  /* 🧩 LOT 123 — Les grandes options de la page d'accueil (routeur centralisé) */
+  if (await accueilRoutes(req, res, p, url)) return;
 
   /* --- API --- */
   if (p === '/api/health') return sendJson(res, 200, { ok: true, storage: pgClient ? 'postgres' : 'fichier', agentsEnLigne: onlineAgents().length, agentsTotal: db.agents.length, clientsTotal: db.clients.length, missions: db.missions.length, writeFrozen: writesFrozen(), live: liveHome() });

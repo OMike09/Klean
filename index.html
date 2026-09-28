@@ -1418,7 +1418,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
           <div id="accueil-lieu" style="margin-top:9px"></div>
         </div>
 
-        <button type="button" id="acc-btn-rechercher" class="acc-btn" onclick="langAfficherPros('accueil')">🔎 Rechercher un service</button>
+        <button type="button" id="acc-btn-rechercher" data-opt="recherche" class="acc-btn" onclick="langAfficherPros('accueil')">🔎 Rechercher un service</button>
         <div id="accueil-msg" style="margin-top:10px"></div>
 
         <details class="acc-kp">
@@ -1439,7 +1439,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
   <div style="padding:0 12px">
     <h2 class="acc-sect">Services populaires</h2>
     <div id="accueil-pop" class="acc-pop"></div>
-    <button type="button" class="acc-tous" onclick="catNatOuvrir()">📚 Voir tous les services <span id="catnat-n"></span> →</button>
+    <button type="button" id="btn-tous-svc" data-opt="tous_services" class="acc-tous" onclick="catNatOuvrir()">📚 Voir tous les services <span id="catnat-n"></span> →</button>
     <div style="font-size:13.5px;color:var(--muted);margin-top:7px;text-align:center" id="catnat-sous">Le catalogue national — touchez une catégorie</div>
     <!-- la liste complète vit dans la fenêtre « 📚 Tous les services » : elle n'encombre plus l'accueil -->
     <div id="catnat-pop" class="hidden" aria-hidden="true" style="display:none"></div>
@@ -1450,15 +1450,24 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
   <!-- ═══ ③ ACCÈS RAPIDE — discret, SOUS la recherche (jamais devant) ═══ -->
   <div style="padding:0 12px">
     <div class="acc-chips">
-      <button type="button" class="cat-chip" onclick="ouvrirRubrique('urgence')" style="display:flex;align-items:center;gap:6px;border-color:#f3c9c9"><span>🆘</span><b style="color:#c62828">Urgence</b></button>
-      <button type="button" class="cat-chip" onclick="ouvrirRubrique('points')" style="display:flex;align-items:center;gap:6px"><span>🪙</span><b>Klean Points</b><span id="rap-pts" style="opacity:.75"></span></button>
-      <button type="button" class="cat-chip" onclick="ouvrirRubrique('quiz')" style="display:flex;align-items:center;gap:6px"><span>🧠</span><b>Quiz</b></button>
-      <button type="button" class="cat-chip" id="rap-jeux" onclick="ouvrirRubrique('jeux')" style="display:none;align-items:center;gap:6px"><span>🎮</span><b>Jeux</b></button>
-      <button type="button" class="cat-chip" onclick="ouvrirRubrique('infos')" style="display:flex;align-items:center;gap:6px"><span>ℹ️</span><b>Infos</b></button>
-      <button type="button" class="cat-chip" onclick="ouvrirRubrique('options')" style="display:flex;align-items:center;gap:6px"><span>⚙️</span><b>Options</b></button>
+      <button type="button" id="rap-urgence" data-opt="urgence" class="cat-chip" onclick="ouvrirRubrique('urgence')" style="display:flex;align-items:center;gap:6px;border-color:#f3c9c9"><span>🆘</span><b style="color:#c62828">Urgence</b></button>
+      <button type="button" id="rap-points" data-opt="points" class="cat-chip" onclick="ouvrirRubrique('points')" style="display:flex;align-items:center;gap:6px"><span>🪙</span><b>Klean Points</b><span id="rap-pts" style="opacity:.75"></span></button>
+      <button type="button" id="rap-quiz" data-opt="quiz" class="cat-chip" onclick="ouvrirRubrique('quiz')" style="display:flex;align-items:center;gap:6px"><span>🧠</span><b>Quiz</b></button>
+      <button type="button" class="cat-chip" id="rap-jeux" data-opt="jeux" onclick="ouvrirRubrique('jeux')" style="display:none;align-items:center;gap:6px"><span>🎮</span><b>Jeux</b></button>
+      <button type="button" id="rap-infos" data-opt="infos" class="cat-chip" onclick="ouvrirRubrique('infos')" style="display:flex;align-items:center;gap:6px"><span>ℹ️</span><b>Infos</b></button>
+      <button type="button" id="rap-options" data-opt="options_client" class="cat-chip" onclick="ouvrirRubrique('options')" style="display:flex;align-items:center;gap:6px"><span>⚙️</span><b>Options</b></button>
     </div>
     <div id="flip-slot" class="hidden" style="margin:0 0 13px"></div>
-    <button type="button" class="acc-pro" onclick="setMode('agent')">🧑‍💼 <b>Vous êtes professionnel&nbsp;?</b> Recevez des missions près de chez vous — <b>75 % du montant vous revient.</b> Rejoindre KLEAN →</button>
+    <button type="button" id="espace-pro-btn" data-opt="espace_pro" class="acc-pro" onclick="setMode('agent')">🧑‍💼 <b>Vous êtes professionnel&nbsp;?</b> Recevez des missions près de chez vous — <b>75 % du montant vous revient.</b> Rejoindre KLEAN →</button>
+    <!-- ═══ 🧩 29/09 (lot 123) — LES GRANDES OPTIONS DE L'ACCUEIL ═══
+         Elles sont écrites ici par le registre central (optsRendu) : le PDG décide lesquelles
+         s'affichent, dans quel ordre, et si elles sont actives. Un écran vide = aucune option. -->
+    <div id="acc-grandes-zone" style="margin-top:6px">
+      <h2 class="acc-sect" id="acc-grandes-titre">Autres options</h2>
+      <div id="acc-grandes"></div>
+      <div id="acc-secours"></div>
+      <div id="acc-opts-etat"></div>
+    </div>
     <p class="note" style="margin-top:14px">KLEAN — la plateforme ivoirienne des services à domicile.<br>📍 Côte d’Ivoire 🇨🇮</p>
   </div>
 </div>
@@ -5197,7 +5206,7 @@ let FLIP = null, FLIP_SESS = null, FLIP_T0 = 0;
   try{ if(window.kVeilleRetirer) window.kVeilleRetirer(); }catch(e){}   /* l'alerte éventuelle s'efface d'elle-même */
   /* 🔎 « Vérifier les mises à jour » : le client (et le PDG) peut savoir d'un geste s'il a la
      dernière page. Sans cela, un téléphone pouvait rester sur l'ancienne version sans le dire. */
-  window.KLEAN_VERSION = '118.5';
+  window.KLEAN_VERSION = '118.6';
   window.kVerifierVersion = function(){
     try{ toast('🔍 Vérification de la mise à jour…'); }catch(e){}
     try{
@@ -8671,6 +8680,854 @@ async function mesPaiementsPro(){
 <div id="ecran-recherche" style="display:none"></div>
 <div id="fiche-pro" style="display:none"></div>
 
+<!-- ═══ 🧩 29/09 (lot 123) — LES GRANDES OPTIONS DE L'ACCUEIL : registre, veilleur, réparation ═══ -->
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   🧩 29/09 — LOT 123 : LES GRANDES OPTIONS DE LA PAGE D'ACCUEIL
+   ═══════════════════════════════════════════════════════════════════════════════════
+   Le PDG a demandé : « chaque grande option doit ouvrir réellement sa fonction, aucun bouton
+   décoratif, aucun bouton qui meurt après une mise à jour — et je dois pouvoir contrôler son
+   état depuis mon tableau de bord ».
+
+   Trois protections, ici dans l'application :
+     ① un REGISTRE (KLEAN_OPTS_DEF) : chaque option a un identifiant STABLE et sait où elle
+        mène (sa cible dans la page, sa vue, sa fonction). Un contrôle automatique compare
+        le registre à la réalité de l'application — les routes centralisées.
+     ② un VEILLEUR : au démarrage puis régulièrement, il vérifie que chaque option active a
+        bien son bouton, son action et sa page ; il rapporte l'état au serveur (🟢🟠🔴⚪).
+     ③ une RÉPARATION à distance : le PDG appuie sur « Réparer » dans son tableau de bord, et
+        l'application se répare elle-même (reconnexion des boutons, recréation des écrans,
+        rechargement du registre) puis renvoie son résultat — sans passer par le code.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+const KLEAN_OPTS_DEF = {
+  recherche:      { cibles: ['#acc-btn-rechercher', '#home-svc-search'], zone: 'accueil', vue: 'view-home', action: 'langAfficherPros', arg: 'accueil', protege: true, quoi: 'la recherche d’un service' },
+  tous_services:  { cibles: ['#btn-tous-svc'], zone: 'accueil', vue: 'view-home', action: 'catNatOuvrir', quoi: 'le catalogue national' },
+  job_pres:       { cibles: ['#opt-job-pres'], zone: 'grandes', vue: 'view-jobs', action: 'jobsOuvrir', quoi: 'les opportunités de travail' },
+  avis_recherche: { cibles: ['#opt-avis'], zone: 'grandes', vue: 'view-avis', action: 'avisOuvrir', quoi: 'les avis de recherche' },
+  urgence:        { cibles: ['#rap-urgence'], zone: 'accueil', vue: 'view-urgence', action: 'ouvrirRubrique', arg: 'urgence', quoi: 'les urgences' },
+  points:         { cibles: ['#rap-points'], zone: 'accueil', vue: 'view-points', action: 'ouvrirRubrique', arg: 'points', quoi: 'les Klean Points' },
+  quiz:           { cibles: ['#rap-quiz'], zone: 'accueil', vue: 'view-quiz', action: 'ouvrirRubrique', arg: 'quiz', quoi: 'le quiz' },
+  jeux:           { cibles: ['#rap-jeux'], zone: 'accueil', vue: 'view-jeux', action: 'ouvrirRubrique', arg: 'jeux', quoi: 'les jeux' },
+  flip:           { cibles: ['#flip-slot'], zone: 'accueil', vue: 'view-home', action: null, module: 'chargerFlipAccueil', quoi: 'le jeu Flip Fizz' },
+  infos:          { cibles: ['#rap-infos'], zone: 'accueil', vue: 'view-infos', action: 'ouvrirRubrique', arg: 'infos', quoi: 'les informations' },
+  options_client: { cibles: ['#rap-options'], zone: 'accueil', vue: 'view-options', action: 'ouvrirRubrique', arg: 'options', quoi: 'les réglages' },
+  publicite:      { cibles: ['#ad-box'], zone: 'publie', vue: 'view-home', action: null, module: 'loadAd', quoi: 'la publicité' },
+  annonce:        { cibles: ['#aff-bar'], zone: 'publie', vue: 'view-home', action: null, module: 'loadAffiche', quoi: 'l’affiche aux utilisateurs' },
+  support:        { cibles: ['#sup-fab'], zone: 'publie', vue: 'view-home', action: null, module: 'supBuild', quoi: 'le support' },
+  espace_pro:     { cibles: ['#espace-pro-btn'], zone: 'accueil', vue: 'view-home', action: 'setMode', arg: 'agent', quoi: 'l’espace professionnel' },
+  langues:        { cibles: ['#lang-barre-accueil'], zone: 'accueil', vue: 'view-home', action: null, module: 'langBarre', quoi: 'le choix des langues' }
+};
+const KLEAN_OPTS_CLES = Object.keys(KLEAN_OPTS_DEF);
+/* 📖 le registre est lisible de l'extérieur (contrôles automatiques, outils du PDG) : c'est lui qui
+   vérifie qu'aucune mise à jour n'a débranché une grande option. */
+try { window.KLEAN_OPTS_DEF = KLEAN_OPTS_DEF; } catch (e) { }
+let KLEAN_OPTS = { charge: false, at: null, version: 0, options: [], grandes: [], map: {}, source: '' , ordresVus: 0 };
+
+function optsCacheLire() {
+  try {
+    const j = (typeof kLJson === 'function') ? kLJson('k2_opts', null) : null;
+    if (j && j.options && j.options.length) return j;
+  } catch (e) { }
+  return null;
+}
+function optsCacheEcrire() {
+  try { kLS.set('k2_opts', JSON.stringify({ at: KLEAN_OPTS.at, version: KLEAN_OPTS.version, options: KLEAN_OPTS.options, grandes: KLEAN_OPTS.grandes })); } catch (e) { }
+}
+
+/* 🔎 interroge le serveur (les options changent de partout, en direct) */
+async function optsCharger() {
+  try {
+    const d = await fetch('/api/accueil/options', { cache: 'no-store' }).then(r => r.json());
+    if (!d || !d.ok || !Array.isArray(d.options)) throw new Error('réponse illisible');
+    KLEAN_OPTS = { charge: true, at: d.at, version: d.version || 0, options: d.options, grandes: d.grandes || [], map: {}, source: 'serveur', ordresVus: KLEAN_OPTS.ordresVus };
+    KLEAN_OPTS.options.forEach(o => { KLEAN_OPTS.map[o.id] = o; });
+    optsCacheEcrire();
+    optsRendu();
+    return true;
+  } catch (e) {
+    /* ⚠️ serveur injoignable : on garde la DERNIÈRE état connu (ou les défauts) —
+       l'accueil ne doit jamais devenir vide parce qu'une requête a échoué. */
+    const c = optsCacheLire();
+    if (c) {
+      KLEAN_OPTS = { charge: false, at: c.at, version: c.version, options: c.options, grandes: c.grandes || [], map: {}, source: 'mémoire' };
+      KLEAN_OPTS.options.forEach(o => { KLEAN_OPTS.map[o.id] = o; });
+      optsRendu();
+    }
+    return false;
+  }
+}
+function optEtat(id) {
+  const o = KLEAN_OPTS.map[id];
+  if (!o) return { actif: true, visible: true, ordre: 999, etat: 'inconnu', message: '', inconnu: true };
+  return o;
+}
+function optEstActif(id) { const o = optEtat(id); return o.inconnu ? true : (o.actif !== false); }
+function optEstVisible(id) { const o = optEtat(id); return o.inconnu ? true : (o.visible !== false && o.actif !== false); }
+
+/* ─────────────── ② le rendu de l'accueil : les grandes options du bas + les états ─────────────── */
+function optHTMLGrande(o) {
+  const off = (o.actif === false);
+  return ''
+    + '<button type="button" id="opt-' + (o.id === 'job_pres' ? 'job-pres' : (o.id === 'avis_recherche' ? 'avis' : o.id)) + '" data-opt="' + o.id + '"'
+    + ' onclick="optOuvrir(\'' + o.id + '\')" aria-label="' + o.titre + '"'
+    + ' style="display:flex;align-items:center;gap:13px;width:100%;text-align:left;background:' + (off ? 'var(--card2)' : 'linear-gradient(135deg,#fff, #FFF7EF)')
+    + ';border:2px solid ' + (off ? 'var(--line)' : 'var(--p)') + ';border-radius:18px;padding:16px 15px;margin-top:11px;cursor:pointer;font:inherit;min-height:84px;box-shadow:' + (off ? 'none' : '0 6px 18px rgba(194,65,12,.14)') + '">'
+    + '<span style="font-size:30px;flex:none">' + (o.icone || '✨') + '</span>'
+    + '<span style="flex:1;min-width:0">'
+    + '<b style="display:block;font-size:19px;line-height:1.2;color:' + (off ? 'var(--muted)' : 'var(--pd)') + '">' + (o.titre || '') + '</b>'
+    + '<span style="display:block;font-size:13.5px;color:var(--muted);margin-top:3px;line-height:1.35">' + (off ? '⏸️ ' + (o.message || 'temporairement désactivée par KLEAN') : (o.sous || '')) + '</span>'
+    + '</span>'
+    + '<span style="font-size:22px;flex:none;color:var(--pd)">' + (off ? '⏸️' : '›') + '</span>'
+    + '</button>';
+}
+function optHTMLPuces(liste) {
+  /* les options secondaires de l'accueil, dans l'ordre choisi par le PDG */
+  const petits = liste || KLEAN_OPTS.options.filter(o => !o.grande && o.zone !== 'publie');
+  if (!petits.length) return '';
+  return petits.map(o => {
+    const off = (o.actif === false);
+    return '<button type="button" class="cat-chip" data-opt="' + o.id + '" onclick="optOuvrir(\'' + o.id + '\')" title="' + (o.titre || '') + '"'
+      + ' style="' + (off ? 'opacity:.55;' : '') + 'border-color:#eee"><span>' + (o.icone || '') + '</span><b>' + (o.titre || '') + '</b>' + (off ? '<span style="font-size:11px">⏸️</span>' : '') + '</button>';
+  }).join('');
+}
+function optsRendu() {
+  /* ① les grandes options du bas de l'accueil (ordre du PDG) */
+  const zone = document.getElementById('acc-grandes');
+  if (zone) {
+    const grandes = KLEAN_OPTS.options.filter(o => o.grande && o.visible !== false);
+    zone.innerHTML = grandes.map(optHTMLGrande).join('') || '';
+    const titre = document.getElementById('acc-grandes-titre');
+    if (titre) titre.style.display = grandes.length ? '' : 'none';
+  }
+  /* ② montrer / cacher les éléments existants de l'accueil selon le PDG */
+  Object.keys(KLEAN_OPTS_DEF).forEach(id => {
+    const d = KLEAN_OPTS_DEF[id];
+    const visible = optEstVisible(id) || !!d.protege;
+    (d.cibles || []).forEach(sel => {
+      let el = null;
+      try { el = document.querySelector(sel); } catch (e) { }
+      if (!el) return;
+      if (d.zone === 'publie') {           /* publicité, affiche, support : gérés par leurs propres modules */
+        if (!optEstActif(id)) { el.classList.add('hidden'); }
+        return;
+      }
+      if (visible) { el.style.display = el.dataset.optDisplay || ''; if (el.dataset.optMasque === '1') { el.style.display = el.dataset.optDisplay || ''; } }
+      else { if (el.dataset.optDisplay === undefined) el.dataset.optDisplay = el.style.display || ''; el.style.display = 'none'; }
+      if (optEstActif(id)) { el.removeAttribute('data-opt-off'); el.style.opacity = (el.dataset.optOpacity || ''); }
+      else { el.setAttribute('data-opt-off', '1'); el.style.opacity = '.55'; }
+    });
+  });
+  /* 🧯 ÎLOT DE SECOURS : si une option active n'a plus son bloc dans la page (mise à jour qui a
+     touché l'accueil), on la remet ICI pour qu'elle reste utilisable — et le PDG le voit dans
+     la surveillance. L'utilisateur ne se retrouve jamais sans son bouton. */
+  const secours = document.getElementById('acc-secours');
+  if (secours) {
+    const manquants = KLEAN_OPTS.options.filter(o => {
+      if (o.zone === 'publie' || o.actif === false) return false;
+      const d = KLEAN_OPTS_DEF[o.id]; if (!d) return false;
+      return (d.cibles || []).length > 0 && !(d.cibles || []).some(sel => { try { return !!document.querySelector(sel); } catch (e) { return false; } });
+    });
+    secours.innerHTML = manquants.length
+      ? '<div style="background:#FFF9F2;border:1.5px dashed var(--p);border-radius:15px;padding:12px;margin-top:11px">'
+        + '<b style="font-size:14.5px;color:var(--pd)">🧯 Raccourcis rétablis automatiquement</b>'
+        + '<div class="acc-chips" style="margin-top:8px">' + optHTMLPuces(manquants) + '</div></div>'
+      : '';
+  }
+  const etat = document.getElementById('acc-opts-etat');
+  if (etat) {
+    const off = KLEAN_OPTS.options.filter(o => o.actif === false && o.visible !== false && !o.essentielle);
+    etat.innerHTML = off.length
+      ? ('⏸️ ' + off.map(o => o.titre).join(' · ') + ' — désactivée(s) par KLEAN pour le moment')
+      : '';
+  }
+  /* 🔔 les pastilles de la barre : on rebranche les puces clonées */
+  optsBrancher();
+}
+/* ─────────────── ① ouverture réelle (jamais de bouton mort) ─────────────── */
+function optMessageEtat(id, o) {
+  const quoi = (KLEAN_OPTS_DEF[id] || {}).quoi || 'cette option';
+  if (o && o.etat === 'panne') return '⚠️ ' + (o.message || (quoi + ' a un souci') ) + ' — KLEAN est prévenu, cela revient très vite. Vous pouvez continuer avec le reste.';
+  return '⏸️ ' + (quoi.charAt(1).toUpperCase() + quoi.slice(2)) + ' est temporairement désactivée par KLEAN. Vous pouvez continuer avec le reste, ou réessayer plus tard.';
+}
+function optOuvrir(id) {
+  const d = KLEAN_OPTS_DEF[id];
+  const o = optEtat(id);
+  if (!d) { try { toast('⚠️ Option inconnue'); } catch (e) { } return false; }
+  if (o.actif === false) { try { toast(optMessageEtat(id, o)); } catch (e) { } return false; }
+  const f = d.action ? window[d.action] : null;
+  if (!d.action) {           /* option gérée par son propre module (pub, jeu, affiche…) : on ne casse rien */
+    const c = document.querySelector((d.cibles || [])[0] || '');
+    if (c) { try { c.click(); return true; } catch (e) { } }
+    return false;
+  }
+  if (typeof f !== 'function') {
+    try { toast('⚠️ Cette partie ne répond pas encore — KLEAN est prévenu'); } catch (e) { }
+    optSanteMaj(id, 'panne', 'la fonction « ' + d.action + ' » n’existe pas dans l’application');
+    return false;
+  }
+  try { f(d.arg); return true; }
+  catch (e) {
+    try { toast('⚠️ Ouverture impossible — KLEAN est prévenu'); } catch (x) { }
+    optSanteMaj(id, 'panne', 'ouverture impossible : ' + (e && e.message));
+    return false;
+  }
+}
+try { window.optOuvrir = optOuvrir; } catch (e) { }
+try { window.KLEAN_OPTS_REGISTRE = KLEAN_OPTS; } catch (e) { }
+
+/* ─────────────── l'interception : si le PDG a désactivé une option, on le DIT (propre) ─────────────── */
+function optsBrancher() {
+  if (window.__optsBranche) return;
+  window.__optsBranche = true;
+  document.addEventListener('click', function (ev) {
+    let el = ev.target;
+    while (el && el !== document.body) {
+      const id = el.getAttribute && el.getAttribute('data-opt');
+      if (id) {
+        if (!optEstActif(id)) {
+          ev.preventDefault(); ev.stopPropagation();
+          if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+          try { toast(optMessageEtat(id, optEtat(id))); } catch (e) { }
+          optSanteMaj(id, 'attention', 'un visiteur a touché l’option désactivée');
+          return false;
+        }
+        return true;
+      }
+      el = el.parentNode;
+    }
+  }, true);
+}
+/* ─────────────── ② le veilleur : chaque option doit avoir son bouton, son action et sa page ─────────────── */
+function optsAnalyser() {
+  const rapport = [];
+  Object.keys(KLEAN_OPTS_DEF).forEach(id => {
+    const d = KLEAN_OPTS_DEF[id];
+    const o = optEtat(id);
+    const r = { id, titre: (o.titre || id), etat: 'ok', message: '' };
+    if (o.actif === false) { r.etat = 'off'; r.message = 'désactivée par le PDG'; rapport.push(r); return; }
+    /* 1. le bouton (ou le bloc) est-il là ? */
+    const presents = (d.cibles || []).filter(sel => { try { return !!document.querySelector(sel); } catch (e) { return false; } });
+    if (!presents.length) {
+      /* un bloc construit par un module (publicité, affiche, jeu, support, langues) n'existe qu'une
+         fois ce module lancé : c'est SA fonction qu'on vérifie, pas sa présence immédiate */
+      if (d.module) {
+        if (typeof window[d.module] === 'function') { rapport.push(r); return; }
+        r.etat = typeof window[d.module] === 'undefined' ? 'attention' : 'panne';
+        r.message = typeof window[d.module] === 'undefined'
+          ? ('le module « ' + d.module + ' » n’est pas encore chargé (il se lance au démarrage)')
+          : ('la fonction « ' + d.module + ' » ne répond pas');
+        rapport.push(r); return;
+      }
+      r.etat = 'attention'; r.message = 'le bloc n’est pas présent sur l’accueil (' + (d.cibles || []).join(', ') + ')'; rapport.push(r); return;
+    }
+    /* 2. mène-t-il quelque part ? */
+    if (d.action && typeof window[d.action] !== 'function') { r.etat = 'panne'; r.message = 'la fonction « ' + d.action + ' » manque'; rapport.push(r); return; }
+    /* 3. la page d'arrivée existe-t-elle ? */
+    if (d.vue && !document.getElementById(d.vue)) { r.etat = 'panne'; r.message = 'la page « ' + d.vue + ' » n’existe pas'; rapport.push(r); return; }
+    rapport.push(r);
+  });
+  return rapport;
+}
+let _opsEnvoi = 0;
+function optSanteMaj(id, etat, message) {
+  const o = KLEAN_OPTS.map[id]; if (o) { o.etat = etat; o.message = message || ''; o.controleAt = new Date().toISOString(); }
+}
+async function optsRapport(reparation) {
+  try {
+    const options = optsAnalyser().map(r => ({ id: r.id, etat: r.etat, message: r.message }));
+    options.forEach(o => optSanteMaj(o.id, o.etat, o.message));
+    const corps = {
+      appareil: optsAppareil(), version: (typeof KLEAN_VERSION !== 'undefined' ? KLEAN_VERSION : ''),
+      depuis: KLEAN_OPTS.ordresVus || 0, options, reparation: reparation || null
+    };
+    const r = await fetch('/api/accueil/etat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+    const d = await r.json().catch(() => ({}));
+    /* 🔧 le PDG a demandé une réparation : elle arrive par ici même si le temps réel est coupé */
+    if (d && Array.isArray(d.ordres) && d.ordres.length) {
+      d.ordres.forEach(o => { KLEAN_OPTS.ordresVus = Math.max(KLEAN_OPTS.ordresVus, new Date(o.at).getTime()); optionsReparer(o.action, o.id); });
+    }
+    if (d && d.version && d.version !== KLEAN_OPTS.version) optsCharger();
+    _opsEnvoi = Date.now();
+    return true;
+  } catch (e) { return false; }
+}
+function optsAppareil() {
+  try { return (navigator.userAgent || '').replace(/\s+/g, ' ').slice(0, 40); } catch (e) { return ''; }
+}
+/* ─────────────── ③ la réparation (le PDG appuie, l'application se répare et répond) ─────────────── */
+async function optsReparer(ordreId) {
+  const avant = optsAnalyser().filter(r => r.etat !== 'ok').map(r => r.id + ' : ' + r.message);
+  const reussies = [], echecs = [];
+  /* a. le registre est rechargé du serveur */
+  try { await optsCharger(); reussies.push('registre des options rechargé'); } catch (e) { echecs.push('registre injoignable'); }
+  /* b. les deux écrans du bas existent ? on les recrée */
+  try {
+    if (!document.getElementById('view-jobs')) { try { jobsMonter(); reussies.push('écran « job près de moi » recréé'); } catch (e) { echecs.push('écran job : ' + e.message); } }
+    if (!document.getElementById('view-avis')) { try { avisMonter(); reussies.push('écran « avis de recherche » recréé'); } catch (e) { echecs.push('écran avis : ' + e.message); } }
+  } catch (e) { }
+  /* c. le bouton de chaque option est rebranché (les écouteurs peuvent avoir été perdus) */
+  try { window.__optsBranche = false; optsBrancher(); reussies.push('touches rebranchées'); } catch (e) { echecs.push('branchement : ' + e.message); }
+  /* d. les éléments masqués à tort par une version précédente sont rétablis */
+  try {
+    Object.keys(KLEAN_OPTS_DEF).forEach(id => {
+      const d = KLEAN_OPTS_DEF[id];
+      (d.cibles || []).forEach(sel => {
+        const el = document.querySelector(sel);
+        if (el && el.dataset && el.dataset.optDisplay !== undefined && optEstVisible(id) && !el.dataset.optMasque) {
+          el.style.display = el.dataset.optDisplay || '';
+        }
+      });
+    });
+    reussies.push('affichage remis d’aplomb');
+  } catch (e) { echecs.push('affichage : ' + e.message); }
+  /* e. re-rendu, puis nouveau contrôle : on compare avant / après */
+  try { optsRendu(); } catch (e) { }
+  const apres = optsAnalyser();
+  const restant = apres.filter(r => r.etat !== 'ok' && r.etat !== 'off');
+  const ok = restant.length === 0;
+  try {
+    toast(ok ? '✅ Réparé — tout répond de nouveau' : '🔧 Réparation partielle — KLEAN continue de surveiller');
+  } catch (e) { }
+  const reparation = { ordreId: ordreId || null, ok, reussies, echecs, avant, apres: restant.map(r => r.id + ' : ' + r.message) };
+  optsRapport(reparation);
+  return reparation;
+}
+function optionsReparer(action, id) {
+  try {
+    if (!action) return;
+    if (action === 'actualiser') { optsCharger(); try { toast('🔄 Accueil actualisé'); } catch (e) { } return; }
+    if (action.indexOf('reparer') === 0) {
+      const cible = action.split(':')[1] || '';
+      if (cible === 'job_pres') { try { jobsMonter(); } catch (e) { } }
+      if (cible === 'avis_recherche') { try { avisMonter(); } catch (e) { } }
+      optsReparer(id || cible);
+    }
+  } catch (e) { }
+}
+try { window.optsReparer = optsReparer; } catch (e) { }
+
+/* 🔔 le serveur prévient : une option a changé, ou le PDG a demandé une réparation */
+window.kleanOnAccueilMaj = function (msg) {
+  if (!msg) return;
+  if (msg.quoi === 'options' || msg.quoi === 'risque') { optsCharger(); }
+  else if (msg.quoi === 'reparation') { optsReparer(msg.id); }
+  else { optsCharger(); }
+};
+window.kleanOnAccueilOrdre = function (msg) { if (msg && msg.action) optionsReparer(msg.action, msg.ordreId); };
+window.kleanOnJobsMaj = function () { try { if (document.getElementById('view-jobs') && document.getElementById('view-jobs').classList.contains('active')) jobsCharger(); } catch (e) { } };
+window.kleanOnAvisMaj = function () { try { if (document.getElementById('view-avis') && document.getElementById('view-avis').classList.contains('active')) avisCharger(); } catch (e) { } };
+
+/* ─────────────── démarrage du veilleur ─────────────── */
+(function optsDemarrage() {
+  function premier() {
+    optsCharger().then(() => { setTimeout(() => optsRapport(null), 1200); });
+    try { optsBrancher(); } catch (e) { }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', premier, { once: true });
+  else setTimeout(premier, 60);
+  /* 🩺 un contrôle toutes les 90 secondes : discret, et il rapporte au tableau de bord */
+  setInterval(function () { optsRapport(null); }, 90000);
+  /* 🔄 retour sur l'application : on revérifie (état + réparation en attente) */
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) optsRapport(null); });
+  window.addEventListener('focus', function () { if (Date.now() - _opsEnvoi > 45000) optsRapport(null); });
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   💼 « JE CHERCHE UN JOB PRÈS DE MOI »  ·  📢 « AVIS DE RECHERCHE »  (lot 123)
+   Les deux grandes options du bas de l'accueil. Chacune a son écran complet — jamais un
+   simple bouton décoratif : on cherche, on filtre, on consulte, on postule, on publie.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+const JOBS = { charge: false, liste: [], total: 0, rayon: 30, lat: null, lng: null, ville: '', q: '', type: '', fiche: null, geoOk: false };
+const AVIS = { charge: false, liste: [], total: 0, q: '', type: '', fiche: null, photo: '', suivi: null, moderation: 'auto' };
+
+function optRetourHTML(titre, sous) {
+  return '<div style="padding:12px 12px 0">'
+    + '<button type="button" onclick="showView(\'view-home\',null,\'client\')" style="border:1.5px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-weight:800;font-size:15px;padding:11px 15px;border-radius:12px;cursor:pointer;min-height:44px">← Accueil</button>'
+    + '<h1 style="font-size:22px;font-weight:900;margin:13px 0 4px;line-height:1.2">' + titre + '</h1>'
+    + '<p style="font-size:14.5px;color:var(--muted);margin:0 0 4px;line-height:1.4">' + sous + '</p>'
+    + '</div>';
+}
+function optFermerHTML() { return '<div style="padding:0 12px 30px"><button type="button" onclick="showView(\'view-home\',null,\'client\')" style="width:100%;margin-top:14px;border:1.5px solid var(--pd);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:16.5px;padding:15px;border-radius:14px;cursor:pointer;min-height:52px">🏠 Retour à l\'accueil</button></div>'; }
+
+/* ══════════════════════════ 💼 LES OPPORTUNITÉS DE TRAVAIL ══════════════════════════ */
+function jobsMonter() {
+  let v = document.getElementById('view-jobs');
+  if (v) return v;
+  v = document.createElement('div');
+  v.className = 'view';
+  v.id = 'view-jobs';
+  v.innerHTML = optRetourHTML('🔎 Je cherche un job près de moi',
+    'Les missions et les offres disponibles autour de vous. Utilisez votre position ou choisissez une ville.')
+    + '<div style="padding:0 12px">'
+    + '  <div id="jobs-etat" style="font-size:13.5px;color:var(--muted);margin:8px 0 10px"></div>'
+    + '  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+    + '    <button type="button" id="jobs-geo" onclick="jobsGeo()" style="flex:1;min-width:150px;border:2px solid var(--p);background:linear-gradient(135deg,#fff,#FFF7EF);color:var(--pd);font:inherit;font-weight:900;font-size:15.5px;padding:14px;border-radius:14px;cursor:pointer;min-height:52px">📍 Utiliser ma position</button>'
+    + '  </div>'
+    + '  <input id="jobs-q" class="acc-input" style="font-size:16.5px;padding:14px" placeholder="Métier, mot-clé (plombier, ménage…)" oninput="jobsFiltre()" autocomplete="off">'
+    + '  <div style="display:flex;gap:8px;margin-top:9px">'
+    + '    <input id="jobs-ville" class="acc-input" style="font-size:15.5px;padding:12px" placeholder="Ville (ex. Abidjan)" oninput="jobsFiltre()" autocomplete="off">'
+    + '    <select id="jobs-rayon" onchange="jobsFiltre()" style="border:2px solid #F6D9BE;border-radius:12px;font:inherit;font-size:15px;font-weight:800;padding:10px;background:#fff;color:var(--ink)">'
+    + '      <option value="10">10 km</option><option value="30" selected>30 km</option><option value="60">60 km</option><option value="150">150 km</option>'
+    + '    </select>'
+    + '  </div>'
+    + '  <div class="acc-chips" style="margin-top:11px">'
+    + '    <button type="button" class="cat-chip" data-jt="" onclick="jobsType(\'\')"><b>Tout</b></button>'
+    + '    <button type="button" class="cat-chip" data-jt="demande" onclick="jobsType(\'demande\')"><b>🔧 Missions</b></button>'
+    + '    <button type="button" class="cat-chip" data-jt="offre" onclick="jobsType(\'offre\')"><b>💼 Offres</b></button>'
+    + '  </div>'
+    + '  <div id="jobs-liste" style="margin-top:12px"></div>'
+    + '  <div id="jobs-fiche"></div>'
+    + '  <div id="jobs-form"></div>'
+    + '  <p style="font-size:13.5px;color:var(--muted);margin-top:16px;line-height:1.5">KLEAN met en relation : les coordonnées ne s’échangent qu’avec votre accord, après votre candidature.</p>'
+    + '</div>' + optFermerHTML();
+  document.body.insertBefore(v, document.getElementById('nav-client') || null);
+  return v;
+}
+function jobsOuvrir() {
+  jobsMonter();
+  const o = optEtat('job_pres');
+  try { showView('view-jobs', null, 'client'); } catch (e) { }
+  const etat = document.getElementById('jobs-etat');
+  if (o.actif === false) {
+    if (etat) etat.innerHTML = '⏸️ <b>Cette option est temporairement désactivée par KLEAN.</b> Les offres ne sont pas affichées en ce moment — vous pouvez continuer avec le reste de l’application.';
+    const l = document.getElementById('jobs-liste'); if (l) l.innerHTML = '';
+    return false;
+  }
+  if (etat) etat.innerHTML = 'Chargement des opportunités…';
+  jobsCharger();
+  return true;
+}
+async function jobsCharger() {
+  const o = optEtat('job_pres');
+  const l = document.getElementById('jobs-liste');
+  if (o.actif === false) { if (l) l.innerHTML = ''; return false; }
+  const p = new URLSearchParams();
+  if (JOBS.lat !== null && JOBS.lng !== null) { p.set('lat', JOBS.lat); p.set('lng', JOBS.lng); }
+  if (JOBS.q) p.set('q', JOBS.q);
+  if (JOBS.ville) p.set('ville', JOBS.ville);
+  if (JOBS.type) p.set('type', JOBS.type);
+  const r = document.getElementById('jobs-rayon'); if (r) p.set('rayonKm', r.value || 30);
+  try {
+    const d = await fetch('/api/jobs?' + p.toString(), { cache: 'no-store' }).then(x => x.json());
+    if (!d.ok) throw new Error(d.error || 'réponse illisible');
+    JOBS.charge = true; JOBS.liste = d.liste || []; JOBS.total = d.total || 0; JOBS.rayon = d.rayon || 30;
+    jobsPeindre(d.message || '');
+    return true;
+  } catch (e) {
+    const etat = document.getElementById('jobs-etat');
+    if (etat) etat.innerHTML = '⚠️ Impossible de charger les opportunités pour l’instant. Réessayez dans un instant — le reste de l’application fonctionne.';
+    if (l) l.innerHTML = '';
+    return false;
+  }
+}
+function jobsPeindre(message) {
+  const l = document.getElementById('jobs-liste'); if (!l) return;
+  const etat = document.getElementById('jobs-etat');
+  if (etat) etat.innerHTML = (JOBS.geoOk ? '📍 Autour de vous (rayon ' + JOBS.rayon + ' km)' : '📍 Position non utilisée — choisissez une ville ou activez la position')
+    + ' · <b>' + JOBS.total + '</b> opportunité' + (JOBS.total > 1 ? 's' : '');
+  if (!JOBS.liste.length) {
+    l.innerHTML = '<div style="background:var(--card);border:1.5px dashed var(--line);border-radius:16px;padding:16px;color:var(--muted);font-size:14.5px;line-height:1.5">'
+      + (message || 'Aucune opportunité dans ce secteur pour l’instant.') + '<br><b>Astuce :</b> élargissez le rayon ou changez de ville.</div>';
+    return;
+  }
+  l.innerHTML = JOBS.liste.map(o => {
+    const d = (typeof o.dist === 'number') ? (o.dist < 1 ? 'à moins d’1 km' : o.dist.toFixed(1) + ' km') : '';
+    return '<button type="button" onclick="jobsFiche(\'' + o.id + '\',\'' + o.source + '\')" style="display:block;width:100%;text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px;margin-bottom:10px;cursor:pointer;font:inherit;min-height:76px">'
+      + '<span style="display:flex;gap:9px;align-items:center"><b style="font-size:16.5px;flex:1">' + o.titre + '</b>'
+      + '<span style="font-size:12px;font-weight:900;padding:4px 9px;border-radius:99px;background:' + (o.source === 'offre' ? 'var(--pl);color:var(--pd)' : '#FFF1E6;color:#b45309') + '">' + (o.source === 'offre' ? '💼 Offre' : '🔧 Mission') + '</span></span>'
+      + '<span style="display:block;font-size:13.5px;color:var(--muted);margin-top:5px">' + [o.quartier, o.ville].filter(Boolean).join(' · ') + (d ? ' · ' + d : '') + '</span>'
+      + (o.prix ? '<span style="display:block;font-size:14px;font-weight:900;color:var(--pd);margin-top:5px">' + o.prix + '</span>' : '')
+      + '<span style="display:block;font-size:13px;color:var(--muted);margin-top:4px">' + (o.quand || '') + '</span>'
+      + '</button>';
+  }).join('');
+}
+function jobsType(t) {
+  JOBS.type = t || '';
+  document.querySelectorAll('[data-jt]').forEach(b => b.classList.toggle('on', b.getAttribute('data-jt') === (t || '')));
+  jobsCharger();
+}
+let _jobsT = null;
+function jobsFiltre() {
+  clearTimeout(_jobsT);
+  _jobsT = setTimeout(() => {
+    const q = document.getElementById('jobs-q'), v = document.getElementById('jobs-ville');
+    JOBS.q = q ? q.value : ''; JOBS.ville = v ? v.value : '';
+    jobsCharger();
+  }, 380);
+}
+function jobsGeo() {
+  const b = document.getElementById('jobs-geo');
+  if (!navigator.geolocation) { try { toast('📍 Votre appareil ne donne pas la position — indiquez la ville'); } catch (e) { } return; }
+  if (b) { b.textContent = '📍 Position en cours…'; b.disabled = true; }
+  navigator.geolocation.getCurrentPosition(function (pos) {
+    JOBS.lat = Math.round(pos.coords.latitude * 10000) / 10000;
+    JOBS.lng = Math.round(pos.coords.longitude * 10000) / 10000;
+    JOBS.geoOk = true;
+    if (b) { b.textContent = '📍 Position utilisée'; b.disabled = false; }
+    try { toast('📍 Recherche autour de vous'); } catch (e) { }
+    jobsCharger();
+  }, function () {
+    if (b) { b.textContent = '📍 Utiliser ma position'; b.disabled = false; }
+    try { toast('📍 Position refusée — indiquez la ville, ça marche aussi'); } catch (e) { }
+  }, { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 });
+}
+function jobsFiche(id, source) {
+  const o = JOBS.liste.find(x => x.id === id && x.source === source);
+  if (!o) { try { toast('⚠️ Cette opportunité n’est plus disponible'); } catch (e) { } return; }
+  JOBS.fiche = o;
+  const f = document.getElementById('jobs-fiche');
+  if (!f) return;
+  const tel = o.tel ? '<a href="tel:' + o.tel + '" style="display:block;text-align:center;background:#0d7a5f;color:#fff;font-weight:900;padding:14px;border-radius:14px;text-decoration:none;margin-top:10px;min-height:50px">📞 Appeler (' + o.tel + ')</a>' : '';
+  f.innerHTML = '<div style="background:var(--card);border:2px solid var(--p);border-radius:18px;padding:15px;margin-top:6px">'
+    + '<div style="display:flex;gap:8px;align-items:center"><b style="font-size:19px;flex:1">' + o.titre + '</b><button type="button" onclick="document.getElementById(\'jobs-fiche\').innerHTML=\'\'" style="border:none;background:var(--card2);border-radius:10px;font:inherit;font-weight:900;font-size:16px;padding:8px 12px;cursor:pointer">✕</button></div>'
+    + '<div style="font-size:14px;color:var(--muted);margin-top:7px;line-height:1.5">'
+    + [o.quartier, o.ville].filter(Boolean).join(' · ') + (o.quand ? '<br>🗓️ ' + o.quand : '') + (o.prix ? '<br>💰 ' + o.prix : '')
+    + (typeof o.dist === 'number' ? '<br>📍 ' + (o.dist < 1 ? 'à moins d’1 km de vous' : o.dist.toFixed(1) + ' km de vous') : '')
+    + '</div>'
+    + (o.description ? '<p style="font-size:15px;line-height:1.55;margin:11px 0 0">' + o.description + '</p>' : '')
+    + tel
+    + '<button type="button" onclick="jobsPostuler(\'' + o.id + '\',\'' + o.source + '\')" style="width:100%;margin-top:10px;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;font-size:17px;padding:16px;border-radius:14px;cursor:pointer;min-height:54px">✋ Proposer ma candidature</button>'
+    + '</div>';
+  try { if (f.scrollIntoView) f.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { }
+}
+function jobsPostuler(id, source) {
+  const o = JOBS.liste.find(x => x.id === id && x.source === source);
+  if (!o) return;
+  const f = document.getElementById('jobs-form');
+  const moi = (typeof client !== 'undefined' && client) ? client : null;
+  f.innerHTML = '<div style="background:#FFF9F2;border:2px solid var(--p);border-radius:18px;padding:15px;margin-top:12px">'
+    + '<b style="font-size:17px">✋ Postuler — ' + o.titre + '</b>'
+    + '<label class="acc-lbl" style="margin-top:11px;font-size:15px">Votre nom</label>'
+    + '<input id="jb-nom" class="acc-input" style="font-size:16px;padding:13px" value="' + ((moi && moi.nom) ? String(moi.nom).replace(/"/g, '&quot;') : '') + '" placeholder="Nom et prénoms">'
+    + '<label class="acc-lbl" style="margin-top:11px;font-size:15px">Votre téléphone</label>'
+    + '<input id="jb-tel" class="acc-input" style="font-size:16px;padding:13px" inputmode="tel" value="' + ((moi && moi.tel) ? String(moi.tel).replace(/\D/g, '') : '') + '" placeholder="07 00 00 00 00">'
+    + '<label class="acc-lbl" style="margin-top:11px;font-size:15px">Votre message (facultatif)</label>'
+    + '<textarea id="jb-msg" class="acc-input" style="font-size:16px;padding:13px;min-height:84px" placeholder="Ce que vous savez faire, votre disponibilité…"></textarea>'
+    + '<div style="display:flex;gap:9px;margin-top:12px">'
+    + '<button type="button" onclick="jobsEnvoyer()" style="flex:2;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;font-size:17px;padding:15px;border-radius:14px;cursor:pointer;min-height:52px">📨 Envoyer</button>'
+    + '<button type="button" onclick="document.getElementById(\'jobs-form\').innerHTML=\'\'" style="flex:1;border:1.5px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-weight:800;font-size:16px;padding:15px;border-radius:14px;cursor:pointer;min-height:52px">Annuler</button>'
+    + '</div><div id="jb-msg2" style="margin-top:9px;font-size:14.5px"></div></div>';
+  try { document.getElementById('jb-nom').focus(); } catch (e) { }
+}
+async function jobsEnvoyer() {
+  const g = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+  const nom = g('jb-nom').trim(), tel = g('jb-tel').trim(), message = g('jb-msg').trim();
+  const zone = document.getElementById('jb-msg2');
+  if (nom.length < 2) { zone.innerHTML = '⚠️ Indiquez votre nom'; return; }
+  if (tel.replace(/\D/g, '').length < 8) { zone.innerHTML = '⚠️ Indiquez un numéro joignable'; return; }
+  zone.innerHTML = '⏳ Envoi…';
+  try {
+    const r = await fetch('/api/jobs/postuler', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        offreId: JOBS.fiche && JOBS.fiche.source === 'offre' ? JOBS.fiche.id : null,
+        missionId: JOBS.fiche && JOBS.fiche.source === 'demande' ? JOBS.fiche.id : null,
+        nom, tel, message, ville: JOBS.ville, lat: JOBS.lat, lng: JOBS.lng
+      })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) { zone.innerHTML = '⚠️ ' + (d.error || 'Envoi impossible pour l’instant'); return; }
+    zone.innerHTML = '<b style="color:#0d7a5f">' + (d.message || 'Candidature envoyée') + '</b><br><span style="font-size:13px;color:var(--muted)">Référence : ' + d.id + '</span>';
+    try { toast('✅ Candidature envoyée'); } catch (e) { }
+  } catch (e) { zone.innerHTML = '⚠️ Réseau indisponible — réessayez dans un instant'; }
+}
+
+/* ══════════════════════════ 📢 LES AVIS DE RECHERCHE ══════════════════════════ */
+function avisMonter() {
+  let v = document.getElementById('view-avis');
+  if (v) return v;
+  v = document.createElement('div');
+  v.className = 'view';
+  v.id = 'view-avis';
+  v.innerHTML = optRetourHTML('📢 Avis de recherche',
+    'Personne ou objet recherché : publiez, consultez, partagez. Chaque minute compte.')
+    + '<div style="padding:0 12px">'
+    + '  <div id="avis-etat" style="font-size:13.5px;color:var(--muted);margin:8px 0 10px"></div>'
+    + '  <button type="button" id="avis-btn-new" onclick="avisNouveau()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;font-size:18px;background:linear-gradient(135deg,#c2410c,#f97316);color:#fff;padding:17px;border-radius:16px;min-height:58px">➕ Publier un avis de recherche</button>'
+    + '  <input id="avis-q" class="acc-input" style="font-size:16.5px;padding:14px;margin-top:12px" placeholder="Rechercher : nom, lieu, description…" oninput="avisFiltre()" autocomplete="off">'
+    + '  <div class="acc-chips" style="margin-top:11px">'
+    + '    <button type="button" class="cat-chip on" data-at="" onclick="avisType(\'\')"><b>Tous</b></button>'
+    + '    <button type="button" class="cat-chip" data-at="personne" onclick="avisType(\'personne\')"><b>👤 Personnes</b></button>'
+    + '    <button type="button" class="cat-chip" data-at="objet" onclick="avisType(\'objet\')"><b>🎒 Objets</b></button>'
+    + '  </div>'
+    + '  <div id="avis-form"></div>'
+    + '  <div id="avis-liste" style="margin-top:12px"></div>'
+    + '  <div id="avis-fiche"></div>'
+    + '  <details style="margin-top:16px;background:var(--card2);border-radius:14px;padding:12px">'
+    + '   <summary style="cursor:pointer;font-weight:900;font-size:15px;color:var(--pd)">🔑 J’ai déjà publié un avis (code de suivi)</summary>'
+    + '   <div style="display:flex;gap:7px;margin-top:9px">'
+    + '    <input id="avis-id" class="acc-input" style="font-size:15px;padding:12px" placeholder="N° de l’avis (AV-…)">'
+    + '    <input id="avis-code" class="acc-input" style="font-size:15px;padding:12px;max-width:130px" placeholder="Code" inputmode="numeric">'
+    + '   </div>'
+    + '   <button type="button" onclick="avisSuivi()" style="width:100%;margin-top:9px;border:1.5px solid var(--pd);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:16px;padding:13px;border-radius:13px;cursor:pointer;min-height:48px">Gérer mon avis</button>'
+    + '   <div id="avis-suivi-msg" style="font-size:14px;margin-top:8px"></div>'
+    + '  </details>'
+    + '  <p style="font-size:13px;color:var(--muted);margin-top:14px;line-height:1.5">⚠️ Un avis de recherche doit être exact. Publier une fausse alerte est puni par la loi ivoirienne. KLEAN peut retirer un avis à tout moment. Ne publiez jamais de données sensibles inutiles.</p>'
+    + '</div>' + optFermerHTML();
+  document.body.insertBefore(v, document.getElementById('nav-client') || null);
+  return v;
+}
+function avisOuvrir() {
+  avisMonter();
+  const o = optEtat('avis_recherche');
+  try { showView('view-avis', null, 'client'); } catch (e) { }
+  const etat = document.getElementById('avis-etat');
+  if (o.actif === false) {
+    if (etat) etat.innerHTML = '⏸️ <b>Cette option est temporairement désactivée par KLEAN.</b> Les avis publiés ne sont pas affichés en ce moment.';
+    const l = document.getElementById('avis-liste'); if (l) l.innerHTML = '';
+    const b = document.getElementById('avis-btn-new'); if (b) b.style.display = 'none';
+    return false;
+  }
+  const b = document.getElementById('avis-btn-new'); if (b) b.style.display = '';
+  if (etat) etat.innerHTML = 'Chargement des avis…';
+  avisCharger();
+  return true;
+}
+async function avisCharger() {
+  const o = optEtat('avis_recherche');
+  const l = document.getElementById('avis-liste');
+  if (o.actif === false) { if (l) l.innerHTML = ''; return false; }
+  const p = new URLSearchParams();
+  if (AVIS.q) p.set('q', AVIS.q);
+  if (AVIS.type) p.set('type', AVIS.type);
+  try {
+    const d = await fetch('/api/avis?' + p.toString(), { cache: 'no-store' }).then(x => x.json());
+    if (!d.ok) throw new Error(d.error || 'illisible');
+    AVIS.charge = true; AVIS.liste = d.liste || []; AVIS.total = d.total || 0; AVIS.moderation = d.moderation || 'auto';
+    avisPeindre(d.message || '');
+    return true;
+  } catch (e) {
+    const etat = document.getElementById('avis-etat');
+    if (etat) etat.innerHTML = '⚠️ Impossible de charger les avis pour l’instant — réessayez dans un instant.';
+    if (l) l.innerHTML = '';
+    return false;
+  }
+}
+function avisPeindre(message) {
+  const l = document.getElementById('avis-liste'); if (!l) return;
+  const etat = document.getElementById('avis-etat');
+  const pers = AVIS.liste.filter(a => a.type === 'personne').length;
+  if (etat) etat.innerHTML = '<b>' + AVIS.total + '</b> avis affiché' + (AVIS.total > 1 ? 's' : '') + ' · ' + pers + ' personne(s) recherchée(s)'
+    + (AVIS.moderation === 'avant' ? ' · <i>les nouveaux avis sont vérifiés par KLEAN avant publication</i>' : '');
+  if (!AVIS.liste.length) {
+    l.innerHTML = '<div style="background:var(--card);border:1.5px dashed var(--line);border-radius:16px;padding:16px;color:var(--muted);font-size:14.5px;line-height:1.5">'
+      + (message || 'Aucun avis pour l’instant.') + '<br>Si vous cherchez quelqu’un, publiez un avis — c’est gratuit.</div>';
+    return;
+  }
+  l.innerHTML = AVIS.liste.map(a => {
+    const nom = (a.nom || a.prenom) ? (a.nom + ' ' + a.prenom).trim() : (a.type === 'objet' ? 'Objet recherché' : 'Personne non identifiée');
+    const ph = a.photo ? '<img src="' + a.photo + '" alt="photo" style="width:64px;height:64px;object-fit:cover;border-radius:12px;flex:none;background:#eee">' : '<span style="width:64px;height:64px;border-radius:12px;flex:none;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:26px">' + (a.type === 'objet' ? '🎒' : '👤') + '</span>';
+    return '<button type="button" onclick="avisFiche(\'' + a.id + '\')" style="display:flex;gap:11px;width:100%;text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:12px;margin-bottom:10px;cursor:pointer;font:inherit;min-height:88px">'
+      + ph + '<span style="flex:1;min-width:0">'
+      + '<b style="display:block;font-size:16.5px">' + nom + '</b>'
+      + '<span style="display:block;font-size:13.5px;color:var(--muted);margin-top:4px;line-height:1.4">' + [a.quartier, a.ville].filter(Boolean).join(' · ') + (a.date ? ' · ' + a.date : '') + '</span>'
+      + '<span style="display:inline-block;margin-top:6px;font-size:11.5px;font-weight:900;padding:3px 9px;border-radius:99px;background:' + (a.statut === 'retrouve' ? '#e9f7ef;color:#0d7a5f' : (a.statut === 'publie' ? '#FFF1E6;color:#b45309' : '#eee;color:#666')) + '">'
+      + (a.statut === 'retrouve' ? '✅ Retrouvé' : a.statut === 'publie' ? '🔎 Recherché' : a.statut) + '</span>'
+      + (a.verifie ? '<span style="display:inline-block;margin-top:6px;margin-left:5px;font-size:11.5px;font-weight:900;padding:3px 9px;border-radius:99px;background:#eef6ff;color:#1d4ed8">🛡️ Vérifié par KLEAN</span>' : '')
+      + '</span></button>';
+  }).join('');
+}
+let _avisT = null;
+function avisFiltre() {
+  clearTimeout(_avisT);
+  _avisT = setTimeout(() => { const q = document.getElementById('avis-q'); AVIS.q = q ? q.value : ''; avisCharger(); }, 380);
+}
+function avisType(t) {
+  AVIS.type = t || '';
+  document.querySelectorAll('[data-at]').forEach(b => b.classList.toggle('on', b.getAttribute('data-at') === (t || '')));
+  avisCharger();
+}
+function avisFiche(id) {
+  const a = AVIS.liste.find(x => x.id === id);
+  if (!a) return;
+  AVIS.fiche = a;
+  const f = document.getElementById('avis-fiche');
+  const nom = (a.nom || a.prenom) ? (a.nom + ' ' + a.prenom).trim() : (a.type === 'objet' ? 'Objet recherché' : 'Personne non identifiée');
+  const part = 'https://' + (location.host || 'klean-services.ci') + '/?avis=' + encodeURIComponent(a.id);
+  f.innerHTML = '<div style="background:var(--card);border:2px solid #f97316;border-radius:18px;padding:15px;margin-top:6px">'
+    + '<div style="display:flex;gap:9px;align-items:flex-start"><b style="font-size:19px;flex:1;line-height:1.25">' + nom + '</b>'
+    + '<button type="button" onclick="document.getElementById(\'avis-fiche\').innerHTML=\'\'" style="border:none;background:var(--card2);border-radius:10px;font:inherit;font-weight:900;font-size:16px;padding:8px 12px;cursor:pointer">✕</button></div>'
+    + (a.photo ? '<img src="' + a.photo + '" alt="photo" style="width:100%;max-height:280px;object-fit:contain;border-radius:14px;margin-top:10px;background:#f6f6f6">' : '')
+    + '<div style="font-size:15px;line-height:1.6;margin-top:11px">'
+    + (a.age ? '<b>Âge :</b> ' + a.age + '<br>' : '')
+    + (a.sexe ? '<b>Sexe :</b> ' + a.sexe + '<br>' : '')
+    + '<b>Disparition :</b> ' + [a.lieu, a.quartier, a.ville].filter(Boolean).join(' · ') + ' le ' + a.date + (a.heure ? ' à ' + a.heure : '') + '<br>'
+    + (a.derniereLieu ? '<b>Dernière observation :</b> ' + a.derniereLieu + (a.derniereDate ? ' (' + a.derniereDate + ')' : '') + '<br>' : '')
+    + (a.vetements ? '<b>Vêtements :</b> ' + a.vetements + '<br>' : '')
+    + (a.signes ? '<b>Signes particuliers :</b> ' + a.signes + '<br>' : '')
+    + (a.objets ? '<b>Objet :</b> ' + a.objets + '<br>' : '')
+    + '</div>'
+    + '<p style="font-size:15px;line-height:1.6;margin:10px 0 0"><b>Description :</b> ' + (a.description || '—') + '</p>'
+    + (a.statut === 'retrouve' ? '<div style="margin-top:11px;background:#e9f7ef;border-radius:12px;padding:11px;font-weight:800;color:#0d7a5f">✅ Personne/objet retrouvé' + (a.suite ? ' — ' + a.suite : '') + '</div>' : '')
+    + (a.contactTel ? '<a href="tel:' + a.contactTel.replace(/\s/g, '') + '" style="display:block;text-align:center;background:#c2410c;color:#fff;font-weight:900;padding:15px;border-radius:14px;text-decoration:none;margin-top:12px;min-height:52px">📞 Appeler' + (a.contactNom ? ' (' + a.contactNom + ')' : '') + '</a>' : '<div style="margin-top:11px;font-size:14px;color:var(--muted)">Contact non publié — passez par KLEAN.</div>')
+    + (a.contactWhatsapp ? '<a href="https://wa.me/' + a.contactWhatsapp.replace(/\D/g, '').replace(/^0+/, '225') + '" target="_blank" rel="noopener" style="display:block;text-align:center;background:#0d7a5f;color:#fff;font-weight:900;padding:15px;border-radius:14px;text-decoration:none;margin-top:9px;min-height:52px">💬 WhatsApp</a>' : '')
+    + '<button type="button" onclick="avisPartager(\'' + a.id + '\')" style="width:100%;margin-top:9px;border:1.5px solid var(--pd);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:14px;cursor:pointer;min-height:50px">🔗 Partager cet avis</button>'
+    + '<div style="font-size:12.5px;color:var(--muted);margin-top:9px">N° ' + a.id + ' · ' + (a.vues || 0) + ' consultation(s)' + (a.verifie ? ' · 🛡️ vérifié par KLEAN' : '') + '</div>'
+    + '</div>';
+  try { if (f.scrollIntoView) f.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { }
+  try { fetch('/api/avis/fiche?id=' + encodeURIComponent(a.id), { cache: 'no-store' }); } catch (e) { }
+}
+function avisPartager(id) {
+  const url = 'https://' + (location.host || 'klean-services.ci') + '/?avis=' + encodeURIComponent(id);
+  const a = AVIS.liste.find(x => x.id === id) || {};
+  const txt = '📢 AVIS DE RECHERCHE — ' + ((a.nom || a.prenom) ? (a.nom + ' ' + a.prenom) : (a.type === 'objet' ? 'Objet recherché' : 'Personne recherchée'))
+    + ' — ' + [a.quartier, a.ville].filter(Boolean).join(' ') + ' — ' + url;
+  if (navigator.share) { navigator.share({ title: 'Avis de recherche KLEAN', text: txt, url }).catch(() => { }); return; }
+  try { navigator.clipboard.writeText(txt); toast('🔗 Lien copié — collez-le dans WhatsApp'); }
+  catch (e) { alert(txt); }
+}
+function avisNouveau() {
+  const o = optEtat('avis_recherche');
+  if (o.actif === false) { try { toast(optMessageEtat('avis_recherche', o)); } catch (e) { } return; }
+  const f = document.getElementById('avis-form');
+  AVIS.photo = ''; AVIS.suivi = null;
+  const moi = (typeof client !== 'undefined' && client) ? client : null;
+  f.innerHTML = '<div style="background:#FFF9F2;border:2px solid #f97316;border-radius:18px;padding:15px;margin-top:12px">'
+    + '<b style="font-size:18px">📢 Nouvel avis de recherche</b>'
+    + '<div style="display:flex;gap:8px;margin-top:11px">'
+    + '  <button type="button" id="av-t-personne" class="cat-chip on" onclick="avisFormType(\'personne\')" style="flex:1;min-height:48px;justify-content:center"><b>👤 Une personne</b></button>'
+    + '  <button type="button" id="av-t-objet" class="cat-chip" onclick="avisFormType(\'objet\')" style="flex:1;min-height:48px;justify-content:center"><b>🎒 Un objet</b></button>'
+    + '</div>'
+    + '<label class="acc-lbl" style="margin-top:12px;font-size:15px">Nom <span class="av-p">de la personne</span></label>'
+    + '<input id="av-nom" class="acc-input" style="font-size:16px;padding:13px" placeholder="Nom de famille (ou « inconnu »)">'
+    + '<label class="acc-lbl" style="margin-top:11px;font-size:15px">Prénom(s)</label>'
+    + '<input id="av-prenom" class="acc-input" style="font-size:16px;padding:13px" placeholder="Prénom(s) si connus">'
+    + '<div style="display:flex;gap:8px">'
+    + '  <div style="flex:1"><label class="acc-lbl" style="margin-top:11px;font-size:15px">Âge</label><input id="av-age" class="acc-input" style="font-size:16px;padding:13px" placeholder="ex. 12 ans"></div>'
+    + '  <div style="flex:1"><label class="acc-lbl" style="margin-top:11px;font-size:15px">Sexe</label><input id="av-sexe" class="acc-input" style="font-size:16px;padding:13px" placeholder="F / M"></div>'
+    + '</div>'
+    + '<label class="acc-lbl" style="margin-top:11px;font-size:15px">Description <span class="av-p">(taille, vêtements, signes…)</span></label>'
+    + '<textarea id="av-desc" class="acc-input" style="font-size:16px;padding:13px;min-height:92px" placeholder="Ce qui permet de la reconnaître"></textarea>'
+    + '<label class="acc-lbl" style="margin-top:11px;font-size:15px">Lieu de disparition (obligatoire)</label>'
+    + '<input id="av-lieu" class="acc-input" style="font-size:16px;padding:13px" placeholder="Quartier, marché, rue…">'
+    + '<div style="display:flex;gap:8px">'
+    + '  <div style="flex:1"><label class="acc-lbl" style="margin-top:11px;font-size:15px">Ville</label><input id="av-ville" class="acc-input" style="font-size:16px;padding:13px" placeholder="ex. Abidjan" value="' + ((typeof city !== 'undefined' && city && city.nom) ? city.nom : '') + '"></div>'
+    + '  <div style="flex:1"><label class="acc-lbl" style="margin-top:11px;font-size:15px">Date (obligatoire)</label><input id="av-date" type="date" class="acc-input" style="font-size:16px;padding:13px"></div>'
+    + '</div>'
+    + '<label class="acc-lbl" style="margin-top:11px;font-size:15px">Heure</label>'
+    + '<input id="av-heure" type="time" class="acc-input" style="font-size:16px;padding:13px">'
+    + '<label class="acc-lbl" style="margin-top:11px;font-size:15px">Dernière observation (lieu et date, si connus)</label>'
+    + '<input id="av-der-lieu" class="acc-input" style="font-size:16px;padding:13px" placeholder="Lieu où la personne a été vue en dernier">'
+    + '<input id="av-der-date" class="acc-input" style="font-size:16px;padding:13px;margin-top:8px" placeholder="Date de cette dernière observation">'
+    + '<div class="av-p"><label class="acc-lbl" style="margin-top:11px;font-size:15px">Vêtements / signes particuliers</label>'
+    + '<input id="av-vet" class="acc-input" style="font-size:16px;padding:13px" placeholder="ex. robe bleue, cicatrice au front…"></div>'
+    + '<div class="av-o" style="display:none"><label class="acc-lbl" style="margin-top:11px;font-size:15px">Objet recherché (marque, couleur, n° de série)</label>'
+    + '<input id="av-objet" class="acc-input" style="font-size:16px;padding:13px" placeholder="ex. sac noir, téléphone Tecno, moto…"></div>'
+    + '<label class="acc-lbl" style="margin-top:12px;font-size:15px">📷 Photo (très utile — facultative)</label>'
+    + '<div style="display:flex;gap:8px">'
+    + '  <button type="button" onclick="document.getElementById(\'av-ph-cam\').click()" style="flex:1;border:2px solid var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:15px;padding:13px;border-radius:13px;cursor:pointer;min-height:50px">📷 Photo</button>'
+    + '  <button type="button" onclick="document.getElementById(\'av-ph-gal\').click()" style="flex:1;border:2px solid var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:15px;padding:13px;border-radius:13px;cursor:pointer;min-height:50px">🖼️ Galerie</button>'
+    + '</div>'
+    + '<input id="av-ph-cam" type="file" accept="image/*" capture="environment" style="display:none" onchange="avisPhoto(this)">'
+    + '<input id="av-ph-gal" type="file" accept="image/*" style="display:none" onchange="avisPhoto(this)">'
+    + '<div id="av-ph-apercu" style="margin-top:9px"></div>'
+    + '<label class="acc-lbl" style="margin-top:12px;font-size:15px">Votre nom (qui prévenir)</label>'
+    + '<input id="av-cnom" class="acc-input" style="font-size:16px;padding:13px" value="' + ((moi && moi.nom) ? String(moi.nom).replace(/"/g, '&quot;') : '') + '" placeholder="Votre nom ou celui de la famille">'
+    + '<label class="acc-lbl" style="margin-top:11px;font-size:15px">Téléphone joignable (obligatoire)</label>'
+    + '<input id="av-ctel" class="acc-input" style="font-size:16px;padding:13px" inputmode="tel" value="' + ((moi && moi.tel) ? String(moi.tel).replace(/\D/g, '') : '') + '" placeholder="07 00 00 00 00">'
+    + '<label class="acc-lbl" style="margin-top:11px;font-size:15px">WhatsApp (facultatif)</label>'
+    + '<input id="av-cwa" class="acc-input" style="font-size:16px;padding:13px" inputmode="tel" placeholder="Même numéro possible">'
+    + '<label style="display:flex;gap:9px;align-items:flex-start;margin-top:12px;font-size:14px;line-height:1.45"><input id="av-pub" type="checkbox" checked style="width:22px;height:22px;flex:none"><span>Afficher mon numéro publiquement sur l’avis (pour être appelé vite)</span></label>'
+    + '<label style="display:flex;gap:9px;align-items:flex-start;margin-top:9px;font-size:14px;line-height:1.45"><input id="av-cert" type="checkbox" style="width:22px;height:22px;flex:none"><span>Je certifie que les informations sont exactes et que je suis autorisé(e) à publier cet avis.</span></label>'
+    + '<div style="display:flex;gap:9px;margin-top:13px">'
+    + '  <button type="button" onclick="avisEnvoyer()" style="flex:2;border:none;background:linear-gradient(135deg,#c2410c,#f97316);color:#fff;font:inherit;font-weight:900;font-size:17px;padding:16px;border-radius:14px;cursor:pointer;min-height:54px">📢 Publier l’avis</button>'
+    + '  <button type="button" onclick="document.getElementById(\'avis-form\').innerHTML=\'\'" style="flex:1;border:1.5px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-weight:800;font-size:16px;padding:16px;border-radius:14px;cursor:pointer;min-height:54px">Annuler</button>'
+    + '</div>'
+    + '<div id="av-msg" style="margin-top:10px;font-size:14.5px;line-height:1.5"></div></div>';
+  AVIS.typeForm = 'personne';
+  try { if (f.scrollIntoView) f.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { }
+}
+function avisFormType(t) {
+  AVIS.typeForm = t;
+  const p = document.getElementById('av-t-personne'), o = document.getElementById('av-t-objet');
+  if (p) p.classList.toggle('on', t === 'personne');
+  if (o) o.classList.toggle('on', t === 'objet');
+  document.querySelectorAll('.av-p').forEach(e => { e.style.display = (t === 'personne') ? '' : 'none'; });
+  document.querySelectorAll('.av-o').forEach(e => { e.style.display = (t === 'objet') ? '' : 'none'; });
+}
+async function avisPhoto(inp) {
+  const f = inp && inp.files && inp.files[0];
+  if (!f) return;
+  if (f.size > 12 * 1024 * 1024) { try { toast('📷 Photo trop lourde'); } catch (e) { } return; }
+  try {
+    AVIS.photo = await fileToThumb(f, 900, 0.72);
+    const z = document.getElementById('av-ph-apercu');
+    if (z) z.innerHTML = '<img src="' + AVIS.photo + '" alt="aperçu" style="width:100%;max-height:230px;object-fit:contain;border-radius:12px;background:#f6f6f6">'
+      + '<button type="button" onclick="AVIS.photo=\'\';document.getElementById(\'av-ph-apercu\').innerHTML=\'\'" style="margin-top:7px;border:1.5px solid var(--line);background:#fff;font:inherit;font-weight:800;font-size:14px;padding:9px 12px;border-radius:11px;cursor:pointer">✕ Retirer la photo</button>';
+  } catch (e) { try { toast('⚠️ Photo illisible — essayez-en une autre'); } catch (x) { } }
+}
+async function avisEnvoyer() {
+  const g = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+  const c = id => { const e = document.getElementById(id); return !!(e && e.checked); };
+  const msg = document.getElementById('av-msg');
+  const type = AVIS.typeForm || 'personne';
+  if (!c('av-cert')) { msg.innerHTML = '⚠️ Cochez la case « Je certifie que les informations sont exactes » — c’est obligatoire.'; return; }
+  const corps = {
+    certifie: true, type,
+    nom: g('av-nom'), prenom: g('av-prenom'), age: g('av-age'), sexe: g('av-sexe'),
+    description: (type === 'objet') ? (g('av-objet') + ' — ' + g('av-desc')) : g('av-desc'),
+    lieu: g('av-lieu'), ville: g('av-ville'), quartier: g('av-lieu'), date: g('av-date'), heure: g('av-heure'),
+    derniereLieu: g('av-der-lieu'), derniereDate: g('av-der-date'),
+    vetements: g('av-vet'), objets: g('av-objet'),
+    contactNom: g('av-cnom'), contactTel: g('av-ctel'), contactWhatsapp: g('av-cwa') || g('av-ctel'),
+    publierContact: c('av-pub'), photo: AVIS.photo || ''
+  };
+  if (type === 'personne' && !(corps.nom || corps.prenom)) { msg.innerHTML = '⚠️ Indiquez au moins le nom ou le prénom (écrivez « inconnu » si vous ne le savez pas).'; return; }
+  if (type === 'objet' && !g('av-objet')) { msg.innerHTML = '⚠️ Décrivez l’objet recherché.'; return; }
+  if (!corps.lieu || !corps.date) { msg.innerHTML = '⚠️ Le lieu et la date de disparition sont obligatoires.'; return; }
+  if (corps.contactTel.replace(/\D/g, '').length < 8) { msg.innerHTML = '⚠️ Indiquez un téléphone joignable.'; return; }
+  msg.innerHTML = '⏳ Publication…';
+  try {
+    const r = await fetch('/api/avis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) { msg.innerHTML = '⚠️ ' + (d.error || 'Publication impossible pour l’instant'); return; }
+    AVIS.suivi = { id: d.id, code: d.code };
+    msg.innerHTML = '<div style="background:#fff;border:2px solid ' + (d.statut === 'publie' ? '#0d7a5f' : '#b45309') + ';border-radius:14px;padding:13px">'
+      + '<b style="font-size:16px">' + (d.message || 'Avis enregistré') + '</b>'
+      + '<div style="margin-top:9px;font-size:14.5px">N° de l’avis : <b>' + d.id + '</b><br>Code de suivi : <b style="font-size:19px;letter-spacing:1px">' + d.code + '</b></div>'
+      + '<div style="font-size:13px;color:var(--muted);margin-top:7px">✍️ Notez ce code : il sert à MODIFIER ou RETIRER l’avis.</div>'
+      + '<button type="button" onclick="avisFermerForm()" style="width:100%;margin-top:10px;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:13px;cursor:pointer;min-height:50px">Voir les avis</button></div>';
+    try { toast('📢 Avis envoyé'); } catch (e) { }
+    avisCharger();
+  } catch (e) { msg.innerHTML = '⚠️ Réseau indisponible — réessayez dans un instant.'; }
+}
+function avisFermerForm() { const f = document.getElementById('avis-form'); if (f) f.innerHTML = ''; }
+async function avisSuivi() {
+  const id = (document.getElementById('avis-id') || {}).value || '';
+  const code = (document.getElementById('avis-code') || {}).value || '';
+  const msg = document.getElementById('avis-suivi-msg');
+  if (!id || !code) { msg.innerHTML = '⚠️ Entrez le n° de l’avis et votre code.'; return; }
+  msg.innerHTML = '⏳ Recherche…';
+  try {
+    const d = await fetch('/api/avis/suivi?id=' + encodeURIComponent(id.trim()) + '&code=' + encodeURIComponent(code.trim()), { cache: 'no-store' }).then(r => r.json());
+    if (!d.ok) { msg.innerHTML = '⚠️ ' + (d.error || 'Avis introuvable'); return; }
+    AVIS.suivi = { id: id.trim(), code: code.trim() };
+    msg.innerHTML = '<div style="background:#fff;border:1.5px solid var(--pd);border-radius:13px;padding:11px">'
+      + '<b>Votre avis — ' + d.statut + '</b><br><span style="font-size:13.5px;color:var(--muted)">' + (d.vu || 0) + ' consultation(s)</span>'
+      + (d.motif ? '<br><span style="color:#b45309">Motif KLEAN : ' + d.motif + '</span>' : '')
+      + '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">'
+      + '<button type="button" onclick="avisAction(\'retrouve\')" style="border:none;background:#0d7a5f;color:#fff;font:inherit;font-weight:900;font-size:14.5px;padding:11px 13px;border-radius:12px;cursor:pointer">✅ Retrouvé — arrêter l’avis</button>'
+      + '<button type="button" onclick="avisAction(\'retirer\')" style="border:1.5px solid #e5484d;background:#fff;color:#e5484d;font:inherit;font-weight:900;font-size:14.5px;padding:11px 13px;border-radius:12px;cursor:pointer">🗑️ Retirer</button>'
+      + '</div></div>';
+  } catch (e) { msg.innerHTML = '⚠️ Réseau indisponible.'; }
+}
+async function avisAction(quoi) {
+  if (!AVIS.suivi) { try { toast('🔑 Entrez d’abord votre n° et votre code'); } catch (e) { } return; }
+  const msg = document.getElementById('avis-suivi-msg');
+  try {
+    const r = await fetch('/api/avis/' + quoi, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: AVIS.suivi.id, code: AVIS.suivi.code, suite: (quoi === 'retrouve' ? 'Retrouvé' : '') })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) { if (msg) msg.innerHTML = '⚠️ ' + (d.error || 'Action impossible'); return; }
+    if (msg) msg.innerHTML = '✅ ' + (d.message || 'Fait');
+    avisCharger();
+  } catch (e) { if (msg) msg.innerHTML = '⚠️ Réseau indisponible.'; }
+}
+try { window.jobsOuvrir = jobsOuvrir; window.avisOuvrir = avisOuvrir; window.jobsMonter = jobsMonter; window.avisMonter = avisMonter; } catch (e) { }
+
+</script>
 <!-- 🛡️ FILET DE SÉCURITÉ DES AFFICHES — les affiches (info · pub · quiz · urgence) sont
      indépendantes du reste de l'application : même si un autre script échoue, elles sortent. -->
 <script>

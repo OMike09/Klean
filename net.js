@@ -643,6 +643,25 @@ function routeNet(msg){
       try { if (window.kleanOnCitiesDeploy) window.kleanOnCitiesDeploy(msg); } catch (e) { }
       break;
 
+    /* 🧩 LOT 123 — les grandes options de la page d'accueil (registre centralisé).
+       Le PDG change un réglage ou demande une réparation : l'application suit SANS rechargement. */
+    case 'accueil_maj':               // → TOUS : une option de l'accueil a changé
+      try { if (window.kleanOnAccueilMaj) window.kleanOnAccueilMaj(msg); } catch (e) { }
+      break;
+
+    case 'accueil_ordre':             // → TOUS : le tableau de bord demande une réparation / actualisation
+      try { if (window.kleanOnAccueilOrdre) window.kleanOnAccueilOrdre(msg); } catch (e) { }
+      break;
+
+    case 'job_candidature':           // → CLIENT : quelqu'un a proposé ses services pour votre demande
+      toast('📨 ' + (msg.nom || 'Une personne') + ' s’est proposé(e) pour votre demande — KLEAN vous met en relation');
+      try { if (window.kleanOnJobsMaj) window.kleanOnJobsMaj(msg); } catch (e) { }
+      break;
+
+    case 'avis_maj':                  // → TOUS : un avis de recherche a été publié / modéré
+      try { if (window.kleanOnAvisMaj) window.kleanOnAvisMaj(msg); } catch (e) { }
+      break;
+
     case 'veille_rappel':             // → PRO en veille : rappel GPS / sonnerie
       toast('🛰️ ' + (msg.text || 'Vérifiez votre GPS et vos sonneries'));
       try { if (typeof verifierVeille === 'function') verifierVeille(true); } catch (e) { }
