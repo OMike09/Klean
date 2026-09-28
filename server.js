@@ -5128,9 +5128,19 @@ const server = http.createServer(async (req, res) => {
       const cc = langComprendre(q);
       return sendJson(res, 200, { ok: true, debug: { texte: cc.texte, corriges: cc.corriges, hits: cc.hits, classement: langClasser(cc).slice(0, 4), urgence: cc.urgence } });
     }
+    /* 🔢 QUANTITÉ COMPRISE (29/09, lot 121) — « je veux laver 6 fauteuils » → 6, « 3 vitres » → 3.
+       Le client écrit comme il parle : on comprend le nombre et on le lui MONTRE. Il peut le corriger,
+       et la quantité définitive se confirme à l'étape suivante (les questions du service concerné). */
+    const qte = (() => {
+      const m = /(?:^|\s)(\d{1,3})\s*(fauteuils?|canap[ée]s?|chaises?|pi[eè]ces?|chambres?|salons?|salles?|vitres?|fen[eê]tres?|matelas|tapis|rideaux|clim(?:atiseurs?)?|ventilateurs?|prises?|ampoules?|robinets?|portes?|wc|toilettes?|cuisini[eè]res?|frigos?|r[ée]frig[ée]rateurs?|machines?)(?=[\s.,!?]|$)/i.exec(q);
+      if (!m) return null;
+      const n = Math.max(1, Math.min(99, parseInt(m[1], 10)));
+      return { n, unite: String(m[2]).toLowerCase(), texte: n + ' ' + String(m[2]).toLowerCase() };
+    })();
     return sendJson(res, 200, {
       ok: true, mode: 'service', principal: c.principal, service: c.compris, compris: c.compris,
       comprisLong: c.comprisLong, tache: c.tache, categorie: c.categorie, urgence: !!c.urgence,
+      quantite: qte,                       /* 🔢 null si la phrase ne contient aucun nombre clair */
       /* 📚 la chaîne du catalogue national (catégorie → service → sous-service → tâche) :
          c'est elle qui permet à l'app d'afficher la tâche précise au client */
       chaine: c.chaine || null, reglemente: c.reglemente || null,
