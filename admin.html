@@ -1147,6 +1147,26 @@
     <div id="cd-preuves" style="margin-top:10px"></div>
     <div id="cd-journal" style="margin-top:10px"></div>
   </div>
+  <div class="panel" style="margin-bottom:14px" id="panel-justif">
+    <h3>🪪 Justificatifs professionnels <span class="cnt" id="jt-cnt">—</span></h3>
+    <p class="sub">Vérification des compétences et de l’activité déclarée, <b>uniquement à l’inscription professionnelle</b>.
+      <b>Un justificatif par métier</b> : jamais un document unique pour tous les métiers. Les exemples livrés par défaut
+      <b>ne sont pas des obligations légales</b> — vous définissez, métier par métier, ce que vous acceptez.</p>
+    <div class="body" style="padding:12px 14px">
+      <div id="jt-etat" style="font-size:13px;font-weight:800;margin:0 0 10px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px">
+        <button type="button" class="btn-main" id="jt-on" onclick="jtActiver(true)">✅ Activer la vérification</button>
+        <button type="button" class="btn-soft" id="jt-off" onclick="jtActiver(false)">⏸️ Désactiver</button>
+        <button type="button" class="btn-soft" onclick="jtCharge()">🔄 Rafraîchir</button>
+        <button type="button" class="btn-soft" onclick="jtOnglet('docs')">📄 Documents reçus</button>
+        <button type="button" class="btn-soft" onclick="jtOnglet('reglages')">⚙️ Régler les métiers</button>
+        <button type="button" class="btn-soft" onclick="jtOnglet('identites')">👤 Identités à vérifier</button>
+        <button type="button" class="btn-soft" onclick="jtOnglet('journal')">📜 Journal</button>
+      </div>
+      <div id="jt-kpis" style="display:flex;gap:8px;flex-wrap:wrap;font-size:12.5px;margin:0 0 10px"></div>
+      <div id="jt-corps"></div>
+    </div>
+  </div>
   <div class="panel" style="margin-bottom:14px" id="panel-freeze">
     <h3>⛔ Bloquer l’entreprise</h3>
     <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Action de <b>modération la plus forte</b> : tout Klean passe en lecture seule — plus aucune écriture (missions, comptes, paiements, chat) sauf la vôtre. À utiliser en cas d’attaque, de bug grave ou de fuite de données.</p>
@@ -1708,6 +1728,7 @@ const HQ_MENU = [
     ['panel-marche','🏷️ Références marché & statistiques','reference marché prix ivoirien source date fourchette inhabituel statistiques prix acceptes valider pdg'],
     ['panel-rel','🤝 Mise en relation (2 pros max)','mise en relation professionnel 1 professionnel 2 refus conversation courte prix devis verrouille contournement numero telephone whatsapp gestionnaire litige historique'],
     ['panel-conditions','📜 Conditions Klean-Services','conditions client professionnel cgu charte règlement accepter contrat engagement articles'],
+    ['panel-justif','🪚 Justificatifs professionnels','justificatif document diplôme carte professionnelle vérification compétence activité déclarée métier identité doublon une seule identité'],
     ['panel-tarif','💰 Moteur de tarification','prix tarifs unités coefficients paliers déplacement zones devis seuils versions estimation marché questions dynamiques je ne sais pas', true],
     ['panel-svc-create','🛠️ Créer / déployer un service','nouveau service prix déployer villes'],
     ['panel-villes','🏙️ Villes & quartiers','zones déployables inscription GPS'],
@@ -1769,7 +1790,7 @@ const HQ_ORDER = ['panel-home','panel-search','kpis','substrip',
   'panel-ann','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
   'panel-flip','panel-quizbank','panel-jeux','panel-promo',
   'panel-urgences','panel-demande-comptes','panel-trash','panel-shield','panel-audit','panel-sauvegardes',
-  'panel-entreprise','panel-cfg','panel-vitesse','panel-rel','panel-conditions','panel-freeze'];   /* 🤝 Mise en relation, 📜 Conditions AVANT le blocage (le blocage reste le dernier, règle du PDG) */
+  'panel-entreprise','panel-cfg','panel-vitesse','panel-rel','panel-conditions','panel-justif','panel-freeze'];   /* 🤝 Mise en relation, 📜 Conditions AVANT le blocage (le blocage reste le dernier, règle du PDG) */
 /* ═══════════ 🧭 NAVIGATION LATÉRALE + 🏠 VUE GÉNÉRALE (lot 97) ═══════════ */
 function hqNavToggle(force){
   const nav = document.getElementById('hq-nav'), back = document.getElementById('hq-nav-back');
@@ -3232,6 +3253,7 @@ function jumpPanel(id){
     if(id==='panel-marche'){ try{ chargerMarcheHQ(); }catch(e){} }        /* 🏷️ lot 112 : sources, dates, statistiques */
     if(id==='panel-vitesse' || id==='panel-cfg'){ try{ loadJeux(); }catch(e){} }
     if(id==='panel-vitesse'){ try{ loadJeux(); paintVitesses(); }catch(e){} }
+    if(id==='panel-justif'){ try{ jtCharge(); }catch(e){} }        /* 🪚 lot 122 : justificatifs professionnels et identités */
   }catch(e){}
 }
 async function runSearchHQ(){
@@ -7082,6 +7104,389 @@ async function ugStatut(id, statut){
   }
   try{ jxNouveau(); }catch(e){}
 })();
+/* ═══════════════════════════════════════════════════════════════════════════════
+   🪪 JUSTIFICATIFS PROFESSIONNELS — PANNEAU DU TABLEAU DE BORD (lot 122)
+   Activer/désactiver · définir les justificatifs de CHAQUE métier · lire les documents
+   envoyés · accepter / refuser / demander un remplacement · surveiller les expirations ·
+   vérifier les identités en doublon.
+   Aucun document n'est téléchargeable publiquement : tout passe par la session PDG.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+let JT = { ok: false, tab: 'docs', actif: false, docs: [], dossiers: [], metiers: [], identites: [], journal: [], stats: null };
+
+function jtPct(x) { return String(x == null ? '' : x); }
+function jtDate(s) { return String(s || '').replace('T', ' ').slice(0, 16); }
+function jtVal(s) { return (s === undefined || s === null || s === '') ? '—' : String(s); }
+
+async function jtCharge() {
+  try {
+    const d = await fetch('/api/admin/justif', { cache: 'no-store' }).then(r => r.json());
+    if (!d || !d.ok) return;
+    JT = Object.assign(JT, d, { ok: true });
+    /* la pastille du menu : combien de documents attendent une décision */
+    const c = document.getElementById('jt-cnt');
+    if (c) c.textContent = (d.stats && d.stats.parStatut ? d.stats.parStatut.attente : 0) + ' à vérifier · ' + JT.metiers.length + ' métiers';
+    jtPeint();
+  } catch (e) { }
+}
+window.jtCharge = jtCharge;
+
+function jtOnglet(t) { JT.tab = t; jtPeint(); }
+window.jtOnglet = jtOnglet;
+
+async function jtActiver(on) {
+  if (on && !confirm('ACTIVER la vérification des justificatifs ?\n\nChaque NOUVEAU professionnel devra fournir un justificatif par métier déclaré. '
+    + 'Les professionnels déjà validés gardent leur compte (aucune obligation rétroactive).')) return;
+  if (!on && !confirm('DÉSACTIVER la vérification ?\n\nUn professionnel pourra s’inscrire sans justificatif. '
+    + 'Rien n’est supprimé : les documents déjà reçus restent consultables et les validations déjà données restent acquises.')) return;
+  const r = await fetch('/api/admin/justif/regle', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: on ? 'activer' : 'desactiver' }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+  alert(d.message || 'Réglage enregistré');
+  jtCharge();
+}
+window.jtActiver = jtActiver;
+
+function jtPeint() {
+  const e = document.getElementById('jt-etat');
+  if (e) e.innerHTML = JT.actif
+    ? '<span style="background:rgba(21,201,138,.14);color:#15c98a;padding:7px 11px;border-radius:10px">✅ VÉRIFICATION ACTIVÉE</span>'
+      + '<span style="color:var(--muted);font-weight:600;margin-left:8px">chaque nouveau professionnel fournit un justificatif PAR MÉTIER — rien n’est validé avant votre décision.</span>'
+    : '<span style="background:rgba(255,176,32,.14);color:#ffb020;padding:7px 11px;border-radius:10px">⏸️ VÉRIFICATION DÉSACTIVÉE</span>'
+      + '<span style="color:var(--muted);font-weight:600;margin-left:8px">un professionnel peut s’inscrire sans justificatif.</span>';
+  const k = document.getElementById('jt-kpis');
+  if (k && JT.stats) {
+    const p = JT.stats.parStatut || {};
+    const puce = (t, v, col) => '<span style="background:var(--card2);border:1.5px solid var(--line);padding:7px 10px;border-radius:10px;font-weight:800">' + t + ' <b style="color:' + col + '">' + v + '</b></span>';
+    k.innerHTML = puce('⏳ En attente', p.attente || 0, '#ffb020') + puce('✅ Vérifiés', p.verifie || 0, '#15c98a')
+      + puce('⛔ Refusés', p.refuse || 0, '#ff6b6b') + puce('🔄 À remplacer', p.a_remplacer || 0, '#8ab4ff')
+      + puce('⌛ Expirés', p.expire || 0, '#ff9f43') + puce('🧑‍💼 Dossiers suivis', JT.stats.nbDossiers || 0, '#8ab4ff')
+      + puce('🛡️ Profession vérifiée', JT.stats.nbProfessionVerifiee || 0, '#15c98a')
+      + (JT.stats.nbIdentites ? puce('👤 Identités à confirmer', JT.stats.nbIdentites, '#ffb020') : '');
+  }
+  const c = document.getElementById('jt-corps');
+  if (!c) return;
+  if (JT.tab === 'reglages') c.innerHTML = jtHTMLReglages();
+  else if (JT.tab === 'identites') c.innerHTML = jtHTMLIdentites();
+  else if (JT.tab === 'journal') c.innerHTML = jtHTMLJournal();
+  else c.innerHTML = jtHTMLDocs();
+}
+
+/* ─── 📄 LES DOCUMENTS REÇUS ─── */
+function jtDocsTries() {
+  const ordre = { attente: 0, a_remplacer: 1, refuse: 2, verifie: 3 };
+  return (JT.docs || []).slice().sort((a, b) => (ordre[a.statut] == null ? 9 : ordre[a.statut]) - (ordre[b.statut] == null ? 9 : ordre[b.statut])
+    || String(b.at).localeCompare(String(a.at)));
+}
+function jtHTMLDocs() {
+  const L = jtDocsTries();
+  if (!L.length) return '<p style="font-size:13px;color:var(--muted)">Aucun document reçu pour l’instant. '
+    + (JT.actif ? 'La vérification est activée : les nouveaux professionnels seront invités à déposer leurs justificatifs.' : 'La vérification est désactivée.') + '</p>';
+  let h = '';
+  /* d’abord les dossiers par professionnel : l’état métier par métier, en un coup d’œil */
+  const dossierIds = {};
+  L.forEach(d => { dossierIds[d.agentId] = 1; });
+  const dossiers = (JT.dossiers || []).filter(x => dossierIds[x.id]);
+  if (dossiers.length) {
+    h += '<h4 style="margin:6px 0 6px;font-size:13.5px">🧑‍💼 État par professionnel (métier par métier)</h4><div style="display:grid;gap:8px;margin-bottom:12px">';
+    dossiers.forEach(d => {
+      const chips = (d.metiers || []).map(m => {
+        const col = m.statut === 'verifie' ? '#15c98a' : m.statut === 'attente' ? '#ffb020' : m.statut === 'non_requis' ? '#9aa7a0' : '#ff6b6b';
+        return '<span style="background:var(--card2);border:1.5px solid var(--line);border-radius:20px;padding:4px 9px;font-size:11.5px;font-weight:800">'
+          + (m.ic || '🛠️') + ' ' + echa(m.nom) + ' — <b style="color:' + col + '">' + echa(m.statutTxt || '') + '</b></span>';
+      }).join(' ');
+      h += '<div style="background:var(--card2);border:1.5px solid var(--line);border-radius:12px;padding:9px 11px">'
+        + '<b style="font-size:13px">' + echa(d.nom) + '</b> <span style="color:var(--muted);font-size:11.5px">' + echa(d.tel) + ' · ' + echa(d.ville || d.quartier || '') + ' · dossier ' + echa(d.status) + '</span>'
+        + (d.professionVerifiee ? ' <span style="color:#15c98a;font-weight:900">🛡️ Profession vérifiée</span>' : ' <span style="color:#ffb020;font-weight:800">' + echa(d.libelle || '') + '</span>')
+        + (d.alerte ? ' <span style="color:#ff6b6b;font-weight:800">👤 identité à vérifier</span>' : '')
+        + '<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">' + (chips || '<i style="color:var(--muted)">aucun métier</i>') + '</div></div>';
+    });
+    h += '</div>';
+  }
+  h += '<h4 style="margin:6px 0 6px;font-size:13.5px">📄 Documents envoyés</h4><div style="display:grid;gap:8px">';
+  L.forEach(d => {
+    const col = d.statut === 'verifie' ? (d.expire ? '#ff9f43' : '#15c98a') : d.statut === 'attente' ? '#ffb020' : d.statut === 'a_remplacer' ? '#8ab4ff' : '#ff6b6b';
+    h += '<div style="background:var(--card2);border:1.5px solid var(--line);border-left:5px solid ' + col + ';border-radius:12px;padding:9px 11px">'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+      + '<b style="font-size:13px">' + echa(d.agentNom || '') + '</b>'
+      + '<span style="font-size:12px;color:var(--muted)">' + echa(d.agentTel || '') + '</span>'
+      + '<span style="background:var(--card);border:1.5px solid var(--line);border-radius:20px;padding:3px 9px;font-size:11.5px;font-weight:800">' + echa(d.metierNom || d.metier) + '</span>'
+      + '<span style="font-weight:900;color:' + col + '">' + echa(d.statutTxt || d.statut) + '</span>'
+      + (d.expire ? '<span style="color:#ff9f43;font-weight:800">⌛ expiré</span>' : '')
+      + '<span style="font-size:11.5px;color:var(--muted)">' + echa(jtDate(d.at)) + ' · ' + (d.nbPages || 0) + ' page(s)</span>'
+      + '</div>'
+      + '<div style="font-size:12px;color:var(--muted);margin-top:4px">Justificatif demandé : <b>' + echa(jtVal(d.regleLibelle)) + '</b>'
+      + (d.couvre && d.couvre.length ? ' · déclaré valable aussi pour : <b>' + d.couvre.map(x => echa(x)).join(', ') + '</b>' : '')
+      + (d.refDoc ? ' · <i>même document que ' + echa(d.refDoc) + '</i>' : '')
+      + (d.motif ? ' · motif : « ' + echa(d.motif) + ' »' : '') + '</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">'
+      + '<button type="button" class="btn-soft" onclick="jtVoirDoc(\'' + d.id + '\')">👁️ Lire le document</button>'
+      + (d.statut !== 'verifie' ? '<button type="button" class="btn-main" style="padding:7px 11px" onclick="jtVoirDoc(\'' + d.id + '\',\'accepter\')">✅ Accepter</button>' : '')
+      + (d.statut !== 'refuse' ? '<button type="button" class="btn-soft" style="color:#ff6b6b" onclick="jtDecider(\'' + d.id + '\',\'refuser\')">⛔ Refuser</button>' : '')
+      + (d.statut !== 'a_remplacer' ? '<button type="button" class="btn-soft" style="color:#8ab4ff" onclick="jtDecider(\'' + d.id + '\',\'remplacer\')">🔄 Demander un nouveau document</button>' : '')
+      + '</div></div>';
+  });
+  return h + '</div>';
+}
+
+/* 👁️ lecture d'un document — dans une fenêtre, avec les contrôles à faire */
+async function jtVoirDoc(id, actionPrevue) {
+  let d = null;
+  try { d = await fetch('/api/admin/justif/doc?id=' + encodeURIComponent(id), { cache: 'no-store' }).then(r => r.json()); } catch (e) { }
+  if (!d || !d.ok) return alert('⚠️ Document indisponible');
+  const doc = d.doc;
+  let m = document.getElementById('jt-modal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'jt-modal';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto';
+    m.onclick = ev => { if (ev.target === m) jtFermer(); };
+    document.body.appendChild(m);
+  }
+  const pages = (doc.pages && doc.pages.length ? doc.pages : (doc.refPages || []));
+  const visu = pages.map(pg => pg.type === 'pdf'
+    ? '<div style="background:var(--card2);border:1.5px solid var(--line);border-radius:10px;padding:10px;margin:6px 0">📄 PDF (' + echa(pg.nom || 'document') + ')'
+      + ' — <a href="' + pg.data + '" target="_blank" rel="noopener" style="color:var(--p);font-weight:800">ouvrir le PDF</a>'
+      + '<div style="font-size:11.5px;color:var(--muted);margin-top:4px">Le PDF s’ouvre dans un nouvel onglet : il n’est jamais rendu public, il passe par votre session.</div></div>'
+    : '<div style="margin:6px 0"><div style="font-size:11.5px;font-weight:800;color:var(--muted);margin-bottom:3px">' + echa(pg.face || 'page') + (pg.nom ? ' · ' + echa(pg.nom) : '') + '</div>'
+      + '<img src="' + pg.data + '" alt="justificatif" style="max-width:100%;border-radius:10px;border:1.5px solid var(--line)"></div>').join('');
+  const metiers = (JT.metiers || []).filter(x => !x.supprime);
+  m.innerHTML = '<div style="background:var(--card);border-radius:16px;padding:16px;max-width:760px;width:100%;margin:auto">'
+    + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">'
+    + '<div><h3 style="margin:0">🪪 ' + echa(doc.agentNom || '') + ' — ' + echa(doc.metierNom || doc.metier) + '</h3>'
+    + '<p style="margin:4px 0 0;font-size:12px;color:var(--muted)">Justificatif demandé : <b>' + echa(jtVal(doc.regleLibelle)) + '</b> · reçu le ' + echa(jtDate(doc.at))
+    + ' · statut <b>' + echa(doc.statutTxt || doc.statut) + '</b>' + (doc.expire ? ' · <b style="color:#ff9f43">expiré</b>' : '') + '</p></div>'
+    + '<button type="button" class="btn-soft" onclick="jtFermer()">✕ Fermer</button></div>'
+    + '<div style="background:rgba(138,180,255,.10);border:1.5px solid rgba(138,180,255,.35);border-radius:12px;padding:9px 11px;margin:10px 0;font-size:12.5px">'
+    + '🔎 <b>À vérifier :</b> le <b>nom</b> sur le document correspond-il au professionnel ? Le document est-il <b>cohérent avec le métier déclaré</b> ? Est-il <b>lisible et réel</b> ? '
+    + '<br>Si ce même document officiel couvre <b>réellement plusieurs métiers</b>, cochez-les ci-dessous : vous seul pouvez le déclarer.</div>'
+    + (doc.identite ? '<div style="font-size:12.5px;margin:6px 0"><b>Identité déclarée :</b> ' + echa([doc.identite.prenom, doc.identite.nom].filter(Boolean).join(' '))
+      + ' · né(e) le ' + echa(jtVal(doc.identite.naissance)) + ' à ' + echa(jtVal(doc.identite.lieuNaissance)) + ' · tél ' + echa(jtVal(doc.identite.tel))
+      + '<br><b>Pièce :</b> ' + echa(jtVal(doc.identite.pieceType)) + ' ' + echa(jtVal(doc.identite.pieceNum)) + '</div>' : '')
+    + '<div style="max-height:46vh;overflow:auto;background:var(--card2);border-radius:12px;padding:8px;margin:8px 0">' + (visu || '<i>Aucune page</i>') + '</div>'
+    + '<div style="margin:8px 0"><b style="font-size:12.5px">Ce document couvre aussi :</b> '
+    + metiers.map(x => '<label style="display:inline-flex;gap:5px;align-items:center;background:var(--card2);border:1.5px solid var(--line);border-radius:20px;padding:5px 10px;margin:3px;font-size:12px;cursor:pointer">'
+      + '<input type="checkbox" id="jt-cv-' + echa(x.id) + '" ' + (x.id === doc.metier ? 'checked disabled' : '') + '> ' + echa(x.ic || '') + ' ' + echa(x.nom) + '</label>').join('')
+    + '<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Le métier d’origine est toujours couvert. Cochez uniquement ce que le document justifie réellement.</div></div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    + '<label style="font-size:12px;font-weight:800">Validité (mois, 0 = sans date) <input id="jt-valid" type="number" min="0" max="600" value="0" style="width:90px;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink)"></label>'
+    + '<input id="jt-motif" placeholder="Motif (obligatoire pour refuser ou demander un remplacement)" style="flex:1;min-width:200px;padding:9px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink)">'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'
+    + '<button type="button" class="btn-main" onclick="jtDeciderDoc(\'' + doc.id + '\',\'accepter\')">✅ Accepter ce document</button>'
+    + '<button type="button" class="btn-soft" style="color:#ff6b6b" onclick="jtDeciderDoc(\'' + doc.id + '\',\'refuser\')">⛔ Refuser</button>'
+    + '<button type="button" class="btn-soft" style="color:#8ab4ff" onclick="jtDeciderDoc(\'' + doc.id + '\',\'remplacer\')">🔄 Demander un nouveau document</button>'
+    + '</div>'
+    + '<p style="font-size:11.5px;color:var(--muted);margin:9px 0 0">' + echa(d.conseil || '') + '</p>'
+    + '</div>';
+  if (actionPrevue === 'accepter') { const z = m.querySelector('#jt-motif'); if (z) z.focus(); }
+}
+window.jtVoirDoc = jtVoirDoc;
+function jtFermer() { const m = document.getElementById('jt-modal'); if (m) m.remove(); }
+window.jtFermer = jtFermer;
+
+async function jtDeciderDoc(id, action) {
+  const m = document.getElementById('jt-modal');
+  const motif = m ? ((m.querySelector('#jt-motif') || {}).value || '') : '';
+  const mois = m ? parseInt((m.querySelector('#jt-valid') || {}).value, 10) || 0 : 0;
+  const aussi = [];
+  if (m) (JT.metiers || []).forEach(x => { const c = m.querySelector('#jt-cv-' + x.id); if (c && c.checked && !c.disabled) aussi.push(x.id); });
+  if ((action === 'refuser' || action === 'remplacer') && !motif.trim())
+    return alert('✋ Indiquez le motif : le professionnel doit savoir quoi corriger.');
+  const r = await fetch('/api/admin/justif/doc', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ docId: id, action, motif, valideMois: mois, aussi }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+  jtFermer();
+  alert('✅ Enregistré : ' + (d.statutTxt || action) + (d.etat ? '\n\nMétiers : ' + d.etat.libelle : ''));
+  jtCharge();
+}
+window.jtDeciderDoc = jtDeciderDoc;
+async function jtDecider(id, action) {
+  let motif = '';
+  if (action === 'refuser') motif = prompt('Motif du refus (le professionnel le verra) :', '') || '';
+  if (action === 'remplacer') motif = prompt('Quel document demander à la place ?', '') || '';
+  if ((action === 'refuser' || action === 'remplacer') && !motif.trim()) return;
+  const r = await fetch('/api/admin/justif/doc', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ docId: id, action, motif }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+  alert('✅ ' + (d.statutTxt || 'Enregistré') + (d.etat ? '\n\n' + d.etat.libelle : ''));
+  jtCharge();
+}
+window.jtDecider = jtDecider;
+
+/* ─── ⚙️ RÉGLER CHAQUE MÉTIER ─── */
+function jtHTMLReglages() {
+  let h = '<div style="background:var(--card2);border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px">'
+    + '<b style="font-size:13px">Réglages généraux</b>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">'
+    + '<label style="font-size:11.5px;font-weight:800">Phrase affichée au professionnel<input id="jt-texte" value="' + echa(JT.texte || '') + '" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card);color:var(--ink)"></label>'
+    + '<label style="font-size:11.5px;font-weight:800">Pages max par document<input id="jt-pages" type="number" min="1" max="10" value="' + (JT.pagesMax || 6) + '" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card);color:var(--ink)"></label>'
+    + '<label style="font-size:11.5px;font-weight:800">Poids max (Mo)<input id="jt-mo" type="number" min="1" max="8" value="' + (JT.tailleMaxMo || 4) + '" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card);color:var(--ink)"></label>'
+    + '<label style="font-size:11.5px;font-weight:800">PDF autorisé<select id="jt-pdf" style="width:100%;padding:9px;border-radius:9px;border:1.5px solid var(--line);background:var(--card);color:var(--ink)">'
+    + '<option value="1"' + (JT.autoriserPdf !== false ? ' selected' : '') + '>Oui</option><option value="0"' + (JT.autoriserPdf === false ? ' selected' : '') + '>Non</option></select></label>'
+    + '</div>'
+    + '<button type="button" class="btn-main" style="margin-top:8px;padding:8px 12px" onclick="jtSauveGeneraux()">💾 Enregistrer ces réglages</button>'
+    + '<p style="font-size:11.5px;color:var(--muted);margin:6px 0 0">Ces libellés sont des <b>exemples proposés</b> : modifiez, ajoutez ou retirez ce que vous voulez. '
+    + 'Rien n’est présenté comme une obligation légale.</p></div>';
+  h += '<h4 style="margin:8px 0 6px;font-size:13.5px">🛠️ Justificatifs acceptés, métier par métier <span style="font-weight:600;color:var(--muted)">(' + (JT.metiers || []).filter(x => !x.supprime).length + ' métiers)</span></h4>';
+  h += '<div style="margin-bottom:8px"><input id="jt-filtre" placeholder="🔍 chercher un métier…" oninput="jtFiltreMetiers(this.value)" style="width:100%;padding:9px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink)"></div>';
+  h += '<div id="jt-metiers" style="display:grid;gap:9px">';
+  (JT.metiers || []).forEach(m => { h += jtHTMLMetier(m); });
+  h += '</div>';
+  return h;
+}
+function jtHTMLMetier(m) {
+  const regles = (m.regles || []);
+  const lignes = regles.map(r => {
+    const col = r.supprime ? '#9aa7a0' : (r.obligatoire ? '#15c98a' : '#ffb020');
+    return '<div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;border-top:1px dashed var(--line);padding:7px 0">'
+      + '<span style="flex:1;min-width:180px;font-size:12.5px;' + (r.supprime ? 'text-decoration:line-through;opacity:.6' : '') + '">' + echa(r.libelle) + '</span>'
+      + '<span style="font-size:11px;font-weight:900;color:' + col + '">' + (r.supprime ? 'retiré' : (r.obligatoire ? 'OBLIGATOIRE' : 'facultatif')) + '</span>'
+      + '<span style="font-size:11px;color:var(--muted)">' + (r.visiblePro !== false ? 'visible du pro' : 'administration') + (r.validiteMois ? ' · ' + r.validiteMois + ' mois' : '') + '</span>'
+      + (r.supprime
+        ? '<button type="button" class="btn-soft" style="padding:5px 9px;font-size:11px" onclick="jtRegle(\'metier_revenir_regle\',\'' + echa(m.id) + '\',\'' + echa(r.id) + '\')">↩️ Remettre</button>'
+        : '<button type="button" class="btn-soft" style="padding:5px 9px;font-size:11px" onclick="jtRegle(\'regle_modifier\',\'' + echa(m.id) + '\',\'' + echa(r.id) + '\',{obligatoire:' + (r.obligatoire ? 'false' : 'true') + '})">' + (r.obligatoire ? '→ facultatif' : '→ obligatoire') + '</button>'
+          + '<button type="button" class="btn-soft" style="padding:5px 9px;font-size:11px" onclick="jtRegle(\'regle_modifier\',\'' + echa(m.id) + '\',\'' + echa(r.id) + '\',{visiblePro:' + (r.visiblePro !== false ? 'false' : 'true') + '})">' + (r.visiblePro !== false ? '→ administration' : '→ visible du pro') + '</button>'
+          + '<button type="button" class="btn-soft" style="padding:5px 9px;font-size:11px;color:#ff6b6b" onclick="jtRegle(\'regle_supprimer\',\'' + echa(m.id) + '\',\'' + echa(r.id) + '\')">✕ Retirer</button>')
+      + '</div>';
+  }).join('');
+  return '<div class="jt-metier" data-nom="' + echa((m.nom + ' ' + m.id + ' ' + m.famille).toLowerCase()) + '" style="background:var(--card2);border:1.5px solid var(--line);border-radius:12px;padding:9px 11px">'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    + '<b style="font-size:13px">' + echa(m.ic || '🛠️') + ' ' + echa(m.nom) + '</b>'
+    + '<span style="font-size:11px;color:var(--muted)">' + echa(m.source || '') + (m.famille ? ' · ' + echa(m.famille) : '') + '</span>'
+    + (m.supprime ? '<span style="color:#ff6b6b;font-weight:800;font-size:11.5px">retiré de la vérification</span>'
+        + '<button type="button" class="btn-soft" style="padding:5px 9px;font-size:11px" onclick="jtRegle(\'metier_revenir\',\'' + echa(m.id) + '\')">↩️ Remettre</button>'
+      : '')
+    + '<button type="button" class="btn-soft" style="padding:5px 9px;font-size:11px" onclick="jtRegle(\'metier_renommer\',\'' + echa(m.id) + '\')">✏️ Renommer</button>'
+    + (m.supprime ? '' : '<button type="button" class="btn-soft" style="padding:5px 9px;font-size:11px;color:#ff6b6b" onclick="jtRegle(\'metier_supprimer\',\'' + echa(m.id) + '\')">✕ Retirer ce métier</button>')
+    + '</div>'
+    + (lignes || '<p style="font-size:12px;color:var(--muted);margin:6px 0">Aucun justificatif : ce métier n’en demande aucun.</p>')
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">'
+    + '<input id="jt-nl-' + echa(m.id) + '" placeholder="➕ Nouveau justificatif accepté…" style="flex:1;min-width:170px;padding:8px;border-radius:9px;border:1.5px solid var(--line);background:var(--card);color:var(--ink)">'
+    + '<button type="button" class="btn-soft" style="padding:7px 10px;font-size:11.5px" onclick="jtAjouteRegle(\'' + echa(m.id) + '\',true)">➕ Ajouter (obligatoire)</button>'
+    + '<button type="button" class="btn-soft" style="padding:7px 10px;font-size:11.5px" onclick="jtAjouteRegle(\'' + echa(m.id) + '\',false)">➕ Ajouter (facultatif)</button>'
+    + '</div></div>';
+}
+function jtFiltreMetiers(q) {
+  q = String(q || '').toLowerCase();
+  document.querySelectorAll('#jt-metiers .jt-metier').forEach(d => {
+    d.style.display = (!q || (d.getAttribute('data-nom') || '').indexOf(q) >= 0) ? '' : 'none';
+  });
+}
+window.jtFiltreMetiers = jtFiltreMetiers;
+
+async function jtSauveGeneraux() {
+  const g = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+  const envois = [
+    { action: 'texte', texte: g('jt-texte') },
+    { action: 'pagesMax', valeur: g('jt-pages') },
+    { action: 'tailleMaxMo', valeur: g('jt-mo') },
+    { action: 'pdf', valeur: g('jt-pdf') === '1' }
+  ];
+  for (const e of envois) {
+    const r = await fetch('/api/admin/justif/regle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); return alert('⚠️ ' + (d.error || 'Impossible')); }
+  }
+  alert('✅ Réglages enregistrés');
+  jtCharge();
+}
+window.jtSauveGeneraux = jtSauveGeneraux;
+
+async function jtRegle(action, metier, regleId, extra) {
+  if (action === 'metier_supprimer' && !confirm('Retirer ce métier de la vérification ?\n\nAucun document n’est supprimé et vous pourrez le remettre en un clic.')) return;
+  if (action === 'metier_renommer') {
+    const nom = prompt('Nom du métier :', '');
+    if (!nom || !nom.trim()) return;
+    const r = await fetch('/api/admin/justif/regle', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, metier, nom }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+    return jtCharge();
+  }
+  if (action === 'metier_revenir_regle') { action = 'regle_revenir'; }
+  const corps = Object.assign({ action, metier, regleId }, extra || {});
+  const r = await fetch('/api/admin/justif/regle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+  jtCharge();
+}
+window.jtRegle = jtRegle;
+
+async function jtAjouteRegle(metier, obligatoire) {
+  const e = document.getElementById('jt-nl-' + metier);
+  const lib = e ? String(e.value || '').trim() : '';
+  if (!lib) return alert('✋ Écrivez d’abord le libellé du justificatif');
+  const r = await fetch('/api/admin/justif/regle', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'regle_ajouter', metier, libelle: lib, obligatoire }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+  jtCharge();
+}
+window.jtAjouteRegle = jtAjouteRegle;
+
+/* ─── 👤 IDENTITÉS À VÉRIFIER ─── */
+function jtHTMLIdentites() {
+  const L = JT.identites || [];
+  let h = '<p style="font-size:12.5px;color:var(--muted);margin:0 0 8px">Une même identité ne doit pas ouvrir plusieurs comptes professionnels pour contourner les règles. '
+    + 'Quand KLEAN détecte une même personne (mêmes nom, prénom et date de naissance, ou même pièce d’identité), le dossier reste <b>bloqué</b> tant que vous n’avez pas tranché.</p>';
+  if (!L.length) return h + '<p style="font-size:13px">Aucune identité en attente de vérification. ✅</p>';
+  L.forEach(x => {
+    h += '<div style="background:var(--card2);border:1.5px solid var(--line);border-left:5px solid #ffb020;border-radius:12px;padding:9px 11px;margin-bottom:8px">'
+      + '<b style="font-size:13px">' + echa(x.nom) + '</b> <span style="font-size:11.5px;color:var(--muted)">' + echa(x.tel) + ' · inscrit le ' + echa(jtDate(x.createdAt)) + ' · dossier ' + echa(x.status) + '</span>'
+      + '<div style="font-size:12.5px;margin-top:4px">Déjà présent dans KLEAN :</div>'
+      + (x.alerte.doublons || []).map(d => '<div style="font-size:12.5px;margin:2px 0 0 10px">• <b>' + echa(d.nom) + '</b> (' + (d.type === 'pro' ? 'compte professionnel' : 'compte client') + ' ' + echa(d.id) + ', tél ' + echa(d.tel || '—') + ') — ' + echa(d.pourquoi) + '</div>').join('')
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">'
+      + '<button type="button" class="btn-main" style="padding:7px 11px" onclick="jtIdentite(\'' + x.id + '\',\'confirmer\')">✅ Vérification faite (identité confirmée)</button>'
+      + '<button type="button" class="btn-soft" style="color:#8ab4ff" onclick="jtIdentite(\'' + x.id + '\',\'fusionner\')">🔗 Fusionner avec le compte existant</button>'
+      + '<button type="button" class="btn-soft" style="color:#ff6b6b" onclick="jtIdentite(\'' + x.id + '\',\'refuser\')">⛔ Refuser ce dossier</button>'
+      + '</div></div>';
+  });
+  return h;
+}
+async function jtIdentite(agentId, action) {
+  let corps = { agentId, action };
+  if (action === 'fusionner') {
+    const autre = prompt('Identifiant du compte à garder comme référence (AG-…) :', '');
+    if (!autre || !autre.trim()) return;
+    corps.autreId = autre.trim();
+  }
+  if (action === 'confirmer') {
+    const note = prompt('Note de vérification (ce que vous avez contrôlé) :', 'Pièce d’identité vérifiée par l’administration');
+    if (note === null) return;
+    corps.note = note;
+  }
+  if (action === 'refuser') {
+    const motif = prompt('Motif du refus :', 'Identité en doublon — une seule identité par personne');
+    if (!motif || !motif.trim()) return;
+    corps.motif = motif;
+  }
+  const r = await fetch('/api/admin/justif/identite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+  alert(d.message || '✅ Enregistré');
+  jtCharge();
+}
+window.jtIdentite = jtIdentite;
+
+/* ─── 📜 JOURNAL ─── */
+function jtHTMLJournal() {
+  const L = JT.journal || [];
+  if (!L.length) return '<p style="font-size:13px;color:var(--muted)">Aucune modification pour l’instant.</p>';
+  return '<div style="display:grid;gap:6px">' + L.map(x => '<div style="background:var(--card2);border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px">'
+    + '<b>' + echa(jtDate(x.at)) + '</b> · ' + echa(x.action) + (x.motif ? ' — « ' + echa(x.motif) + ' »' : '')
+    + '<div style="color:var(--muted)">' + echa(jtVal(x.avant)) + ' → <b>' + echa(jtVal(x.apres)) + '</b></div></div>').join('') + '</div>';
+}
+
+/* 🔄 rafraîchissement doux quand le panneau est ouvert (toutes les 20 s, sans voler le focus) */
+if (!window._jtPoll) window._jtPoll = setInterval(() => {
+  const p = document.getElementById('panel-justif');
+  if (!p || p.style.display === 'none' || p.classList.contains('folded')) return;
+  if (document.getElementById('jt-modal')) return;                    /* on ne rafraîchit jamais pendant une lecture */
+  jtCharge();
+}, 20000);
+
 try{ window.__kleanInit = 1; }catch(e){}      /* ✅ le tableau de bord est allé au bout de son démarrage */
 </script>
 

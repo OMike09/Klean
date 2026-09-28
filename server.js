@@ -137,6 +137,7 @@ function poserDefauts() {
   db.fieldAgents = db.fieldAgents || [];
   db.fieldChat = db.fieldChat || [];
   db.cities = db.cities || [];
+  justifEnsure();     /* 🪚 justificatifs professionnels (lot 122) : poses au demarrage */
   db.catalog = db.catalog || [];
   /* ═══ 🎮 FLIP FIZZ · KLEAN POINTS · RÉCOMPENSES · QUIZ · INFOS · URGENCE (lot 96) ═══
      ⚠️ Par défaut le jeu est DÉSACTIVÉ et INVISIBLE sur l'accueil : seul le PDG l'active. */
@@ -3309,7 +3310,20 @@ function fichePublique(ag, o) {
     ville: ag.villeService || ag.ville || ag.villeIci || '',
     zoneAff: p.hideQuartier ? ('zone ' + (ag.quartier || ag.villeService || ag.ville || '')) : (ag.quartier || ''),
     quartier: p.hideQuartier ? '' : (ag.quartier || ''),
-    services: Array.isArray(ag.services) ? ag.services.slice(0, 12) : [],
+    /* 🪪 PROFESSION VÉRIFIÉE (lot 122) : le client ne voit qu'un INDICATEUR, jamais la photo
+       d'une carte ou d'un diplôme. Et le profil n'affiche que les métiers réellement validés. */
+    services: (() => {
+      const ss = Array.isArray(ag.services) ? ag.services.slice(0, 12) : [];
+      try {
+        const e = justifEtatPro(ag);
+        if (!e.actif) return ss;
+        const ok = {}; e.metiers.forEach(m => { if (m.statut === 'verifie' || m.statut === 'non_requis') ok[m.metier] = 1; });
+        return ss.filter(x => ok[x]);
+      } catch (err) { return ss; }
+    })(),
+    professionVerifiee: (() => { try { return !!justifEtatPro(ag).professionVerifiee; } catch (e) { return false; } })(),
+    metiersVerifies: (() => { try { return justifEtatPro(ag).metiers.filter(m => m.statut === 'verifie').map(m => ({ metier: m.metier, nom: m.nom, ic: m.ic })); } catch (e) { return []; } })(),
+    verifLibelle: (() => { try { return justifEtatPro(ag).libelle; } catch (e) { return ''; } })(),
     online: agentIsOnline(ag), dispo, dispoTxt: dispoTxt(dispo),
     zoneKm: z.km, villesZone: z.villes,
     note: Math.round((st.rating || 5) * 10) / 10,
@@ -3881,6 +3895,296 @@ function broadcastNewMission(m) {
       emitAdmin('mission', '🌍 ' + live.id + ' élargie à toutes les villes (aucun accepté dans la ville)');
     }, 25000);
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   🪪 JUSTIFICATIFS PROFESSIONNELS (lot 122) — vérification des compétences et
+   de l'activité déclarée, UNIQUEMENT à l'inscription professionnelle.
+
+   ⚠️ DEUX RÈGLES ABSOLUES :
+   ① ON DEMANDE UN DOCUMENT PAR MÉTIER. Jamais un document unique pour tous les
+      métiers. Si un même document officiel couvre réellement plusieurs métiers,
+      c'est l'ADMINISTRATION qui le déclare après vérification (action « couvre
+      aussi »), jamais le système tout seul.
+   ② LES EXEMPLES LIVRÉS PAR DÉFAUT NE SONT PAS DES OBLIGATIONS LÉGALES. Le PDG
+      active/désactive la vérification et définit lui-même, métier par métier, ce
+      qu'il accepte : ajouter, modifier, supprimer, rendre obligatoire ou
+      facultatif, masquer à l'affichage du professionnel.
+
+   🔒 PROTECTION : les documents contiennent des données personnelles. Ils ne sont
+   JAMAIS servis par une route publique, jamais visibles d'un client, jamais
+   téléchargeables sans session d'administration. Le client ne voit qu'un
+   indicateur « Profession vérifiée ».
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+const JUSTIF_STATUTS = {
+  attente:     { t: 'En attente de vérification', ic: '⏳', col: '#ffb020' },
+  verifie:     { t: 'Vérifié',                    ic: '✅', col: '#15c98a' },
+  refuse:      { t: 'Refusé',                     ic: '⛔', col: '#ff6b6b' },
+  a_remplacer: { t: 'Document à remplacer',       ic: '🔄', col: '#8ab4ff' },
+  non_fourni:  { t: 'Non fourni',                 ic: '➕', col: '#9aa7a0' },
+  non_requis:  { t: 'Non demandé',                ic: '➖', col: '#9aa7a0' },
+  expire:      { t: 'Expiré',                     ic: '⌛', col: '#ff9f43' }
+};
+function justifStatut(s) { return JUSTIF_STATUTS[s] || JUSTIF_STATUTS.non_fourni; }
+
+/* 🧰 MODÈLES de justificatifs par famille de métier — ce sont des EXEMPLES
+   PROPOSÉS, modifiables un par un par le PDG (aucune valeur légale affichée). */
+const JUSTIF_MODELES = {
+  batiment: { nom: 'Bâtiment, artisanat & technique', regles: [
+    'Carte professionnelle d’artisan',
+    'Certificat ou diplôme de formation professionnelle',
+    'Certificat de qualification',
+    'Autre justificatif professionnel accepté par l’administration'
+  ]},
+  nettoyage: { nom: 'Nettoyage & entretien', regles: [
+    'Attestation d’expérience ou de références professionnelles',
+    'Certificat de formation (produits et matériels de nettoyage)',
+    'Carte professionnelle lorsqu’elle existe pour l’activité',
+    'Autre justificatif professionnel accepté'
+  ]},
+  education: { nom: 'Cours, formation & éducation', regles: [
+    'Diplôme correspondant à la matière ou au niveau enseigné',
+    'Certificat de formation ou de qualification pertinente',
+    'Carte professionnelle lorsqu’elle existe pour l’activité',
+    'Autre justificatif permettant de vérifier la qualification'
+  ]},
+  numerique: { nom: 'Informatique & numérique', regles: [
+    'Diplôme',
+    'Certificat de formation',
+    'Certification professionnelle',
+    'Autre justificatif pertinent'
+  ]},
+  personnes: { nom: 'Garde, aide à la personne & personnel', regles: [
+    'Attestation d’expérience (garde d’enfants, aide à la personne)',
+    'Certificat de formation (premiers secours, puériculture…)',
+    'Références vérifiables (employeur, structure)',
+    'Autre justificatif professionnel accepté'
+  ]},
+  transport: { nom: 'Transport & déménagement', regles: [
+    'Permis de conduire correspondant au véhicule utilisé',
+    'Carte professionnelle de transporteur lorsqu’elle existe',
+    'Attestation d’expérience ou de références',
+    'Autre justificatif professionnel accepté'
+  ]},
+  cuisine: { nom: 'Cuisine & alimentation', regles: [
+    'Certificat de formation culinaire',
+    'Attestation d’expérience professionnelle',
+    'Autorisation sanitaire si l’activité est réglementée (à confirmer par l’administration)',
+    'Autre justificatif professionnel accepté'
+  ]},
+  media: { nom: 'Installation technique (satellite, réseaux)', regles: [
+    'Attestation d’installateur agréé lorsqu’elle existe',
+    'Certificat de formation technique',
+    'Attestation d’expérience ou de références',
+    'Autre justificatif professionnel accepté'
+  ]},
+  jardin: { nom: 'Jardin, extérieur & véhicules', regles: [
+    'Attestation d’expérience ou de références',
+    'Certificat de formation (espaces verts, entretien)',
+    'Carte professionnelle lorsqu’elle existe pour l’activité',
+    'Autre justificatif professionnel accepté'
+  ]},
+  reglemente: { nom: 'Profession réglementée', regles: [
+    'Justificatif exigé par la réglementation (à préciser par l’administration) — autorisation, agrément ou diplôme reconnu',
+    'Autre justificatif autorisé par l’administration'
+  ]}
+};
+/* 📌 métier → famille + modèle. Les exemples dictés par le PDG (29/09) sont
+   repris mot pour mot pour Menuiserie, Électricité, Plomberie, Maçonnerie,
+   Coiffure/esthétique, Couture, Cours à domicile et Informatique/numérique. */
+const JUSTIF_METIERS_DEF = {
+  /* — les métiers du catalogue Klean — */
+  maison:      { nom: 'Nettoyage maison', ic: '🏠', famille: 'nettoyage' },
+  bureaux:     { nom: 'Nettoyage bureaux', ic: '🏢', famille: 'nettoyage' },
+  canapes:     { nom: 'Canapés & fauteuils', ic: '🛋️', famille: 'nettoyage' },
+  vitres:      { nom: 'Vitres & baies', ic: '🪟', famille: 'nettoyage' },
+  demenagement:{ nom: 'Après déménagement', ic: '🧼', famille: 'nettoyage' },
+  sdb:         { nom: 'Salles de bains', ic: '🚿', famille: 'nettoyage' },
+  grand:       { nom: 'Grand ménage', ic: '🧹', famille: 'nettoyage' },
+  entretien:   { nom: 'Entretien régulier', ic: '🗓️', famille: 'nettoyage' },
+  evenement:   { nom: 'Après événement', ic: '🎉', famille: 'nettoyage' },
+  plomberie:   { nom: 'Plomberie', ic: '🔧', famille: 'batiment' },
+  electricite: { nom: 'Électricité', ic: '💡', famille: 'batiment' },
+  clim:        { nom: 'Climatisation', ic: '❄️', famille: 'batiment' },
+  serrurerie:  { nom: 'Serrurerie', ic: '🔑', famille: 'batiment' },
+  electro:     { nom: 'Électroménager', ic: '🔌', famille: 'batiment' },
+  bricolage:   { nom: 'Bricolage & montage', ic: '🪛', famille: 'batiment' },
+  jardinage:   { nom: 'Jardinage', ic: '🌿', famille: 'jardin' },
+  lavageauto:  { nom: 'Lavage auto à domicile', ic: '🚗', famille: 'jardin' },
+  demen:       { nom: 'Déménagement & portage', ic: '📦', famille: 'transport' },
+  cuisine:     { nom: 'Cuisinier à domicile', ic: '🍳', famille: 'cuisine' },
+  placement:   { nom: 'Placement de personnel', ic: '👥', famille: 'personnes' },
+  cours:       { nom: 'Cours ou formation à domicile', ic: '📚', famille: 'education' },
+  canal:       { nom: 'Canal+ domicile', ic: '📡', famille: 'media' },
+  /* — métiers cités par le PDG qui ne sont pas encore au catalogue : la
+       configuration existe déjà, il n'y aura rien à refaire le jour où le
+       service s'ouvre. — */
+  menuiserie:  { nom: 'Menuiserie', ic: '🪚', famille: 'batiment' },
+  maconnerie:  { nom: 'Maçonnerie', ic: '🧱', famille: 'batiment' },
+  coiffure:    { nom: 'Coiffure / esthétique', ic: '💇', famille: 'beaute' },
+  couture:     { nom: 'Couture', ic: '🧵', famille: 'beaute' },
+  informatique:{ nom: 'Informatique / numérique', ic: '💻', famille: 'numerique' }
+};
+const JUSTIF_MODELE_SPE = {
+  beaute: { nom: 'Beauté, coiffure & couture', regles: [
+    'Carte professionnelle ou justificatif professionnel approprié',
+    'Diplôme / certificat de formation',
+    'Certificat de qualification'
+  ]}
+};
+function justifRegleDe(libelle, obligatoire) {
+  return { libelle: String(libelle).slice(0, 120), obligatoire: obligatoire !== false, actif: true, visiblePro: true, validiteMois: 0, aConfirmer: false };
+}
+function justifDefauts() {
+  const metiers = {};
+  Object.keys(JUSTIF_METIERS_DEF).forEach((id, i) => {
+    const m = JUSTIF_METIERS_DEF[id];
+    const modele = JUSTIF_MODELE_SPE[m.famille] || JUSTIF_MODELES[m.famille] || JUSTIF_MODELES.batiment;
+    metiers[id] = {
+      id, nom: m.nom, ic: m.ic || '🛠️', famille: m.famille, source: 'modèle Klean (exemple du ' + '29/09/2026' + ')',
+      regles: modele.regles.map((lib, j) => Object.assign(justifRegleDe(lib, true), { id: 'r' + (j + 1) })),
+      supprime: false
+    };
+  });
+  return {
+    actif: false,                             /* ⬅️ L'OPTION DU PDG : désactivée par défaut */
+    texte: 'Fournissez uniquement un document réel, lisible et correspondant au métier déclaré.',
+    exigerTous: true,                         /* chaque métier sélectionné doit être justifié */
+    autoriserPdf: true,
+    pagesMax: 6,                              /* recto + verso + pages supplémentaires */
+    tailleMaxMo: 4,
+    metiers, journal: [], majAt: null, majPar: null
+  };
+}
+const JUSTIF_DEF = justifDefauts();
+
+function justifEnsure() {
+  const J0 = db.justif;
+  if (!J0 || typeof J0 !== 'object' || !J0.metiers) db.justif = JSON.parse(JSON.stringify(JUSTIF_DEF));
+  const J = db.justif;
+  J.metiers = J.metiers || {};
+  J.journal = J.journal || [];
+  /* ⚠️ « corriger sans supprimer » : on n'ajoute que ce qui manque. Un métier
+     supprimé par le PDG reste marqué supprimé et n'est JAMAIS recréé. */
+  Object.keys(JUSTIF_DEF.metiers).forEach(id => { if (!J.metiers[id]) J.metiers[id] = JSON.parse(JSON.stringify(JUSTIF_DEF.metiers[id])); });
+  db.justifDocs = db.justifDocs || [];
+  db.liensIdentite = db.liensIdentite || [];
+  return J;
+}
+function justifJournal(J, action, avant, apres, motif) {
+  J.journal.push({ at: nowISO(), par: 'PDG', action: String(action).slice(0, 40), avant: String(avant || '').slice(0, 200),
+    apres: String(apres || '').slice(0, 200), motif: String(motif || '').slice(0, 200) });
+  if (J.journal.length > 600) J.journal = J.journal.slice(-600);
+  J.majAt = nowISO(); J.majPar = 'PDG';
+}
+/* règles VISIBLES par le professionnel (une règle d'administration n'est jamais demandée au pro) */
+function justifRegles(sid, pourPro) {
+  const J = justifEnsure(), M = J.metiers[sid];
+  if (!M || M.supprime) return [];
+  return (M.regles || []).filter(r => r.actif !== false && !r.supprime && (!pourPro || r.visiblePro !== false));
+}
+function justifRequis(sid) { return justifRegles(sid, false).some(r => r.obligatoire !== false); }
+function justifMetierNom(sid) { const M = justifEnsure().metiers[sid]; return (M && M.nom) || SVC_NAMES[sid] || sid; }
+function justifMetierIc(sid) { const M = justifEnsure().metiers[sid]; return (M && M.ic) || '🛠️'; }
+function justifDocExpire(d) {
+  if (!d || !d.valideJusqu) return false;
+  const t = Date.parse(d.valideJusqu);
+  return Number.isFinite(t) && t < Date.now();
+}
+/* dernier document d'un pro pour un métier (le plus récent qui compte) */
+function justifDocDe(agentId, sid) {
+  const L = (db.justifDocs || []).filter(d => d.agentId === agentId && d.metier === sid && !d.retire);
+  if (!L.length) return null;
+  return L.slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))[0];
+}
+/* 📊 état métier par métier — c'est LUI qui décide ce qu'on affiche */
+function justifEtatPro(ag) {
+  const J = justifEnsure();
+  const services = Array.isArray(ag.services) ? ag.services : [];
+  const actif = J.actif === true;
+  const liste = services.map(sid => {
+    /* 🧓 un professionnel validé AVANT l'activation n'est pas bloqué rétroactivement :
+       il peut déposer ses justificatifs quand il veut, sans perdre son compte. */
+    const requis = actif && !ag.justifAncien && justifRequis(sid);
+    const doc = justifDocDe(ag.id, sid);
+    let st = 'non_requis';
+    if (requis) {
+      if (!doc) st = 'non_fourni';
+      else if (doc.statut === 'verifie') st = justifDocExpire(doc) ? 'expire' : 'verifie';
+      else st = doc.statut || 'attente';
+    } else if (doc && doc.statut === 'verifie') st = justifDocExpire(doc) ? 'expire' : 'verifie';
+    return { metier: sid, nom: justifMetierNom(sid), ic: justifMetierIc(sid), requis, statut: st,
+      statutTxt: justifStatut(st).t, docId: doc ? doc.id : null,
+      motif: doc ? (doc.motif || '') : '', expire: doc ? justifDocExpire(doc) : false,
+      valideJusqu: doc ? (doc.valideJusqu || '') : '', at: doc ? (doc.at || '') : '' };
+  });
+  /* ⚠️ « PROFESSION VÉRIFIÉE » NE SE DIT QUE SI **TOUS** LES MÉTIERS CONCERNÉS SONT VÉRIFIÉS.
+     On raisonne sur les métiers qui ont réellement un enjeu de vérification (statut ≠ « non demandé ») :
+      · un professionnel validé AVANT l'activation garde son compte — s'il dépose ses documents et
+        qu'ils sont vérifiés, il est « profession vérifiée » lui aussi ;
+      · un métier laissé de côté par le PDG (aucun justificatif demandé) ne fait jamais échouer le reste. */
+  const aVerifier = liste.filter(x => x.statut !== 'non_requis');
+  const verifiees = aVerifier.filter(x => x.statut === 'verifie');
+  const attenteIds = ['attente', 'a_remplacer', 'refuse', 'non_fourni', 'expire'];
+  const requises = liste.filter(x => x.requis);
+  const complet = aVerifier.length > 0 && verifiees.length === aVerifier.length;
+  return {
+    actif, texte: J.texte, exigerTous: J.exigerTous !== false,
+    metiers: liste, nbRequis: requises.length, nbVerifies: verifiees.length,
+    nbAVerifier: aVerifier.length, complet,
+    enAttente: aVerifier.filter(x => attenteIds.indexOf(x.statut) >= 0).length,
+    /* jamais avant la validation effective par l'administration */
+    professionVerifiee: actif && complet,
+    libelle: !actif ? 'Vérification non demandée'
+      : (aVerifier.length === 0 ? 'Aucun justificatif déposé pour l’instant'
+        : (complet ? 'Tous les métiers vérifiés'
+          : (verifiees.length ? verifiees.length + ' métier(s) vérifié(s) sur ' + aVerifier.length : 'Métiers non vérifiés')))
+  };
+}
+/* 👤 IDENTITÉ DE RÉFÉRENCE (une seule personne = une seule identité) */
+function justifNorm(s) {
+  return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function identiteDe(rec) {
+  if (!rec) return null;
+  return {
+    nom: rec.nomFamille || (rec.prenom && rec.nom ? String(rec.nom).replace(String(rec.prenom), '').trim() : rec.nom) || '',
+    prenom: rec.prenom || '',
+    naissance: rec.naissance || '',
+    lieuNaissance: rec.lieuNaissance || rec.lieu_naissance || '',
+    tel: String(rec.tel1 || rec.tel || '').replace(/\D/g, ''),
+    pieceType: rec.pieceType || '', pieceNum: rec.pieceNum || '',
+    nomComplet: rec.nom || ''
+  };
+}
+function identiteCle(rec) {
+  const i = identiteDe(rec); if (!i) return '';
+  return [justifNorm(i.nom), justifNorm(i.prenom), String(i.naissance || '')].join('|');
+}
+/* 🔎 doublons : la même identité ne doit pas ouvrir plusieurs comptes pro */
+function identiteDoublons(rec) {
+  const I = identiteDe(rec), cle = identiteCle(rec), out = [];
+  if (!cle || cle === '||') return out;
+  const pieceN = justifNorm(I.pieceNum);
+  (db.agents || []).forEach(a => {
+    if (a.id === rec.id) return;
+    if ((a.status || '') === 'rejected') return;
+    if (identiteCle(a) === cle) out.push({ type: 'pro', id: a.id, nom: a.nom, tel: String(a.tel1 || a.tel || ''), quand: a.createdAt || '', pourquoi: 'mêmes nom, prénom et date de naissance' });
+    else if (pieceN && justifNorm(a.pieceNum) === pieceN) out.push({ type: 'pro', id: a.id, nom: a.nom, tel: String(a.tel1 || a.tel || ''), quand: a.createdAt || '', pourquoi: 'même numéro de pièce d’identité' });
+  });
+  (db.clients || []).forEach(c => {
+    const memePiece = pieceN && justifNorm(c.pieceNum) === pieceN;
+    const memeNom = justifNorm(c.nom) === justifNorm(I.nomComplet) || (justifNorm(c.nom) === justifNorm((I.prenom + ' ' + I.nom).trim()));
+    if (memePiece) out.push({ type: 'client', id: c.id, nom: c.nom, tel: String(c.tel || ''), quand: c.createdAt || '', pourquoi: 'même numéro de pièce d’identité' });
+    else if (memeNom && String(c.tel || '').replace(/\D/g, '') === I.tel && I.tel) out.push({ type: 'client', id: c.id, nom: c.nom, tel: String(c.tel || ''), quand: c.createdAt || '', pourquoi: 'même nom et même téléphone' });
+  });
+  return out;
+}
+function hqOnly(req, res) {
+  const id = hqIdentity(req);
+  if (!id) { sendJson(res, 403, { error: 'Réservé à l’administration KLEAN', code: 'admin' }); return false; }
+  return true;
 }
 
 function agentCompletion(ag) {
@@ -6987,6 +7291,7 @@ const server = http.createServer(async (req, res) => {
       quartier: b.quartier, adresse: b.adresse,
       ville: String(b.ville || '').slice(0, 60), villeService: String(b.villeService || b.ville || '').slice(0, 60), mail: String(b.mail || '').slice(0, 80),
       pieceType: b.pieceType, pieceNum: b.pieceNum,
+      lieuNaissance: String(b.lieuNaissance || '').slice(0, 80),
       piecePhoto: typeof b.piecePhoto === 'string' && b.piecePhoto.length < 900000 ? b.piecePhoto : '',
       urgenceNom: b.urgenceNom.trim(), urgenceTel: String(b.urgenceTel).replace(/\D/g, ''),
       experience: Math.min(30, Math.max(0, parseInt(b.experience) || 0)),
@@ -7011,14 +7316,35 @@ const server = http.createServer(async (req, res) => {
       db.agents = db.agents.filter(a => a.id !== reApply.id);
       auditLog('agent_recandidature', { agent: ag.nom, tel: tel1 });
     }
+    /* ═══ 👤 IDENTITÉ DE RÉFÉRENCE (lot 122) ═══
+       Une seule personne = une seule identité. On ne refuse pas l'entrée : on DÉTECTE
+       les doublons (mêmes nom, prénom et date de naissance, ou même pièce d'identité)
+       et on demande une VÉRIFICATION SUPPLÉMENTAIRE à l'administration. */
+    ag.identiteCle = identiteCle(ag);
+    const _dup = identiteDoublons(ag);
+    if (_dup.length) {
+      ag.identiteAlerte = { at: nowISO(), doublons: _dup, message: 'Identité déjà présente dans KLEAN — vérification supplémentaire nécessaire avant validation' };
+      ag.identiteVerifiee = null;
+    }
+    /* ═══ 🪪 JUSTIFICATIFS PROFESSIONNELS (lot 122) ═══
+       Ce qui sera exigé est calculé selon ce que le PDG a réglé, MÉTIER PAR MÉTIER.
+       Si l'option est désactivée, rien n'est demandé : l'inscription passe comme avant. */
+    const _J = justifEnsure();
+    ag.justifRequis = (_J.actif === true && !ag.justifAncien) ? (ag.services || []).filter(sv => justifRequis(sv)) : [];
     db.agents.push(ag);
     const accP = conditionsAccepter('pro', ag.nom, tel1, { ua: req.headers['user-agent'], ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress, source: 'inscription' });
     ag.conditionsVersion = accP.version; ag.conditionsAt = accP.at;
     saveDb();
     auditLog('conditions_acceptees', { role: 'pro', qui: ag.nom, version: accP.version, source: 'inscription' });
+    if (ag.identiteAlerte) emitAdmin('cand', `👤 ⚠️ ${ag.nom} : identité déjà présente dans KLEAN (${ag.identiteAlerte.doublons.length} compte(s)) — vérification supplémentaire demandée`);
+    if ((ag.justifRequis || []).length) emitAdmin('cand', `🪪 ${ag.nom} : ${ag.justifRequis.length} justificatif(s) professionnel(s) à fournir (${ag.justifRequis.map(x => justifMetierNom(x)).join(', ')})`);
     emitAdmin('cand', `📋 Nouvelle candidature professionnel : ${ag.nom} (${ag.quartier}) — dossier à vérifier`);
     console.log(`📋 Candidature agent : ${ag.nom} — ${ag.pieceType} ${ag.pieceNum}`);
-    return sendJson(res, 201, { ok: true, agentId: ag.id, status: 'pending' });
+    return sendJson(res, 201, { ok: true, agentId: ag.id, status: 'pending',
+      justif: { actif: _J.actif === true, requis: ag.justifRequis || [], etat: justifEtatPro(ag) },
+      identiteAlerte: ag.identiteAlerte || null,
+      message: (ag.justifRequis || []).length ? 'Dossier reçu. Justificatifs professionnels à fournir : ' + ag.justifRequis.map(x => justifMetierNom(x)).join(', ')
+        : 'Dossier reçu — en vérification par l’équipe KLEAN.' });
   }
 
   /* 📊 Niveau de remplissage du profil pro : 100 % = il inspire confiance */
@@ -7026,8 +7352,12 @@ const server = http.createServer(async (req, res) => {
   if (aStatus && req.method === 'GET') {
     const ag = db.agents.find(a => a.id === aStatus[1]);
     if (!ag) return sendJson(res, 404, {});
+    const _e = justifEtatPro(ag);
     return sendJson(res, 200, { id: ag.id, nom: ag.nom, status: ag.status || 'approved', rejectReason: ag.rejectReason || '', blocked: !!ag.blocked,
-      completion: agentCompletion(ag), quartier: ag.quartier || '', tel: ag.tel1 || '', photo: ag.photo || '' });
+      completion: agentCompletion(ag), quartier: ag.quartier || '', tel: ag.tel1 || '', photo: ag.photo || '',
+      justif: _e, professionVerifiee: _e.professionVerifiee, libelleVerif: _e.libelle,
+      identiteAlerte: ag.identiteAlerte || null, identiteVerifiee: ag.identiteVerifiee || null,
+      clientLie: ag.clientId || null });
   }
 
   if (p.match(/^\/api\/agents\/(.+)\/profile$/) && req.method === 'PUT') {
@@ -9383,13 +9713,38 @@ const server = http.createServer(async (req, res) => {
   if (cOne && req.method === 'GET') {
     const ag = db.agents.find(a => a.id === cOne[1]);
     if (!ag) return sendJson(res, 404, {});
-    return sendJson(res, 200, ag);
+    /* 🪪 lot 122 : le dossier de candidature porte l'état des justificatifs, métier par métier,
+       et l'alerte d'identité éventuelle (sans jamais exposer les documents eux-mêmes). */
+    return sendJson(res, 200, Object.assign({}, ag, {
+      justif: justifEtatPro(ag),
+      identite: identiteDe(ag),
+      docsJustif: (db.justifDocs || []).filter(d => d.agentId === ag.id && !d.retire)
+        .map(d => ({ id: d.id, metier: d.metier, regleLibelle: d.regleLibelle || '', statut: d.statut, motif: d.motif || '', nbPages: (d.pages || []).length, at: d.at }))
+    }));
   }
 
   const aApprove = p.match(/^\/api\/admin\/agents\/(.+)\/approve$/);
   if (aApprove && req.method === 'POST') {
     const ag = db.agents.find(a => a.id === aApprove[1]);
     if (!ag) return sendJson(res, 404, {});
+    /* 🪪 LOT 122 : quand la vérification des justificatifs est ACTIVÉE, un professionnel ne peut pas
+       devenir « vérifié » tant que CHAQUE métier déclaré n'a pas son justificatif VÉRIFIÉ par
+       l'administration — et qu'une alerte d'identité éventuelle n'a pas été levée.
+       Le PDG garde toujours la main (forcer:true) et le forçage est écrit au journal. */
+    const bApp = await readBody(req).catch(() => ({}));
+    if (db.justif && db.justif.actif === true && bApp && bApp.force !== true) {
+      const _eg = justifEtatPro(ag);
+      const _manque = _eg.metiers.filter(m => m.requis && m.statut !== 'verifie');
+      if (_manque.length || (ag.identiteAlerte && !ag.identiteVerifiee))
+        return sendJson(res, 409, { error: 'À vérifier avant de valider : '
+            + (_manque.length ? _manque.map(m => m.nom + ' — ' + m.statutTxt).join(' · ') : '')
+            + (!_manque.length && ag.identiteAlerte ? 'identité en doublon à confirmer' : ''), code: 'justif',
+          justif: _eg, identiteAlerte: ag.identiteAlerte || null,
+          conseil: 'Ouvrez « Justificatifs professionnels » : acceptez les documents vérifiés (ou demandez un remplacement), puis validez le dossier. '
+                 + 'Pour passer outre, envoyez force:true (la décision est tracée au journal).' });
+    }
+    if (bApp && bApp.force === true && db.justif && db.justif.actif === true)
+      auditLog('justif_validation_forcee', { pro: ag.nom, proId: ag.id, par: act(req), motif: String(bApp.motif || '').slice(0, 160) });
     ag.status = 'approved'; ag.approvedAt = nowISO(); saveDb();
     (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'valide', from: 'pending', to: 'approved' });
     auditLog('agent_valide', { agent: ag.nom, id: ag.id, par: act(req) });
@@ -9928,6 +10283,380 @@ const server = http.createServer(async (req, res) => {
     m.status = 'annulee'; saveDb();
     auditLog('relation_arret', { missionId: m.id, motif: String(b.motif || '').slice(0, 160) });
     return sendJson(res, 200, { ok: true, rel: relPublique(m) });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     🪪 JUSTIFICATIFS PROFESSIONNELS (lot 122) — côté PROFESSIONNEL
+     Le pro voit exactement ce qu'on lui demande, métier par métier, et dépose
+     ses documents (photo, galerie, PDF). Aucune donnée d'un autre pro n'est
+     accessible ici ; aucun document n'est jamais servi au public.
+     ═══════════════════════════════════════════════════════════════════════ */
+  if (p === '/api/justif/config' && req.method === 'GET') {
+    const J = justifEnsure();
+    const ids = String(url.searchParams.get('services') || '').split(',').map(x => x.trim()).filter(Boolean);
+    const agId = String(url.searchParams.get('agentId') || '').trim();
+    const ag = agId ? db.agents.find(a => a.id === agId) : null;
+    const liste = (ag ? (ag.services || []) : ids).map(sid => ({
+      metier: sid, nom: justifMetierNom(sid), ic: justifMetierIc(sid),
+      requis: justifRequis(sid),
+      regles: justifRegles(sid, true).map(r => ({ id: r.id, libelle: r.libelle, obligatoire: r.obligatoire !== false, validiteMois: r.validiteMois || 0, aConfirmer: !!r.aConfirmer }))
+    }));
+    return sendJson(res, 200, { ok: true, actif: J.actif === true, texte: J.texte, exigerTous: J.exigerTous !== false,
+      autoriserPdf: J.autoriserPdf !== false, pagesMax: J.pagesMax || 6, tailleMaxMo: J.tailleMaxMo || 4,
+      metiers: liste,
+      regle: 'Un justificatif PAR MÉTIER. Ces documents ne sont ni publics, ni visibles par les clients : '
+           + 'seule l’administration KLEAN les consulte pour vérifier votre qualification.' });
+  }
+  if (p === '/api/justif/etat' && req.method === 'GET') {
+    const ag = db.agents.find(a => a.id === String(url.searchParams.get('agentId') || '').trim());
+    if (!ag) return sendJson(res, 404, { error: 'professionnel introuvable' });
+    const e = justifEtatPro(ag);
+    e.ok = true;
+    e.docs = (db.justifDocs || []).filter(d => d.agentId === ag.id && !d.retire)
+      .slice(-30).reverse().map(d => ({ id: d.id, metier: d.metier, metierNom: justifMetierNom(d.metier), regleLibelle: d.regleLibelle || '',
+        statut: d.statut, statutTxt: justifStatut(d.statut).t, motif: d.motif || '', pages: (d.pages || []).map(x => ({ face: x.face, nom: x.nom, type: x.type })),
+        at: d.at, par: d.par || '', couvre: d.couvre || [], refDoc: d.refDoc || '', valideJusqu: d.valideJusqu || '', expire: justifDocExpire(d) }));
+    return sendJson(res, 200, e);
+  }
+  if (p === '/api/justif/envoyer' && req.method === 'POST') {
+    const J = justifEnsure();
+    const b = await readBody(req);
+    const ag = db.agents.find(a => a.id === String(b.agentId || '').trim());
+    if (!ag) return sendJson(res, 404, { error: 'professionnel introuvable' });
+    /* 🔒 on ne dépose un document que pour SON propre dossier : le téléphone du compte (ou le jeton
+       d’accès remis à la création) doit correspondre. Un document personnel ne se dépose pas au nom d’un autre. */
+    const telDoc = String(b.tel || '').replace(/\D/g, ''), telAg = String(ag.tel1 || ag.tel || '').replace(/\D/g, '');
+    if (telAg && telDoc !== telAg && !(b.jeton && ag.jeton && String(b.jeton) === String(ag.jeton)))
+      return sendJson(res, 403, { error: 'Code d’accès du compte professionnel manquant ou incorrect', code: 'acces' });
+    const sid = String(b.metier || '').trim();
+    if (!(ag.services || []).includes(sid)) return sendJson(res, 403, { error: 'Ce métier n’est pas déclaré sur votre profil' });
+    const regles = justifRegles(sid, true);
+    if (!regles.length) return sendJson(res, 400, { error: 'Aucun justificatif n’est demandé pour ce métier' });
+    const regle = regles.find(r => r.id === String(b.regleId || '')) || regles[0];
+    const pagesIn = Array.isArray(b.pages) ? b.pages : [];
+    const maxP = Math.min(10, J.pagesMax || 6), maxMo = Math.min(8, J.tailleMaxMo || 4);
+    const pages = [];
+    for (const pg of pagesIn.slice(0, maxP)) {
+      const data = String((pg && pg.data) || '');
+      const isImg = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/.test(data);
+      const isPdf = J.autoriserPdf !== false && /^data:application\/pdf;base64,[A-Za-z0-9+/=]+$/.test(data);
+      if (!isImg && !isPdf) return sendJson(res, 400, { error: 'Format non accepté : envoyez une photo (image) ou un PDF' });
+      if (data.length > maxMo * 1400000) return sendJson(res, 413, { error: 'Document trop lourd (max ' + maxMo + ' Mo) — reprenez la photo ou envoyez un PDF plus léger' });
+      pages.push({ face: ['recto', 'verso'].indexOf(String(pg.face)) >= 0 ? String(pg.face) : 'page', nom: String(pg.nom || '').slice(0, 60),
+        type: isPdf ? 'pdf' : 'image', data });
+    }
+    if (!pages.length) return sendJson(res, 400, { error: 'Aucun document joint : prenez une photo, choisissez une image ou envoyez un PDF' });
+    /* un nouveau dépôt remplace le précédent tant qu'il n'est pas vérifié (rien n'est perdu : l'ancien est conservé) */
+    (db.justifDocs || []).forEach(d => { if (d.agentId === ag.id && d.metier === sid && d.statut !== 'verifie') d.retire = true; });
+    const doc = { id: uid('JD'), agentId: ag.id, agentNom: ag.nom, agentTel: String(ag.tel1 || ag.tel || ''),
+      metier: sid, metierNom: justifMetierNom(sid), regleId: regle.id, regleLibelle: regle.libelle,
+      pages, statut: 'attente', motif: '', at: nowISO(), par: '', decideAt: null, valideJusqu: '', couvre: [], refDoc: '',
+      identite: identiteDe(ag), v: 1 };
+    db.justifDocs.push(doc);
+    (ag.history = ag.history || []).push({ at: nowISO(), by: 'agent', action: 'justificatif_envoye', metier: sid, doc: doc.id });
+    saveDb();
+    auditLog('justif_envoye', { pro: ag.nom, proId: ag.id, metier: sid, regle: regle.libelle, pages: pages.length });
+    emitAdmin('cand', '🪪 Justificatif reçu : ' + ag.nom + ' — ' + justifMetierNom(sid) + ' (' + pages.length + ' page(s)) à vérifier');
+    return sendJson(res, 201, { ok: true, docId: doc.id, statut: 'attente', statutTxt: justifStatut('attente').t, etat: justifEtatPro(ag) });
+  }
+  if (p === '/api/justif/retirer' && req.method === 'POST') {
+    const b = await readBody(req);
+    const doc = (db.justifDocs || []).find(d => d.id === String(b.docId || ''));
+    if (!doc) return sendJson(res, 404, { error: 'document introuvable' });
+    const ag = db.agents.find(a => a.id === doc.agentId);
+    if (!ag || String(b.agentId || '') !== ag.id) return sendJson(res, 403, { error: 'Ce document n’est pas le vôtre' });
+    const telR = String(b.tel || '').replace(/\D/g, ''), telA = String(ag.tel1 || ag.tel || '').replace(/\D/g, '');
+    if (telA && telR !== telA && !(b.jeton && ag.jeton && String(b.jeton) === String(ag.jeton)))
+      return sendJson(res, 403, { error: 'Code d’accès du compte professionnel manquant ou incorrect', code: 'acces' });
+    if (doc.statut === 'verifie') return sendJson(res, 400, { error: 'Un document déjà vérifié ne peut pas être retiré — demandez son remplacement à l’administration' });
+    doc.retire = true; doc.retireAt = nowISO(); saveDb();
+    return sendJson(res, 200, { ok: true });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     👤 UNE SEULE IDENTITÉ, DEUX ESPACES (lot 122)
+     La même personne peut être client ET professionnel avec la MÊME identité
+     vérifiée. Les deux espaces restent séparés (Mon espace Client / Mon espace
+     Professionnel) mais l'identité est commune et les doublons sont détectés.
+     ═══════════════════════════════════════════════════════════════════════ */
+  if (p === '/api/identite/etat' && req.method === 'GET') {
+    const ag = db.agents.find(a => a.id === String(url.searchParams.get('agentId') || '').trim());
+    if (!ag) return sendJson(res, 404, { error: 'professionnel introuvable' });
+    let cl = ag.clientId ? db.clients.find(c => c.id === ag.clientId) : null;
+    const tel = String(ag.tel1 || ag.tel || '').replace(/\D/g, '');
+    if (!cl && tel) cl = db.clients.find(c => String(c.tel || '').replace(/\D/g, '') === tel);
+    const e = justifEtatPro(ag);
+    return sendJson(res, 200, { ok: true, identite: identiteDe(ag),
+      pro: { id: ag.id, nom: ag.nom, numPro: ag.numPro || '', statut: ag.status || 'approved', quartier: ag.quartier || '', ville: ag.villeService || ag.ville || '',
+        metiers: e.metiers, professionVerifiee: e.professionVerifiee, libelle: e.libelle },
+      client: cl ? { id: cl.id, nom: cl.nom, tel: String(cl.tel || ''), quartier: cl.quartier || '', ville: cl.ville || '', depuis: cl.createdAt || '' } : null,
+      lie: !!(cl && ag.clientId === cl.id),
+      memeTel: !!cl, alerte: ag.identiteAlerte || null, identiteVerifiee: ag.identiteVerifiee || null });
+  }
+  if (p === '/api/identite/lier' && req.method === 'POST') {
+    const b = await readBody(req);
+    const ag = db.agents.find(a => a.id === String(b.agentId || '').trim());
+    if (!ag) return sendJson(res, 404, { error: 'professionnel introuvable' });
+    const tel = String(ag.tel1 || ag.tel || '').replace(/\D/g, '');
+    let cl = b.clientId ? db.clients.find(c => c.id === String(b.clientId)) : null;
+    const parTel = b.parTel !== false;
+    if (!cl && parTel && tel) cl = db.clients.find(c => String(c.tel || '').replace(/\D/g, '') === tel);
+    if (!cl) return sendJson(res, 404, { error: 'Aucun compte client n’a été trouvé avec ce numéro — créez d’abord votre compte client' });
+    /* 🛡️ on ne relie jamais deux personnes différentes : le nom doit correspondre */
+    const nPro = justifNorm(ag.nom), nCli = justifNorm(cl.nom);
+    const meme = nPro && nCli && (nPro === nCli || nPro.indexOf(nCli) >= 0 || nCli.indexOf(nPro) >= 0);
+    if (!meme && b.forcer !== true)
+      return sendJson(res, 409, { error: 'Le nom du compte client (« ' + cl.nom + ' ») ne correspond pas au vôtre (« ' + ag.nom + ' »)',
+        code: 'nom', conseil: 'Vérifiez le numéro, ou demandez à l’administration KLEAN de confirmer la liaison.' });
+    ag.clientId = cl.id; cl.agentId = ag.id;
+    db.liensIdentite = db.liensIdentite || [];
+    db.liensIdentite.push({ at: nowISO(), agentId: ag.id, clientId: cl.id, tel, nom: ag.nom });
+    saveDb();
+    auditLog('identite_liee', { pro: ag.nom, proId: ag.id, clientId: cl.id });
+    return sendJson(res, 200, { ok: true, client: { id: cl.id, nom: cl.nom, tel: String(cl.tel || '') },
+      message: 'Votre compte client et votre compte professionnel sont reliés : une seule identité, deux espaces.' });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     🪪 JUSTIFICATIFS PROFESSIONNELS — côté ADMINISTRATION (tableau de bord)
+     Activer/désactiver · régler chaque métier · lire les documents · accepter,
+     refuser, demander un remplacement · surveiller les expirations · vérifier
+     les identités douteuses. Rien n'est jamais supprimé du journal.
+     ═══════════════════════════════════════════════════════════════════════ */
+  if (p === '/api/admin/justif' && req.method === 'GET') {
+    if (!hqOnly(req, res)) return;
+    const J = justifEnsure();
+    const docs = (db.justifDocs || []).filter(d => !d.retire);
+    const parStatut = { attente: 0, verifie: 0, refuse: 0, a_remplacer: 0, expire: 0 };
+    docs.forEach(d => { const k = d.statut === 'verifie' && justifDocExpire(d) ? 'expire' : d.statut; if (parStatut[k] !== undefined) parStatut[k]++; });
+    const dossiers = db.agents.filter(a => a.justifRequis || (a.services || []).some(s => justifRequis(s)))
+      .map(a => { const e = justifEtatPro(a); return { id: a.id, nom: a.nom, tel: String(a.tel1 || a.tel || ''), quartier: a.quartier || '',
+        ville: a.villeService || a.ville || '', status: a.status || 'approved', createdAt: a.createdAt || '',
+        professionVerifiee: e.professionVerifiee, libelle: e.libelle, metiers: e.metiers, nbVerifies: e.nbVerifies, nbRequis: e.nbRequis,
+        alerte: a.identiteAlerte || null, identiteVerifiee: !!a.identiteVerifiee }; })
+      .slice(-400).reverse();
+    /* 🔎 identités douteuses : même personne détectée sur plusieurs comptes */
+    const identites = db.agents.filter(a => a.identiteAlerte && !a.identiteVerifiee && (a.status || '') !== 'rejected')
+      .slice(-100).reverse().map(a => ({ id: a.id, nom: a.nom, tel: String(a.tel1 || a.tel || ''), createdAt: a.createdAt || '',
+        alerte: a.identiteAlerte, status: a.status || 'approved', lie: a.clientId || null }));
+    return sendJson(res, 200, { ok: true, actif: J.actif === true, texte: J.texte, exigerTous: J.exigerTous !== false,
+      autoriserPdf: J.autoriserPdf !== false, pagesMax: J.pagesMax || 6, tailleMaxMo: J.tailleMaxMo || 4,
+      metiers: Object.keys(J.metiers).map(id => ({ id, nom: J.metiers[id].nom, ic: J.metiers[id].ic || '🛠️', famille: J.metiers[id].famille || '',
+        source: J.metiers[id].source || '', supprime: !!J.metiers[id].supprime,
+        regles: (J.metiers[id].regles || []).map(r => ({ id: r.id, libelle: r.libelle, obligatoire: r.obligatoire !== false, actif: r.actif !== false,
+          visiblePro: r.visiblePro !== false, validiteMois: r.validiteMois || 0, aConfirmer: !!r.aConfirmer, supprime: !!r.supprime })),
+        nbActives: justifRegles(id, false).length, nbVisiblesPro: justifRegles(id, true).length })),
+      modeles: Object.keys(JUSTIF_MODELES).concat(Object.keys(JUSTIF_MODELES)).filter((x, i, a) => a.indexOf(x) === i)
+        .map(k => ({ id: k, nom: (JUSTIF_MODELES[k] || JUSTIF_MODELE_SPE[k] || {}).nom || k, regles: ((JUSTIF_MODELES[k] || JUSTIF_MODELE_SPE[k] || {}).regles || []) })),
+      docs: docs.slice(-500).reverse().map(d => ({ id: d.id, agentId: d.agentId, agentNom: d.agentNom, agentTel: d.agentTel || '',
+        metier: d.metier, metierNom: justifMetierNom(d.metier), regleLibelle: d.regleLibelle || '', statut: d.statut,
+        statutTxt: justifStatut(d.statut).t, motif: d.motif || '', nbPages: (d.pages || []).length, at: d.at, par: d.par || '',
+        couvre: d.couvre || [], refDoc: d.refDoc || '', valideJusqu: d.valideJusqu || '', expire: justifDocExpire(d),
+        identite: d.identite || null })),
+      dossiers, identites, journal: (J.journal || []).slice(-120).reverse(), majAt: J.majAt, majPar: J.majPar,
+      stats: { nbDocs: docs.length, parStatut, nbDossiers: dossiers.length,
+        nbProfessionVerifiee: dossiers.filter(x => x.professionVerifiee).length, nbIdentites: identites.length },
+      regle: 'Un justificatif PAR MÉTIER. Les documents ne sont ni publics ni visibles par les clients : seule l’administration les consulte. '
+           + 'Les exemples livrés par défaut ne sont PAS des obligations légales — le PDG définit lui-même ce qu’il accepte, métier par métier.' });
+  }
+  if (p === '/api/admin/justif/doc' && req.method === 'GET') {
+    if (!hqOnly(req, res)) return;
+    const d = (db.justifDocs || []).find(x => x.id === String(url.searchParams.get('id') || ''));
+    if (!d) return sendJson(res, 404, { error: 'document introuvable' });
+    const ref = d.refDoc ? (db.justifDocs || []).find(x => x.id === d.refDoc) : null;
+    auditLog('justif_consulte', { doc: d.id, pro: d.agentNom, par: act(req) });
+    return sendJson(res, 200, { ok: true, doc: { id: d.id, agentId: d.agentId, agentNom: d.agentNom, metier: d.metier, metierNom: justifMetierNom(d.metier),
+      regleLibelle: d.regleLibelle || '', statut: d.statut, statutTxt: justifStatut(d.statut).t, motif: d.motif || '', at: d.at, par: d.par || '',
+      decideAt: d.decideAt || null, valideJusqu: d.valideJusqu || '', expire: justifDocExpire(d), couvre: d.couvre || [],
+      identite: d.identite || null, refDoc: d.refDoc || '', refPages: ref ? (ref.pages || []) : [],
+      pages: (d.pages || []).map(x => ({ face: x.face, nom: x.nom, type: x.type, data: x.data })) },
+      conseil: 'Vérifiez le NOM sur le document, sa COHÉRENCE avec le métier déclaré, et sa LISIBILITÉ avant d’accepter. '
+             + 'Si le même document officiel couvre réellement plusieurs métiers, utilisez « couvre aussi » après vérification.' });
+  }
+  if (p === '/api/admin/justif/doc' && req.method === 'POST') {
+    if (!hqOnly(req, res)) return;
+    const b = await readBody(req);
+    const d = (db.justifDocs || []).find(x => x.id === String(b.docId || ''));
+    if (!d) return sendJson(res, 404, { error: 'document introuvable' });
+    const ag = db.agents.find(a => a.id === d.agentId);
+    const action = String(b.action || '').slice(0, 20);
+    const motif = String(b.motif || '').slice(0, 240);
+    if (action === 'accepter') {
+      d.statut = 'verifie'; d.motif = motif; d.par = act(req); d.decideAt = nowISO();
+      const mois = Math.max(0, Math.min(600, parseInt(b.valideMois, 10) || 0));
+      d.valideJusqu = mois ? new Date(Date.now() + mois * 30.44 * 86400000).toISOString().slice(0, 10) : '';
+      /* la même pièce peut couvrir d'autres métiers — DÉCISION DE L'ADMINISTRATION uniquement */
+      const aussi = Array.isArray(b.aussi) ? b.aussi.map(x => String(x)).filter(x => x && x !== d.metier) : [];
+      d.couvre = aussi;
+      aussi.forEach(sid => {
+        if (!ag || !(ag.services || []).includes(sid)) return;
+        (db.justifDocs || []).forEach(x => { if (x.agentId === ag.id && x.metier === sid && x.statut !== 'verifie') x.retire = true; });
+        db.justifDocs.push({ id: uid('JD'), agentId: ag.id, agentNom: ag.nom, agentTel: String(ag.tel1 || ag.tel || ''), metier: sid, metierNom: justifMetierNom(sid),
+          regleId: d.regleId, regleLibelle: 'Couvert par le document « ' + d.regleLibelle + ' » (vérifié par l’administration)',
+          pages: [], statut: 'verifie', motif: 'Même document officiel que ' + d.id, at: nowISO(), par: act(req), decideAt: nowISO(),
+          valideJusqu: d.valideJusqu || '', couvre: [], refDoc: d.id, identite: d.identite || null });
+      });
+      if (ag) (ag.history = ag.history || []).push({ at: nowISO(), by: act(req), action: 'justificatif_verifie', metier: d.metier, doc: d.id, couvre: aussi });
+      auditLog('justif_verifie', { doc: d.id, pro: d.agentNom, metier: d.metier, par: act(req), couvre: aussi, valide: mois ? mois + ' mois' : 'sans date' });
+    } else if (action === 'refuser') {
+      if (!motif) return sendJson(res, 400, { error: 'Indiquez le motif du refus : le professionnel doit savoir quoi corriger' });
+      d.statut = 'refuse'; d.motif = motif; d.par = act(req); d.decideAt = nowISO();
+      auditLog('justif_refuse', { doc: d.id, pro: d.agentNom, metier: d.metier, motif, par: act(req) });
+    } else if (action === 'remplacer') {
+      if (!motif) return sendJson(res, 400, { error: 'Dites au professionnel quel document fournir à la place' });
+      d.statut = 'a_remplacer'; d.motif = motif; d.par = act(req); d.decideAt = nowISO();
+      auditLog('justif_a_remplacer', { doc: d.id, pro: d.agentNom, metier: d.metier, motif, par: act(req) });
+    } else return sendJson(res, 400, { error: 'action inconnue' });
+    saveDb();
+    const s = [...sockets].find(x => x.meta && x.meta.agentId === d.agentId);
+    if (s) wsSend(s, { type: 'justif_maj', metier: d.metier, statut: d.statut, motif: d.motif });
+    const e = ag ? justifEtatPro(ag) : null;
+    emitAdmin('cand', (d.statut === 'verifie' ? '✅' : d.statut === 'refuse' ? '⛔' : '🔄') + ' Justificatif ' + justifStatut(d.statut).t.toLowerCase()
+      + ' : ' + d.agentNom + ' — ' + justifMetierNom(d.metier) + (e ? ' (' + e.libelle + ')' : ''));
+    return sendJson(res, 200, { ok: true, statut: d.statut, statutTxt: justifStatut(d.statut).t, etat: e });
+  }
+  /* 📎 l'administration peut joindre elle-même un document (pièce interne) à un dossier :
+     utile pour les justificatifs qui ne sont PAS demandés au professionnel (règle masquée). */
+  if (p === '/api/admin/justif/ajouter' && req.method === 'POST') {
+    if (!hqOnly(req, res)) return;
+    const J = justifEnsure();
+    const b = await readBody(req);
+    const ag = db.agents.find(a => a.id === String(b.agentId || ''));
+    if (!ag) return sendJson(res, 404, { error: 'professionnel introuvable' });
+    const sid = String(b.metier || '');
+    const regle = (b.regle && typeof b.regle === 'object') ? b.regle : { id: 'adm', libelle: 'Document ajouté par l’administration', obligatoire: false, actif: true, visiblePro: false };
+    const pages = (Array.isArray(b.pages) ? b.pages : []).slice(0, 10).map(pg => ({ face: ['recto', 'verso'].indexOf(String(pg.face)) >= 0 ? String(pg.face) : 'page',
+      nom: String(pg.nom || '').slice(0, 60), type: /^data:application\/pdf/.test(String(pg.data || '')) ? 'pdf' : 'image', data: String(pg.data || '') }))
+      .filter(x => /^data:(image\/(png|jpe?g|webp)|application\/pdf);base64,/.test(x.data));
+    if (!pages.length) return sendJson(res, 400, { error: 'Aucun document joint' });
+    const doc = { id: uid('JD'), agentId: ag.id, agentNom: ag.nom, agentTel: String(ag.tel1 || ag.tel || ''), metier: sid, metierNom: justifMetierNom(sid),
+      regleId: regle.id, regleLibelle: regle.libelle, pages, statut: 'verifie', motif: String(b.motif || 'Déposé par l’administration').slice(0, 200),
+      at: nowISO(), par: act(req), decideAt: nowISO(), valideJusqu: '', couvre: [], refDoc: '', admin: true, identite: identiteDe(ag) };
+    db.justifDocs.push(doc); saveDb();
+    auditLog('justif_admin_ajout', { pro: ag.nom, metier: sid, par: act(req) });
+    return sendJson(res, 201, { ok: true, docId: doc.id, etat: justifEtatPro(ag) });
+  }
+  if (p === '/api/admin/justif/regle' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const J = justifEnsure();
+    const b = await readBody(req);
+    const action = String(b.action || '').slice(0, 24);
+    const sid = String(b.metier || '').trim();
+    const M = J.metiers[sid];
+    const gid = () => 'r' + Date.now().toString(36).slice(-4) + Math.floor(Math.random() * 900 + 100);
+    if (action === 'activer' || action === 'desactiver') {
+      const avant = J.actif === true; J.actif = (action === 'activer');
+      /* 🧓 ON N'INVENTE PAS D'OBLIGATION RÉTROACTIVE : les professionnels déjà validés par
+         l'administration à cet instant gardent leur compte ; ils pourront déposer leurs
+         justificatifs, mais ils ne sont pas bloqués du jour au lendemain. */
+      let anciens = 0;
+      if (J.actif) db.agents.forEach(a => { if (!a.justifAncien && (a.status || 'approved') === 'approved') { a.justifAncien = nowISO(); anciens++; } });
+      justifJournal(J, action, avant ? 'activée' : 'désactivée', J.actif ? 'activée' : 'désactivée', b.motif);
+      auditLog('justif_option', { actif: J.actif, par: 'PDG' }); saveDb();
+      return sendJson(res, 200, { ok: true, actif: J.actif, anciens,
+        message: J.actif ? '✅ Vérification ACTIVÉE : chaque NOUVEAU professionnel devra fournir un justificatif par métier. '
+                + (anciens ? anciens + ' professionnel(s) déjà validé(s) gardent leur compte (obligation non rétroactive).' : '')
+                          : '⏸️ Vérification DÉSACTIVÉE : un professionnel peut s’inscrire sans justificatif. Rien n’est supprimé, les documents déjà reçus restent consultables.' });
+    }
+    if (action === 'texte') {
+      const avant = J.texte; J.texte = String(b.texte || '').slice(0, 300) || avant;
+      justifJournal(J, 'texte', avant, J.texte, b.motif); saveDb();
+      return sendJson(res, 200, { ok: true, texte: J.texte });
+    }
+    if (action === 'exigerTous' || action === 'pdf' || action === 'pagesMax' || action === 'tailleMaxMo') {
+      if (action === 'exigerTous') { const a = J.exigerTous !== false; J.exigerTous = !!b.valeur; justifJournal(J, 'exiger-tous', a, J.exigerTous, b.motif); }
+      if (action === 'pdf') { const a = J.autoriserPdf !== false; J.autoriserPdf = !!b.valeur; justifJournal(J, 'pdf', a, J.autoriserPdf, b.motif); }
+      if (action === 'pagesMax') { const a = J.pagesMax; J.pagesMax = Math.max(1, Math.min(10, parseInt(b.valeur, 10) || 6)); justifJournal(J, 'pages-max', a, J.pagesMax, b.motif); }
+      if (action === 'tailleMaxMo') { const a = J.tailleMaxMo; J.tailleMaxMo = Math.max(1, Math.min(8, parseInt(b.valeur, 10) || 4)); justifJournal(J, 'taille-max', a, J.tailleMaxMo, b.motif); }
+      saveDb();
+      return sendJson(res, 200, { ok: true, actif: J.actif, exigerTous: J.exigerTous !== false, autoriserPdf: J.autoriserPdf !== false, pagesMax: J.pagesMax, tailleMaxMo: J.tailleMaxMo });
+    }
+    if (action === 'metier_ajouter') {
+      const id = justifNorm(b.id || b.nom).replace(/ /g, '_').slice(0, 40);
+      if (!id) return sendJson(res, 400, { error: 'Donnez un nom de métier' });
+      if (J.metiers[id] && !J.metiers[id].supprime) return sendJson(res, 409, { error: 'Ce métier existe déjà' });
+      const modele = JUSTIF_MODELES[String(b.famille || 'batiment')] || JUSTIF_MODELES.batiment;
+      J.metiers[id] = { id, nom: String(b.nom || id).slice(0, 60), ic: String(b.ic || '🛠️').slice(0, 4), famille: String(b.famille || 'batiment'),
+        source: 'créé par le PDG le ' + nowISO().slice(0, 10), supprime: false,
+        regles: modele.regles.map((lib, j) => Object.assign(justifRegleDe(lib, true), { id: 'r' + (j + 1) })) };
+      justifJournal(J, 'metier_ajoute', '', J.metiers[id].nom, b.motif); saveDb();
+      return sendJson(res, 201, { ok: true, metier: J.metiers[id] });
+    }
+    if (!M) return sendJson(res, 404, { error: 'métier inconnu' });
+    if (action === 'metier_supprimer') {   /* corriger SANS supprimer : le métier est mis de côté, jamais effacé */
+      M.supprime = true; justifJournal(J, 'metier_retire', M.nom, 'retiré de la vérification', b.motif); saveDb();
+      return sendJson(res, 200, { ok: true, supprime: true });
+    }
+    if (action === 'metier_revenir') { M.supprime = false; justifJournal(J, 'metier_reactive', M.nom, 'remis en service', b.motif); saveDb(); return sendJson(res, 200, { ok: true, supprime: false }); }
+    if (action === 'metier_renommer') {
+      const avant = M.nom; M.nom = String(b.nom || M.nom).slice(0, 60); if (b.ic) M.ic = String(b.ic).slice(0, 4);
+      justifJournal(J, 'metier_renomme', avant, M.nom, b.motif); saveDb(); return sendJson(res, 200, { ok: true, nom: M.nom, ic: M.ic });
+    }
+    if (action === 'regle_ajouter') {
+      const lib = String(b.libelle || '').trim();
+      if (!lib) return sendJson(res, 400, { error: 'Écrivez le libellé du justificatif' });
+      const r = Object.assign(justifRegleDe(lib, b.obligatoire !== false), { id: gid(), visiblePro: b.visiblePro !== false, validiteMois: Math.max(0, parseInt(b.validiteMois, 10) || 0) });
+      M.regles.push(r); justifJournal(J, 'regle_ajoutee', M.nom, r.libelle + (r.obligatoire ? ' (obligatoire)' : ' (facultatif)'), b.motif); saveDb();
+      return sendJson(res, 201, { ok: true, regle: r });
+    }
+    const R = (M.regles || []).find(x => x.id === String(b.regleId || ''));
+    if (!R) return sendJson(res, 404, { error: 'justificatif inconnu' });
+    if (action === 'regle_supprimer') { R.supprime = true; R.actif = false; justifJournal(J, 'regle_retiree', R.libelle, 'retirée', b.motif); saveDb(); return sendJson(res, 200, { ok: true }); }
+    if (action === 'regle_revenir') { R.supprime = false; R.actif = true; justifJournal(J, 'regle_reactivee', R.libelle, 'remise en service', b.motif); saveDb(); return sendJson(res, 200, { ok: true }); }
+    if (action === 'regle_modifier') {
+      const avant = [R.libelle, R.obligatoire ? 'obligatoire' : 'facultatif', R.visiblePro !== false ? 'visible pro' : 'administration'].join(' · ');
+      if (b.libelle !== undefined) R.libelle = String(b.libelle).slice(0, 120) || R.libelle;
+      if (b.obligatoire !== undefined) R.obligatoire = !!b.obligatoire;
+      if (b.actif !== undefined) R.actif = !!b.actif;
+      if (b.visiblePro !== undefined) R.visiblePro = !!b.visiblePro;
+      if (b.validiteMois !== undefined) R.validiteMois = Math.max(0, Math.min(600, parseInt(b.validiteMois, 10) || 0));
+      if (b.aConfirmer !== undefined) R.aConfirmer = !!b.aConfirmer;
+      justifJournal(J, 'regle_modifiee', avant, [R.libelle, R.obligatoire ? 'obligatoire' : 'facultatif', R.visiblePro !== false ? 'visible pro' : 'administration'].join(' · '), b.motif);
+      saveDb();
+      return sendJson(res, 200, { ok: true, regle: R });
+    }
+    return sendJson(res, 400, { error: 'action inconnue' });
+  }
+  /* 🎛️ appliquer d'un geste un modèle complet à un métier (le PDG garde la main après) */
+  if (p === '/api/admin/justif/modele' && req.method === 'POST') {
+    if (!pdgOnly(req, res)) return;
+    const J = justifEnsure();
+    const b = await readBody(req);
+    const M = J.metiers[String(b.metier || '')];
+    const modele = JUSTIF_MODELES[String(b.modele || '')] || JUSTIF_MODELE_SPE[String(b.modele || '')];
+    if (!M || !modele) return sendJson(res, 404, { error: 'métier ou modèle inconnu' });
+    M.source = 'modèle « ' + modele.nom + ' » appliqué le ' + nowISO().slice(0, 10);
+    M.regles = modele.regles.map((lib, j) => Object.assign(justifRegleDe(lib, true), { id: 'r' + (j + 1) }));
+    justifJournal(J, 'modele_applique', M.nom, modele.nom + ' (' + modele.regles.length + ' justificatifs)', b.motif); saveDb();
+    return sendJson(res, 200, { ok: true, metier: M });
+  }
+  /* 🔎 IDENTITÉS : lever (ou confirmer) une alerte de doublon */
+  if (p === '/api/admin/justif/identite' && req.method === 'POST') {
+    if (!hqOnly(req, res)) return;
+    const b = await readBody(req);
+    const ag = db.agents.find(a => a.id === String(b.agentId || ''));
+    if (!ag) return sendJson(res, 404, { error: 'professionnel introuvable' });
+    const action = String(b.action || '');
+    if (action === 'confirmer') {
+      ag.identiteVerifiee = { at: nowISO(), par: act(req), note: String(b.note || 'Vérification supplémentaire faite par l’administration').slice(0, 200) };
+      auditLog('identite_verifiee', { pro: ag.nom, proId: ag.id, par: act(req) }); saveDb();
+      return sendJson(res, 200, { ok: true, identiteVerifiee: ag.identiteVerifiee });
+    }
+    if (action === 'fusionner') {
+      const autre = db.agents.find(a => a.id === String(b.autreId || ''));
+      if (!autre) return sendJson(res, 404, { error: 'second compte introuvable' });
+      autre.doublonDe = ag.id; autre.online = false; autre.status = 'rejected'; autre.rejectReason = 'Doublon d’identité — compte fusionné avec ' + ag.nom;
+      if (autre.clientId) { ag.clientId = autre.clientId; const cl = db.clients.find(c => c.id === autre.clientId); if (cl) cl.agentId = ag.id; }
+      ag.identiteVerifiee = { at: nowISO(), par: act(req), note: 'Doublon fusionné : ' + autre.nom + ' (' + autre.id + ')' };
+      auditLog('identite_fusionnee', { garde: ag.nom, gardeId: ag.id, fusionne: autre.nom, fusionneId: autre.id, par: act(req) }); saveDb();
+      return sendJson(res, 200, { ok: true, message: 'Comptes fusionnés : ' + ag.nom + ' reste le compte de référence, ' + autre.nom + ' est fermé (motif écrit au journal).' });
+    }
+    if (action === 'refuser') {
+      ag.status = 'rejected'; ag.rejectReason = String(b.motif || 'Identité en doublon — une seule identité par personne').slice(0, 200); ag.online = false;
+      auditLog('identite_refusee', { pro: ag.nom, proId: ag.id, motif: ag.rejectReason, par: act(req) }); saveDb();
+      return sendJson(res, 200, { ok: true });
+    }
+    return sendJson(res, 400, { error: 'action inconnue' });
   }
 
   /* ═══════════ 📜 CONDITIONS KLEAN (tableau de bord PDG) ═══════════ */

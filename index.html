@@ -1822,6 +1822,12 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
         <button type="button" class="btn-line" style="width:100%;margin-top:9px" onclick="proChargerTaches()">✅ Choisir mes tâches (catalogue national)</button>
         <div id="prof-taches" style="margin-top:9px"></div>
       </div>
+      <div style="background:#FDECDC;border:1.5px solid rgba(194,65,12,.35);border-radius:14px;padding:12px;margin:0 0 12px">
+        <b style="display:block;font-size:14px;margin-bottom:6px">🪪 Mes justificatifs professionnels</b>
+        <p class="note" style="margin:0 0 8px">Un justificatif <b>par métier</b>. Vos documents ne sont <b>jamais visibles par les clients</b> : ils ne voient qu’un indicateur « profession vérifiée ».</p>
+        <div id="prof-justif" style="font-size:15px">—</div>
+      </div>
+      <div style="margin:0 0 12px" id="prof-identite"></div>
       <button class="btn-main" style="width:100%;flex:none" onclick="saveProfile()">💾 Enregistrer</button>
       <button class="btn-line" style="width:100%;margin-top:10px" onclick="kContactKlean()">📞 Contactez Klean-Service</button>
     </div>
@@ -3693,6 +3699,356 @@ function testerSonnerie(){
   toast('🔔 Si vous n’entendez rien : montez le son du téléphone et touchez « Activer les sonneries de mission »');
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════════
+   🪪 JUSTIFICATIFS PROFESSIONNELS (lot 122) — côté application
+   Un justificatif PAR MÉTIER. Photo (appareil), image (téléphone) ou PDF.
+   Recto, verso, plusieurs pages. Rien n’est public : les clients ne voient
+   qu’un indicateur « Profession vérifiée », jamais la carte ni le diplôme.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+const JUSTIF = { actif: false, texte: '', metiers: [], docs: [], attente: {}, charge: false, busy: false, err: '', professionVerifiee: false, libelle: '' };
+try { window.JUSTIF = JUSTIF; }catch(e){}
+let JUSTIF_CIBLE = null;
+
+/* ⚠️ le compte professionnel est lu à TROIS endroits (en mémoire, dans le stockage local, par l’identifiant
+   mémorisé) : l’écran des justificatifs reste juste même après une fermeture de l’application. */
+function justifAgent() {
+  let mem = null;
+  try { if (typeof agent !== 'undefined' && agent) mem = agent; } catch (e) { }
+  try { const s = kLS.get('k2_agent'); if (s) { const o = JSON.parse(s); if (o && (o.tel || (o.apply && o.apply.agentId))) return o; } } catch (e) { }
+  return mem || {};
+}
+function justifAgentId() {
+  const a = justifAgent();
+  return (a.apply && a.apply.agentId) || (typeof NET !== 'undefined' && NET.agentId) || kLS.get('k2_agentId') || '';
+}
+function justifTel() { const a = justifAgent(); return String(a.tel || a.tel1 || '').replace(/\D/g, ''); }
+function justifCle(sid, rid) { return sid + '|' + rid; }
+function justifCoul(st) { return st === 'verifie' ? '#15c98a' : st === 'attente' ? '#ffb020' : st === 'non_requis' ? '#9aa7a0' : st === 'expire' ? '#ff9f43' : '#ff6b6b'; }
+function justifEch(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+function justifBox() {
+  let b = document.getElementById('justif-box');
+  if (b) return b;
+  b = document.createElement('div'); b.id = 'justif-box';
+  b.style.cssText = 'display:none;position:fixed;inset:0;z-index:78;background:#f4f7f6;overflow-y:auto;-webkit-overflow-scrolling:touch';
+  document.body.appendChild(b); return b;
+}
+function justifOuvrir() {
+  const b = justifBox();
+  b.style.display = 'block';
+  try { window.KBouclier.ajouter(b, 'justificatifs', justifFermer); } catch (e) { document.body.style.overflow = 'hidden'; }
+  b.innerHTML = '<div style="max-width:640px;margin:0 auto;padding:20px;font-weight:800;color:#6b7c73">🪪 Vos justificatifs professionnels…</div>';
+  justifCharger().then(justifPeint);
+  try { b.scrollTop = 0; }catch(e){}
+}
+function justifFermer() {
+  const b = document.getElementById('justif-box');
+  if (b) b.style.display = 'none';
+  document.body.style.overflow = '';
+  try { window.KBouclier.retirer(b); }catch(e){}
+}
+try { window.justifOuvrir = justifOuvrir; window.justifFermer = justifFermer; window.justifTel = justifTel; window.justifAgentId = justifAgentId; window.justifAgent = justifAgent; }catch(e){}
+
+async function justifCharger() {
+  const id = justifAgentId();
+  if (!id) { JUSTIF.err = 'Connectez d’abord votre compte professionnel.'; JUSTIF.charge = true; return JUSTIF; }
+  try {
+    /* on demande en même temps : ce que CE pro doit fournir (ses métiers, ses justificatifs acceptés)
+       et l'état réel de ses dépôts (vérifié / en attente / refusé / à remplacer) */
+    const [cfg, d] = await Promise.all([
+      fetch('/api/justif/config?agentId=' + encodeURIComponent(id), { cache: 'no-store' }).then(r => r.json()).catch(() => null),
+      fetch('/api/justif/etat?agentId=' + encodeURIComponent(id), { cache: 'no-store' }).then(r => r.json())
+    ]);
+    if (!d || !d.ok) throw new Error('reponse');
+    JUSTIF.err = '';
+    JUSTIF.actif = d.actif === true;
+    JUSTIF.texte = (cfg && cfg.texte) || d.texte || '';
+    JUSTIF.pdfOk = !(cfg && cfg.autoriserPdf === false);
+    JUSTIF.pagesMax = (cfg && cfg.pagesMax) || 6;
+    JUSTIF.metiers = d.metiers || [];
+    JUSTIF.docs = d.docs || [];
+    JUSTIF.professionVerifiee = d.professionVerifiee === true;
+    JUSTIF.libelle = d.libelle || '';
+    /* on rattache à chaque métier la LISTE des justificatifs acceptés (ceux visibles du professionnel) */
+    const parId = {};
+    ((cfg && cfg.metiers) || []).forEach(m => { parId[m.metier] = m; });
+    JUSTIF.metiers.forEach(m => {
+      const c = parId[m.metier];
+      if (c) { m.reglesDetail = c.regles || []; if (c.ic) m.ic = c.ic; if (c.nom) m.nom = c.nom; m.requis = m.requis || c.requis === true; }
+    });
+    ((cfg && cfg.metiers) || []).forEach(c => {
+      if (!JUSTIF.metiers.some(m => m.metier === c.metier))
+        JUSTIF.metiers.push({ metier: c.metier, nom: c.nom, ic: c.ic, requis: c.requis === true, statut: 'non_fourni', statutTxt: 'Non fourni', reglesDetail: c.regles || [] });
+    });
+  } catch (e) { JUSTIF.err = '📵 Connexion fragile — réessayez dans un instant.'; }
+  JUSTIF.charge = true;
+  try { justifPastilles(); }catch(e){}
+  return JUSTIF;
+}
+try { window.justifCharger = justifCharger; }catch(e){}
+
+/* ─── 🎨 la fenêtre des justificatifs ─── */
+function justifPeint() {
+  const b = document.getElementById('justif-box');
+  if (!b) return;
+  const requises = (JUSTIF.metiers || []).filter(m => m.requis);
+  let h = '<div style="max-width:640px;margin:0 auto;padding:16px 16px 40px">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">'
+    + '<h3 style="margin:0;font-size:21px">🪪 Justificatifs professionnels</h3>'
+    + '<button type="button" class="btn-ghost" style="flex:none;padding:10px 14px;font-size:14px" onclick="justifFermer()">✕ Fermer</button></div>';
+
+  if (JUSTIF.err) return void (b.innerHTML = h + '<p style="font-size:15px;color:#b03a1a;font-weight:800">' + justifEch(JUSTIF.err) + '</p></div>');
+
+  if (!JUSTIF.actif) {
+    b.innerHTML = h + '<div style="background:#fff;border-radius:16px;padding:16px;font-size:15px;line-height:1.5">'
+      + '<b style="font-size:16px">✔ Aucun justificatif n’est demandé pour le moment</b>'
+      + '<p style="margin:8px 0 0;color:#6b7c73">La vérification des justificatifs professionnels est <b>désactivée</b> par la direction de KLEAN. '
+      + 'Vous n’avez rien à fournir. Si la direction l’active, vous serez prévenu et vos métiers apparaîtront ici.</p></div>';
+    return;
+  }
+  /* la phrase exigée par le PDG, toujours visible avant tout dépôt */
+  h += '<div style="background:#fff7ed;border:2px solid #fdba74;border-radius:14px;padding:12px 14px;margin-bottom:12px;font-size:14.5px;font-weight:800;color:#9a3412">'
+    + '📌 ' + justifEch(JUSTIF.texte || 'Fournissez uniquement un document réel, lisible et correspondant au métier déclaré.') + '</div>';
+  h += '<div style="background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:12px;font-size:14px;line-height:1.5;color:#33423b">'
+    + '🔎 <b>Un justificatif par métier.</b> Vous déclarez plusieurs métiers ? Chacun a son document : un diplôme de plomberie ne prouve pas l’électricité. '
+    + 'Si un même document officiel couvre réellement plusieurs de vos métiers, <b>c’est l’administration KLEAN qui le reconnaît</b> après vérification.<br>'
+    + '🔒 Vos documents <b>ne sont jamais visibles par les clients</b> : ils ne voient qu’un indicateur « profession vérifiée ».</div>';
+
+  if (!requises.length) {
+    h += '<div style="background:#fff;border-radius:16px;padding:16px;font-size:15px">Aucun de vos métiers ne demande de justificatif pour l’instant. 👍</div>';
+  } else {
+    h += '<div style="font-size:14.5px;font-weight:900;margin:0 0 8px">' + justifEch(JUSTIF.libelle || '') + '</div>';
+    JUSTIF.metiers.forEach(m => { if (m.requis) h += justifHTMLMetier(m); });
+  }
+  b.innerHTML = h + '</div>';
+}
+
+function justifHTMLMetier(m) {
+  const col = justifCoul(m.statut);
+  const regles = (m.regles || m.reglesDemandees || []);
+  let h = '<div style="background:#fff;border-radius:16px;padding:14px;margin-bottom:12px;box-shadow:0 2px 10px rgba(0,0,0,.05)">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">'
+    + '<b style="font-size:17px">' + justifEch(m.ic || '🛠️') + ' ' + justifEch(m.nom) + '</b>'
+    + '<span style="font-size:14px;font-weight:900;color:' + col + ';background:#f6f8f7;border-radius:20px;padding:6px 12px">' + justifEch(m.statutTxt || '') + '</span></div>';
+  if (m.motif) h += '<div style="margin-top:8px;font-size:14.5px;background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:12px;padding:10px;font-weight:700">💬 Message de KLEAN : ' + justifEch(m.motif) + '</div>';
+  if (m.valideJusqu) h += '<div style="margin-top:8px;font-size:14px;color:#6b7c73">📅 Valable jusqu’au <b>' + justifEch(m.valideJusqu) + '</b></div>';
+
+  if (m.statut === 'verifie') {
+    h += '<p style="margin:9px 0 0;font-size:14.5px;color:#0f5132;font-weight:800">✅ Votre document a été vérifié par l’administration KLEAN. Ce métier est validé.</p>'
+      + '<p style="margin:6px 0 0;font-size:13.5px;color:#6b7c73">Pour le remplacer (nouveau diplôme, pièce plus lisible) : retirez-le d’abord ou demandez un remplacement à l’assistance.</p></div>';
+    return h;
+  }
+
+  const demandees = m.reglesDetail || regles;
+  const liste = (demandees && demandees.length ? demandees : [{ id: 'r1', libelle: 'Justificatif professionnel correspondant à ce métier', obligatoire: true }]);
+  h += '<p style="margin:8px 0 6px;font-size:14px;color:#6b7c73">Justificatif(s) accepté(s) pour ce métier :</p>';
+  liste.forEach(r => {
+    const cle = justifCle(m.metier, r.id);
+    const L = JUSTIF.attente[cle];
+    h += '<div style="border:1.5px dashed #cfd9d4;border-radius:14px;padding:11px;margin-bottom:9px">'
+      + '<div style="font-size:14.5px;font-weight:800;margin-bottom:6px">📄 ' + justifEch(r.libelle) + (r.obligatoire === false ? ' <span style="font-size:12.5px;color:#6b7c73;font-weight:600">(facultatif)</span>' : '') + '</div>';
+    if (L && L.pages.length) {
+      h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">' + L.pages.map((p, i) =>
+        '<div style="background:#f6f8f7;border-radius:12px;padding:7px;font-size:13px;font-weight:800">'
+        + (p.type === 'pdf' ? '📄 ' + justifEch(p.nom || 'PDF') : '<img src="' + p.data + '" style="width:74px;height:74px;object-fit:cover;border-radius:9px;display:block;margin-bottom:4px" alt="page">')
+        + '<button type="button" onclick="justifFace(\'' + justifEch(m.metier) + '\',\'' + justifEch(r.id) + '\',' + i + ',\'' + (p.face === 'recto' ? 'verso' : 'recto') + '\')" style="background:#fff;border:1.5px solid #cfd9d4;border-radius:8px;padding:4px 7px;font:inherit;font-weight:800;font-size:12px;cursor:pointer">'
+        + (p.face === 'recto' ? '⬛ Recto' : p.face === 'verso' ? '⬛ Verso' : '⬛ Page ' + (i + 1)) + ' ↔</button> '
+        + '<button type="button" onclick="justifDelPage(\'' + justifEch(m.metier) + '\',\'' + justifEch(r.id) + '\',' + i + ')" style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:8px;padding:4px 7px;font:inherit;font-weight:800;font-size:12px;cursor:pointer">✕</button>'
+        + '</div>').join('') + '</div>';
+    }
+    h += '<div style="display:flex;gap:7px;flex-wrap:wrap">'
+      + '<button type="button" style="flex:1;min-width:150px;background:#f6f8f7;border:2px solid #cfd9d4;border-radius:12px;padding:13px;font:inherit;font-weight:800;font-size:14.5px;cursor:pointer" onclick="justifPrendre(\'' + justifEch(m.metier) + '\',\'' + justifEch(r.id) + '\',\'camera\')">📷 Prendre une photo</button>'
+      + '<button type="button" style="flex:1;min-width:150px;background:#f6f8f7;border:2px solid #cfd9d4;border-radius:12px;padding:13px;font:inherit;font-weight:800;font-size:14.5px;cursor:pointer" onclick="justifPrendre(\'' + justifEch(m.metier) + '\',\'' + justifEch(r.id) + '\',\'photo\')">🖼️ Choisir une photo</button>'
+      + (JUSTIF.pdfOk === false ? '' : '<button type="button" style="flex:1;min-width:150px;background:#f6f8f7;border:2px solid #cfd9d4;border-radius:12px;padding:13px;font:inherit;font-weight:800;font-size:14.5px;cursor:pointer" onclick="justifPrendre(\'' + justifEch(m.metier) + '\',\'' + justifEch(r.id) + '\',\'pdf\')">📄 Envoyer un PDF</button>')
+      + '</div>';
+    if (L && L.pages.length) h += '<button type="button" class="btn-main" style="width:100%;margin-top:8px" onclick="justifEnvoyer(\'' + justifEch(m.metier) + '\',\'' + justifEch(r.id) + '\')">📤 Envoyer ce justificatif (' + L.pages.length + ' page' + (L.pages.length > 1 ? 's' : '') + ')</button>';
+    h += '</div>';
+  });
+  return h + '</div>';
+}
+try { window.justifPeint = justifPeint; }catch(e){}
+
+function justifPrendre(sid, rid, mode) {
+  JUSTIF_CIBLE = { sid: sid, rid: rid };
+  let inp = document.getElementById('justif-file');
+  if (!inp) {
+    inp = document.createElement('input');
+    inp.type = 'file'; inp.id = 'justif-file'; inp.style.display = 'none';
+    inp.onchange = function () { justifFichier(inp); };
+    document.body.appendChild(inp);
+  }
+  inp.value = '';
+  inp.accept = mode === 'pdf' ? 'application/pdf' : 'image/*';
+  if (mode === 'camera') inp.setAttribute('capture', 'environment'); else inp.removeAttribute('capture');
+  inp.click();
+}
+try { window.justifPrendre = justifPrendre; }catch(e){}
+
+function fileVersDataURL(file) {
+  return new Promise((res, rej) => { const rd = new FileReader(); rd.onload = e => res(e.target.result); rd.onerror = rej; rd.readAsDataURL(file); });
+}
+async function justifFichier(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  const c = JUSTIF_CIBLE; if (!c) return;
+  const cle = justifCle(c.sid, c.rid);
+  const L = JUSTIF.attente[cle] = JUSTIF.attente[cle] || { pages: [] };
+  if (L.pages.length >= 6) { input.value = ''; return toast('📄 6 pages maximum par document'); }
+  try {
+    let data, type;
+    if (f.type === 'application/pdf') {
+      if (f.size > 3600000) { input.value = ''; return toast('📄 PDF trop lourd (3,5 Mo maximum) — essayez une photo'); }
+      data = await fileVersDataURL(f); type = 'pdf';
+    } else {
+      data = await fileToThumb(f, 1500, 0.62); type = 'image';
+      if (data.length > 4200000) { input.value = ''; return toast('📷 Photo trop lourde — reprenez la photo de plus loin'); }
+    }
+    const face = L.pages.length === 0 ? 'recto' : (L.pages.length === 1 ? 'verso' : 'page');
+    L.pages.push({ face: face, nom: String(f.name || '').slice(0, 40), type: type, data: data });
+    justifPeint();
+    toast('📎 Page ajoutée — recto/verso modifiable');
+  } catch (e) { toast('⚠️ Lecture du fichier impossible'); }
+  input.value = '';
+}
+function justifFace(sid, rid, i, face) {
+  const L = JUSTIF.attente[justifCle(sid, rid)]; if (!L || !L.pages[i]) return;
+  L.pages[i].face = (L.pages[i].face === face) ? 'page' : face;
+  justifPeint();
+}
+function justifDelPage(sid, rid, i) {
+  const L = JUSTIF.attente[justifCle(sid, rid)]; if (!L) return;
+  L.pages.splice(i, 1);
+  if (!L.pages.length) delete JUSTIF.attente[justifCle(sid, rid)];
+  justifPeint();
+}
+try { window.justifFace = justifFace; window.justifDelPage = justifDelPage; }catch(e){}
+
+async function justifEnvoyer(sid, rid) {
+  const L = JUSTIF.attente[justifCle(sid, rid)];
+  if (!L || !L.pages.length) return toast('📎 Ajoutez d’abord une page (photo ou PDF)');
+  if (JUSTIF.busy) return;
+  JUSTIF.busy = true; justifPeint();
+  try {
+    const r = await fetch('/api/justif/envoyer', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: justifAgentId(), tel: justifTel(), metier: sid, regleId: rid, pages: L.pages }) });
+    const d = await r.json().catch(() => ({}));
+    JUSTIF.busy = false;
+    if (!r.ok) { toast('❌ ' + (d.error || 'Envoi impossible')); justifPeint(); return; }
+    delete JUSTIF.attente[justifCle(sid, rid)];
+    JUSTIF.actif = true;
+    if (d.etat) { JUSTIF.metiers = d.etat.metiers || JUSTIF.metiers; JUSTIF.docs = d.etat.docs || JUSTIF.docs;
+      JUSTIF.professionVerifiee = d.etat.professionVerifiee === true; JUSTIF.libelle = d.etat.libelle || ''; }
+    justifPeint(); justifPastilles();
+    toast('📤 Document envoyé — en attente de vérification par KLEAN');
+  } catch (e) { JUSTIF.busy = false; toast('📵 Réseau fragile — votre document n’est PAS parti, réessayez'); justifPeint(); }
+}
+try { window.justifEnvoyer = justifEnvoyer; }catch(e){}
+
+/* ─── 🧷 pastilles : dossier pro, tableau de bord, profil ─── */
+function justifPastilles() {
+  const st = justifAgentId();
+  if (!st) return;
+  const requises = (JUSTIF.metiers || []).filter(m => m.requis);
+  const reste = requises.filter(m => m.statut !== 'verifie').length;
+  const el = document.getElementById('justif-pastille') || document.getElementById('justif-pastille-actif');
+  if (el) el.innerHTML = !JUSTIF.actif ? '' : (requises.length === 0 ? '' :
+    '<div style="background:' + (reste ? '#fff7ed' : '#f0fdf4') + ';border:2px solid ' + (reste ? '#fdba74' : '#86efac') + ';border-radius:14px;padding:11px 13px;margin:10px 0;font-size:14.5px;font-weight:800;color:' + (reste ? '#9a3412' : '#166534') + '">'
+    + (reste ? '🪪 Il vous reste <b>' + reste + '</b> justificatif(s) professionnel(s) à faire vérifier.' : '🛡️ ' + justifEch(JUSTIF.libelle || 'Tous vos métiers sont vérifiés'))
+    + '<button type="button" class="btn-main" style="width:100%;margin-top:8px" onclick="justifOuvrir()">🪪 ' + (reste ? 'Déposer mes justificatifs' : 'Voir mes justificatifs') + '</button></div>');
+  const g = document.getElementById('justif-gate');
+  if (g) g.innerHTML = el ? el.innerHTML : '';
+  justifProfilPeint();
+}
+
+/* ─── 👤 profil : métiers vérifiés + deux espaces (une seule identité) ─── */
+let IDENT = { charge: false, identite: null, pro: null, client: null, lie: false, alerte: null, identiteVerifiee: null };
+function identiteCharger() {
+  const id = justifAgentId(); if (!id) return Promise.resolve(IDENT);
+  return fetch('/api/identite/etat?agentId=' + encodeURIComponent(id), { cache: 'no-store' }).then(r => r.json()).then(d => {
+    if (d && d.ok) { IDENT = Object.assign(IDENT, d, { charge: true }); justifProfilPeint(); }
+    return IDENT;
+  }).catch(() => IDENT);
+}
+try { window.identiteCharger = identiteCharger; }catch(e){}
+
+function justifProfilPeint() {
+  const z = document.getElementById('prof-justif');
+  if (z) {
+    if (!justifAgentId()) { z.innerHTML = '<p style="font-size:14px;color:#6b7c73">Connectez votre compte professionnel pour voir vos justificatifs.</p>'; }
+    else {
+      const requises = (JUSTIF.metiers || []).filter(m => m.requis);
+      let h = '';
+      if (!requises.length) h += '<p style="font-size:14.5px;color:#6b7c73">' + (JUSTIF.actif ? 'Aucun de vos métiers ne demande de justificatif.' : 'La vérification des justificatifs est désactivée par KLEAN.') + '</p>';
+      else {
+        h += '<div style="display:flex;flex-direction:column;gap:6px">' + requises.map(m =>
+          '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;background:#fff;border:1.5px solid #e6ece9;border-radius:12px;padding:9px 11px;font-size:14.5px">'
+          + '<span>' + justifEch(m.ic || '') + ' ' + justifEch(m.nom) + '</span>'
+          + '<b style="color:' + justifCoul(m.statut) + '">' + justifEch(m.statutTxt || '') + '</b></div>').join('') + '</div>'
+          /* ⚠️ jamais « tous les métiers vérifiés » si un seul l’est */
+          + '<div style="margin-top:8px;font-size:14.5px;font-weight:900;color:' + (JUSTIF.professionVerifiee ? '#166534' : '#9a3412') + '">'
+          + (JUSTIF.professionVerifiee ? '🛡️ Profession vérifiée — ' : '⏳ ') + justifEch(JUSTIF.libelle || '') + '</div>'
+          + '<button type="button" class="btn-main" style="width:100%;margin-top:9px" onclick="justifOuvrir()">🪪 Gérer mes justificatifs</button>';
+      }
+      z.innerHTML = h;
+    }
+  }
+  const i = document.getElementById('prof-identite');
+  if (i) {
+    const id = IDENT.identite || {};
+    let h = '<div style="background:#fff;border:1.5px solid #e6ece9;border-radius:14px;padding:12px;font-size:14.5px;line-height:1.55">'
+      + '<b style="font-size:15px">👤 Mon identité de référence</b>'
+      + '<div style="margin-top:6px">Nom : <b>' + justifEch(id.nom || '—') + '</b> · Prénom(s) : <b>' + justifEch(id.prenom || '—') + '</b><br>'
+      + 'Né(e) le <b>' + justifEch(id.naissance || '—') + '</b> à <b>' + justifEch(id.lieuNaissance || '—') + '</b><br>'
+      + 'Téléphone : <b>' + justifEch(id.tel || '—') + '</b> · Pièce : <b>' + justifEch(id.pieceType || '—') + ' ' + justifEch(id.pieceNum || '') + '</b></div>'
+      + '<p style="margin:8px 0 0;color:#6b7c73;font-size:13.5px">Cette identité est unique : une personne ne peut pas ouvrir plusieurs comptes professionnels avec les mêmes informations.</p></div>'
+      + '<div style="background:#fff;border:1.5px solid #e6ece9;border-radius:14px;padding:12px;margin-top:10px">'
+      + '<b style="font-size:15px">🧭 Mes deux espaces</b>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'
+      + '<button type="button" style="flex:1;min-width:150px;background:#f6f8f7;border:2px solid #cfd9d4;border-radius:12px;padding:12px;font:inherit;font-weight:800;font-size:14.5px;cursor:pointer" onclick="espaceBasculer(\'client\')">👤 Mon espace Client</button>'
+      + '<button type="button" style="flex:1;min-width:150px;background:#FDECDC;border:2px solid var(--p);border-radius:12px;padding:12px;font:inherit;font-weight:900;font-size:14.5px;cursor:pointer">🛠️ Mon espace Professionnel</button>'
+      + '</div>';
+    if (IDENT.client) {
+      h += '<div style="margin-top:9px;font-size:14px;color:#33423b">Compte client trouvé : <b>' + justifEch(IDENT.client.nom) + '</b> (' + justifEch(IDENT.client.tel || '') + ')'
+        + (IDENT.lie ? ' — <b style="color:#166534">✅ relié à votre compte professionnel</b>' : ' — <b style="color:#9a3412">pas encore relié</b>')
+        + '</div>';
+      if (!IDENT.lie) h += '<button type="button" class="btn-main" style="width:100%;margin-top:8px" onclick="identiteLier()">🔗 Relier mes deux espaces (une seule identité)</button>';
+    } else {
+      h += '<div style="margin-top:9px;font-size:14px;color:#6b7c73">Aucun compte client à ce numéro. Vous pouvez créer votre <b>espace Client</b> avec le même numéro : votre identité restera unique.</div>'
+        + '<button type="button" class="btn-line" style="width:100%;margin-top:8px" onclick="espaceBasculer(\'client\')">👤 Ouvrir / créer mon espace Client</button>';
+    }
+    if (IDENT.alerte) h += '<div style="margin-top:9px;background:#fff7ed;border:2px solid #fdba74;border-radius:12px;padding:10px;font-size:14px;font-weight:700;color:#9a3412">'
+      + '👤 Une vérification d’identité supplémentaire a été demandée par KLEAN' + (IDENT.identiteVerifiee ? ' — <b style="color:#166534">déjà confirmée ✅</b>' : ' (elle est en cours).') + '</div>';
+    h += '</div>';
+    i.innerHTML = h;
+  }
+}
+try { window.justifProfilPeint = justifProfilPeint; }catch(e){}
+
+async function identiteLier() {
+  try {
+    const r = await fetch('/api/identite/lier', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: justifAgentId() }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return toast('⚠️ ' + (d.error || 'Liaison impossible'));
+    toast('🔗 ' + (d.message || 'Comptes reliés'));
+    identiteCharger();
+  } catch (e) { toast('📵 Réseau fragile — réessayez'); }
+}
+try { window.identiteLier = identiteLier; }catch(e){}
+function espaceBasculer(ou) {
+  try { justifFermer(); }catch(e){}
+  if (ou === 'client') { goClientAccount(); toast('👤 Mon espace Client'); }
+  else { setMode('agent'); toast('🛠️ Mon espace Professionnel'); }
+}
+try { window.espaceBasculer = espaceBasculer; }catch(e){}
+
+/* 🔔 le serveur prévient le professionnel dès qu’un document est vérifié, refusé ou à remplacer */
+window.kleanOnJustifMaj = function (m) {
+  if (!m || !m.metier) return;
+  const txt = m.statut === 'verifie' ? '✅ Votre justificatif a été vérifié' : m.statut === 'refuse' ? '⛔ Justificatif refusé' : '🔄 Document à remplacer';
+  try { toast(txt + (m.motif ? ' — ' + m.motif : '')); }catch (e) { }
+  try { justifCharger().then(justifPeint); } catch (e) { }
+};
+
 /* ═════════ CANDIDATURE AGENT (vérifiée par le propriétaire) ═════════ */
 agent.apply = agent.apply || {status: agent.nom ? 'approved' : 'none', agentId: kLS.get('k2_agentId')||null, reason:''};
 let applySvc = {};
@@ -3720,6 +4076,8 @@ async function claimAgentAccount(){
 }
 function renderAgentGate(){
   const el = $('#agent-gate');
+  /* 🪪 on recharge l'état des justificatifs dès que l'espace professionnel s'affiche */
+  try{ if(justifAgentId()) setTimeout(()=>{ justifCharger().then(()=>{ try{ justifPastilles(); }catch(e){} }); }, 30); }catch(e){}
   const st = agent.apply.status;
   $('#agent-blocks').style.display = st === 'approved' ? 'block' : 'none';
 
@@ -3731,6 +4089,7 @@ function renderAgentGate(){
     const gd = window._agstatus || {};
     const comp = typeof gd.completion === 'number' ? gd.completion : null;
     el.innerHTML = `
+    <div id="justif-pastille-actif" style="max-width:620px;margin:0 auto 12px"></div>
     <div class="gate-card" style="border:1.5px solid var(--line);padding:13px 15px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
         <b style="font-size:13px">👋 ${agent.apply.nom || gd.nom || 'Professionnel'} — compte actif</b>
@@ -3756,7 +4115,8 @@ function renderAgentGate(){
     return;
   }
   if(st === 'pending'){
-    el.innerHTML = `<div class="gate-card status-card">
+    el.innerHTML = `<div id="justif-pastille" style="max-width:620px;margin:0 auto 12px"></div>
+    <div class="gate-card status-card">
       <div class="big">⏳</div>
       <h4>Dossier en cours de vérification</h4>
       <p class="sub">Votre candidature est entre les mains de l'équipe KLEAN.<br>Nous vérifions : pièce d'identité, références, expérience.<br><b>Vous serez appelé au ${agent.apply.tel || '…'}.</b></p>
@@ -3796,8 +4156,9 @@ function renderAgentGate(){
     </div>
     <div class="two">
       <div class="inp-row"><label>Date de naissance *</label><input class="inp" id="ap-naissance" type="date"></div>
-      <div class="inp-row"><label>Années d'expérience</label><input class="inp" id="ap-experience" type="number" min="0" max="30" placeholder="0"></div>
+      <div class="inp-row"><label>Lieu de naissance *</label><input class="inp" id="ap-lieunaissance" maxlength="60" placeholder="ex : Abidjan, Cocody"></div>
     </div>
+    <div class="inp-row"><label>Années d'expérience</label><input class="inp" id="ap-experience" type="number" min="0" max="30" placeholder="0"></div>
     <div class="inp-row"><label>🏙️ Ville de résidence * — où vous vivez ?</label><button type="button" class="btn-line" style="width:100%;margin-bottom:8px;font-weight:800" onclick="openVilleFor('ap-ville')">🔍 Chercher / choisir une ville (A→Z)</button><select class="inp" id="ap-ville" onchange="document.getElementById('ap-ville2-row').style.display=(this.value==='__autre'?'block':'none')"><option value="">— choisir votre ville —</option>${cityOptionsHTML()}<option value="__autre">✏️ Ma ville n'est pas dans la liste — je l'écris</option></select></div>
     <div class="inp-row" id="ap-ville2-row" style="display:none"><label>✏️ Écrivez le nom de votre ville</label><input class="inp" id="ap-ville2" maxlength="40" placeholder="Ex : Séguéla…"></div>
     <p class="note" style="margin:-2px 0 10px">🛠️ <b>La ville de service se choisit à l'ouverture de votre compte</b> — une fenêtre s'ouvre et vous désignez la ville où vous allez travailler (elle peut changer quand vous voulez).</p>
@@ -3957,7 +4318,7 @@ function togglePw(id){
 const V_AP = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
 async function submitApplication(){
   const dossier = {
-    nom: V_AP('ap-nom'), prenom: V_AP('ap-prenom'), naissance: V_AP('ap-naissance'),
+    nom: V_AP('ap-nom'), prenom: V_AP('ap-prenom'), naissance: V_AP('ap-naissance'), lieuNaissance: V_AP('ap-lieunaissance'),
     tel1: V_AP('ap-tel1').replace(/\D/g,''), tel2: V_AP('ap-tel2').replace(/\D/g,''),
     quartier: V_AP('ap-quartier'), adresse: V_AP('ap-adresse'),
     ville: (V_AP('ap-ville')==='__autre' ? V_AP('ap-ville2') : V_AP('ap-ville')).trim(),
@@ -3976,7 +4337,7 @@ async function submitApplication(){
   };
   if(!dossier.password) return toast('❌ Choisissez un mot de passe (bouton 👁 pour le voir)');
   if(dossier.password !== V_AP('ap-pw2')) return toast('❌ Les deux mots de passe ne correspondent pas');
-  const need = {nom:'Nom', prenom:'Prénom', naissance:'Date de naissance', tel1:'Téléphone', adresse:'Adresse', pieceNum:'N° de pièce', urgenceNom:'Personne à alerter', urgenceTel:'Tél. urgence', ref1Nom:'Référence 1', ref1Tel:'Tél. référence'};
+  const need = {nom:'Nom', prenom:'Prénom', naissance:'Date de naissance', lieuNaissance:'Lieu de naissance', tel1:'Téléphone', adresse:'Adresse', pieceNum:'N° de pièce', urgenceNom:'Personne à alerter', urgenceTel:'Tél. urgence', ref1Nom:'Référence 1', ref1Tel:'Tél. référence'};
   for(const k in need){ if(!dossier[k]) return toast('❌ Champ requis : '+need[k]); }
   if(dossier.tel1.length < 8) return toast('❌ Téléphone principal invalide');
   if(!dossier.services.length) return toast('❌ Choisissez au moins un service');
@@ -4008,6 +4369,14 @@ async function submitApplication(){
       agent.apply = {status:'pending', agentId: d.agentId, tel: dossier.tel1};
       saveAll(); renderAgentGate();
       toast('📤 Dossier envoyé ! En vérification 🛡️');
+      /* 🪪 le PDG a activé la vérification : on ouvre tout de suite l'écran des justificatifs */
+      if(d.justif && d.justif.actif && (d.justif.requis || []).length){
+        JUSTIF.actif = true;
+        setTimeout(()=>{ try{ justifOuvrir(); }catch(e){} }, 500);
+      }
+      /* 👤 une identité déjà présente dans KLEAN : on le dit tout de suite, honnêtement */
+      if(d.identiteAlerte)
+        setTimeout(()=>{ try{ toast('👤 Une vérification d’identité supplémentaire sera faite par KLEAN (une seule identité par personne).'); }catch(e){} }, 1400);
       return;
     }catch(e){ if(location.protocol.startsWith('http')) return toast('⏳ Serveur momentanément indisponible — votre dossier n’a PAS été envoyé. Réessayez dans ~1 minute'); }
   }
@@ -4704,6 +5073,9 @@ async function proSaveTaches(){
   }catch(e){ toast('📡 Serveur injoignable — réessayez'); }
 }
 function fillProfile(){
+  /* 🪪 lot 122 : l'état des justificatifs + l'identité commune aux deux espaces */
+  try{ justifCharger().then(()=>{ try{ justifProfilPeint(); }catch(e){} }); }catch(e){}
+  try{ identiteCharger(); }catch(e){}
   $('#prof-nom').value = agent.nom; $('#prof-quartier').value = agent.quartier; $('#prof-tel').value = agent.tel;
   const pv=document.getElementById('prof-ville'); if(pv) pv.value = agent.ville || '';
   const vsa = document.getElementById('prof-vs-actuelle');
@@ -7821,6 +8193,7 @@ function rechVueListe(){
       + (p.scorePct!=null?('<span style="font-size:10px;font-weight:900;background:var(--pd);color:#fff;padding:3px 7px;border-radius:99px">'+p.scorePct+'/100</span>'):'')
       + '<span style="font-size:14px;font-weight:900;color:#b58900">★ '+(p.note!=null?p.note:'—')+'/5</span>'
       + '<span style="font-size:10.5px;color:#7A6A5E">'+(p.avis?(p.avis+' avis'):'nouveau')+'</span>'
+      + (p.professionVerifiee?'<span style="font-size:13px;font-weight:900;background:#f0fdf4;color:#166534;border:1.5px solid #86efac;border-radius:20px;padding:3px 9px">🛡️ Profession vérifiée</span>':'')
       + (p.verifTxt?('<span style="font-size:10.5px;font-weight:900;background:'+(p.verifPlus?'#FDECDC':'#f4f6f5')+';color:'+(p.verifPlus?'var(--pd)':'#5b6b63')+';padding:3px 7px;border-radius:99px">'+rechEch(p.verifTxt)+'</span>'):'')
       + '<span style="font-size:10.5px;font-weight:900;background:'+dispoBg+';color:'+dispoFg+';padding:3px 8px;border-radius:99px">'+(p.dispo==='libre'?'🟢 ':p.dispo==='occupe'?'🟠 ':p.dispo==='pause'?'⏸️ ':'⚪ ')+rechEch(p.dispoTxt||'—')+'</span>'
       + '</div>'
