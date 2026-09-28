@@ -3917,16 +3917,21 @@ const _hitMap = new Map();
 const _SCAN = /(\.env|wp-admin|wp-login|phpmyadmin|xmlrpc|\.git|\/\.aws|\.htaccess|eval-stdin|phpunit|cgi-bin|actuator\/env|\/etc\/passwd)/i;
 const _INJECT = /(\.\.\/|\.\.\\|%00|<script|javascript:|union\s+select|drop\s+table|or\s+1=1|\$\{jndi|;os\.system|`)/i;
 /* ═══════════════════════════════════════════════════════════════════════════
-   🛡️ BOUCLIER KLEAN — RÈGLES FIXÉES PAR LE PDG (26/09/2026)
-   · une adresse IP NORMALE est TOUJOURS autorisée : « inconnue » n'est PAS un motif ;
-   · une adresse PARTAGÉE (cybercafé, hôtel, entreprise, réseau mobile ivoirien) n'est
-     JAMAIS bloquée automatiquement — elle est seulement RALENTIE (429) pour protéger
-     le serveur : bloquer une IP partagée punirait des clients honnêtes ;
-   · le blocage automatique n'existe QUE sur un comportement réellement suspect :
-     sondage de fichiers réservés, injection dans l'adresse, rafale de requêtes ;
-   · tout blocage automatique est TEMPORAIRE : 15 min → 1 h → 6 h → 24 h au maximum ;
-   · la RAISON du blocage et sa DURÉE sont écrites en français, visibles dans le tableau
-     de bord, et rappelées au client bloqué (avec le temps restant).
+/* ═══════════════════════════════════════════════════════════════
+   🛡️ BOUCLIER KLEAN — RÈGLE FIXÉE PAR LE PDG (29/09/2026)
+   ⛔ AUCUN BLOCAGE AUTOMATIQUE. Motif du PDG : « la sécurité bloque de nombreuses personnes ».
+      Sur un réseau mobile ivoirien, des milliers de clients honnêtes partagent la MÊME adresse :
+      bloquer une adresse d'après son « comportement » revenait à bloquer des gens hors de cause.
+   Ce que le bouclier fait maintenant, et rien de plus :
+   · il OBSERVE (sondage de fichiers réservés, injection dans l'adresse, rafale) ;
+   · il COMPTE et écrit tout dans son journal, en français, avec la raison ;
+   · il PRÉVIENT le PDG (alerte en direct) ;
+   · il ne coupe JAMAIS l'accès de lui-même — même pas 15 minutes.
+   Ce qui bloque encore, uniquement sur décision :
+   · le PDG bloque une adresse (motif + durée obligatoires) et peut tout libérer d'un bouton ;
+   · un COMPTE bloqué par le PDG le reste (décision prise par un humain, jamais automatique).
+   Pour ne jamais punir un réseau partagé, les limites de connexion protègent
+   le COMPTE (le numéro de téléphone), plus l'adresse du réseau.
    ═══════════════════════════════════════════════════════════════════════════ */
 const SHIELD_DUREES = [15, 60, 360, 1440];              // minutes (palier 1 → 4, plafond 24 h)
 const SHIELD_MOTIFS = {
@@ -3946,7 +3951,7 @@ function ipPartagee(ip) {
   return s === '::1' || s === 'localhost' || /^127\./.test(s) || /^10\./.test(s)
     || /^192\.168\./.test(s) || /^172\.(1[6-9]|2\d|3[01])\./.test(s) || /^169\.254\./.test(s);
 }
-let _shieldMigre = false;
+let _shieldMigre = false, _shieldLibere = false;
 function shieldEnsure() {
   db.shield = db.shield || { events: [], ips: {} };
   if (!Array.isArray(db.shield.events)) db.shield.events = [];
@@ -3960,7 +3965,7 @@ function shieldEnsure() {
     for (const ip of Object.keys(db.shield.ips)) {
       const r = db.shield.ips[ip];
       if (r && r.blocked && !r.annihilated && !r.blockedUntil) {
-        r.blocked = false; r.blockBy = ''; r.blockReason = ''; r.legacyReouvert = true;
+        r.blocked = false; r.blockBy = ''; r.blockReason = ''; r.legacyReouvert = true; r.liberee = true;
         r.last = nowISO(); n++;
         db.shield.events.unshift({ id: uid('SH'), at: nowISO(), ip, kind: 'reouverture', path: '/hq',
           detail: 'ancien blocage automatique sans durée rouvert (il ne respectait pas la nouvelle règle)',
@@ -3969,6 +3974,29 @@ function shieldEnsure() {
     }
     if (db.shield.events.length > 250) db.shield.events = db.shield.events.slice(0, 250);
     if (n) { try { saveDb(); } catch (e) {} console.log('🛡️ ' + n + ' ancien(s) blocage(s) sans durée rouvert(s)'); }
+  }
+  /* 🔓 29/09 — LIBÉRATION GÉNÉRALE : aucun blocage automatique ne doit subsister.
+     Toutes les adresses que l'ancien bouclier avait bloquées « automatiquement » sont rouvertes.
+     Celles décidées par le PDG restent : c'est sa décision, pas celle d'une machine. */
+  if (!_shieldLibere) {
+    _shieldLibere = true;
+    let n = 0;
+    for (const ip of Object.keys(db.shield.ips)) {
+      const r = db.shield.ips[ip];
+      if (r && r.blocked && !r.annihilated && r.blockBy !== 'pdg') {
+        r.blocked = false; r.blockBy = ''; r.blockReason = ''; r.liberee = true; r.last = nowISO();
+        db.shield.ips[ip] = r; n++;
+        db.shield.events.unshift({ id: uid('SH'), at: nowISO(), ip, kind: 'liberation', path: '/hq',
+          detail: 'blocage automatique LEVÉ — le bouclier ne bloque plus personne (décision du PDG du 29/09)',
+          score: r.score || 0, action: 'debloque', raison: 'plus aucun blocage automatique', minutes: 0 });
+      }
+    }
+    if (n) {
+      if (db.shield.events.length > 250) db.shield.events = db.shield.events.slice(0, 250);
+      try { saveDb(); } catch (e) {}
+      try { emitAdmin('bouclier', '🔓 ' + n + ' adresse(s) bloquée(s) automatiquement ont été LIBÉRÉES — plus personne n’est coupé par le bouclier'); } catch (e) {}
+      console.log('🔓 ' + n + ' adresse(s) libérée(s) : le bouclier ne bloque plus automatiquement');
+    }
   }
 }
 /* ⏳ le score fond quand l'IP se calme (demi-vie : 10 minutes) : une IP partagée qui reçoit
@@ -3991,20 +4019,12 @@ function shieldLog(ip, kind, path, detail, score) {
   rec.kind = kind;
   const grave = score >= SHIELD_SERIEUX;                      // vraie attaque / abus
   if (grave) rec.serieux = (Number(rec.serieux) || 0) + 1;
+  /* 🚫 PLUS AUCUN BLOCAGE AUTOMATIQUE (29/09 — « la sécurité bloque de nombreuses personnes »).
+     On observe, on compte, on prévient le PDG : on ne coupe plus jamais l'accès à personne. */
   let action = 'veille', minutes = 0;
   if (rec.annihilated) action = 'aneanti';
   else if (rec.blocked) action = 'deja-bloque';
-  else if (grave && rec.serieux >= 2 && rec.score >= 50) {
-    /* ⚠️ deux signaux graves au moins, et JAMAIS sur une adresse partagée ou la machine elle-même */
-    /* une adresse PARTAGÉE n'est jamais bloquée automatiquement… sauf si le PDG l'a explicitement demandé */
-    if (ipPartagee(ip) && !(db.config && db.config.shieldPartagees)) action = 'surveille';
-    else {
-      minutes = SHIELD_DUREES[Math.min(Number(rec.bloqueCount) || 0, SHIELD_DUREES.length - 1)];
-      db.shield.ips[ip] = rec;
-      shieldBloquer(ip, kind, minutes, 'auto');
-      action = 'auto-blocage';
-    }
-  }
+  else if (grave) action = 'surveille';
   db.shield.ips[ip] = rec;
   db.shield.events.unshift({ id: uid('SH'), at: nowISO(), ip, kind, path: String(path || '').slice(0, 180),
     detail: String(detail || '').slice(0, 160), score: rec.score, action,
@@ -4108,32 +4128,34 @@ function shieldGate(req, res, p) {
     return true;
   }
   if (_INJECT.test(req.url || '')) {
-    const r2 = shieldLog(ip, 'injection', p, 'charge dans l’URL', 22);
-    if (r2.blocked && !estPdg && !r2.annihilated) {
-      const reste = shieldResteMin(r2);
-      sendJson(res, 403, { ok: false, code: 'bouclier', error: 'Accès temporairement bloqué (' + reste + ' min) — ' + r2.blockReason,
-        raison: r2.blockReason, resteMin: reste, fin: r2.blockedUntil, par: 'automatique' });
-      return true;
-    }
+    /* 🚫 29/09 : plus AUCUN blocage automatique, jamais. Une tentative d'injection est REFUSÉE et NOTÉE
+       pour le PDG (shieldLog action « surveille »), mais l'adresse n'est pas coupée : sur un réseau
+       partagé, couper l'adresse couperait des milliers de clients innocents. Seul le PDG bloque. */
+    shieldLog(ip, 'injection', p, 'charge dans l’URL', 22);
+    sendJson(res, 403, { ok: false, code: 'refus', error: 'Requête refusée (charge suspecte dans l’URL) — l’adresse n’est pas bloquée',
+      raison: 'tentative d’injection refusée', resteMin: 0, fin: null, par: '' });
+    return true;
   }
-  /* 🚦 TROP DE REQUÊTES : on RALENTIT d'abord (le client réessaie), on ne bloque pas d'emblée.
-     Le blocage temporaire n'arrive que si la rafale continue (3 fois de suite). */
+  /* 🚦 TROP DE REQUÊTES : on RALENTIT (le client réessaie), on ne bloque JAMAIS.
+     29/09 : même après une rafale violente, il n'y a ni blocage, ni durée, ni score qui monte :
+     juste un frein de quelques secondes qui retombe tout seul. */
   const now = Date.now();
   const h = _hitMap.get(ip) || { t: now, n: 0 };
-  if (now - h.t > 10000) { h.t = now; h.n = 0; }
+  if (now - h.t > 10000) { h.t = now; h.n = 0; h.frein = 0; }
   h.n += 1;
   _hitMap.set(ip, h);
-  if (h.n > 160) {
-    const rec2 = shieldLog(ip, 'flood', p, h.n + ' req / 10 s', 18);
-    const reste = rec2.blocked ? shieldResteMin(rec2) : 0;
+  /* 🚦 FILET ANTI-MACHINE, ET RIEN D'AUTRE : il faut 1 200 requêtes en 10 secondes (120 par seconde :
+     une seule machine qui martèle) pour être freiné. Un réseau mobile partagé par des dizaines de clients
+     normaux reste très loin de ce seuil — et même atteint, ce n'est qu'un ralentissement de quelques
+     secondes : AUCUN blocage, aucune durée, rien qui reste. */
+  if (h.n > 1200) {
+    /* on NOTE pour le PDG (une ligne tous les 400 coups de frein : jamais un journal noyé), on ne bloque pas */
+    h.frein = (Number(h.frein) || 0) + 1;
+    if (h.frein % 400 === 1) shieldLog(ip, 'flood', p, h.n + ' req / 10 s (frein temporaire, aucun blocage)', 0);
     try { res.setHeader('Retry-After', '10'); } catch (e) {}
-    sendJson(res, 429, { ok: false, code: rec2.blocked ? 'bouclier' : 'limite',
-      error: rec2.blocked
-        ? ('Accès temporairement bloqué (' + reste + ' min) — ' + rec2.blockReason)
-        : ('Trop de requêtes : ' + h.n + ' en 10 secondes — patientez un instant'),
-      raison: rec2.blocked ? rec2.blockReason : 'trop de requêtes en quelques secondes',
-      resteMin: reste, fin: rec2.blocked ? rec2.blockedUntil : null,
-      par: rec2.blocked ? 'automatique' : '' });
+    sendJson(res, 429, { ok: false, code: 'limite',
+      error: 'Doucement 🙂 patientez quelques secondes — il n’y a AUCUN blocage, réessayez',
+      raison: 'rafale inhabituelle (frein temporaire, jamais un blocage)', resteMin: 0, fin: null, par: '' });
     return true;
   }
   return false;
@@ -5160,7 +5182,7 @@ const server = http.createServer(async (req, res) => {
     const cli = findClientByToken(req);
     const ip = req.socket.remoteAddress || '?';
     const cle = (cli && cli.id) || ip;
-    if (!recherchePlafond('r:' + cle, cfg.maxRecherchesMin))
+    if (!recherchePlafond('r:' + cle, Math.max(400, (cfg.maxRecherchesMin || 20) * 20)))   /* 29/09 : large, pour ne jamais couper un réseau partagé */
       return sendJson(res, 429, { error: 'Trop de recherches en une minute — patientez un instant', code: 'plafond' });
     const service = String(url.searchParams.get('service') || '').slice(0, 40);
     const q = String(url.searchParams.get('q') || '').slice(0, 120);
@@ -5351,7 +5373,7 @@ const server = http.createServer(async (req, res) => {
   /* 🧾 le calcul détaillé : une ligne par élément (le téléphone ne calcule plus rien) */
   if (p === '/api/tarif/devis' && req.method === 'GET') {
     const ip = clientIp(req);
-    if (!recherchePlafond('tarif:' + ip, 240))
+    if (!recherchePlafond('tarif:' + ip, 2000))                                            /* idem : le calcul de prix ne coupe personne */
       return sendJson(res, 429, { error: 'Trop de calculs en une minute — patientez un instant', code: 'plafond' });
     const qp = url.searchParams;
     const o = {
@@ -5787,7 +5809,7 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/pros/fiche' && req.method === 'GET') {
     const cfg = matchCfg();
     const ip = req.socket.remoteAddress || '?';
-    if (!recherchePlafond('f:' + ip, 60)) return sendJson(res, 429, { error: 'Trop de consultations — patientez un instant' });
+    if (!recherchePlafond('f:' + ip, 900)) return sendJson(res, 429, { error: 'Trop de consultations — patientez un instant' });
     if (!cfg.ficheOuverte) return sendJson(res, 403, { error: 'La consultation des fiches est momentanément fermée' });
     const id = String(url.searchParams.get('id') || '').trim();
     const num = String(url.searchParams.get('num') || '').trim();
@@ -6651,20 +6673,29 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/clients/login' && req.method === 'POST') {
     const ipc = req.socket.remoteAddress || '?';
-    const rcc = loginTries.get(ipc + '|cli') || { n: 0, t: 0 };
-    if (rcc.n >= 10 && Date.now() - rcc.t < 600000) return sendJson(res, 429, { error: 'Trop d’essais — patientez 10 minutes' });
     const b = await readBody(req);
     const tel = String(b.tel || '').replace(/\D/g, '');
+    /* 🛡️ 29/09 — la limite protège LE NUMÉRO, plus l'adresse : sur un réseau mobile partagé,
+       bloquer l'adresse punissait des inconnus honnêtes. Le plafond par adresse ne sert plus
+       qu'à arrêter une MACHINE qui essaie des milliers de numéros. */
+    const cleTel = 'cli|' + (tel || ipc);
+    const rcc = loginTries.get(cleTel) || { n: 0, t: 0 };
+    const rIpMachine = loginTries.get('cli-ip|' + ipc) || { n: 0, t: 0 };
+    if (rcc.n >= 12 && Date.now() - rcc.t < 600000)
+      return sendJson(res, 429, { error: 'Trop d’essais sur ce numéro — patientez 10 minutes, ou vérifiez votre code d’accès' });
+    if (rIpMachine.n >= 400 && Date.now() - rIpMachine.t < 600000)
+      return sendJson(res, 429, { error: 'Trop d’essais — patientez 10 minutes' });
     const cl = db.clients.find(x => x.tel === tel);
     if (cl && cl.blocked) return sendJson(res, 403, { error: 'Compte bloqué' + (cl.blockReason ? ' — motif : ' + cl.blockReason : '') + ' · Contactez Klean-Service', blocked: true });
     const saisi = String(b.password || '').replace(/\s/g, '');
     let bon = !!(cl && hashPassword(cl.salt, b.password || '') === cl.passHash);
     if (!bon && cl && cl.codeAcces && /^\d{4,8}$/.test(saisi) && saisi === String(cl.codeAcces)) bon = true; // 🎟️ connexion par code d'accès
     if (!bon) {
-      loginTries.set(ipc + '|cli', { n: rcc.n + 1, t: rcc.t || Date.now() });
+      loginTries.set(cleTel, { n: rcc.n + 1, t: rcc.t || Date.now() });
+      loginTries.set('cli-ip|' + ipc, { n: rIpMachine.n + 1, t: rIpMachine.t || Date.now() });
       return sendJson(res, 401, { error: 'Téléphone, mot de passe ou code d’accès incorrect' });
     }
-    loginTries.delete(ipc + '|cli');
+    loginTries.delete(cleTel); loginTries.delete('cli-ip|' + ipc);
     if (cl.blocked) return sendJson(res, 403, { error: 'Compte bloqué' + (cl.blockReason ? ' — motif : ' + cl.blockReason : '') + ' · Contactez Klean-Service', blocked: true });
     try { cl.lastLogin = nowISO(); cl.lastAppareil = String(req.headers['user-agent'] || '').slice(0, 120); cl.online = true; saveDb(); } catch (e) {}
     return sendJson(res, 200, { ok: true, clientId: cl.id, token: clientToken(cl.passHash), nom: cl.nom, quartier: cl.quartier, ville: cl.ville || '', mail: cl.mail || '', photo: cl.photo || '' });
@@ -7484,17 +7515,19 @@ const server = http.createServer(async (req, res) => {
   /* --- 🤝 Liaison d'un compte pro créé à la main par l'équipe (code à usage unique) --- */
   if (p === '/api/agents/claim' && req.method === 'POST') {
     const ip = req.socket.remoteAddress || '?';
-    const rc = loginTries.get(ip + '|claim') || { n: 0, t: 0 };
-    if (rc.n >= 6 && Date.now() - rc.t < 600000) return sendJson(res, 429, { error: 'Trop d’essais — patientez 10 minutes' });
     const b = await readBody(req);
     const tel = String(b.tel || '').replace(/\D/g, '');
     const pin = String(b.pin || '').trim();
+    /* 🛡️ la limite protège CE NUMÉRO (8 essais), jamais tout le réseau derrière la même adresse */
+    const cleClaim = 'claim|' + (tel || ip);
+    const rc = loginTries.get(cleClaim) || { n: 0, t: 0 };
+    if (rc.n >= 8 && Date.now() - rc.t < 600000) return sendJson(res, 429, { error: 'Trop d’essais sur ce numéro — patientez 10 minutes' });
     const ag = db.agents.find(a => String(a.tel1 || '').replace(/\D/g, '') === tel && ((a.codeAcces && a.codeAcces === pin) || (a.claimPin && a.claimPin === pin)) && (a.status || 'approved') === 'approved');
     if (!ag) {
-      loginTries.set(ip + '|claim', { n: rc.n + 1, t: rc.t || Date.now() });
+      loginTries.set(cleClaim, { n: rc.n + 1, t: rc.t || Date.now() });
       return sendJson(res, 401, { error: 'Numéro ou code incorrect — vérifiez avec le gestionnaire' });
     }
-    loginTries.delete(ip + '|claim');
+    loginTries.delete(cleClaim);
     if (ag.claimPin && ag.claimPin === pin) delete ag.claimPin; // 🔒 le code à usage unique s'efface, le code d'accès durable reste
     ag.claimedAt = nowISO();
     if (!ag.zone) ag.zone = { km: matchCfg().rayonDefautKm, villes: [] };
@@ -10492,27 +10525,38 @@ const server = http.createServer(async (req, res) => {
       nEvents: db.shield.events.length,
       nSurveillees: nSurv,
       durees: SHIELD_DUREES,
-      bloquerPartagees: !!(db.config && db.config.shieldPartagees),
-      regle: 'Une adresse inconnue ou partagée n’est jamais bloquée pour cette seule raison. Les erreurs normales des clients (code inconnu, fiche inexistante) ne comptent pas. Seuls un sondage de fichiers réservés, une tentative d’injection ou une rafale de requêtes déclenchent un blocage — toujours temporaire (15 min, puis 1 h, 6 h, 24 h au maximum) et toujours expliqué ici.',
+      blocageAuto: false,                                   /* 🚫 29/09 : plus AUCUN blocage automatique */
+      autoLiberees: Object.keys(db.shield.ips).filter(k => db.shield.ips[k] && db.shield.ips[k].liberee).length,
+      regle: 'AUCUN BLOCAGE AUTOMATIQUE (règle du 29/09) : le bouclier observe, compte et vous prévient — il ne coupe plus jamais l’accès de lui-même, parce que des milliers de clients honnêtes partagent la même adresse sur le réseau mobile. Seul VOUS bloquez une adresse (motif + durée), et vous pouvez tout libérer d’un bouton. Les erreurs normales des clients (code inconnu, fiche inexistante) ne comptent pas. Seuls un sondage de fichiers réservés, une tentative d’injection ou une rafale de requêtes déclenchent un blocage — toujours temporaire (15 min, puis 1 h, 6 h, 24 h au maximum) et toujours expliqué ici.',
       resume: nBloquees ? (nBloquees + ' adresse(s) bloquée(s) temporairement' + (nSurv ? (' · ' + nSurv + ' surveillée(s) sans restriction') : ''))
         : (nSurv ? ('Aucune adresse bloquée · ' + nSurv + ' surveillée(s) sans restriction') : 'Aucune adresse bloquée — tout le monde passe normalement')
     });
   }
   /* 🚫 LE PDG BLOQUE UNE ADRESSE : avec une DURÉE (minutes, plafond 24 h) — jamais un blocage muet.
      Il peut aussi viser une adresse encore inconnue du bouclier (elle est créée avec sa raison). */
-  /* ⚙️ RÉGLAGE DU PDG : bloquer AUSSI les adresses partagées (cybercafé, hôtel, réseau mobile).
-     Par défaut : NON — bloquer une adresse partagée punirait des inconnus honnêtes. */
+  /* 🔓 PLUS AUCUN BLOCAGE AUTOMATIQUE (29/09) — et le PDG peut LIBÉRER d'un seul clic
+     toutes les adresses que l'ancien réglage avait bloquées. Rien n'est supprimé : chaque
+     libération est écrite dans le journal du bouclier, avec la raison. */
   if (p === '/api/admin/shield/regle' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
-    const b = await readBody(req);
-    db.config = db.config || {};
-    db.config.shieldPartagees = !!b.bloquerPartagees;
+    shieldEnsure();
+    let n = 0;
+    for (const ip of Object.keys(db.shield.ips)) {
+      const r = db.shield.ips[ip];
+      if (r && r.blocked && !r.annihilated && r.blockBy !== 'pdg') {
+        r.blocked = false; r.blockBy = ''; r.blockReason = ''; r.liberee = true; r.last = nowISO();
+        db.shield.ips[ip] = r; n++;
+        db.shield.events.unshift({ id: uid('SH'), at: nowISO(), ip, kind: 'liberation', path: '/hq',
+          detail: 'libération demandée par le PDG — le bouclier ne bloque plus personne',
+          score: r.score || 0, action: 'debloque', raison: 'libération par le PDG', minutes: 0 });
+      }
+    }
+    if (db.shield.events.length > 250) db.shield.events = db.shield.events.slice(0, 250);
     saveDb();
-    auditLog('shield_regle', { bloquerPartagees: db.config.shieldPartagees, par: 'PDG' });
-    return sendJson(res, 200, { ok: true, bloquerPartagees: db.config.shieldPartagees,
-      message: db.config.shieldPartagees
-        ? 'Le bouclier bloque maintenant aussi les adresses partagées (déconseillé)'
-        : 'Les adresses partagées ne sont plus jamais bloquées automatiquement (règle normale)' });
+    auditLog('shield_liberation', { n, par: 'PDG' });
+    return sendJson(res, 200, { ok: true, liberees: n, blocageAuto: false,
+      message: n ? ('🔓 ' + n + ' adresse(s) bloquée(s) automatiquement ont été libérées — plus personne n’est coupé.')
+                 : '✅ Aucune adresse bloquée automatiquement : personne n’est coupé. Le bouclier ne bloque plus jamais tout seul.' });
   }
   if (p === '/api/admin/shield/recaler' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
