@@ -2194,22 +2194,79 @@ window.kleanOnServicesDeploy = function(msg){
   try{ if(agent && agent.nom) renderAgentDash(); }catch(e){}
   try{ if(typeof renderAgentGate==='function') renderAgentGate(); }catch(e){}
 };
-function paintWriteFreeze(on){
-  var b=document.getElementById('klean-freeze');
-  if(on){
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   🔴 29/09 — LOT 125 : LE POINT DE BLOCAGE EXISTANT (#klean-freeze), renforcé.
+   C'est LE MÊME écran que le lot 97 — mêmes couleurs, même identifiant, même rôle — mais sa
+   logique suit maintenant le contrôle global du PDG :
+     · BLOCAGE TOTAL  → il couvre toute l'application (le compte n'a pas d'autorisation) ;
+     · LECTURE SEULE  → il garde exactement son apparence d'origine (bandeau en haut).
+   L'état vient du SERVEUR (/api/blocage) : ni le rechargement, ni une ancienne version ne
+   permettent de le contourner — même la page servie porte déjà l'état (KLEAN_BLOCAGE_ETAT).
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+var KLEAN_BLOCAGE = { actif:false, mode:'ecriture', message:'', bloque:false };
+function paintBlocage(etat){
+  if(etat && typeof etat==='object') KLEAN_BLOCAGE = Object.assign(KLEAN_BLOCAGE, etat);
+  var e = KLEAN_BLOCAGE;
+  var b = document.getElementById('klean-freeze');
+  var total = !!e.actif && e.mode==='acces' && e.bloque!==false;
+  if(!e.actif){ if(b) b.remove(); return; }
+  if(!total || e.bloque===false){
+    /* ⏸️ lecture seule : le bandeau d'origine, inchangé. Un compte AUTORISÉ (ou le PDG) ne le voit pas :
+       l'autorisation exceptionnelle lui rend l'application exactement comme avant le blocage. */
+    if(e.bloque===false && e.mode!=='ecriture'){ if(b) b.remove(); return; }
+    if(e.mode==='ecriture' && e.bloque===false){ if(b) b.remove(); return; }
     if(!b){
       b=document.createElement('div'); b.id='klean-freeze';
       b.style.cssText='position:sticky;top:0;z-index:9999;background:#7a1f1f;color:#fff;font-weight:800;text-align:center;padding:10px 12px;font-size:13px';
       b.textContent='⛔ Plateforme en lecture seule (PDG) — vous ne pouvez pas écrire pour le moment.';
       if(document.body) document.body.insertBefore(b, document.body.firstChild);
     }
-  } else if(b) b.remove();
+    return;
+  }
+  /* 🔴 blocage total : le point de blocage couvre l'application (message écrit par le PDG) */
+  var msg = String(e.message || 'KLEAN est momentanément bloqué par la direction. Vous retrouverez l’application très vite.')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  var html = '<div style="max-width:520px;margin:0 auto;padding:26px 18px;text-align:center">'
+    + '<div style="font-size:52px;line-height:1">🔒</div>'
+    + '<div style="font-size:21px;font-weight:900;margin-top:10px">Accès momentanément bloqué</div>'
+    + '<div style="font-size:15px;line-height:1.55;margin-top:12px;background:#fff;border-radius:16px;padding:14px;color:#1c2b26">' + msg + '</div>'
+    + '<div style="font-size:13px;line-height:1.5;margin-top:12px;opacity:.9">L’entreprise a bloqué l’accès à INTER pour le moment. Aucune donnée n’est perdue : comptes, profils, photos, demandes et conversations sont conservés.</div>'
+    + (e.depuis ? '<div style="font-size:12px;margin-top:8px;opacity:.75">Depuis le ' + String(e.depuis).slice(0,16).replace('T',' à ') + '</div>' : '')
+    + '<button type="button" onclick="loadBlocage(true)" style="margin-top:16px;background:#fff;color:#7a1f1f;border:none;font:inherit;font-weight:900;font-size:16px;padding:14px 22px;border-radius:13px;cursor:pointer;min-height:50px">🔄 Réessayer</button>'
+    + '</div>';
+  if(!b){
+    b=document.createElement('div'); b.id='klean-freeze';
+    b.style.cssText='position:fixed;left:0;right:0;top:0;bottom:0;z-index:2147483000;overflow:auto;background:#7a1f1f;color:#fff';
+    if(document.body) document.body.insertBefore(b, document.body.firstChild);
+  }
+  if(b.getAttribute('data-total')!=='1'){ b.setAttribute('data-total','1'); b.style.cssText='position:fixed;left:0;right:0;top:0;bottom:0;z-index:2147483000;overflow:auto;background:#7a1f1f;color:#fff'; }
+  b.innerHTML = html;
 }
-async function loadWriteFreeze(){
-  try{ const h=await fetch('/api/health',{cache:'no-store'}).then(r=>r.json()); paintWriteFreeze(!!h.writeFrozen); }catch(e){}
+try{ window.paintBlocage = paintBlocage; }catch(e){}
+function paintWriteFreeze(on){ paintBlocage({ actif: !!on, mode: 'ecriture', bloque: false }); }   /* compatibilité (lot 97) */
+async function loadBlocage(direct){
+  try{
+    var h = {};
+    try{ h = Object.assign(h, cliHdrs()); }catch(e){}
+    try{ h = Object.assign(h, jetonProHeaders()); }catch(e){}
+    var d = await fetch('/api/blocage',{cache:'no-store', headers:h}).then(r=>r.json());
+    paintBlocage(d);
+    return d;
+  }catch(e){ return null; }
 }
-loadWriteFreeze();
-setInterval(loadWriteFreeze, 20000);
+try{ window.loadBlocage = loadBlocage; }catch(e){}
+function loadWriteFreeze(){ return loadBlocage(); }                                              /* compatibilité (lot 97) */
+try{ window.loadWriteFreeze = loadWriteFreeze; }catch(e){}
+/* 🔔 le serveur prévient en direct : blocage activé/levé, autorisation retirée… (voir net.js) */
+window.kleanOnBlocage = function(msg){
+  if(!msg) return;
+  paintBlocage(msg);
+  try{ if(msg.actif && msg.mode==='acces' && msg.bloque) toast('🔒 Accès bloqué par la direction'); }catch(e){}
+};
+/* l'état est déjà dans la page (écrit par le serveur) : le point de blocage apparaît sans attendre */
+try{ if(window.KLEAN_BLOCAGE_ETAT) paintBlocage(window.KLEAN_BLOCAGE_ETAT); }catch(e){}
+loadBlocage();
+setInterval(function(){ loadBlocage(); }, 20000);
 function currentCity(){ return CITIES.find(x=>x.id===(c.city||'bouake')) || CITIES[0]; }
 function currentQuartiers(){ return currentCity().quartiers; }
 const QUARTIERS = CITIES[0].quartiers; // compat (Bouaké par défaut)
@@ -5209,7 +5266,7 @@ let FLIP = null, FLIP_SESS = null, FLIP_T0 = 0;
   try{ if(window.kVeilleRetirer) window.kVeilleRetirer(); }catch(e){}   /* l'alerte éventuelle s'efface d'elle-même */
   /* 🔎 « Vérifier les mises à jour » : le client (et le PDG) peut savoir d'un geste s'il a la
      dernière page. Sans cela, un téléphone pouvait rester sur l'ancienne version sans le dire. */
-  window.KLEAN_VERSION = '124.1';
+  window.KLEAN_VERSION = '125.0';
   window.kVerifierVersion = function(){
     try{ toast('🔍 Vérification de la mise à jour…'); }catch(e){}
     try{
@@ -9305,6 +9362,7 @@ async function emploiBesoins() {
     if (d.actif === false) { l.innerHTML = '⏸️ <b>Cette option est temporairement désactivée par KLEAN.</b>'; return; }
     if (!d.liste.length) { l.innerHTML = '<div style="background:var(--card);border:1.5px dashed var(--line);border-radius:15px;padding:14px;color:var(--muted);font-size:14px">Personne ne cherche quelqu’un pour l’instant. Revenez plus tard.</div>'; return; }
     l.innerHTML = d.liste.map(b => '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:15px;padding:13px;margin-bottom:10px">'
+      + '<div style="font-size:12px;font-weight:900;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">🔎 Recherche d’un travailleur — ' + (b.metierNom || b.titre || 'tous métiers') + ([b.quartier, b.ville].filter(Boolean).length ? ' — ' + [b.quartier, b.ville].filter(Boolean).join(' · ') : '') + '</div>'
       + '<b style="font-size:16px">' + (b.urgent ? '⚡ ' : '') + b.titre + '</b>'
       + '<div style="font-size:13.5px;color:var(--muted);margin-top:4px">' + [b.quartier, b.ville].filter(Boolean).join(' · ') + (b.salaire ? ' · ' + b.salaire : '') + (b.quand ? ' · ' + b.quand : '') + '</div>'
       + (b.description ? '<div style="font-size:14px;margin-top:6px;line-height:1.5">' + b.description + '</div>' : '')
@@ -9468,7 +9526,8 @@ function travPeindreEtat(txt) { const e = document.getElementById('trav-etat'); 
 function travPeindre(message) {
   const l = document.getElementById('trav-liste'); if (!l) return;
   const z = document.getElementById('trav-compris');
-  if (z) z.innerHTML = TRAV.compris ? ('✅ KLEAN a compris : ' + TRAV.compris) : '💡 Écrivez ce que vous cherchez — KLEAN comprend le français simple.';
+  if (z) z.innerHTML = TRAV.compris ? ('✅ KLEAN a compris : ' + TRAV.compris)
+    : (TRAV.total ? '💡 Vous n’avez pas précisé de métier : voici <b>toutes les personnes disponibles</b> dans la zone choisie.' : '💡 Écrivez ce que vous cherchez — KLEAN comprend le français simple.');
   travPeindreEtat('<b>' + TRAV.total + '</b> personne(s) disponible(s)'
     + (TRAV.portee === 'pres' ? ' · autour de vous' : TRAV.portee === 'ci' ? ' · partout en Côte d’Ivoire' : ''));
   if (!TRAV.liste.length) {
@@ -9480,6 +9539,7 @@ function travPeindre(message) {
     + (p.photo ? '<img src="' + p.photo + '" alt="photo" style="width:64px;height:64px;object-fit:cover;border-radius:13px;flex:none;background:#f2f2f2">'
       : '<span style="width:64px;height:64px;border-radius:13px;flex:none;background:var(--pl);display:flex;align-items:center;justify-content:center;font-size:26px">👤</span>')
     + '<div style="flex:1;min-width:0">'
+    + '<div style="font-size:12px;font-weight:900;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">🔎 Recherche d’emploi — ' + (p.metierNom || p.metier || 'tous métiers') + (p.ville ? ' — ' + p.ville : (p.quartier ? ' — ' + p.quartier : '')) + '</div>'
     + '<b style="font-size:16.5px">' + p.nom + (p.prenom ? ' ' + p.prenom : '') + (p.valide ? ' <span style="font-size:11px;font-weight:900;background:#e9f7ef;color:#0d7a5f;padding:2px 7px;border-radius:99px">✅ validé</span>' : '') + '</b>'
     + '<div style="font-size:13.5px;color:var(--pd);font-weight:800;margin-top:3px">' + (p.metierNom || p.metier || 'Travail non précisé') + '</div>'
     + '<div style="font-size:13px;color:var(--muted);margin-top:3px">' + p.repere + (typeof p.distanceKm === 'number' ? ' · ' + (p.distanceKm < 1 ? 'à moins d’1 km' : p.distanceKm + ' km') : '') + '</div>'

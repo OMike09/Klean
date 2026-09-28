@@ -371,8 +371,16 @@ function emitAdmin(kind, text) { broadcast(adminSockets(), { type: 'admin_event'
 function routeWsMessage(sock, msg) {
   sock.meta = sock.meta || { missions: new Set() };
   if (writesFrozen() && msg.type !== 'ping') {
-    wsSend(sock, { type: 'frozen', error: 'Écriture désactivée par le PDG' });
-    return;
+    /* 🔴 LOT 125 : l'autorisation exceptionnelle vaut aussi pour le temps réel — un compte autorisé
+       continue de discuter normalement ; les autres reçoivent l'état du point de blocage existant. */
+    let autorise = false;
+    try { autorise = blkWsAutorise(sock, msg); } catch (e) { }
+    if (!autorise) {
+      wsSend(sock, blocageActif() && blk().mode === 'acces'
+        ? { type: 'blocage', actif: true, mode: 'acces', message: blk().message, bloque: true, status: 'BLOCKED' }
+        : { type: 'frozen', error: 'Écriture désactivée par le PDG' });
+      return;
+    }
   }
   switch (msg.type) {
     case 'hello':
@@ -5293,15 +5301,19 @@ const TRAV_METIERS = [
   { id: 'comptabilite', nom: 'Comptabilité / gestion', ic: '🧮', cle: ['comptable', 'comptabilite', 'caisse', 'gestion', 'financier', 'audit', 'facturation'] },
   { id: 'secretariat', nom: 'Secrétariat / informatique', ic: '💻', cle: ['secretaire', 'secretariat', 'assistant', 'assistante', 'informatique', 'ordinateur', 'saisie', 'bureautique', 'receptionniste', 'accueil'] },
   { id: 'agriculture', nom: 'Agriculture / élevage', ic: '🌾', cle: ['agriculteur', 'agriculture', 'champ', 'plantation', 'cacao', 'cafe', 'riz', 'maraichage', 'elevage', 'poulet', 'betail', 'peche', 'pecheur', 'jardinier', 'jardinage'] },
-  { id: 'nounou', nom: 'Garde d’enfants / nounou', ic: '🧒', cle: ['nounou', 'nourrice', 'garde d enfant', 'garde enfants', 'baby sitter', 'baby-sitter', 'garder les enfants', 'gardienne d enfants'] },
+  { id: 'nounou', nom: 'Garde d’enfants / nounou', ic: '🧒', cle: ['nounou', 'nourrice', 'garde d enfant', 'garde d enfants', 'garde enfants', 'baby sitter', 'baby-sitter', 'garder les enfants', 'garder mes enfants', 'garder des enfants', 'garder un enfant', 'garder bebe', 'garder le bebe', 'gardienne d enfants', 'surveiller les enfants', 'surveiller mes enfants', 'occuper des enfants', 'occuper les enfants', 's occuper des enfants', "s'occuper des enfants", 's occuper des enfants a la maison', 'nounou a domicile', 'maison des enfants'] },
   { id: 'soins', nom: 'Santé / aide à la personne', ic: '🩺', cle: ['aide soignant', 'aide-soignant', 'infirmier', 'infirmiere', 'sante', 'garde malade', 'personne agee', 'vieillard', 'maternite', 'pharmacie', 'vendeur en pharmacie'] },
   { id: 'securite_incendie', nom: 'Sécurité incendie / plongeur', ic: '🧯', cle: ['pompier', 'incendie', 'secouriste', 'plongeur sous marin'] },
-  { id: 'apprenti', nom: 'Apprenti / débutant', ic: '🎓', cle: ['apprenti', 'apprentissage', 'stage', 'stagiaire', 'debutant', 'formation', 'aide', 'assistant technique', 'travailleur'] },
+  { id: 'apprenti', nom: 'Apprenti / débutant', ic: '🎓', cle: ['apprenti', 'apprentissage', 'stage', 'stagiaire', 'debutant', 'jeune travailleur', 'premier emploi', 'sans experience'] },
   { id: 'autre', nom: 'Autre travail', ic: '✨', cle: [] }
 ];
 /* mots qui veulent simplement dire « travail » : ils ne désignent aucun métier */
-const TRAV_MOTS_TRAVAIL = ['travail', 'travaux', 'boulot', 'boulot', 'job', 'emploi', 'taf', 'activite', 'mission', 'petit boulot', 'service', 'besogne', 'gagne pain', 'gagner ma vie', 'gagner de l argent'];
-const TRAV_VIDES = ['je', 'tu', 'il', 'elle', 'nous', 'vous', 'ils', 'elles', 'moi', 'toi', 'on', 'me', 'te', 'se', 'moi meme', 'veux', 'veut', 'vouloir', 'cherche', 'chercher', 'recherche', 'rechercher', 'besoin', 'souhaite', 'souhaiter', 'aide', 'aidez', 'svp', 'please', 'urgent', 'urgemment', 'pour', 'dans', 'en', 'a', 'au', 'aux', 'de', 'des', 'du', 'le', 'la', 'les', 'un', 'une', 'qui', 'que', 'quoi', 'quelqu', 'quelqu un', 'quelquun', 'personne', 'gens', 'gars', 'type', 'homme', 'femme', 'dame', 'monsieur', 'madame', 'est', 'suis', 'y', 'ya', 'il y a', 'est ce que', 'bonjour', 'salut', 'merci', 'aussi', 'encore', 'poste', 'place', 'quelque chose'];
+const TRAV_MOTS_TRAVAIL = ['travail', 'travaux', 'boulot', 'boulot', 'job', 'emploi', 'taf', 'activite', 'mission', 'petit boulot', 'service', 'besogne', 'gagne pain', 'gagner ma vie', 'gagner de l argent',
+  /* les verbes : « je cherche quelqu'un POUR TRAVAILLER » ne doit pas vider la recherche */
+  'travailler', 'travaille', 'travaillez', 'travaillons', 'embaucher', 'embauche', 'recruter', 'recrute', 'recrutement', 'recrutons', 'occuper', 'aider'];
+const TRAV_VIDES = ['je', 'tu', 'il', 'elle', 'nous', 'vous', 'ils', 'elles', 'moi', 'toi', 'on', 'me', 'te', 'se', 'moi meme', 'veux', 'veut', 'vouloir', 'cherche', 'chercher', 'recherche', 'rechercher', 'besoin', 'souhaite', 'souhaiter', 'aide', 'aidez', 'svp', 'please', 'urgent', 'urgemment', 'pour', 'dans', 'en', 'a', 'au', 'aux', 'de', 'des', 'du', 'le', 'la', 'les', 'un', 'une', 'qui', 'que', 'quoi', 'quelqu', 'quelqu un', 'quelquun', "quelqu'un", 'personne', 'gens', 'gars', 'type', 'homme', 'femme', 'dame', 'monsieur', 'madame', 'est', 'suis', 'y', 'ya', 'il y a', 'est ce que', 'bonjour', 'salut', 'merci', 'aussi', 'encore', 'poste', 'place', 'quelque chose',
+  /* on parle comme on parle : ces mots ne doivent pas filtrer les résultats */
+  'aimerais', 'aimerait', 'voudrais', 'voudrait', 'peux', 'peut', 'pourrais', 'pourrait', 'c est', "c'est", "j'ai", 'j ai', "n'importe", 'n importe', "s'occuper", 'aujourd', 'hui', 'maintenant', 'vite', 'besoin de', 'recherchons', 'engager', 'prendre'];
 /* fautes et abréviations courantes, écrites comme on parle */
 const TRAV_CORRECTIONS = [
   ['chaufeur', 'chauffeur'], ['chauffeur', 'chauffeur'], ['chauf', 'chauffeur'], ['shauffeur', 'chauffeur'],
@@ -5340,8 +5352,9 @@ function travComprendre(txt, options) {
       if (cc && new RegExp('(^| )' + cc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '( |$)').test(s)) trouve.push({ id: m.id, nom: m.nom, ic: m.ic, cle: c });
     });
   });
-  /* le métier le plus précis l'emporte (le premier trouvé dans l'ordre de la liste) */
-  const metier = trouve[0] || null;
+  /* le métier le plus précis l'emporte : la clé la PLUS LONGUE trouvée dans la phrase.
+     Exemple : « je cherche une garde d'enfants » → Garde d'enfants (nounou), pas « gardien ». */
+  const metier = trouve.slice().sort((a, b) => String(b.cle).length - String(a.cle).length)[0] || null;
   /* une ville ? (celles de KLEAN + les villes connues de Côte d'Ivoire) */
   let ville = '';
   try {
@@ -5384,6 +5397,9 @@ const MOD_INTERDITS = [
   { id: 'violence', txt: 'violence ou acte criminel', re: /\b(tuer|assassiner|assassinat|meurtre|braquage|braquer une banque|enlevement|kidnapping|kidnapper|racket|extorsion|agression|agresser|casser du monde|attaque armee|recel|receleur)\b/ },
   { id: 'faux', txt: 'faux documents ou fraude', re: /\b(faux diplome|faux diplomes|faux papier|faux papiers|faux document|faux documents|falsifier|falsification|faussaire|fausse carte|fausse piece|faux acte|faux certificat|vaccin falsifie)\b/ },
   { id: 'arnaque', txt: 'escroquerie', re: /\b(arnaque|arnaquer|escroquerie|escroc|faux billets|fausse monnaie|blanchiment d argent|detournement de fonds|avance sur salaire pour frais de dossier)\b/ },
+  { id: 'loi', txt: 'contournement de la loi ou corruption', re: /\b(corruption|corrompre|pot de vin|pots de vin|soudoyer|soudoyage|graisser la patte|marcher a la douane|contourner la douane|contourner la loi|contourner la police|fausse declaration|fausses declarations|fraude fiscale|fraude douaniere|faux papiers a l etranger|passer la douane sans|payer pour ne pas etre vu)\b/ },
+  { id: 'effraction', txt: 'cambriolage ou effraction', re: /\b(cambriolage|cambriolages|cambrioler|cambrioleur|effraction|monter un coup|preparer un coup|ouvrir un coffre fort|forcer une porte)\b/ },
+  { id: 'esclavage', txt: 'travail forcé ou exploitation', re: /\b(travail force|travaux forces|travail force des enfants|mariage force|mariages forces|vendre un bebe|vendre des bebes|bebe a vendre|vente de bebe|exploiter des enfants|faire travailler des enfants)\b/ },
   { id: 'trafic', txt: 'trafic, contrebande ou recel', re: /\b(trafic|traficotage|contrebande|recel|receleur|dealer|deal de|marchandise volee|marchandises volees|moto volee|motos volees|voiture volee|voitures volees|objets voles|produits voles|travail avec des voleurs)\b/ }
 ];
 /* Ce qui est AMBIGU : légitime dans un contexte de travail, inquiétant sans contexte. */
@@ -5400,6 +5416,7 @@ const MOD_AMBIGUS = [
 ];
 const MOD_DEGRES = [
   { id: 'contact_hors_plateforme', txt: 'demande de payer AVANT tout travail', re: /\b(payer d abord|paie d abord|envoie l argent avant|payer pour avoir le travail|frais de dossier avant)\b/, niveau: 'verifier' },
+  { id: 'papiers', txt: 'travail sans papiers (à vérifier)', re: /\b(sans papiers?|sans carte|papiers pas en regle|non declare|au noir)\b/, niveau: 'verifier' },
   { id: 'mineur', txt: 'travail d’un enfant', re: /\b(enfant de moins de 5|bebe pour travailler|petit de 8 ans|moins de 12 ans|enfant pour travailler au champ)\b/, niveau: 'verifier' }
 ];
 function modAnalyser(textes, meta) {
@@ -5657,6 +5674,14 @@ async function travRoutes(req, res, p, url) {
       if (!travFiltreGeo(x, q)) return false;
       return true;
     });
+    /* 🫱 filet de sécurité demandé par le PDG : si AUCUN métier n'a été reconnu et que la phrase
+       ne donne aucun résultat, on ne laisse pas l'utilisateur devant une page vide :
+       on montre toutes les personnes disponibles de la zone, et on lui explique comment affiner. */
+    let elargi = false;
+    if (!liste.length && !c.metier && texte) {
+      elargi = true;
+      liste = db.trav.filter(travVisible).filter(x => travFiltreGeo(x, q));
+    }
     liste = liste.map(x => ({ x, s: travScore(x, q) }))
       .sort((a, b) => (a.s.rang - b.s.rang) || ((a.s.dist === null ? 1e9 : a.s.dist) - (b.s.dist === null ? 1e9 : b.s.dist)) || String(b.x.at || '').localeCompare(String(a.x.at || '')))
       .slice(0, Math.max(1, Math.min(120, Number(url.searchParams.get('limite')) || 60)))
@@ -5664,7 +5689,9 @@ async function travRoutes(req, res, p, url) {
     liste.forEach(l => { const x = db.trav.find(z => z.id === l.id); if (x) x.vues = (x.vues || 0) + 1; });
     return sendJson(res, 200, {
       ok: true, actif: true, liste, total: liste.length, compris: c.resume, comprehension: { metier: c.metier ? c.metier.id : '', metierNom: c.metier ? c.metier.nom : '', ic: c.metier ? c.metier.ic : '', ville: c.ville, portee: c.portee || q.portee, type: c.type },
-      message: liste.length ? '' : 'Personne ne correspond pour l’instant — élargissez la zone (« Partout en Côte d’Ivoire ») ou changez les mots.'
+      elargi,
+      message: liste.length ? (elargi ? 'Voici toutes les personnes disponibles de la zone — précisez le métier (par ex. « chauffeur », « ménage ») pour affiner.' : '')
+        : 'Personne ne correspond pour l’instant — élargissez la zone (« Partout en Côte d’Ivoire ») ou changez les mots.'
     }), true;
   }
   if (p === '/api/trav/comprendre' && req.method === 'GET') {
@@ -6133,6 +6160,277 @@ async function travRoutes(req, res, p, url) {
     }
   }
   return false;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   🔴 29/09 — LOT 125 : BLOCAGE GLOBAL D'INTER (le point de blocage EXISTANT, renforcé)
+
+   ⚠️ RÈGLE DU PDG : « Le système possède DÉJÀ un point de blocage global. NE PAS en créer un
+   autre. » → Ce module NE crée rien : il branché sa logique sur l'interrupteur du lot 97
+   (db.config.gestFrozen), sur l'écran #klean-freeze de l'application et sur la fenêtre
+   « ⛔ Bloquer l'entreprise » du tableau de bord. Un seul état, une seule route, un seul écran.
+
+   Ce qui change :
+     GLOBAL_STATUS = BLOCKED → l'accès à INTER est refusé à TOUS les comptes,
+        SAUF ceux qui disposent d'une AUTORISATION EXCEPTIONNELLE :
+          · des comptes précis (administrateur secondaire, professionnel X, client Y…),
+          · une catégorie entière (tous les administrateurs / tous les pros / tous les clients),
+          · une zone (tous les comptes d'une ville).
+     GLOBAL_STATUS = NORMAL → tout le monde retrouve ses droits habituels.
+
+   ⛔ Une autorisation exceptionnelle NE DONNE AUCUN DROIT SUPPLÉMENTAIRE : le compte autorisé
+      retrouve exactement les permissions qu'il avait avant le blocage.
+
+   Priorité : BLOCAGE GLOBAL → autorisation exceptionnelle ? → accès selon les permissions
+              habituelles, sinon → point de blocage existant.
+   Le contrôle est fait CÔTÉ SERVEUR sur chaque requête : ni le rechargement, ni une ancienne
+   session, ni une ancienne version, ni une URL directe ne permettent de le contourner.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+const BLK_MODES = ['acces', 'ecriture'];       /* 'acces' = blocage total · 'ecriture' = lecture seule (fonction du lot 97) */
+const BLK_CATEGORIES = ['gestionnaires', 'pros', 'clients'];
+
+/* 🔌 UN SEUL INTERRUPTEUR : celui du lot 97 (db.config.gestFrozen) — jamais un second système */
+function blocageActif() { return !!(db.config && db.config.gestFrozen); }
+function blocageStatus() { return blocageActif() ? 'BLOCKED' : 'NORMAL'; }
+function blk() {
+  db.config = db.config || {};
+  const b = db.config.blocage = db.config.blocage || {};
+  if (BLK_MODES.indexOf(b.mode) < 0) b.mode = 'acces';
+  if (typeof b.message !== 'string' || !b.message.trim()) b.message = 'KLEAN est momentanément bloqué par la direction. Vous retrouverez l’application très vite.';
+  b.excep = b.excep || { comptes: [], categories: [], villes: [] };
+  ['comptes', 'categories', 'villes'].forEach(k => { if (!Array.isArray(b.excep[k])) b.excep[k] = []; });
+  if (!Array.isArray(b.histo)) b.histo = [];
+  return b;
+}
+/* 🕵️ qui parle ? (PDG, administrateur secondaire, professionnel, client, ou visiteur sans compte) */
+function blkAgent(req, body) {
+  try {
+    const h = String((req.headers && (req.headers['x-agent-token'] || req.headers['X-Agent-Token'])) || '').trim();
+    const j = h || String((body && body.jeton) || '').trim();
+    if (!j) return null;
+    return (db.agents || []).find(a => a.jeton && a.jeton === j) || null;
+  } catch (e) { return null; }
+}
+function blkQui(req, body) {
+  try {
+    const hq = hqIdentity(req);
+    if (hq) return hq.role === 'pdg'
+      ? { type: 'pdg', id: 'pdg', nom: 'Administrateur principal', tel: '', ville: '' }
+      : { type: 'gestionnaire', id: hq.id || 'gest', nom: hq.nom || 'Administrateur', tel: '', ville: '' };
+  } catch (e) { }
+  try {
+    const cl = findClientByToken(req);
+    if (cl) return { type: 'client', id: cl.id, nom: cl.nom || 'Client', tel: cl.tel || '', ville: cl.ville || '' };
+  } catch (e) { }
+  const ag = blkAgent(req, body);
+  if (ag) return { type: 'pro', id: ag.id, nom: ag.nom || 'Professionnel', tel: ag.tel || ag.tel1 || '', ville: ag.ville || '', numPro: ag.numPro || '' };
+  return null;
+}
+/* ✅ l'autorisation exceptionnelle (compte précis → catégorie → zone) et D'OÙ elle vient */
+function blkAutorisation(b, compte) {
+  if (!compte) return null;
+  if (compte.type === 'pdg') return 'administrateur principal';
+  if (b.excep.comptes.indexOf(compte.id) >= 0) return 'compte autorisé';
+  const cat = compte.type === 'gestionnaire' ? 'gestionnaires' : (compte.type === 'pro' ? 'pros' : (compte.type === 'client' ? 'clients' : ''));
+  if (cat && b.excep.categories.indexOf(cat) >= 0) return 'catégorie « ' + (cat === 'gestionnaires' ? 'tous les administrateurs' : (cat === 'pros' ? 'tous les professionnels' : 'tous les clients')) + ' »';
+  if (compte.ville && b.excep.villes.length) {
+    const v = normVille(compte.ville);
+    if (b.excep.villes.some(x => normVille(x) === v)) return 'zone « ' + compte.ville + ' »';
+  }
+  return null;
+}
+/* 🧭 LA décision centrale : qui peut accéder, qui voit le point de blocage */
+function blkDecision(req, body) {
+  const b = blk();
+  if (!blocageActif()) return { actif: false, status: 'NORMAL', mode: b.mode, message: b.message, depuis: '', bloque: false, compte: null, autorisation: null };
+  const compte = blkQui(req, body);
+  const auth = blkAutorisation(b, compte);
+  return {
+    actif: true, status: 'BLOCKED', mode: b.mode, message: b.message, depuis: b.depuis || '', par: b.par || '',
+    compte: compte, autorisation: auth,
+    bloque: !auth,                                  /* pas d'autorisation → point de blocage existant */
+    raison: compte ? (auth ? ('accès exceptionnel — ' + auth) : 'compte non autorisé pendant le blocage') : 'aucun compte : visiteur'
+  };
+}
+/* 📡 même décision pour une connexion temps réel (l'identité vient du message ou de la connexion) */
+function blkWsAutorise(sock, msg) {
+  const meta = (sock && sock.meta) || {};
+  const entetes = { cookie: '' };
+  const jeton = String((msg && msg.jeton) || meta.jeton || '').trim();
+  if (jeton) entetes['x-agent-token'] = jeton;
+  const req = { headers: entetes };
+  const faux = { jeton: jeton, clientId: (msg && msg.clientId) || meta.clientId || '' };
+  const d = blkDecision(req, faux);
+  if (d.compte) return d.bloque === false;
+  /* le serveur peut aussi reconnaître le compte par la connexion elle-même */
+  const ag = db.agents.find(a => a.id === meta.agentId);
+  const cl = db.clients.find(c => c.id === meta.clientId);
+  const compte = ag ? { type: 'pro', id: ag.id, ville: ag.ville || '' } : (cl ? { type: 'client', id: cl.id, ville: cl.ville || '' } : null);
+  return !!(compte && blkAutorisation(blk(), compte));
+}
+/* 🔓 les routes qui restent toujours ouvertes : sinon le PDG ne pourrait plus débloquer,
+      et l'application ne pourrait plus savoir qu'elle est bloquée. */
+const BLK_OUVERTES = ['/api/blocage', '/api/health', '/api/admin/login', '/api/admin/setup', '/api/admin/logout',
+  '/api/admin/whoami', '/api/admin/password', '/api/admin/blocage', '/api/admin/gest-freeze', '/api/admin/verifier'];
+function blkRouteOuverte(p) { return BLK_OUVERTES.indexOf(p) >= 0; }
+/* 📜 historique : qui a fait quoi, quand (le PDG doit pouvoir tout relire) */
+function blkJournal(action, detail, par) {
+  const b = blk();
+  b.histo.unshift({ at: nowISO(), action: action, detail: detail || '', par: par || 'PDG' });
+  b.histo = b.histo.slice(0, 500);
+  try { auditLog('blocage_' + action, { detail: detail || '' }); } catch (e) { }
+  return b.histo[0];
+}
+/* 📣 la mise à jour part TOUT DE SUITE vers les téléphones connectés (utilisateur déjà en ligne) */
+function blkDiffuser(action) {
+  const b = blk(), actif = blocageActif();
+  for (const s of [...sockets]) {
+    try {
+      const meta = s.meta || {};
+      let compte = null;
+      if (meta.clientId) compte = { type: 'client', id: meta.clientId };
+      else if (meta.agentId) compte = { type: 'pro', id: meta.agentId };
+      const bloque = actif && b.mode === 'acces' && !(compte && blkAutorisation(b, compte));
+      wsSend(s, { type: 'blocage', actif: actif, mode: b.mode, message: b.message, bloque: bloque, status: blocageActif() ? 'BLOCKED' : 'NORMAL', action: action || '' });
+    } catch (e) { }
+  }
+  saveDb();
+}
+/* 📇 l'annuaire des comptes pour le PDG (avec 🟢 Autorisé / 🔴 Bloqué, et d'où vient le droit) */
+function blkAnnuaire(q) {
+  const b = blk();
+  const filtre = String(q || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const ligne = (type, id, nom, tel, ville, extra) => {
+    const compte = { type: type, id: id, nom: nom, tel: tel || '', ville: ville || '' };
+    const auth = blkAutorisation(b, compte);
+    return Object.assign({ type: type, id: id, nom: nom || '—', tel: tel || '', ville: ville || '', numPro: (extra && extra.numPro) || '', autorise: !!auth, source: auth || '' }, extra || {});
+  };
+  const rows = [];
+  try { rows.push({ type: 'pdg', id: 'pdg', nom: 'Administrateur principal', tel: '', ville: '', numPro: '', autorise: true, source: 'administrateur principal' }); } catch (e) { }
+  (db.admins || []).forEach(g => rows.push(ligne('gestionnaire', g.id, g.nom || 'Administrateur secondaire', g.tel || '', g.ville || '', { role: g.role || 'gestionnaire' })));
+  (db.agents || []).forEach(a => rows.push(ligne('pro', a.id, a.nom, a.tel || a.tel1 || '', a.ville || '', { numPro: a.numPro || '', statut: a.status || '' })));
+  (db.clients || []).forEach(c => rows.push(ligne('client', c.id, c.nom, c.tel || '', c.ville || '', {})));
+  const total = rows.length;
+  const liste = filtre ? rows.filter(r => [r.nom, r.tel, r.id, r.numPro, r.ville, r.type].join(' ').toLowerCase().indexOf(filtre) >= 0) : rows;
+  return { total: total, liste: liste.slice(0, 400), autorises: rows.filter(r => r.autorise).length };
+}
+/* 🌐 les routes du blocage (une seule API pour tout le système) */
+async function blocageRoutes(req, res, p, url) {
+  if (p === '/api/blocage' && req.method === 'GET') {
+    const d = blkDecision(req);
+    return sendJson(res, 200, {
+      ok: true, actif: d.actif, status: d.status, mode: d.mode, message: d.message, depuis: d.depuis,
+      bloque: d.bloque, autorisation: d.autorisation || '', compte: d.compte ? d.compte.type : 'visiteur'
+    }), true;
+  }
+  if (p === '/api/admin/blocage') {
+    const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+    if (!hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise', code: 'session' }), true;
+    const b = blk(), pdg = hq.role === 'pdg';
+    if (req.method === 'GET') {
+      const ann = blkAnnuaire(url.searchParams.get('q') || '');
+      return sendJson(res, 200, {
+        ok: true, pdg: pdg, role: hq.role, actif: blocageActif(), status: blocageStatus(), mode: b.mode, message: b.message,
+        depuis: b.depuis || '', par: b.par || '', excep: b.excep, categories: b.excep.categories.map(c => ({
+          id: c, nom: c === 'gestionnaires' ? 'Tous les administrateurs' : (c === 'pros' ? 'Tous les professionnels' : 'Tous les clients')
+        })),
+        autorises: ann.autorises, totalComptes: ann.total, annuaire: ann.liste, histo: b.histo.slice(0, 80),
+        /* ℹ️ l'état de MON compte (pour l'écran du tableau de bord) */
+        moi: blkDecision(req).bloque === false ? 'autorise' : 'bloque'
+      }), true;
+    }
+    if (req.method === 'POST') {
+      if (!pdg) return sendJson(res, 403, { error: 'Réservé au PDG : seul le compte principal gère le blocage global', code: 'pdg' }), true;
+      const B = await readBody(req).catch(() => ({}));
+      const action = String(B.action || '');
+      const motDePasse = String(B.password || '');
+      const verif = () => (!db.admin || hashPassword(db.admin.salt, motDePasse) === db.admin.passHash);
+      /* les gestes sensibles (bloquer / réactiver / changer de force) demandent le mot de passe du PDG,
+         comme le faisait déjà la fenêtre existante « Bloquer l'entreprise » */
+      if (['activer', 'desactiver', 'mode'].indexOf(action) >= 0 && !verif())
+        return sendJson(res, 401, { error: 'Mot de passe PDG incorrect', code: 'password' }), true;
+      if (action === 'activer') {
+        db.config = db.config || {}; db.config.gestFrozen = true;
+        if (BLK_MODES.indexOf(B.mode) >= 0) b.mode = B.mode;
+        b.depuis = nowISO(); b.par = 'PDG'; b.masqueAt = null;
+        blkJournal('blocage_global_activé', (b.mode === 'acces' ? 'accès total bloqué' : 'écriture seule coupée') + ' — autorisations exceptionnelles conservées');
+        blkDiffuser('activer');
+        try { emitAdmin('admin', '🔴 LE PDG BLOQUE INTER' + (b.mode === 'acces' ? ' (accès total)' : ' (écriture seule)') + ' — autorisations exceptionnelles : ' + b.excep.comptes.length + ' compte(s)'); } catch (e) { }
+        return sendJson(res, 200, { ok: true, actif: true, status: 'BLOCKED', mode: b.mode, depuis: b.depuis, message: b.message }), true;
+      }
+      if (action === 'desactiver') {
+        db.config = db.config || {}; db.config.gestFrozen = false;
+        b.desAt = nowISO();
+        blkJournal('reactivation', 'INTER revenu au fonctionnement normal — les autorisations exceptionnelles sont conservées dans l’historique');
+        blkDiffuser('desactiver');
+        try { emitAdmin('admin', '🟢 INTER réactivé par le PDG — tout le monde retrouve ses droits habituels'); } catch (e) { }
+        return sendJson(res, 200, { ok: true, actif: false, status: 'NORMAL' }), true;
+      }
+      if (action === 'mode') {
+        if (BLK_MODES.indexOf(B.mode) < 0) return sendJson(res, 400, { error: 'Mode inconnu' }), true;
+        b.mode = B.mode; blkJournal('mode', b.mode === 'acces' ? 'blocage total' : 'lecture seule');
+        blkDiffuser('mode');
+        return sendJson(res, 200, { ok: true, mode: b.mode }), true;
+      }
+      if (action === 'message') {
+        b.message = String(B.message || '').replace(/\s+/g, ' ').trim().slice(0, 400) || b.message;
+        blkJournal('message', 'nouveau message du point de blocage : « ' + b.message.slice(0, 120) + ' »');
+        blkDiffuser('message');
+        return sendJson(res, 200, { ok: true, message: b.message }), true;
+      }
+      if (action === 'autoriser' || action === 'retirer') {
+        const garder = action === 'autoriser';
+        if (B.cible === 'categorie') {
+          const cat = String(B.categorie || '');
+          if (BLK_CATEGORIES.indexOf(cat) < 0) return sendJson(res, 400, { error: 'Catégorie inconnue' }), true;
+          const i = b.excep.categories.indexOf(cat);
+          if (garder && i < 0) b.excep.categories.push(cat);
+          if (!garder && i >= 0) b.excep.categories.splice(i, 1);
+          blkJournal(garder ? 'categorie_autorisee' : 'categorie_retiree', cat);
+        } else if (B.cible === 'zone') {
+          const v = String(B.ville || '').trim().slice(0, 60);
+          if (!v) return sendJson(res, 400, { error: 'Indiquez la zone' }), true;
+          const i = b.excep.villes.findIndex(x => normVille(x) === normVille(v));
+          if (garder && i < 0) b.excep.villes.push(v);
+          if (!garder && i >= 0) b.excep.villes.splice(i, 1);
+          blkJournal(garder ? 'zone_autorisee' : 'zone_retiree', v);
+        } else {
+          const id = String(B.id || '').trim();
+          if (!id) return sendJson(res, 400, { error: 'Compte inconnu' }), true;
+          const i = b.excep.comptes.indexOf(id);
+          if (garder && i < 0) b.excep.comptes.push(id);
+          if (!garder && i >= 0) b.excep.comptes.splice(i, 1);
+          const qui = (db.agents || []).find(a => a.id === id) || (db.clients || []).find(c => c.id === id) || (db.admins || []).find(g => g.id === id);
+          blkJournal(garder ? 'compte_autorise' : 'compte_retire', (qui ? (qui.nom + ' (' + id + ')') : id));
+          if (!garder) {
+            /* 📴 retrait d'autorisation : les téléphones déjà connectés sont prévenus immédiatement */
+            try {
+              const s = [...sockets].find(x => x.meta && (x.meta.agentId === id || x.meta.clientId === id));
+              if (s && blocageActif() && b.mode === 'acces') wsSend(s, { type: 'blocage', actif: true, mode: 'acces', message: b.message, bloque: true, status: 'BLOCKED', action: 'retrait' });
+            } catch (e) { }
+          }
+        }
+        blkDiffuser(action);
+        return sendJson(res, 200, { ok: true, excep: b.excep, message: garder ? '🟢 Accès autorisé pendant le blocage' : '🔴 Autorisation retirée' }), true;
+      }
+      if (action === 'histo') return sendJson(res, 200, { ok: true, histo: b.histo.slice(0, 200) }), true;
+      if (action === 'regler') return sendJson(res, 200, { ok: true, message: b.message }), true;
+      return sendJson(res, 400, { error: 'Action inconnue : ' + action }), true;
+    }
+  }
+  return false;
+}
+/* 🖥️ le drapeau injecté dans les pages : même une page ouverte par une URL directe
+      (ou une ancienne version conservée par le téléphone) affiche le point de blocage. */
+function blkInjection(req) {
+  try {
+    const d = blkDecision(req);
+    const etat = {
+      actif: d.actif, status: d.status, mode: d.mode, message: d.message, depuis: d.depuis,
+      bloque: !!d.bloque, autorisation: d.autorisation || '', compte: d.compte ? d.compte.type : 'visiteur'
+    };
+    return '<script>window.KLEAN_BLOCAGE_ETAT=' + JSON.stringify(etat).replace(/</g, '\\u003c') + ';</script>';
+  } catch (e) { return ''; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════════
@@ -6917,10 +7215,40 @@ async function accueilRoutes(req, res, p, url) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
+
+  /* ═══════════════════════════════════════════════════════════════════════════════════
+     🔴 LOT 125 — LE CONTRÔLE GLOBAL, EN UN SEUL ENDROIT, AVANT TOUTE AUTRE ROUTE.
+     Ordre voulu par le PDG : BLOCAGE GLOBAL → autorisation exceptionnelle ? → accès selon
+     les permissions habituelles, sinon → point de blocage existant.
+     Rien ne peut le contourner : rechargement, ancienne session, ancien lien, URL directe,
+     ancienne version conservée par le téléphone (la décision est prise ici, côté serveur).
+     ═══════════════════════════════════════════════════════════════════════════════════ */
+  const freezeAllow = ['/api/admin/login', '/api/admin/setup', '/api/admin/logout', '/api/admin/password', '/api/admin/gest-freeze', '/api/presence', '/api/quiz/chat', '/api/annonce/react'];
+  if (p.indexOf('/api/') === 0 && !blkRouteOuverte(p)) {
+    const methAvant = (req.method || 'GET').toUpperCase();
+    const dec = blkDecision(req);
+    /* ① blocage total : tout est refusé sauf les comptes autorisés */
+    if (dec.actif && dec.mode === 'acces' && dec.bloque) {
+      return sendJson(res, 403, {
+        ok: false, code: 'blocage', blocage: true, status: 'BLOCKED', actif: true, mode: 'acces',
+        message: dec.message, depuis: dec.depuis || '', compte: dec.compte ? dec.compte.type : 'visiteur',
+        error: dec.message
+      });
+    }
+    /* ② lecture seule (fonction du lot 97, conservée) : les écritures restent coupées,
+          sauf pour le PDG sur son tableau de bord et pour les comptes autorisés */
+    if (writesFrozen() && ['GET', 'HEAD', 'OPTIONS'].indexOf(methAvant) < 0 && freezeAllow.indexOf(p) < 0) {
+      const id = hqIdentity(req);
+      const excepte = dec.compte && dec.bloque === false;
+      if (!(id && id.role === 'pdg' && p.startsWith('/api/admin')) && !excepte)
+        return sendJson(res, 403, { error: 'Écriture désactivée par le PDG — comptes clients, pros et gestionnaires en lecture seule', frozen: true, code: 'lecture_seule' });
+    }
+  }
   if (shieldGate(req, res, p)) return;
   /* 🧩 LOT 123 — Les grandes options de la page d'accueil (routeur centralisé) */
   if (await accueilRoutes(req, res, p, url)) return;
   /* 💼 LOT 124 — Recherche d'emploi & mise en relation (routeur centralisé) */
+  if (await blocageRoutes(req, res, p, url)) return;    /* 🔴 lot 125 : blocage global & accès exceptionnels */
   if (await travRoutes(req, res, p, url)) return;
 
   /* --- API --- */
@@ -7033,12 +7361,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   const meth = (req.method || 'GET').toUpperCase();
-  const freezeAllow = ['/api/admin/login', '/api/admin/setup', '/api/admin/logout', '/api/admin/password', '/api/admin/gest-freeze', '/api/presence', '/api/quiz/chat', '/api/annonce/react'];
-  if (writesFrozen() && !['GET', 'HEAD', 'OPTIONS'].includes(meth) && !freezeAllow.includes(p)) {
-    const id = hqIdentity(req);
-    if (!(id && id.role === 'pdg' && p.startsWith('/api/admin')))
-      return sendJson(res, 403, { error: 'Écriture désactivée par le PDG — comptes clients, pros et gestionnaires en lecture seule', frozen: true });
-  }
 
   if (p === '/api/match' && req.method === 'GET') {
     const cli = findClientByToken(req);
@@ -11127,7 +11449,11 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/admin/whoami' && req.method === 'GET') {
     const id = hqIdentity(req);
-    return sendJson(res, 200, { role: id.role, nom: id.nom, gestFrozen: !!(db.config && db.config.gestFrozen), stockage: stockageInfo() });
+    const d125 = blkDecision(req);   /* 🔴 lot 125 : ce compte est-il autorisé pendant le blocage ? */
+    return sendJson(res, 200, {
+      role: id.role, nom: id.nom, gestFrozen: !!(db.config && db.config.gestFrozen), stockage: stockageInfo(),
+      blocage: { actif: d125.actif, status: d125.status, mode: d125.mode, message: d125.message, bloque: d125.bloque, autorisation: d125.autorisation || '' }
+    });
   }
   if (p === '/api/admin/gest-freeze' && req.method === 'POST') {
     if (!pdgOnly(req, res)) return;
@@ -11136,7 +11462,18 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 401, { error: 'Mot de passe PDG incorrect' });
     db.config = db.config || {};
     db.config.gestFrozen = !!b.frozen;
+    if (db.config.gestFrozen) {
+      /* la fenêtre historique « Bloquer l'entreprise » garde son geste : on note le niveau demandé */
+      const bb = blk();
+      if (BLK_MODES.indexOf(b.mode) >= 0) bb.mode = b.mode;
+      bb.depuis = nowISO(); bb.par = 'PDG';
+      blkJournal('blocage_global_activé', (bb.mode === 'acces' ? 'accès total bloqué' : 'écriture seule coupée') + ' (fenêtre « Bloquer l’entreprise »)');
+    } else {
+      const bb = blk(); bb.desAt = nowISO();
+      blkJournal('reactivation', 'INTER réactivé (fenêtre « Bloquer l’entreprise »)');
+    }
     saveDb();
+    blkDiffuser(db.config.gestFrozen ? 'activer' : 'desactiver');
     auditLog(db.config.gestFrozen ? 'ecriture_gel' : 'ecriture_degel', { par: 'PDG' });
     emitAdmin('admin', db.config.gestFrozen ? '⛔ Écriture coupée (gestionnaires, clients, pros)' : '✅ Écriture réactivée');
     if (db.config.gestFrozen) {
@@ -11144,7 +11481,7 @@ const server = http.createServer(async (req, res) => {
         try { wsSend(s, { type: 'frozen', error: 'Écriture désactivée par le PDG' }); } catch (e) {}
       }
     }
-    return sendJson(res, 200, { ok: true, gestFrozen: db.config.gestFrozen });
+    return sendJson(res, 200, { ok: true, gestFrozen: db.config.gestFrozen, mode: blk().mode, message: blk().message });
   }
   if (p === '/api/admin/search' && req.method === 'GET') {
     const q = String(url.searchParams.get('q') || '').trim().toLowerCase();
@@ -13324,7 +13661,12 @@ const server = http.createServer(async (req, res) => {
     fs.readFile(path.join(__dirname, file), (err, data) => {
       if (err) { res.writeHead(404); res.end('404'); return; }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end(data);
+      /* 🔴 LOT 125 : l'état du blocage est écrit DANS la page servie — une URL directe, un ancien
+         lien ou une ancienne version du téléphone affichent donc le point de blocage existant. */
+      let html = data.toString('utf8');
+      const inj = blkInjection(req);
+      if (inj && html.indexOf('<head>') >= 0) html = html.replace('<head>', '<head>' + inj);
+      res.end(html);
     });
   };
   if (p === '/pdg' || p === '/admin' || p === '/admin.html' || p === '/admin-login.html') {
@@ -13364,6 +13706,12 @@ const server = http.createServer(async (req, res) => {
   fs.readFile(fp, (err, data) => {
     if (err) { res.writeHead(404); res.end('404'); return; }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    if (path.extname(fp) === '.html') {              /* 🔴 lot 125 : drapeau du blocage dans la page */
+      let html = data.toString('utf8');
+      const inj = blkInjection(req);
+      if (inj && html.indexOf('<head>') >= 0) html = html.replace('<head>', '<head>' + inj);
+      res.end(html); return;
+    }
     res.end(data);
   });
 });

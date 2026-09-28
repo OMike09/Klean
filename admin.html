@@ -1259,13 +1259,61 @@
 
   <div class="panel" style="margin-bottom:14px" id="panel-freeze">
     <h3>⛔ Bloquer l’entreprise</h3>
-    <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Action de <b>modération la plus forte</b> : tout Klean passe en lecture seule — plus aucune écriture (missions, comptes, paiements, chat) sauf la vôtre. À utiliser en cas d’attaque, de bug grave ou de fuite de données.</p>
+    <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Action de <b>modération la plus forte</b> : quand INTER est bloqué, l’accès est refusé à <b>tous</b> les comptes — l’écran de blocage de l’application apparaît partout. Seuls les comptes que vous autorisez (ci-dessous) continuent d’utiliser leurs droits habituels. À utiliser en cas d’attaque, de bug grave ou de fuite de données.</p>
     <div class="body" style="padding:12px 14px">
-      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Personne n’écrit plus : gestionnaires, <b>clients</b> et <b>professionnels</b> (missions, messages, inscriptions, profils). Lecture seule. Vous (PDG) restez maître du HQ. Mot de passe obligatoire.</p>
+      <div id="blk-etat" style="background:var(--card2);border:1.5px solid var(--line);border-radius:12px;padding:11px 12px;margin-bottom:10px;font-size:13px;font-weight:800;line-height:1.5">⏳ Lecture de l’état…</div>
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 6px;line-height:1.45"><b>Niveau du blocage</b> — le même interrupteur, deux forces :</p>
+      <select id="frz-mode" style="width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:9px">
+        <option value="acces">🔴 BLOCAGE TOTAL — personne n’entre, sauf les comptes autorisés</option>
+        <option value="ecriture">⏸️ Lecture seule — chacun entre, mais plus aucune écriture (réglage d’origine)</option>
+      </select>
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.45">Personne n’écrit plus : gestionnaires, <b>clients</b> et <b>professionnels</b> (missions, messages, inscriptions, profils). Vous (PDG) restez maître du HQ. Mot de passe obligatoire.</p>
       <input id="frz-pw" type="password" placeholder="Votre mot de passe PDG" style="width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit;margin-bottom:8px">
-      <button type="button" onclick="gelerGest(true)" style="width:100%;background:rgba(255,107,107,.14);border:1.5px solid rgba(255,107,107,.45);color:var(--red);font-weight:900;padding:12px;border-radius:12px;cursor:pointer;font-family:inherit;margin-bottom:7px">⛔ Couper toutes les écritures</button>
-      <button type="button" onclick="gelerGest(false)" class="btn-main" style="width:100%">✅ Réactiver les écritures</button>
+      <button type="button" onclick="gelerGest(true)" style="width:100%;background:rgba(255,107,107,.14);border:1.5px solid rgba(255,107,107,.45);color:var(--red);font-weight:900;padding:12px;border-radius:12px;cursor:pointer;font-family:inherit;margin-bottom:7px">⛔ BLOQUER INTER (l’accès est refusé à tous, sauf aux comptes autorisés)</button>
+      <button type="button" onclick="gelerGest(false)" class="btn-main" style="width:100%">✅ RÉACTIVER INTER (tout le monde retrouve ses droits habituels)</button>
       <div id="frz-state" style="margin-top:8px;font-size:12.5px;font-weight:800;color:var(--amber)"></div>
+
+      <hr style="border:none;border-top:1.5px dashed var(--line);margin:13px 0">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <b style="font-size:13px">🟢 COMPTES AUTORISÉS PENDANT LE BLOCAGE</b>
+        <span class="badge" id="blk-cnt" style="background:rgba(21,201,138,.15);color:var(--p);border-color:rgba(21,201,138,.4)">Accès exceptionnels : 0 compte</span>
+        <button type="button" onclick="blkBasculer()" class="btn-sec" id="blk-btn-acces" style="font-size:11px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;font-family:inherit">GÉRER LES ACCÈS</button>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.45">Une autorisation exceptionnelle donne <b>seulement l’accès</b> pendant le blocage : elle n’ajoute <b>aucun droit</b> supplémentaire. Sans autorisation, le compte voit l’écran de blocage.</p>
+
+      <div id="blk-acces" style="display:none;margin-top:11px">
+        <p style="font-size:12.5px;color:var(--muted);margin:0 0 7px;line-height:1.45"><b>Chercher un compte</b> — par nom, numéro de téléphone, identifiant, type de compte (client / professionnel / administrateur) ou identifiant professionnel.</p>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:9px">
+          <input id="blk-q" placeholder="Nom, téléphone, identifiant, id pro…" style="flex:1;min-width:170px;padding:10px 11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <select id="blk-type" style="padding:10px 11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+            <option value="">Tous les types</option>
+            <option value="client">Clients</option>
+            <option value="pro">Professionnels</option>
+            <option value="gestionnaire">Administrateurs</option>
+            <option value="pdg">Compte principal</option>
+          </select>
+          <button type="button" onclick="blkChercher()" class="btn-main" style="padding:10px 14px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">🔎 CHERCHER</button>
+        </div>
+        <p style="font-size:12.5px;color:var(--muted);margin:0 0 7px;line-height:1.45"><b>Ou autoriser une catégorie entière</b> :</p>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
+          <button type="button" onclick="blkToutCat('gestionnaires')" class="btn-sec" style="font-size:11px;font-weight:800;padding:8px 10px;border-radius:9px;cursor:pointer;font-family:inherit">👔 Tous les administrateurs</button>
+          <button type="button" onclick="blkToutCat('pros')" class="btn-sec" style="font-size:11px;font-weight:800;padding:8px 10px;border-radius:9px;cursor:pointer;font-family:inherit">🧑‍💼 Tous les professionnels</button>
+          <button type="button" onclick="blkToutCat('clients')" class="btn-sec" style="font-size:11px;font-weight:800;padding:8px 10px;border-radius:9px;cursor:pointer;font-family:inherit">🧍 Tous les clients</button>
+        </div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">
+          <input id="blk-ville" placeholder="Zone / ville (ex. Bouaké)" style="flex:1;min-width:150px;padding:10px 11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">
+          <button type="button" onclick="blkZone(true)" class="btn-sec" style="font-size:11px;font-weight:800;padding:8px 10px;border-radius:9px;cursor:pointer;font-family:inherit">📍 Autoriser cette zone</button>
+          <button type="button" onclick="blkZone(false)" class="btn-sec" style="font-size:11px;font-weight:800;padding:8px 10px;border-radius:9px;cursor:pointer;font-family:inherit">Retirer la zone</button>
+        </div>
+        <div id="blk-cats" style="font-size:12px;color:var(--muted);margin-bottom:10px"></div>
+        <div id="blk-liste" style="max-height:340px;overflow:auto;border:1.5px solid var(--line);border-radius:12px;padding:8px"></div>
+        <p style="font-size:12.5px;color:var(--muted);margin:12px 0 7px;line-height:1.45"><b>Message affiché sur l’écran de blocage</b> — les gens voient exactement ce texte :</p>
+        <textarea id="blk-message" rows="2" style="width:100%;padding:10px 11px;border-radius:10px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit"></textarea>
+        <button type="button" onclick="blkMessage()" class="btn-main" style="margin-top:7px;padding:10px 14px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit">💬 MODIFIER LE MESSAGE</button>
+        <p style="font-size:12.5px;color:var(--muted);margin:12px 0 7px;line-height:1.45"><b>Historique du blocage</b> — date et heure de chaque geste :</p>
+        <div id="blk-histo" style="max-height:240px;overflow:auto;border:1.5px solid var(--line);border-radius:12px;padding:8px;font-size:12px"></div>
+        <p style="font-size:11.5px;color:var(--muted);margin:9px 0 0;line-height:1.45">🔒 Aucune suppression de données : le blocage ne fait que fermer l’accès. Comptes, profils, photos, demandes, offres, conversations, historiques et paramètres sont conservés.</p>
+      </div>
     </div>
   </div>
 
@@ -1679,6 +1727,8 @@ async function loadAll(){
   try{
     paintHqGo();
     ME = await fetchJ('/api/admin/whoami').catch(()=>ME);
+    /* 🔴 LOT 125 : le blocage global est vérifié à chaque chargement — côté serveur (whoami + /api/admin/blocage) */
+    try{ blkHqPoint(ME && ME.blocage); if(ME && ME.role==='pdg') blkMaj(); }catch(e){}
     try{ window.ME = ME; }catch(e){}
     const soft = u => fetchJ(u).catch(()=>null);
     let [ov, ms, ags, cands, ppl, cfg, aud] = await Promise.all([
@@ -3366,17 +3416,165 @@ async function runSearchHQ(){
     out.innerHTML = secs.map(s=>'<b style="display:block;margin:8px 0 4px;cursor:pointer" onclick="jumpPanel(\''+(s.panel||'')+'\')">'+s.title+' →</b>'+(s.items||[]).map(it=>'<div style="padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer" onclick="jumpPanel(\''+(s.panel||'')+'\')"><b>'+(it.t||'')+'</b>'+(it.s?' <small>'+it.s+'</small>':'')+'</div>').join('')).join('');
   }catch(e){ out.textContent='Recherche impossible'; }
 }
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   🔴 29/09 — LOT 125 : LE CONTRÔLE TOTAL DU PDG (intégré au point de blocage EXISTANT).
+   Un seul état (celui du lot 97), une seule liste d’autorisations, un seul historique.
+   ══════════════════════════════════════════════════════════════════════════════════════════ */
+let BLK = { actif:false, status:'NORMAL', mode:'acces', message:'', excep:{comptes:[],categories:[],villes:[]}, annuaire:[], histo:[], autorises:0, pdg:true };
+const BLK_NIV = { acces:'Blocage total', ecriture:'Lecture seule' };
+async function blkMaj(q){
+  try{
+    let d;
+    try{ d = await fetchJ('/api/admin/blocage'+(q?('?q='+encodeURIComponent(q)):'')); }catch(e){ return; }
+    if(!d || d.ok===false) return;
+    BLK = Object.assign(BLK, d);
+    blkPeindre();
+  }catch(e){}
+}
+function blkPeindre(){
+  const e = document.getElementById('blk-etat'), c = document.getElementById('blk-cnt');
+  if(e){
+    e.innerHTML = BLK.actif
+      ? '<span style="color:var(--red)">🔴 BLOCAGE GLOBAL : ACTIVÉ</span> <small style="font-weight:700;color:var(--muted)">('+BLK_NIV[BLK.mode]+')</small><br><span style="font-size:12px;font-weight:700">Accès exceptionnels : <b>'+BLK.autorises+' compte(s)</b></span>'+(BLK.depuis?(' <small style="font-weight:700;color:var(--muted)">· depuis le '+String(BLK.depuis).slice(0,16).replace('T',' à ')+'</small>'):'')
+      : '<span style="color:var(--p)">🟢 BLOCAGE GLOBAL : DÉSACTIVÉ</span><br><span style="font-size:12px;font-weight:700">Accès normaux pour tout le monde · réglage choisi : '+BLK_NIV[BLK.mode]+'</span>';
+  }
+  if(c) c.textContent = 'Accès exceptionnels : '+BLK.autorises+' compte'+(BLK.autorises>1?'s':'');
+  const ms = document.getElementById('blk-message');
+  if(ms && document.activeElement!==ms) ms.value = BLK.message||'';
+  const sel = document.getElementById('frz-mode');
+  if(sel && BLK.mode) sel.value = BLK.mode;
+  const ct = document.getElementById('blk-cats');
+  if(ct){
+    const c1 = (BLK.excep&&BLK.excep.categories)||[], v1 = (BLK.excep&&BLK.excep.villes)||[];
+    const noms = { gestionnaires:'👔 tous les administrateurs', pros:'🧑‍💼 tous les professionnels', clients:'🧍 tous les clients' };
+    ct.innerHTML = (c1.length||v1.length)
+      ? '✓ Catégories déjà autorisées : <b>'+c1.map(x=>noms[x]||x).join('</b>, <b>')+'</b>'+((c1.length&&v1.length)?' · ':'')+(v1.length?('📍 zones : <b>'+v1.join('</b>, <b>')+'</b>'):'')
+      : 'Aucune catégorie autorisée pour l’instant.';
+    ct.innerHTML += ' <span style="color:var(--muted)">(le bouton agit comme un interrupteur : appuyez une 2ᵉ fois pour retirer)</span>';
+  }
+  blkPeindreListe();
+  blkPeindreHisto();
+}
+function blkPeindreListe(){
+  const box = document.getElementById('blk-liste');
+  if(!box) return;
+  const type = ((document.getElementById('blk-type')||{}).value||'');
+  const rows = (BLK.annuaire||[]).filter(r => !type || r.type===type);
+  if(!rows.length){ box.innerHTML = '<div style="padding:10px;color:var(--muted);font-size:12.5px">Aucun compte ne correspond. Videz la recherche ou changez de type.</div>'; return; }
+  box.innerHTML = rows.map(r=>{
+    const t = r.type==='pdg' ? 'Compte principal' : (r.type==='gestionnaire' ? 'Administrateur' : (r.type==='pro' ? 'Professionnel' : 'Client'));
+    const ic = r.type==='pdg' ? '👑' : (r.type==='gestionnaire' ? '👔' : (r.type==='pro' ? '🧑‍💼' : '🧍'));
+    return '<div style="display:flex;gap:8px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--line);flex-wrap:wrap">'
+      + '<div style="flex:1;min-width:180px"><b>'+ic+' '+(r.nom||'—')+'</b> <small style="color:var(--muted)">'+t+'</small><br>'
+      + '<small style="color:var(--muted)">'+((r.tel?'📞 '+r.tel+' · ':'')+(r.ville?'📍 '+r.ville+' · ':'')+'🆔 '+r.id+(r.numPro?(' · id pro '+r.numPro):''))+'</small></div>'
+      + '<span class="badge" style="font-weight:900;'+(r.autorise?'background:rgba(21,201,138,.15);color:var(--p);border-color:rgba(21,201,138,.4)':'background:rgba(255,107,107,.14);color:var(--red);border-color:rgba(255,107,107,.4)')+'">'+(r.autorise?'🟢 Autorisé':'🔴 Bloqué')+'</span>'
+      + (r.source?('<small style="color:var(--muted);font-size:11px">'+r.source+'</small>'):'')
+      + (r.type==='pdg' ? '<small style="color:var(--muted);font-size:11px">toujours autorisé</small>'
+        : (r.autorise
+          ? '<button type="button" onclick="blkAutoriser(\''+r.id+'\',false)" style="background:var(--card2);border:1px solid rgba(255,107,107,.4);color:var(--red);font-size:10.5px;font-weight:800;padding:7px 9px;border-radius:8px;cursor:pointer;font-family:inherit">RETIRER L’AUTORISATION</button>'
+          : '<button type="button" onclick="blkAutoriser(\''+r.id+'\',true)" style="background:rgba(21,201,138,.14);border:1px solid rgba(21,201,138,.45);color:var(--p);font-size:10.5px;font-weight:800;padding:7px 9px;border-radius:8px;cursor:pointer;font-family:inherit">AUTORISER PENDANT LE BLOCAGE</button>'))
+      + '</div>';
+  }).join('');
+  box.innerHTML += '<div style="padding:8px 4px;color:var(--muted);font-size:11.5px">'+rows.length+' compte(s) affiché(s) · '+BLK.totalComptes+' au total</div>';
+}
+function blkPeindreHisto(){
+  const box = document.getElementById('blk-histo');
+  if(!box) return;
+  const h = BLK.histo||[];
+  const noms = { blocage_global_activé:'🔴 Blocage activé', reactivation:'🟢 INTER réactivé', compte_autorise:'🟢 Compte autorisé', compte_retire:'🔴 Autorisation retirée', categorie_autorisee:'🟢 Catégorie autorisée', categorie_retiree:'🔴 Catégorie retirée', zone_autorisee:'🟢 Zone autorisée', zone_retiree:'🔴 Zone retirée', message:'💬 Message modifié', mode:'⚙️ Niveau changé' };
+  box.innerHTML = h.length ? h.map(x=>'<div style="padding:6px 3px;border-bottom:1px solid var(--line)"><b>'+(noms[x.action]||x.action)+'</b> <small style="color:var(--muted)">'+String(x.at||'').slice(0,16).replace('T',' à ')+' · '+(x.par||'PDG')+'</small><br><small style="color:var(--muted)">'+(x.detail||'')+'</small></div>').join('')
+    : '<div style="padding:9px;color:var(--muted);font-size:12.5px">Aucun geste enregistré pour l’instant. Chaque blocage, autorisation, retrait et modification de message apparaîtra ici, avec la date et l’heure.</div>';
+}
+function blkBasculer(){
+  const z = document.getElementById('blk-acces');
+  if(!z) return;
+  const ouvert = z.style.display!=='none';
+  z.style.display = ouvert ? 'none' : 'block';
+  const b = document.getElementById('blk-btn-acces');
+  if(b) b.textContent = ouvert ? 'GÉRER LES ACCÈS' : 'MASQUER LA GESTION DES ACCÈS';
+  if(!ouvert) blkMaj((document.getElementById('blk-q')||{}).value||'');
+}
+function blkChercher(){ blkMaj((document.getElementById('blk-q')||{}).value||''); }
+async function blkEnvoyer(corps){
+  try{
+    const r = await fetch('/api/admin/blocage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(corps)});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ alert('⚠️ '+(d.error||'Impossible')); return null; }
+    return d;
+  }catch(e){ alert('⚠️ Réseau indisponible'); return null; }
+}
+async function blkAutoriser(id, garder){
+  const d = await blkEnvoyer({ action: garder?'autoriser':'retirer', cible:'compte', id:id });
+  if(!d) return;
+  await blkMaj((document.getElementById('blk-q')||{}).value||'');
+  alert(d.message||'Fait');
+}
+async function blkToutCat(cat){
+  const dans = (BLK.excep && BLK.excep.categories || []).indexOf(cat) >= 0;
+  const nom = cat==='gestionnaires' ? 'TOUS les administrateurs' : (cat==='pros' ? 'TOUS les professionnels' : 'TOUS les clients');
+  if(!dans && !confirm('Autoriser '+nom+' pendant le blocage ?')) return;
+  const d = await blkEnvoyer({ action: dans?'retirer':'autoriser', cible:'categorie', categorie: cat });
+  if(!d) return;
+  await blkMaj();
+  alert(dans ? ('🔴 Autorisation retirée : '+nom) : ('🟢 Autorisation ajoutée : '+nom));
+}
+async function blkZone(garder){
+  const v = ((document.getElementById('blk-ville')||{}).value||'').trim();
+  if(!v) return alert('❌ Indiquez la zone (ex. Bouaké)');
+  const d = await blkEnvoyer({ action: garder?'autoriser':'retirer', cible:'zone', ville: v });
+  if(!d) return;
+  await blkMaj();
+  alert(garder ? ('🟢 Tous les comptes de '+v+' sont autorisés pendant le blocage') : ('🔴 Autorisation retirée pour '+v));
+}
+async function blkMessage(){
+  const m = ((document.getElementById('blk-message')||{}).value||'').trim();
+  if(!m) return alert('❌ Écrivez le message que les gens verront');
+  const d = await blkEnvoyer({ action:'message', message: m });
+  if(!d) return;
+  await blkMaj();
+  alert('💬 Message du blocage modifié — il s’affiche tout de suite sur les écrans bloqués.');
+}
+/* 🔒 le point de blocage existant, tel que le voit un compte NON autorisé sur le tableau de bord */
+function blkHqPoint(etat){
+  const e = etat || window.KLEAN_BLOCAGE_ETAT || (ME && ME.blocage) || null;
+  if(!e || !e.actif || e.mode!=='acces' || e.bloque===false){
+    const v = document.getElementById('klean-blocage-hq'); if(v) v.remove(); return;
+  }
+  let d = document.getElementById('klean-blocage-hq');
+  const msg = e.message || 'INTER est momentanément bloqué par la direction.';
+  if(!d){
+    d = document.createElement('div'); d.id = 'klean-blocage-hq';
+    d.style.cssText = 'position:fixed;left:0;right:0;top:0;bottom:0;z-index:2147483000;overflow:auto;background:#7a1f1f;color:#fff';
+    document.body.appendChild(d);
+  }
+  d.innerHTML = '<div style="max-width:520px;margin:0 auto;padding:28px 18px;text-align:center">'
+    + '<div style="font-size:52px;line-height:1">🔒</div>'
+    + '<div style="font-size:21px;font-weight:900;margin-top:10px">Accès momentanément bloqué</div>'
+    + '<div style="font-size:15px;line-height:1.55;margin-top:12px;background:#fff;border-radius:16px;padding:14px;color:#1c2b26">'+msg+'</div>'
+    + '<div style="font-size:13px;line-height:1.5;margin-top:12px;opacity:.9">Ce compte n’a pas d’autorisation exceptionnelle. Seul le compte principal (PDG) peut l’autoriser — essayez plus tard.</div>'
+    + '<button type="button" onclick="location.reload()" style="margin-top:16px;background:#fff;color:#7a1f1f;border:none;font:inherit;font-weight:900;font-size:16px;padding:14px 22px;border-radius:13px;cursor:pointer;min-height:50px">🔄 Réessayer</button>'
+    + '</div>';
+}
+try{ window.blkHqPoint = blkHqPoint; window.blkMaj = blkMaj; }catch(e){}
+
 async function gelerGest(frozen){
   const password=((document.getElementById('frz-pw')||{}).value||'');
   if(!password) return alert('❌ Entrez votre mot de passe PDG');
-  if(frozen && !confirm('Couper TOUTES les écritures : gestionnaires, clients et professionnels ?')) return;
-  const r=await fetch('/api/admin/gest-freeze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password, frozen})});
+  const mode=((document.getElementById('frz-mode')||{}).value||'acces');
+  if(frozen){
+    const msg = mode==='acces'
+      ? 'BLOQUER INTER ? L’accès est refusé à tous les comptes, sauf ceux que vous avez autorisés. Les comptes non autorisés voient l’écran de blocage.'
+      : 'Couper TOUTES les écritures (lecture seule) : gestionnaires, clients et professionnels ?';
+    if(!confirm(msg)) return;
+  } else if(!confirm('Réactiver INTER ? Tout le monde retrouve ses droits habituels. Les autorisations exceptionnelles restent dans l’historique.')) return;
+  const r=await fetch('/api/admin/gest-freeze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password, frozen, mode})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok) return alert('⚠️ '+(d.error||'Impossible'));
   document.getElementById('frz-pw').value='';
   const st=document.getElementById('frz-state');
-  if(st) st.textContent = d.gestFrozen ? '⛔ Écritures coupées (tous)' : '✅ Écritures actives';
-  alert(d.gestFrozen ? '⛔ Plus personne n’écrit (sauf vous, PDG).' : '✅ Écritures réactivées.');
+  if(st) st.textContent = d.gestFrozen ? ('⛔ INTER est bloqué ('+BLK_NIV[d.mode||mode]+')') : '✅ INTER est réactivé — accès normaux';
+  try{ blkMaj(); }catch(e){}
+  alert(d.gestFrozen ? '⛔ INTER est bloqué. Les comptes autorisés continuent normalement ; les autres voient l’écran de blocage.' : '✅ INTER est réactivé : tout le monde retrouve ses droits habituels.');
 }
 async function ouvrirFenetreVilles(){
   const w=hqWinOuvrir('win-villes','block');               /* 🪟 même règle : jamais refermée toute seule */
@@ -5265,7 +5463,13 @@ async function loadTeam(){
   const st=document.getElementById('frz-state');
   if(st && ME) st.textContent = ME.gestFrozen ? '⛔ Écritures actuellement coupées (tous)' : '✅ Écritures actuellement actives';
   if(ME && ME.role==='gest' && ME.gestFrozen){
-    alert('⛔ Le PDG a coupé toutes les écritures. Lecture seule.');
+    if(ME.blocage && ME.blocage.mode==='acces'){
+      /* 🔴 blocage total : ce gestionnaire n'a pas d'autorisation → le point de blocage existant */
+      try{ blkHqPoint(ME.blocage); }catch(e){}
+    } else if(!window._blkAlert){
+      window._blkAlert = 1;                                  /* lecture seule : averti une seule fois */
+      alert('⛔ Le PDG a coupé toutes les écritures. Lecture seule.');
+    }
   }
   if(!ME || ME.role !== 'pdg'){ document.querySelector('#team-cnt').textContent = (ME && ME.nom)?('connecté : '+ME.nom):'—'; return; }
   try{ TEAM = await fetchJ('/api/admin/admins'); }catch(e){ TEAM = []; }
@@ -8137,6 +8341,16 @@ if (!window._jtPoll) window._jtPoll = setInterval(() => {
   if (document.getElementById('jt-modal')) return;                    /* on ne rafraîchit jamais pendant une lecture */
   jtCharge();
 }, 20000);
+
+/* 🔴 lot 125 : veille du blocage — l'écran du PDG reste juste, sans jamais voler le focus */
+if(!window._blkPoll) window._blkPoll = setInterval(() => {
+  try{
+    const f = document.activeElement;
+    if(f && /^(blk-q|blk-ville|blk-message|frz-pw)$/.test(f.id||'')) return;      /* on n'écrase jamais une saisie */
+    if(ME && ME.role==='pdg'){ blkMaj(); }
+    else blkHqPoint();
+  }catch(e){}
+}, 15000);
 
 try{ window.__kleanInit = 1; }catch(e){}      /* ✅ le tableau de bord est allé au bout de son démarrage */
 </script>

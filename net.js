@@ -662,6 +662,11 @@ function routeNet(msg){
       try { if (window.kleanOnAvisMaj) window.kleanOnAvisMaj(msg); } catch (e) { }
       break;
 
+    /* 🔴 LOT 125 — blocage global : la mise à jour arrive immédiatement (même en pleine utilisation) */
+    case 'blocage':
+      try { if (window.kleanOnBlocage) window.kleanOnBlocage(msg); } catch (e) { }
+      break;
+
     /* 💼 LOT 124 — recherche d'emploi & mise en relation : chacun est prévenu en direct */
     case 'trav_contact':              // → quelqu'un demande votre contact
       toast('🤝 ' + (msg.nom || 'Une personne') + ' veut vous contacter' + (msg.sujet ? ' — ' + msg.sujet : ''));
