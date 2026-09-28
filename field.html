@@ -37,9 +37,10 @@ h1{font-size:18px;margin-bottom:10px}.note{font-size:12px;color:var(--muted);mar
     <button class="btn" onclick="mk('pro')">Créer le pro</button>
   </div>
   <div class="card">
-    <b>💬 Écrire au gestionnaire / PDG</b>
-    <div id="msgs" style="max-height:160px;overflow:auto;font-size:13px;margin:8px 0"></div>
-    <input id="m" placeholder="Votre message">
+    <b>💬 Écrire au PDG / gestionnaire</b>
+    <p class="note">Il voit votre message dans le HQ et peut vous répondre ici.</p>
+    <div id="msgs" style="max-height:240px;overflow:auto;font-size:13px;margin:8px 0;min-height:80px"></div>
+    <input id="m" placeholder="Votre message" onkeydown="if(event.key==='Enter'){event.preventDefault();send();}">
     <button class="btn" onclick="send()">Envoyer</button>
   </div>
   <button class="btn" style="background:#1e332a;color:var(--ink)" onclick="fetch('/api/logout',{method:'POST'});location.reload()">Sortir</button>
@@ -67,13 +68,19 @@ async function mk(kind){
 async function loadChat(){
   const r=await fetch('/api/field/chat'); if(!r.ok) return;
   const d=await r.json();
-  msgs.innerHTML=(d.messages||[]).map(m=>'<div style="margin:4px 0"><b>'+(m.from==='field'?'vous':m.gestNom)+'</b> — '+m.text+'</div>').join('')||'<span class="note">Aucun message</span>';
+  msgs.innerHTML=(d.messages||[]).map(m=>{
+    const mine=m.from==='field';
+    const who=mine?'vous':(m.par||m.gestNom||'PDG');
+    const t=(m.at||'').slice(11,19);
+    return '<div style="margin:6px 0;text-align:'+(mine?'right':'left')+'"><span style="display:inline-block;max-width:88%;background:'+(mine?'#1e332a':'#16261f')+';border-radius:11px;padding:7px 10px">'+(m.text||'')+'<small style="display:block;opacity:.7">'+who+' · '+t+'</small></span></div>';
+  }).join('')||'<span class="note">Aucun message — écrivez, le PDG verra.</span>';
+  msgs.scrollTop=msgs.scrollHeight;
 }
 async function send(){
   const t=m.value.trim(); if(!t) return;
   await fetch('/api/field/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});
   m.value=''; loadChat();
 }
-setInterval(loadChat, 12000);
+setInterval(loadChat, 4000);
 </script>
 </body></html>

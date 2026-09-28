@@ -8704,9 +8704,88 @@ async function accueilRoutes(req, res, p, url) {
   return false;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   📱 LOT 126 ter — LE TÉLÉPHONE : MESURÉ, PUIS CORRIGÉ (aucune route modifiée)
+   ① COMPRESSION. Le serveur envoyait index.html (834 Ko) et admin.html (760 Ko) NON
+     COMPRESSÉS, plus net.js (96 Ko) : ≈930 Ko à télécharger à CHAQUE ouverture de l'app,
+     sur le forfait du client. Ici, tout le texte (page, JS, JSON) part compressé :
+     834 Ko → ≈212 Ko (gzip) ou ≈150 Ko (brotli). Images et vidéos ne sont jamais
+     recompressées.
+   ② CACHE INTELLIGENT. Avec « no-store », le téléphone re-téléchargeait les 834 Ko à chaque
+     ouverture. On passe à « no-cache + ETag » : le serveur est TOUJOURS interrogé (l'état du
+     blocage reste décidé côté serveur — la règle du lot 125 est intacte), mais il répond
+     « rien n'a changé » (304, quelques centaines d'octets) quand la page est la même.
+     Tout ce qui est marqué « no-store » (données sensibles, sauvegardes) garde exactement
+     son comportement d'avant.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+const zlib = require('zlib');
+const MOB126_TEXTE = /^(?:text\/|application\/(?:json|javascript|manifest\+json|xml|xhtml\+xml)|image\/svg)/i;
+const MOB126_ETAG = /^(?:text\/html|text\/javascript|text\/css|application\/json|image\/svg)/i;
+const MOB126_CACHE = new Map();          /* corps déjà compressés (mémoire ≤ 40 × ~200 Ko) */
+function mob126(res, req) {
+  const ae = String((req && req.headers && req.headers['accept-encoding']) || '');
+  const peutBr = /\bbr\b/.test(ae), peutGz = /\bgzip\b/.test(ae);
+  const vraiHead = res.writeHead.bind(res), vraiEnd = res.end.bind(res);
+  let code = res.statusCode || 200, entetes = null, fini = false;
+  res.writeHead = function (c, h) {
+    if (c && typeof c === 'object') { code = res.statusCode = 200; entetes = c; }
+    else { code = res.statusCode = (c || 200); entetes = h || {}; }
+    return res;
+  };
+  const supprime = (h, nom) => { Object.keys(h).forEach(k => { if (k.toLowerCase() === nom) delete h[k]; }); };
+  const pose = (h, nom, val) => { supprime(h, nom.toLowerCase()); h[nom] = val; };
+  res.end = function (corps, enc) {
+    if (fini) return vraiEnd();
+    fini = true;
+    const estTexte = (typeof corps === 'string') || Buffer.isBuffer(corps);
+    if (!estTexte || !corps || code === 304 || code === 204) { vraiHead(code, entetes || {}); return vraiEnd(corps, enc); }
+    let buf = Buffer.isBuffer(corps) ? corps : Buffer.from(corps, typeof enc === 'string' ? enc : 'utf8');
+    const h = {};
+    const poses = res.getHeaders();
+    Object.keys(poses).forEach(k => { h[k] = poses[k]; });
+    Object.keys(entetes || {}).forEach(k => {
+      const deja = Object.keys(h).filter(x => x.toLowerCase() === k.toLowerCase())[0];
+      if (deja) h[deja] = entetes[k]; else h[k] = entetes[k];
+    });
+    const ctype = String(h['Content-Type'] || h['content-type'] || '');
+    const cache = String(h['Cache-Control'] || h['cache-control'] || '');
+    try {
+      if (buf.length > 900 && MOB126_ETAG.test(ctype) && cache.indexOf('no-store') < 0) {
+        const tag = '"' + buf.length.toString(16) + '-' + crypto.createHash('sha1').update(buf).digest('hex').slice(0, 20) + '"';
+        pose(h, 'ETag', tag);
+        if (String(req.headers['if-none-match'] || '').indexOf(tag) >= 0) {
+          supprime(h, 'content-length'); supprime(h, 'content-encoding');
+          vraiHead(304, h); return vraiEnd();
+        }
+        if (MOB126_TEXTE.test(ctype) && (peutBr || peutGz)) {
+          const cle = tag + (peutBr ? '|br' : '|gz');
+          let z = MOB126_CACHE.get(cle);
+          if (!z) {
+            z = peutBr ? zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } })
+                       : zlib.gzipSync(buf, { level: 6 });
+            if (z && z.length < buf.length) { if (MOB126_CACHE.size > 40) MOB126_CACHE.clear(); MOB126_CACHE.set(cle, z); }
+            else z = null;
+          }
+          if (z) {
+            const v = h['Vary'] || h['vary'];
+            supprime(h, 'content-length');
+            pose(h, 'Content-Encoding', peutBr ? 'br' : 'gzip');
+            pose(h, 'Content-Length', String(z.length));
+            pose(h, 'Vary', v ? String(v) + ', Accept-Encoding' : 'Accept-Encoding');
+            buf = z;
+          }
+        }
+      }
+    } catch (e) { try { buf = Buffer.isBuffer(corps) ? corps : Buffer.from(String(corps)); } catch (e2) { } }
+    vraiHead(code, h);
+    return vraiEnd(buf);
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
+  mob126(res, req);   /* 📱 compression + cache du téléphone (une seule porte d'entrée) */
 
   /* ═══════════════════════════════════════════════════════════════════════════════════
      🔴 LOT 125 — LE CONTRÔLE GLOBAL, EN UN SEUL ENDROIT, AVANT TOUTE AUTRE ROUTE.
@@ -15149,7 +15228,7 @@ const server = http.createServer(async (req, res) => {
   if (p === '/field' || p === '/field.html') {
     fs.readFile(path.join(__dirname, 'field.html'), (err, data) => {
       if (err) { res.writeHead(404); res.end('404'); return; }
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
       res.end(data);
     });
     return;
@@ -15157,7 +15236,7 @@ const server = http.createServer(async (req, res) => {
   const sendPage = (file) => {
     fs.readFile(path.join(__dirname, file), (err, data) => {
       if (err) { res.writeHead(404); res.end('404'); return; }
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
       /* 🔴 LOT 125 : l'état du blocage est écrit DANS la page servie — une URL directe, un ancien
          lien ou une ancienne version du téléphone affichent donc le point de blocage existant. */
       let html = data.toString('utf8');
@@ -15202,7 +15281,7 @@ const server = http.createServer(async (req, res) => {
   const fp = path.join(__dirname, file);
   fs.readFile(fp, (err, data) => {
     if (err) { res.writeHead(404); res.end('404'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
     if (path.extname(fp) === '.html') {              /* 🔴 lot 125 : drapeau du blocage dans la page */
       let html = data.toString('utf8');
       const inj = blkInjection(req);
