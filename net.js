@@ -662,6 +662,37 @@ function routeNet(msg){
       try { if (window.kleanOnAvisMaj) window.kleanOnAvisMaj(msg); } catch (e) { }
       break;
 
+    /* 💼 LOT 124 — recherche d'emploi & mise en relation : chacun est prévenu en direct */
+    case 'trav_contact':              // → quelqu'un demande votre contact
+      toast('🤝 ' + (msg.nom || 'Une personne') + ' veut vous contacter' + (msg.sujet ? ' — ' + msg.sujet : ''));
+      try { if (window.kleanOnTravMaj) window.kleanOnTravMaj(msg); } catch (e) { }
+      break;
+
+    case 'trav_msg':                  // → nouveau message dans une discussion de mise en relation
+      toast('💬 Nouveau message' + (msg.texte ? ' : ' + String(msg.texte).slice(0, 50) : ''));
+      try { if (window.kleanOnTravMaj) window.kleanOnTravMaj(msg); } catch (e) { }
+      break;
+
+    case 'trav_decision':             // → le contact a été accepté ou refusé
+      toast(msg.message || (msg.statut === 'acceptee' ? '✅ Contact accepté' : 'Demande de contact refusée'));
+      try { if (window.kleanOnTravMaj) window.kleanOnTravMaj(msg); } catch (e) { }
+      break;
+
+    case 'trav_reponse':              // → quelqu'un propose ses services pour votre recherche
+      toast('🙋 ' + (msg.nom || 'Quelqu’un') + ' propose ses services' + (msg.tel ? ' — ' + msg.tel : ''));
+      try { if (window.kleanOnTravMaj) window.kleanOnTravMaj(msg); } catch (e) { }
+      break;
+
+    case 'trav_profil':               // → une personne correspond à ce que vous cherchez
+      toast('💼 ' + (msg.resume || 'Une personne cherche du travail près de vous'));
+      try { if (window.kleanOnTravMaj) window.kleanOnTravMaj(msg); } catch (e) { }
+      break;
+
+    case 'trav_besoin':               // → un professionnel recherche quelqu'un comme vous
+      toast('🧑‍💼 ' + (msg.resume || 'On cherche quelqu’un qui correspond à votre profil'));
+      try { if (window.kleanOnTravMaj) window.kleanOnTravMaj(msg); } catch (e) { }
+      break;
+
     case 'veille_rappel':             // → PRO en veille : rappel GPS / sonnerie
       toast('🛰️ ' + (msg.text || 'Vérifiez votre GPS et vos sonneries'));
       try { if (typeof verifierVeille === 'function') verifierVeille(true); } catch (e) { }

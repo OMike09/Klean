@@ -1167,6 +1167,20 @@
       <div id="jt-corps"></div>
     </div>
   </div>
+  <!-- ═══ 💼 29/09 (lot 124) — RECHERCHE D'EMPLOI & TRAVAILLEURS ═══ -->
+  <div class="panel" style="margin-bottom:14px" id="panel-trav">
+    <h3>💼 Recherche d’emploi &amp; travailleurs <span class="cnt" id="tr-cnt">—</span></h3>
+    <p class="sub">Les deux sens du système : les personnes qui <b>cherchent du travail</b> publient leur recherche,
+      les professionnels qui <b>cherchent quelqu’un</b> publient leur besoin — et KLEAN les met en relation
+      (voir → demander le contact → discuter → convenir). Ici : tout voir, tout contrôler, et la
+      <b>modération automatique</b> (demandes dangereuses ou illégales bloquées ou mises à vérifier).</p>
+    <div class="body" style="padding:12px 14px">
+      <div id="tr-stats"></div>
+      <div id="tr-reglages" style="margin-bottom:10px"></div>
+      <div id="tr-liste"></div>
+    </div>
+  </div>
+
   <!-- ═══ 🧩 29/09 (lot 123) — LES GRANDES OPTIONS DE LA PAGE D'ACCUEIL ═══ -->
   <div class="panel" style="margin-bottom:14px" id="panel-accueil">
     <h3>🧩 Options de la page d’accueil <span class="cnt" id="oa-cnt">—</span></h3>
@@ -1824,6 +1838,7 @@ const HQ_MENU = [
   { g:'📣 Communication', items:[
     ['panel-ann','📣 Affiche aux utilisateurs','bandeau message annonce défilant accueil'],
     ['panel-avis','📢 Avis de recherche','avis recherche personne disparue objet perdu publier modérer retrouvé'],
+    ['panel-trav','💼 Recherche d’emploi & travailleurs','emploi travail job demande offre travailleur profil mise en relation modération bloqué signalé'],
     ['panel-jobs','💼 Jobs & offres de travail','job travail offre mission candidature recrutement'],
     ['panel-ads','📢 Publicité sur l’accueil','image vidéo fond vert aperçu publier'],
     ['panel-field-inbox','🧭 Messages agents de terrain','recenseurs répondre fil terrain'],
@@ -1866,7 +1881,7 @@ const HQ_ORDER = ['panel-home','panel-search','panel-accueil','kpis','substrip',
   'panel-svc-browse','panel-svc-create','panel-catnat','panel-tarif','panel-marche','panel-villes','panel-match',
   'panel-missions','panel-quotes','panel-litiges',
   'panel-ca7','panel-pay','panel-paydest',
-  'panel-ann','panel-avis','panel-jobs','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
+  'panel-ann','panel-avis','panel-trav','panel-jobs','panel-field-inbox','panel-support','panel-hqchat','panel-infos',
   'panel-flip','panel-quizbank','panel-jeux','panel-promo',
   'panel-urgences','panel-demande-comptes','panel-trash','panel-shield','panel-audit','panel-sauvegardes',
   'panel-entreprise','panel-cfg','panel-vitesse','panel-rel','panel-conditions','panel-justif','panel-freeze'];   /* 🤝 Mise en relation, 📜 Conditions AVANT le blocage (le blocage reste le dernier, règle du PDG) */
@@ -3336,6 +3351,7 @@ function jumpPanel(id){
     if(id==='panel-accueil'){ try{ oaCharge(); }catch(e){} }       /* 🧩 lot 123 : les grandes options de l'accueil */
     if(id==='panel-jobs'){ try{ oaJobsCharge(); }catch(e){} }      /* 💼 lot 123 : offres de travail et candidatures */
     if(id==='panel-avis'){ try{ oaAvisCharge(); }catch(e){} }      /* 📢 lot 123 : avis de recherche */
+    if(id==='panel-trav'){ try{ trCharge(); }catch(e){} }          /* 💼 lot 124 : recherche d'emploi & travailleurs */
   }catch(e){}
 }
 async function runSearchHQ(){
@@ -7193,6 +7209,187 @@ async function ugStatut(id, statut){
    vérifier les identités en doublon.
    Aucun document n'est téléchargeable publiquement : tout passe par la session PDG.
    ═══════════════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   💼 29/09 — LOT 124 (tableau de bord) : « RECHERCHE D'EMPLOI & TRAVAILLEURS »
+   Le PDG voit et contrôle TOUT le système : profils publiés, recherches de travailleurs,
+   mises en relation, signalements, blocages, contenus à vérifier, statistiques.
+   Actes possibles sur chaque publication : ACTIVER · DÉSACTIVER · APPROUVER · REFUSER ·
+   MASQUER · ACTUALISER · SIGNALER · RÉEXAMINER · SUPPRIMER (réservés au PDG).
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+let TR = { ok: false, pdg: false, profils: [], besoins: [], contacts: [], moderation: [], stats: {}, reglages: {}, tab: 'profils' };
+
+async function trCharge() {
+  try {
+    const d = await fetch('/api/admin/trav', { cache: 'no-store' }).then(r => r.json());
+    if (!d || !d.ok) return;
+    TR = Object.assign(TR, d, { ok: true });
+    const c = document.getElementById('tr-cnt');
+    if (c) c.textContent = TR.stats.profils + ' demande(s) d’emploi · ' + TR.stats.besoins + ' recherche(s) de travailleur'
+      + (TR.stats.aVerifier ? ' · ' + TR.stats.aVerifier + ' à vérifier' : '') + (TR.stats.blocages ? ' · ' + TR.stats.blocages + ' bloquée(s)' : '');
+    trPeint();
+  } catch (e) { }
+}
+window.trCharge = trCharge;
+
+function trOnglet(t) { TR.tab = t; trPeint(); }
+window.trOnglet = trOnglet;
+
+function trBadge(statut) {
+  const m = {
+    publie: ['🟢 PUBLIÉE', '#e9f7ef', '#0d7a5f'], en_verification: ['🟠 EN VÉRIFICATION', '#FFF7ED', '#b45309'],
+    bloque: ['🔴 BLOQUÉE', '#fdecec', '#b91c1c'], desactive: ['⚪ DÉSACTIVÉE', '#f3f4f6', '#6b7280'],
+    refuse: ['⛔ REFUSÉE', '#fdecec', '#b91c1c'], masque: ['🙈 MASQUÉE', '#f3f4f6', '#6b7280']
+  };
+  const v = m[statut] || [statut, '#f3f4f6', '#6b7280'];
+  return '<span style="font-size:11.5px;font-weight:900;padding:4px 9px;border-radius:99px;background:' + v[1] + ';color:' + v[2] + '">' + v[0] + '</span>';
+}
+function trBoutons(cible, id, statut) {
+  if (!TR.pdg) return '<span style="font-size:12px;color:var(--muted)">🔒 Seul le PDG modère les demandes d’emploi.</span>';
+  const b = (act, txt, style) => '<button type="button" class="' + (style || 'btn-soft') + '" onclick="trAction(\'' + cible + '\',\'' + id + '\',\'' + act + '\')">' + txt + '</button>';
+  return (statut === 'publie' ? b('desactiver', '⏸️ DÉSACTIVER') : b('activer', '✅ ACTIVER', 'btn-main'))
+    + b('approuver', '✅ APPROUVER') + b('refuser', '⛔ REFUSER') + b('masquer', '🙈 MASQUER')
+    + b('actualiser', '🔄 ACTUALISER') + b('signaler', '🚩 SIGNALER') + b('reexaminer', '🔍 RÉEXAMINER')
+    + b('supprimer', '❌ SUPPRIMER');
+}
+function trPeint() {
+  const s = TR.stats || {};
+  const res = document.getElementById('tr-stats');
+  if (res) {
+    const car = (ic, txt, nb, f, c) => '<span style="display:inline-block;font-size:12.5px;font-weight:900;padding:6px 10px;border-radius:99px;background:' + f + ';color:' + c + ';margin:0 6px 6px 0">' + ic + ' ' + txt + ' : ' + nb + '</span>';
+    res.innerHTML = '<div style="margin-bottom:9px">'
+      + car('📝', 'Demandes d’emploi', s.profils || 0, '#eef6ff', '#1d4ed8')
+      + car('🧑‍💼', 'Recherches de travailleurs', s.besoins || 0, '#FFF1E6', '#b45309')
+      + car('🟢', 'Publiés', (s.profilsPublies || 0) + (s.besoinsPublies || 0), '#e9f7ef', '#0d7a5f')
+      + car('🟠', 'En vérification', (s.profilsVerifier || 0) + (s.besoinsVerifier || 0), '#FFF7ED', '#b45309')
+      + car('🔴', 'Bloqués', (s.profilsBloques || 0) + (s.besoinsBloques || 0), '#fdecec', '#b91c1c')
+      + car('⚪', 'Désactivés', s.profilsDesactives || 0, '#f3f4f6', '#6b7280')
+      + car('✅', 'Validés par le PDG', s.profilsValides || 0, '#e9f7ef', '#0d7a5f')
+      + car('🤝', 'Mises en relation', s.contacts || 0, '#eef6ff', '#1d4ed8')
+      + car('✅', 'Contacts acceptés', s.contactsAcceptes || 0, '#e9f7ef', '#0d7a5f')
+      + car('⛔', 'Contacts refusés', s.contactsRefuses || 0, '#fdecec', '#b91c1c')
+      + car('💬', 'Messages échangés', s.messages || 0, '#f3f4f6', '#374151')
+      + car('🚩', 'Signalements', s.signalements || 0, '#FFF7ED', '#b45309')
+      + car('⛔', 'Blocages automatiques', s.blocages || 0, '#fdecec', '#b91c1c')
+      + car('🟠', 'À vérifier (modération)', s.aVerifier || 0, '#FFF7ED', '#b45309')
+      + car('📷', 'Photos (jamais de documents)', s.photos || 0, '#eef6ff', '#1d4ed8')
+      + '</div>';
+    const met = Object.entries(s.parMetier || {}).map(([k, v]) => k + ' : ' + v).join(' · ');
+    if (met) res.innerHTML += '<div style="font-size:12.5px;color:var(--muted);margin-bottom:9px">Métiers les plus recherchés (profils publiés) — ' + met + '</div>';
+  }
+  const L = document.getElementById('tr-liste');
+  if (!L) return;
+  const ong = [['profils', '📝 Demandes d’emploi'], ['besoins', '🧑‍💼 Recherches de travailleurs'], ['contacts', '🤝 Mises en relation'], ['moderation', '🚩 Signalements & blocages']];
+  let h = '<div class="acc-chips" style="margin-bottom:10px">' + ong.map(o =>
+    '<button type="button" class="cat-chip' + (TR.tab === o[0] ? ' on' : '') + '" onclick="trOnglet(\'' + o[0] + '\')"><b>' + o[1] + '</b></button>').join('') + '</div>';
+  if (TR.tab === 'profils') {
+    h += (TR.profils || []).map(p => '<div style="border:1.5px solid var(--line);border-radius:13px;padding:11px;margin-bottom:9px;background:' + (p.statut === 'publie' ? '#fff' : '#fafafa') + '">'
+      + '<div style="display:flex;gap:9px;align-items:flex-start;flex-wrap:wrap">'
+      + '<b style="font-size:15px;flex:1;min-width:170px">' + p.nom + (p.prenom ? ' ' + p.prenom : '') + ' — ' + (p.metierNom || p.metier || 'métier non précisé') + '</b>' + trBadge(p.statut) + '</div>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:5px">' + p.repere + ' · 📞 ' + (p.tel || '—') + ' · publié ' + oaQuand(p.at) + ' · ' + (p.vues || 0) + ' vue(s) · ' + (p.contacts || 0) + ' contact(s)</div>'
+      + '<div style="font-size:13px;margin-top:6px;line-height:1.5">'
+      + (p.competences ? '<b>Compétences :</b> ' + p.competences + '<br>' : '')
+      + (p.experience ? '<b>Expérience :</b> ' + p.experience + '<br>' : '')
+      + (p.diplomes ? '<b>Diplômes (déclarés) :</b> ' + p.diplomes + '<br>' : '')
+      + (p.description ? '« ' + p.description + ' »' : '') + '</div>'
+      + (p.modId ? '<div style="font-size:12px;color:#b45309;margin-top:5px">🚩 Événement de modération lié : ' + p.modId + '</div>' : '')
+      + (p.motif ? '<div style="font-size:12px;color:#b91c1c;margin-top:4px">Motif : ' + p.motif + '</div>' : '')
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">' + trBoutons('profil', p.id, p.statut) + '</div>'
+      + '</div>').join('') || '<div class="sub">Aucune demande d’emploi pour l’instant.</div>';
+  } else if (TR.tab === 'besoins') {
+    h += (TR.besoins || []).map(b => '<div style="border:1.5px solid var(--line);border-radius:13px;padding:11px;margin-bottom:9px">'
+      + '<div style="display:flex;gap:9px;align-items:flex-start;flex-wrap:wrap"><b style="font-size:15px;flex:1;min-width:170px">' + b.titre + (b.urgent ? ' ⚡' : '') + '</b>' + trBadge(b.statut) + '</div>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:5px">' + (b.metierNom || '') + ' · ' + [b.quartier, b.ville].filter(Boolean).join(' · ') + ' · 📞 ' + (b.tel || '—') + ' · ' + (b.qui || '') + ' · ' + (b.reponses || 0) + ' réponse(s)</div>'
+      + (b.description ? '<div style="font-size:13px;margin-top:6px;line-height:1.5">' + b.description + '</div>' : '')
+      + (b.salaire ? '<div style="font-size:12.5px;margin-top:4px">💰 ' + b.salaire + (b.quand ? ' · 🗓️ ' + b.quand : '') + '</div>' : '')
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">' + trBoutons('besoin', b.id, b.statut) + '</div>'
+      + '</div>').join('') || '<div class="sub">Aucune recherche de travailleur pour l’instant.</div>';
+  } else if (TR.tab === 'contacts') {
+    h += (TR.contacts || []).map(c => '<div style="border:1.5px solid var(--line);border-radius:13px;padding:11px;margin-bottom:9px">'
+      + '<b style="font-size:14.5px">' + c.de.nom + ' → ' + c.vers.nom + '</b> ' + trBadge(c.statut === 'acceptee' ? 'publie' : (c.statut === 'refusee' ? 'refuse' : 'en_verification')) 
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:4px">' + c.sujet + ' · ' + oaQuand(c.at) + ' · ' + (c.messages || []).length + ' message(s)</div>'
+      + '<div style="font-size:13px;margin-top:5px">📞 ' + (c.de.tel || '—') + ' ↔ 📞 ' + (c.vers.tel || '—') + '</div>'
+      + (c.de.message ? '<div style="font-size:13px;margin-top:5px;background:var(--card2);border-radius:10px;padding:8px">« ' + c.de.message + ' »</div>' : '')
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">' + (TR.pdg ? '<button type="button" class="btn-soft" onclick="trAction(\'contact\',\'' + c.id + '\',\'actualiser\')">🔄 ACTUALISER</button><button type="button" class="btn-soft" onclick="trAction(\'contact\',\'' + c.id + '\',\'signaler\')">🚩 SIGNALER</button><button type="button" class="btn-soft" onclick="trAction(\'contact\',\'' + c.id + '\',\'supprimer\')">❌ SUPPRIMER</button>' : '') + '</div></div>').join('')
+      || '<div class="sub">Aucune mise en relation pour l’instant.</div>';
+  } else {
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:9px">'
+      + '<button type="button" class="btn-soft" onclick="trCharge()">🔄 Rafraîchir</button>'
+      + '<button type="button" class="btn-soft" onclick="trToutReexaminer()">🔍 RÉEXAMINER toutes les bloquées</button></div>';
+    h += (TR.moderation || []).map(m => '<div style="border:1.5px solid var(--line);border-radius:13px;padding:11px;margin-bottom:9px;background:' + (m.risque === 'bloquer' ? '#fdecec' : (m.risque === 'verifier' ? '#FFF7ED' : '#fff')) + '">'
+      + '<div style="display:flex;gap:9px;align-items:flex-start;flex-wrap:wrap"><b style="font-size:14.5px;flex:1;min-width:160px">' + (m.risque === 'bloquer' ? '🔴 BLOQUÉ' : (m.risque === 'verifier' ? '🟠 À VÉRIFIER' : '🟢 EXAMINÉ')) + ' — ' + (m.quoi || '') + '</b>'
+      + '<span style="font-size:11.5px;font-weight:900;padding:4px 9px;border-radius:99px;background:#fff">' + (m.statut || '') + '</span></div>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:5px">' + oaQuand(m.at) + ' · par ' + (m.par || 'automatique') + ' · motifs : ' + ((m.motifs || []).join(', ') || '—') + '</div>'
+      + (m.texte ? '<div style="font-size:13px;margin-top:5px;background:#fff;border-radius:10px;padding:8px">« ' + m.texte + ' »</div>' : '')
+      + (m.contexte && m.contexte.length ? '<div style="font-size:12px;color:#0d7a5f;margin-top:4px">Contexte reconnu : ' + m.contexte.join(' · ') + '</div>' : '')
+      + (TR.pdg ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+        + '<button type="button" class="btn-soft" onclick="trMod(\'' + m.id + '\',\'reexaminer\')">🔍 RÉEXAMINER</button>'
+        + '<button type="button" class="btn-soft" onclick="trMod(\'' + m.id + '\',\'lever\')">✅ LEVER</button>'
+        + '<button type="button" class="btn-soft" onclick="trMod(\'' + m.id + '\',\'bloquer\')">⛔ BLOQUER</button>'
+        + '<button type="button" class="btn-soft" onclick="trMod(\'' + m.id + '\',\'supprimer\')">❌ SUPPRIMER</button></div>' : '')
+      + '</div>').join('') || '<div class="sub">Aucun signalement, aucun blocage — rien à examiner.</div>';
+  }
+  L.innerHTML = h;
+  /* réglages */
+  const R = document.getElementById('tr-reglages');
+  if (R) {
+    R.innerHTML = '<div style="font-size:13px;margin-top:6px">'
+      + 'Option « Je cherche un job près de moi » : <b>' + (TR.reglages.job_pres ? '✅ activée' : '⏸️ désactivée') + '</b> · '
+      + 'Option « Je cherche un travailleur » : <b>' + (TR.reglages.job_trav ? '✅ activée' : '⏸️ désactivée') + '</b>'
+      + (TR.pdg ? '<div style="margin-top:7px;display:flex;gap:7px;flex-wrap:wrap">'
+        + '<button type="button" class="btn-soft" onclick="oaAction(\'job_pres\',\'' + (TR.reglages.job_pres ? 'desactiver' : 'activer') + '\');setTimeout(trCharge,700)">' + (TR.reglages.job_pres ? '⏸️ Désactiver les demandes d’emploi' : '✅ Activer les demandes d’emploi') + '</button>'
+        + '<button type="button" class="btn-soft" onclick="oaAction(\'job_trav\',\'' + (TR.reglages.job_trav ? 'desactiver' : 'activer') + '\');setTimeout(trCharge,700)">' + (TR.reglages.job_trav ? '⏸️ Désactiver les recherches de travailleurs' : '✅ Activer les recherches de travailleurs') + '</button>'
+        + '</div>' : '')
+      + '<div style="font-size:12px;color:var(--muted);margin-top:6px">Métiers reconnus automatiquement (français simple) : ' + (TR.reglages.metiers || []).length + ' catégories — ' + (TR.reglages.metiers || []).slice(0, 10).map(m => m.ic + ' ' + m.nom).join(' · ') + '…</div>'
+      + '</div>';
+  }
+}
+window.trPeint = trPeint;
+
+async function trAction(cible, id, action) {
+  let motif = '';
+  if (action === 'refuser' || action === 'signaler') {
+    motif = prompt(action === 'refuser' ? 'Motif du refus (écrit dans le journal) :' : 'Motif du signalement :') || '';
+    if (motif === null) return;
+  }
+  if (action === 'supprimer' && !confirm('Supprimer définitivement cette publication ?')) return;
+  try {
+    const r = await fetch('/api/admin/trav', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cible, id, action, motif })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return alert('⚠️ ' + (d.error || 'Impossible'));
+    trCharge(); oaCharge();
+  } catch (e) { alert('⚠️ Réseau indisponible'); }
+}
+window.trAction = trAction;
+
+async function trMod(id, action) {
+  if (action === 'supprimer' && !confirm('Supprimer cet événement de modération ?')) return;
+  const r = await fetch('/api/admin/mod', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action }) })
+    .then(x => x.json()).catch(() => ({}));
+  if (!r.ok && r.error) alert('⚠️ ' + r.error);
+  trCharge();
+}
+window.trMod = trMod;
+
+async function trToutReexaminer() {
+  if (!confirm('Remettre TOUTES les publications bloquées en « à vérifier » ?')) return;
+  const r = await fetch('/api/admin/trav', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'tout_reexaminer' }) })
+    .then(x => x.json()).catch(() => ({}));
+  alert(r.message || 'Fait');
+  trCharge();
+}
+window.trToutReexaminer = trToutReexaminer;
+
+/* 🔄 le tableau de bord suit ce que le public publie (contrôle discret toutes les 60 s) */
+setInterval(function () {
+  try {
+    const p = document.getElementById('panel-trav');
+    if (p && p.offsetParent !== null) trCharge();
+  } catch (e) { }
+}, 60000);
+
 /* ═══ 🧩 29/09 — LOT 123 (tableau de bord) : options de la page d'accueil, jobs, avis ═══ */
 /* ═══════════════════════════════════════════════════════════════════════════════════
    🧩 29/09 — LOT 123 (tableau de bord) : « Options de la page d'accueil »

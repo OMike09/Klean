@@ -139,6 +139,7 @@ function poserDefauts() {
   db.cities = db.cities || [];
   justifEnsure();     /* 🪚 justificatifs professionnels (lot 122) : poses au demarrage */
   accueilEnsure();    /* 🧩 grandes options de l'accueil + jobs + avis de recherche (lot 123) */
+  travEnsure();       /* 💼 lot 124 : recherche d'emploi, besoins, mise en relation, modération */
   db.catalog = db.catalog || [];
   /* ═══ 🎮 FLIP FIZZ · KLEAN POINTS · RÉCOMPENSES · QUIZ · INFOS · URGENCE (lot 96) ═══
      ⚠️ Par défaut le jeu est DÉSACTIVÉ et INVISIBLE sur l'accueil : seul le PDG l'active. */
@@ -5262,6 +5263,879 @@ async function jeuGenererIA(opt) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════════
+   💼 29/09 — LOT 124 : RECHERCHE D'EMPLOI & MISE EN RELATION (les DEUX SENS)
+   ═══════════════════════════════════════════════════════════════════════════════════
+   « Celui qui cherche du travail peut être trouvé par celui qui cherche quelqu'un. »
+   « Celui qui cherche quelqu'un trouve facilement la personne qui propose ses compétences. »
+
+   ① COMPRÉHENSION DU FRANÇAIS SIMPLE : « je cherche boulot », « besoin gars pour chantier »,
+      « ya travail pour moi ? »… → métier, ville, portée, type de travail.
+   ② MODÉRATION CONTEXTUELLE : on analyse l'INTENTION, jamais une simple liste de mots
+      (« couteau » en cuisine = travail légitime ; vente d'armes = blocage).
+   ③ DEUX SENS : profils de travailleurs ↔ besoins des professionnels, avec mise en relation,
+      discussion et échange du contact APRÈS accord.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+
+/* ─────────── ① LE COMPRÉHENSION DU FRANÇAIS SIMPLE (mots courants, fautes, familier) ─────────── */
+const TRAV_METIERS = [
+  { id: 'menage', nom: 'Ménage / entretien', ic: '🧹', cle: ['menage', 'nettoyage', 'femme de menage', 'fille de menage', 'garcon de menage', 'entretien', 'repassage', 'lessive', 'balayage', 'lingerie', 'proprete', 'femme menage'] },
+  { id: 'cuisine', nom: 'Cuisine / restauration', ic: '🍲', cle: ['cuisinier', 'cuisiniere', 'cuisine', 'restaurant', 'resto', 'maquis', 'patissier', 'patisserie', 'boulanger', 'boulangerie', 'serveur', 'serveuse', 'traiteur', 'plongeur', 'boucher', 'boucherie', 'gastronomie'] },
+  { id: 'chauffeur', nom: 'Chauffeur / transport', ic: '🚗', cle: ['chauffeur', 'chaufeur', 'chauffeur', 'conducteur', 'taxi', 'transporteur', 'livreur', 'livraison', 'moto', 'gbaka', 'tricycle', 'camion', 'bus', 'vendeur de bord'] },
+  { id: 'gardien', nom: 'Gardien / sécurité', ic: '🛡️', cle: ['gardien', 'gardiennage', 'vigile', 'securite', 'surveillant', 'veilleur', 'garde', 'watchman', 'garder la maison', 'garder maison', 'garder une maison', 'surveillance'] },
+  { id: 'macon', nom: 'Maçonnerie / chantier', ic: '🧱', cle: ['macon', 'maconnerie', 'chantier', 'construction', 'ciment', 'coffreur', 'ferrailleur', 'carreleur', 'carrelage', 'peintre', 'peinture', 'manoeuvre', 'manoeuvre', 'placo', 'platrier', 'briqueteur', 'travaux', 'btp'] },
+  { id: 'plomberie', nom: 'Plomberie', ic: '🔧', cle: ['plombier', 'plomberie', 'tuyau', 'fuite', 'robinet', 'sanitaire', 'wc', 'pompe'] },
+  { id: 'electricite', nom: 'Électricité', ic: '💡', cle: ['electricien', 'electricite', 'cable', 'cablage', 'tableau electrique', 'installation electrique', 'soudure', 'soudeur', 'photovoltaique'] },
+  { id: 'menuiserie', nom: 'Menuiserie / bois', ic: '🪚', cle: ['menuisier', 'menuiserie', 'bois', 'charpente', 'ebeniste', 'meuble', 'armoire', 'porte en bois'] },
+  { id: 'mecanique', nom: 'Mécanique / entretien véhicule', ic: '🔩', cle: ['mecanicien', 'mecanique', 'mecano', 'vulcanisateur', 'pneu', 'moteur', 'garage', 'vidange'] },
+  { id: 'coiffure', nom: 'Coiffure / esthétique', ic: '💇', cle: ['coiffeur', 'coiffeuse', 'coiffure', 'tresse', 'tresses', 'tressage', 'perruque', 'esthetique', 'beaute', 'onglerie', 'maquillage', 'barbier'] },
+  { id: 'couture', nom: 'Couture / textile', ic: '🧵', cle: ['couturier', 'couturiere', 'couture', 'tailleur', 'tissu', 'pagne', 'broderie', 'styliste'] },
+  { id: 'commerce', nom: 'Commerce / vente', ic: '🛒', cle: ['vendeur', 'vendeuse', 'commerce', 'boutique', 'boutiquier', 'caissier', 'caissiere', 'magasin', 'supermarche', 'kiosque', 'commercant', 'vendre'] },
+  { id: 'comptabilite', nom: 'Comptabilité / gestion', ic: '🧮', cle: ['comptable', 'comptabilite', 'caisse', 'gestion', 'financier', 'audit', 'facturation'] },
+  { id: 'secretariat', nom: 'Secrétariat / informatique', ic: '💻', cle: ['secretaire', 'secretariat', 'assistant', 'assistante', 'informatique', 'ordinateur', 'saisie', 'bureautique', 'receptionniste', 'accueil'] },
+  { id: 'agriculture', nom: 'Agriculture / élevage', ic: '🌾', cle: ['agriculteur', 'agriculture', 'champ', 'plantation', 'cacao', 'cafe', 'riz', 'maraichage', 'elevage', 'poulet', 'betail', 'peche', 'pecheur', 'jardinier', 'jardinage'] },
+  { id: 'nounou', nom: 'Garde d’enfants / nounou', ic: '🧒', cle: ['nounou', 'nourrice', 'garde d enfant', 'garde enfants', 'baby sitter', 'baby-sitter', 'garder les enfants', 'gardienne d enfants'] },
+  { id: 'soins', nom: 'Santé / aide à la personne', ic: '🩺', cle: ['aide soignant', 'aide-soignant', 'infirmier', 'infirmiere', 'sante', 'garde malade', 'personne agee', 'vieillard', 'maternite', 'pharmacie', 'vendeur en pharmacie'] },
+  { id: 'securite_incendie', nom: 'Sécurité incendie / plongeur', ic: '🧯', cle: ['pompier', 'incendie', 'secouriste', 'plongeur sous marin'] },
+  { id: 'apprenti', nom: 'Apprenti / débutant', ic: '🎓', cle: ['apprenti', 'apprentissage', 'stage', 'stagiaire', 'debutant', 'formation', 'aide', 'assistant technique', 'travailleur'] },
+  { id: 'autre', nom: 'Autre travail', ic: '✨', cle: [] }
+];
+/* mots qui veulent simplement dire « travail » : ils ne désignent aucun métier */
+const TRAV_MOTS_TRAVAIL = ['travail', 'travaux', 'boulot', 'boulot', 'job', 'emploi', 'taf', 'activite', 'mission', 'petit boulot', 'service', 'besogne', 'gagne pain', 'gagner ma vie', 'gagner de l argent'];
+const TRAV_VIDES = ['je', 'tu', 'il', 'elle', 'nous', 'vous', 'ils', 'elles', 'moi', 'toi', 'on', 'me', 'te', 'se', 'moi meme', 'veux', 'veut', 'vouloir', 'cherche', 'chercher', 'recherche', 'rechercher', 'besoin', 'souhaite', 'souhaiter', 'aide', 'aidez', 'svp', 'please', 'urgent', 'urgemment', 'pour', 'dans', 'en', 'a', 'au', 'aux', 'de', 'des', 'du', 'le', 'la', 'les', 'un', 'une', 'qui', 'que', 'quoi', 'quelqu', 'quelqu un', 'quelquun', 'personne', 'gens', 'gars', 'type', 'homme', 'femme', 'dame', 'monsieur', 'madame', 'est', 'suis', 'y', 'ya', 'il y a', 'est ce que', 'bonjour', 'salut', 'merci', 'aussi', 'encore', 'poste', 'place', 'quelque chose'];
+/* fautes et abréviations courantes, écrites comme on parle */
+const TRAV_CORRECTIONS = [
+  ['chaufeur', 'chauffeur'], ['chauffeur', 'chauffeur'], ['chauf', 'chauffeur'], ['shauffeur', 'chauffeur'],
+  ['menagere', 'menage'], ['menagee', 'menage'], ['menaje', 'menage'], ['menage', 'menage'],
+  ['macon', 'macon'], ['masson', 'macon'], ['masons', 'macon'],
+  ['cuisignier', 'cuisinier'], ['cuisiner', 'cuisinier'], ['cuistot', 'cuisinier'],
+  ['gard1', 'gardien'], ['gadien', 'gardien'], ['guardien', 'gardien'],
+  ['electricien', 'electricien'], ['eletricien', 'electricien'], ['electricite', 'electricite'],
+  ['plonbier', 'plombier'], ['plombje', 'plombier'],
+  ['couturiere', 'couturiere'], ['couture', 'couture'],
+  ['coifeur', 'coiffeur'], ['coifeuse', 'coiffeuse'],
+  ['comtable', 'comptable'], ['compta', 'comptabilite'],
+  ['secretaire', 'secretaire'], ['secretair', 'secretaire'],
+  ['boulot', 'travail'], ['boulot', 'travail'], ['taf', 'travail'], ['job', 'travail'],
+  ['aider', 'aide'], ['travayer', 'travailler'], ['travaille', 'travailler'], ['travay', 'travailler'],
+  ['gagner', 'gagner'], ['salaire', 'salaire'], ['paye', 'salaire']
+];
+function travSansAccents(s) {
+  return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+/* un texte écrit par un utilisateur, ramené à quelque chose de comparable */
+function travNet(txt) {
+  let s = travSansAccents(txt).replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  TRAV_CORRECTIONS.forEach(([a, b]) => { s = s.replace(new RegExp('\\b' + a + '\\b', 'g'), b); });
+  return s;
+}
+/* comprend la demande : métier, ville, portée, type de travail */
+function travComprendre(txt, options) {
+  const o = options || {};
+  const brut = String(txt || '');
+  const s = travNet(brut);
+  const trouve = [];
+  TRAV_METIERS.forEach(m => {
+    m.cle.forEach(c => {
+      const cc = travNet(c);
+      if (cc && new RegExp('(^| )' + cc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '( |$)').test(s)) trouve.push({ id: m.id, nom: m.nom, ic: m.ic, cle: c });
+    });
+  });
+  /* le métier le plus précis l'emporte (le premier trouvé dans l'ordre de la liste) */
+  const metier = trouve[0] || null;
+  /* une ville ? (celles de KLEAN + les villes connues de Côte d'Ivoire) */
+  let ville = '';
+  try {
+    for (const row of CI_GPS) { if (new RegExp('\\b' + travNet(row[0]) + '\\b').test(s)) { ville = row[0]; break; } }
+    if (!ville && db.cities) {
+      for (const c of db.cities) {
+        const n = normVille(c.nom);
+        if (n && new RegExp('\\b' + n + '\\b').test(s)) { ville = c.nom; break; }
+      }
+    }
+  } catch (e) { }
+  /* portée demandée */
+  let portee = o.portee || '';
+  if (!portee) {
+    if (/\b(pres de moi|pres|proche|proximite|alentour|autour de moi|dans mon coin|mon quartier)\b/.test(s)) portee = 'pres';
+    else if (/\b(partout|toute la cote d ivoire|tout le pays|n importe ou|toutes les villes|partout en cote d ivoire)\b/.test(s)) portee = 'ci';
+    else if (/\b(dans ma ville|ma ville|dans la ville)\b/.test(s)) portee = 'ville';
+    else if (ville) portee = 'ville';
+  }
+  /* type de travail */
+  let type = '';
+  if (/\b(regulier|permanent|chaque jour|tous les jours|temps plein|longtemps|longue duree|fixe)\b/.test(s)) type = 'regulier';
+  else if (/\b(ponctuel|temporaire|quelques jours|une fois|un jour|court|court terme|depannage|week end)\b/.test(s)) type = 'ponctuel';
+  else if (/\b(mission|missions|contrat)\b/.test(s)) type = 'mission';
+  const urgence = /\b(urgent|urgemment|tout de suite|des que possible|maintenant|rapidement)\b/.test(s);
+  return {
+    texte: brut.slice(0, 400), net: s.slice(0, 300), metier, metiers: trouve.slice(0, 4), ville, portee, type, urgence,
+    comprend: !!(metier || ville),
+    resume: metier ? (metier.ic + ' ' + metier.nom + (ville ? ' — ' + ville : '')) : (ville ? '📍 ' + ville : '')
+  };
+}
+
+/* ─────────── ② LA MODÉRATION CONTEXTUELLE (l'intention, pas les mots) ─────────── */
+/* Ce qui est INTERDIT : aucun contexte ne le rend acceptable. */
+const MOD_INTERDITS = [
+  { id: 'drogue', txt: 'drogue ou stupéfiants', re: /\b(drogues?|cocaine|crack|heroine|cannabis|chanvre|marijuana|zamal|beuh|weed|haschich|shit|kush|mdma|ecstasy|meth|methamphetamine|stupefiants?|produits? illicites?|tramadol sans ordonnance|vente de produits interdits)\b/ },
+  { id: 'armes', txt: 'armes ou explosifs', re: /\b(kalachnikov|kalachnikov|kalash|ak 47|ak47|fusil|pistolet|revolver|grenade|explosif|explosifs|dynamite|munitions?|silencieux|arme de guerre|armes de guerre|armes automatiques?|fabrication d armes?|fabrication de armes?|fabriqu\w* des armes?|trafi[ck] d armes?|marche noir des armes)\b|\b(vend\w*|vente|vendeur|achet\w*|achat|fourni\w*|fournir|livr\w*|livraison|import\w*|importation|transport\w*|convoyer|propos\w*|besoin d|recherche d|cherche d|veut acheter|veux acheter|trafi\w*|revend\w*)\s*(d['’]?\s*|de\s+|des\s+|la\s+|les\s+|une\s+|un\s+){0,3}\s*armes?\b|\barmes?\s+(a\s+|pour\s+)?vendre\b/ },
+  { id: 'excision', txt: 'mutilation génitale', re: /\b(excision|exciser|exciser|mutilation genitale|mutilations genitales|mgf)\b/ },
+  { id: 'traite', txt: 'traite ou exploitation de personnes', re: /\b(traite des etres humains|traite humaine|trafic d etres humains|esclavage|esclave|vendre une personne|vente de personnes|prostitution|prostituer|maquereau|reseau de prostitution|exploitation sexuelle|faveur sexuelle|service sexuel|services sexuels|escort girl)\b/ },
+  { id: 'violence', txt: 'violence ou acte criminel', re: /\b(tuer|assassiner|assassinat|meurtre|braquage|braquer une banque|enlevement|kidnapping|kidnapper|racket|extorsion|agression|agresser|casser du monde|attaque armee|recel|receleur)\b/ },
+  { id: 'faux', txt: 'faux documents ou fraude', re: /\b(faux diplome|faux diplomes|faux papier|faux papiers|faux document|faux documents|falsifier|falsification|faussaire|fausse carte|fausse piece|faux acte|faux certificat|vaccin falsifie)\b/ },
+  { id: 'arnaque', txt: 'escroquerie', re: /\b(arnaque|arnaquer|escroquerie|escroc|faux billets|fausse monnaie|blanchiment d argent|detournement de fonds|avance sur salaire pour frais de dossier)\b/ },
+  { id: 'trafic', txt: 'trafic, contrebande ou recel', re: /\b(trafic|traficotage|contrebande|recel|receleur|dealer|deal de|marchandise volee|marchandises volees|moto volee|motos volees|voiture volee|voitures volees|objets voles|produits voles|travail avec des voleurs)\b/ }
+];
+/* Ce qui est AMBIGU : légitime dans un contexte de travail, inquiétant sans contexte. */
+const MOD_AMBIGUS = [
+  { id: 'arme', mot: 'arme (à préciser)', re: /\b(armes?|arme a feu|arme blanche)\b/,
+    contextes: [/\b(gardien\w*|vigile|securite|police|gendarmerie|gendarme|militaire|armee nationale|armurerie|musee|collection|chasse|cine|film|theatre)/] },
+  { id: 'couteau', mot: 'couteau / lame', re: /\b(couteau|couteaux|lame|lames|machette|hachoir|mortier|pilon|flechette)\b/,
+    contextes: [/\b(cuisin\w*|restaurant\w*|resto|maquis|patiss\w*|boulang\w*|traiteur|hotel|boucher\w*|abattoir|serveur|serveuse|decoup\w*|gendarme|police|securite|jardin\w*|champ|agricul\w*)/] },
+  { id: 'garde', mot: 'garde / surveillance d’une personne', re: /\b(garder|surveiller|gardiennage)\b/,
+    contextes: [/\b(maison|villa|boutique|magasin|chantier|enfant\w*|nourrice|vigile|gardien\w*|surveillance|vehicule|voiture|moto|bebe)/] },
+  { id: 'nuit', mot: 'travail de nuit', re: /\b(travail de nuit|de nuit|la nuit)\b/, contextes: [/\b(gardien\w*|vigile|securite|restaurant\w*|hotel|maquis|veilleur|livraison\w*|infirmier\w*|hopital)/] },
+  { id: 'transport', mot: 'transport de marchandises', re: /\b(transporter|transport|convoyer|convoi)\b/,
+    contextes: [/\b(marchandise\w*|colis|aliment\w*|ciment|materiaux|poisson|legumes|boisson\w*|meubles|bagages|sand\w*|gravier|eau)/] }
+];
+const MOD_DEGRES = [
+  { id: 'contact_hors_plateforme', txt: 'demande de payer AVANT tout travail', re: /\b(payer d abord|paie d abord|envoie l argent avant|payer pour avoir le travail|frais de dossier avant)\b/, niveau: 'verifier' },
+  { id: 'mineur', txt: 'travail d’un enfant', re: /\b(enfant de moins de 5|bebe pour travailler|petit de 8 ans|moins de 12 ans|enfant pour travailler au champ)\b/, niveau: 'verifier' }
+];
+function modAnalyser(textes, meta) {
+  const brut = (Array.isArray(textes) ? textes : [textes]).filter(Boolean).join(' \n ');
+  const s = ' ' + travNet(brut) + ' ';
+  const motifs = [], ambigu = [], contexte = [];
+  MOD_INTERDITS.forEach(r => { if (r.re.test(s)) motifs.push({ id: r.id, txt: r.txt, niveau: 'bloquer' }); });
+  MOD_DEGRES.forEach(r => { if (r.re.test(s)) motifs.push({ id: r.id, txt: r.txt, niveau: r.niveau || 'verifier' }); });
+  MOD_AMBIGUS.forEach(r => {
+    if (!r.re.test(s)) return;
+    const ok = r.contextes.some(c => c.test(s));
+    if (ok) contexte.push(r.id + ' : contexte de travail reconnu');
+    else ambigu.push({ id: r.id, txt: r.mot, niveau: 'verifier' });
+  });
+  motifs.push(...ambigu);
+  const bloquer = motifs.some(m => m.niveau === 'bloquer');
+  const verifier = !bloquer && motifs.some(m => m.niveau === 'verifier');
+  return {
+    risque: bloquer ? 'bloquer' : (verifier ? 'verifier' : 'ok'),
+    motifs, contexte,
+    message: bloquer
+      ? 'Cette demande ne peut pas être publiée sur KLEAN : elle semble concerner une activité interdite ou dangereuse.'
+      : (verifier ? 'Votre demande est envoyée à KLEAN pour vérification. Elle sera publiée très vite si tout est en ordre.' : '')
+  };
+}
+
+/* ─────────── ③ LES DONNÉES ─────────── */
+function travEnsure() {
+  db.trav = db.trav || [];              /* profils : personnes qui cherchent du travail */
+  db.travBesoins = db.travBesoins || [];/* besoins : professionnels qui cherchent quelqu'un */
+  db.travContacts = db.travContacts || [];/* mises en relation */
+  db.travChat = db.travChat || [];      /* messages échangés après mise en relation */
+  db.modQ = db.modQ || [];              /* file de modération (signalements, blocages, à vérifier) */
+  db.travPhotos = db.travPhotos || {};  /* photos de profil (jamais de document) */
+  return db;
+}
+function travSante() {
+  travEnsure();
+  const P = db.trav, B = db.travBesoins, C = db.travContacts;
+  return {
+    profils: P.length,
+    profilsPublies: P.filter(x => x.statut === 'publie').length,
+    profilsVerifier: P.filter(x => x.statut === 'en_verification').length,
+    profilsBloques: P.filter(x => x.statut === 'bloque').length,
+    profilsDesactives: P.filter(x => x.statut === 'desactive').length,
+    profilsValides: P.filter(x => x.valide).length,
+    besoins: B.length,
+    besoinsPublies: B.filter(x => x.statut === 'publie').length,
+    besoinsVerifier: B.filter(x => x.statut === 'en_verification').length,
+    besoinsBloques: B.filter(x => x.statut === 'bloque').length,
+    contacts: C.length,
+    contactsAcceptes: C.filter(x => x.statut === 'acceptee').length,
+    contactsRefuses: C.filter(x => x.statut === 'refusee').length,
+    contactsAttente: C.filter(x => x.statut === 'envoyee').length,
+    messages: db.travChat.length,
+    signalements: db.modQ.filter(m => m.motif === 'signalement').length,
+    blocages: db.modQ.filter(m => m.risque === 'bloquer').length,
+    aVerifier: db.modQ.filter(m => m.risque === 'verifier').length,
+    photos: Object.keys(db.travPhotos).length,
+    parMetier: (() => {
+      const m = {};
+      db.trav.filter(x => x.statut === 'publie').forEach(x => { const k = (x.metierId || 'autre'); m[k] = (m[k] || 0) + 1; });
+      return m;
+    })()
+  };
+}
+/* une publication est-elle visible de tout le monde ? */
+function travVisible(x) { return x && (x.statut === 'publie' || x.statut === 'valide'); }
+function modNoter(quoi, ref, texte, analyse, par) {
+  travEnsure();
+  const e = {
+    id: uid('MQ'), quoi, ref: ref || null, texte: String(texte || '').slice(0, 400),
+    risque: analyse.risque, motifs: analyse.motifs.map(m => m.id), motif: par || analyse.risque,
+    contexte: analyse.contexte, at: nowISO(), par: par || 'automatique', statut: analysisStatut(analyse)
+  };
+  db.modQ.unshift(e);
+  db.modQ = db.modQ.slice(0, 800);
+  if (analyse.risque !== 'ok') {
+    emitAdmin('moderation', (analyse.risque === 'bloquer' ? '⛔ Demande bloquée' : '🟠 Demande à vérifier') +
+      ' (' + quoi + ') : ' + analyse.motifs.map(m => m.txt).join(', ').slice(0, 120));
+  }
+  return e;
+}
+function analysisStatut(a) { return a.risque === 'bloquer' ? 'bloque' : (a.risque === 'verifier' ? 'a_verifier' : 'ok'); }
+
+/* ─────────── ④ LA RECHERCHE GÉOGRAPHIQUE INTELLIGENTE ─────────── */
+/* Portées : 'pres' (autour de moi) · 'ville' (dans ma ville) · 'ci' (partout en Côte d'Ivoire)
+   · 'zone' (une ville ou un quartier que j'écris moi-même). Priorité demandée :
+   même quartier → proximité dans la ville → reste de la ville → autres villes → tout le pays. */
+function travScore(item, q) {
+  const ville = q.ville ? normVille(q.ville) : '';
+  const quartier = q.quartier ? normVille(q.quartier) : '';
+  const iv = normVille(item.ville), iq = normVille(item.quartier);
+  let d = null;
+  if (typeof q.lat === 'number' && typeof item.lat === 'number') d = haversineKm(q.lat, q.lng, item.lat, item.lng);
+  const p = { rang: 5, dist: d };
+  if (quartier && iq && iq === quartier) { p.rang = 1; return p; }
+  if (ville && iv && iv === ville) { p.rang = (d !== null && d <= 3) ? 2 : 3; return p; }
+  if (q.portee === 'pres' && d !== null) { p.rang = d <= (q.rayonKm || 30) ? 2 : 6; return p; }
+  if (q.portee === 'ci') { p.rang = 4; return p; }
+  if (q.portee === 'zone') { p.rang = (ville && iv) ? 3 : 4; return p; }
+  p.rang = 6; return p;
+}
+function travFiltreGeo(item, q) {
+  const s = travScore(item, q);
+  if (q.portee === 'pres') {
+    if (s.dist !== null) return s.dist <= (q.rayonKm || 30);
+    /* pas de position : on garde au moins la ville écrite, sinon rien */
+    if (q.ville) return normVille(item.ville) === normVille(q.ville) || s.rang <= 3;
+    return false;
+  }
+  if (q.portee === 'ville') { if (!q.ville) return true; return normVille(item.ville) === normVille(q.ville); }
+  if (q.portee === 'zone') { if (!q.ville) return true; return normVille(item.ville) === normVille(q.ville); }
+  return true;    /* 'ci' ou pas de portée : tout le pays */
+}
+
+/* ─────────── ⑤ LES PUBLICS (jamais de données privées) ─────────── */
+function travProfilPublic(x, pourMoi) {
+  const contact = pourMoi ? { tel: x.tel, code: x.code } : null;
+  return {
+    id: x.id, statut: x.statut, valide: !!x.valide,
+    nom: x.nom, prenom: x.prenom, photo: x.photo ? ('/api/trav/photo?id=' + encodeURIComponent(x.id)) : '',
+    ville: x.ville || '', quartier: x.quartier || '', zoneAcceptee: x.zoneAcceptee || '',
+    metier: x.metier || '', metierId: x.metierId || 'autre', metierNom: x.metierNom || '',
+    competences: x.competences || '', experience: x.experience || '', qualifications: x.qualifications || '',
+    diplomes: x.diplomes || '', disponibilite: x.disponibilite || '', type: x.type || '',
+    description: x.description || '', portee: x.portee || 'ville',
+    tel: (pourMoi || x.publierTel) ? x.tel : '', contact: contact ? { tel: x.tel } : null,
+    at: x.at, majAt: x.majAt || x.at, vues: x.vues || 0, contacts: (x.contacts || 0),
+    repere: x.quartier ? (x.quartier + ' · ' + x.ville) : (x.ville || 'Lieu non précisé'),
+    /** ⚠️ exigence du PDG : les diplômes sont DÉCLARÉS, jamais présentés comme vérifiés */
+    diplomesAvertissement: 'Les qualifications et diplômes déclarés par l’utilisateur peuvent être vérifiés directement par le demandeur.'
+  };
+}
+function travBesoinPublic(b, pourMoi) {
+  return {
+    id: b.id, statut: b.statut,
+    titre: b.titre || 'Recherche d’un travailleur', metier: b.metier || '', metierId: b.metierId || 'autre', metierNom: b.metierNom || '',
+    description: b.description || '', ville: b.ville || '', quartier: b.quartier || '', zone: b.zone || '',
+    quand: b.quand || '', salaire: b.salaire || '', type: b.type || '', urgent: !!b.urgent,
+    qui: b.qui || '', nom: b.nom || (b.qui === 'professionnel' ? 'Un professionnel KLEAN' : 'Un employeur'),
+    tel: (pourMoi) ? b.tel : '', photo: '',
+    at: b.at, majAt: b.majAt || b.at, vues: b.vues || 0, reponses: (b.reponses || 0)
+  };
+}
+function travContactPublic(c, qui) {
+  /* qui voit quel numéro : le PDG et le propriétaire (liste du tableau de bord / « mes contacts ») voient tout ;
+     chacun voit SES propres informations ; le numéro de l'AUTRE n'est échangé qu'après acceptation. */
+  const tout = (qui === 'proprietaire' || qui === 'pdg');
+  const voit = cote => tout || c.statut === 'acceptee' || (qui === 'demandeur' && cote === 'de') || (qui === 'destinataire' && cote === 'vers');
+  return {
+    id: c.id, statut: c.statut, at: c.at, majAt: c.majAt || c.at,
+    profilId: c.profilId || null, besoinId: c.besoinId || null,
+    de: { nom: c.deNom, ville: c.deVille || '', message: c.deMessage || '', tel: voit('de') ? c.deTel : '' },
+    vers: { nom: c.versNom, ville: c.versVille || '', tel: voit('vers') ? c.versTel : '' },
+    sujet: c.sujet || '', messages: db.travChat.filter(m => m.contactId === c.id).slice(-60).map(m => ({
+      id: m.id, de: m.de, texte: m.texte, at: m.at
+    }))
+  };
+}
+/* 📣 notifier la bonne personne (client par son compte, professionnel par son identifiant) */
+function travNotifier(cible, obj) {
+  try {
+    const liste = [...sockets].filter(s => {
+      if (!s.meta) return false;
+      if (cible.clientId && s.meta.clientId === cible.clientId) return true;
+      if (cible.agentId && s.meta.agentId === cible.agentId) return true;
+      return false;
+    });
+    if (liste.length) broadcast(liste, obj);
+  } catch (e) { }
+}
+function travQui(req, b) {
+  /* qui parle ? le tableau de bord (PDG), un professionnel (agentId + jeton), un client (jeton), ou un visiteur (code de suivi) */
+  let hq = null; try { hq = hqIdentity(req); } catch (e) { }
+  if (hq) return { type: 'pdg', role: hq.role, nom: hq.nom || hq.role };
+  const aid = String((b && b.agentId) || '').trim();
+  if (aid) {
+    const ag = db.agents.find(a => a.id === aid);
+    if (ag) { const j = agentJetonOk(req, ag, b || {}, false); if (j.ok) return { type: 'professionnel', agentId: ag.id, nom: ag.nom || 'Professionnel', tel: ag.tel1 || ag.tel || '', ville: ag.villeService || ag.ville || '', quartier: ag.quartier || '' }; }
+  }
+  const cli = (() => { try { return findClientByToken(req); } catch (e) { return null; } })();
+  if (cli) return { type: 'client', clientId: cli.id, nom: cli.nom || 'Client', tel: cli.tel || '', ville: cli.ville || '', quartier: cli.quartier || '' };
+  return null;
+}
+
+
+/* ═══════════════════ ROUTES CENTRALISÉES — RECHERCHE D'EMPLOI (lot 124) ═══════════════════
+   Renvoie true si la requête est traitée. Tout passe par ici : un seul point d'entrée,
+   donc aucune option « débranchée » possible. */
+function travPhotoEnvoi(res, b64) {
+  const buf = Buffer.from(String(b64).split(',').pop() || '', 'base64');
+  res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': buf.length, 'Cache-Control': 'public, max-age=600', 'X-Content-Type-Options': 'nosniff' });
+  res.end(buf);
+}
+/* 📷 SÉCURITÉ DES PHOTOS : uniquement une image, taille maîtrisée, réduite avant stockage.
+   ⛔ AUCUN document (PDF, diplôme, certificat) n'est accepté dans cette fonctionnalité. */
+function travPhotoGarder(id, dataUrl) {
+  const d = String(dataUrl || '');
+  if (!/^data:image\/(jpeg|jpg|png|webp);base64,/.test(d)) return { ok: false, error: 'Seules les PHOTOS sont acceptées (JPG ou PNG). Les documents PDF, diplômes et certificats ne sont pas reçus ici.' };
+  const b64 = d.split(',').pop();
+  if (b64.length > 1500 * 1024) return { ok: false, error: 'Photo trop lourde — reprenez-la, elle doit rester nette mais légère.' };
+  const buf = Buffer.from(b64, 'base64');
+  if (buf.length < 200) return { ok: false, error: 'Photo illisible — reprenez-la.' };
+  /* 🛡️ contrôles de sécurité : entête d'image réelle, pas un fichier déguisé */
+  const sig = buf.slice(0, 4).toString('hex');
+  const estImage = sig.startsWith('ffd8ff') || sig === '89504e47' || buf.slice(0, 4).toString('ascii') === 'RIFF';
+  if (!estImage) return { ok: false, error: 'Ce fichier n’est pas une image valide.' };
+  db.travPhotos[id] = { b64, at: nowISO(), octets: buf.length };
+  /* on ne garde que les 300 photos les plus récentes (la base ne grossit pas sans fin) */
+  const cles = Object.keys(db.travPhotos);
+  if (cles.length > 300) cles.sort((a, b) => String(db.travPhotos[a].at).localeCompare(String(db.travPhotos[b].at)))
+    .slice(0, cles.length - 300).forEach(k => { delete db.travPhotos[k]; });
+  return { ok: true };
+}
+
+async function travRoutes(req, res, p, url) {
+  const dedans = p.indexOf('/api/trav') === 0 || p.indexOf('/api/admin/trav') === 0 || p.indexOf('/api/admin/mod') === 0;
+  if (!dedans) return false;
+  travEnsure();
+  const B = (req.method === 'POST' || req.method === 'PATCH') ? await readBody(req).catch(() => ({})) : {};
+  const ip = req._ip || clientIp(req);
+  const moi = travQui(req, B);
+
+  /* ═══════════ ① CÔTÉ PERSONNE QUI CHERCHE DU TRAVAIL ═══════════
+     Publier sa recherche, la modifier, la retirer, la retrouver par son code. */
+  if (p === '/api/trav' && req.method === 'GET') {
+    const r = accueilReglages('job_trav');
+    if (!r.actif) return sendJson(res, 200, { ok: true, actif: false, liste: [], total: 0, message: 'Cette option est désactivée par KLEAN pour le moment.' }), true;
+    if (!hitsAutorises('trav:' + ip, 60)) return sendJson(res, 429, { error: 'Trop de recherches — patientez une minute' }), true;
+    const lat = url.searchParams.get('lat'), lng = url.searchParams.get('lng');
+    const q = {
+      q: url.searchParams.get('q') || '', metier: url.searchParams.get('metier') || '',
+      ville: url.searchParams.get('ville') || '', quartier: url.searchParams.get('quartier') || '',
+      portee: url.searchParams.get('portee') || 'ci', type: url.searchParams.get('type') || '',
+      dispo: url.searchParams.get('dispo') || '',
+      lat: (lat !== null && lat !== '' && isFinite(Number(lat))) ? Number(lat) : null,
+      lng: (lng !== null && lng !== '' && isFinite(Number(lng))) ? Number(lng) : null,
+      rayonKm: Number(url.searchParams.get('rayonKm')) || 30
+    };
+    /* le professionnel écrit avec ses mots : on comprend, puis on cherche */
+    const c = travComprendre([q.q, q.metier, q.ville].filter(Boolean).join(' '), { portee: q.portee });
+    if (!q.metier && c.metier && !q.q) q.metier = c.metier.id;
+    if (c.metier && q.metier && travNet(q.metier) !== travNet(c.metier.id)) { /* on garde la saisie exacte si elle vise un autre métier */ }
+    const texte = travNet(q.q);
+    let liste = db.trav.filter(travVisible).filter(x => {
+      if (q.metier && x.metierId !== q.metier) return false;
+      if (q.type && x.type && x.type !== q.type) return false;
+      if (q.dispo && normVille(x.disponibilite).indexOf(normVille(q.dispo)) < 0) return false;
+      if (texte) {
+        const gros = travNet([x.metier, x.competences, x.experience, x.qualifications, x.diplomes, x.description, x.ville, x.quartier, x.metierNom].join(' '));
+        const mots = texte.split(' ').filter(w => w.length > 2 && TRAV_VIDES.indexOf(w) < 0 && TRAV_MOTS_TRAVAIL.indexOf(w) < 0);
+        if (mots.length && !mots.some(w => gros.indexOf(w) >= 0)) return false;
+      }
+      if (!travFiltreGeo(x, q)) return false;
+      return true;
+    });
+    liste = liste.map(x => ({ x, s: travScore(x, q) }))
+      .sort((a, b) => (a.s.rang - b.s.rang) || ((a.s.dist === null ? 1e9 : a.s.dist) - (b.s.dist === null ? 1e9 : b.s.dist)) || String(b.x.at || '').localeCompare(String(a.x.at || '')))
+      .slice(0, Math.max(1, Math.min(120, Number(url.searchParams.get('limite')) || 60)))
+      .map(o => Object.assign(travProfilPublic(o.x, false), { distanceKm: o.s.dist === null ? null : Math.round(o.s.dist * 10) / 10, rang: o.s.rang }));
+    liste.forEach(l => { const x = db.trav.find(z => z.id === l.id); if (x) x.vues = (x.vues || 0) + 1; });
+    return sendJson(res, 200, {
+      ok: true, actif: true, liste, total: liste.length, compris: c.resume, comprehension: { metier: c.metier ? c.metier.id : '', metierNom: c.metier ? c.metier.nom : '', ic: c.metier ? c.metier.ic : '', ville: c.ville, portee: c.portee || q.portee, type: c.type },
+      message: liste.length ? '' : 'Personne ne correspond pour l’instant — élargissez la zone (« Partout en Côte d’Ivoire ») ou changez les mots.'
+    }), true;
+  }
+  if (p === '/api/trav/comprendre' && req.method === 'GET') {
+    /* 🔎 comprendre AVANT de chercher : l'utilisateur voit ce que KLEAN a compris, et peut corriger */
+    const c = travComprendre(url.searchParams.get('q') || '');
+    const m = modAnalyser([url.searchParams.get('q') || ''], {});
+    return sendJson(res, 200, {
+      ok: true, compris: c.resume, metierNom: c.metier ? c.metier.nom : '', metierId: c.metier ? c.metier.id : '',
+      ic: c.metier ? c.metier.ic : '', ville: c.ville, portee: c.portee, type: c.type, urgence: c.urgence,
+      suggestions: TRAV_METIERS.filter(x => x.id !== 'autre').slice(0, 12).map(x => ({ id: x.id, nom: x.nom, ic: x.ic })),
+      moderation: { risque: m.risque, message: m.message, motifs: m.motifs.map(x => x.txt) }
+    }), true;
+  }
+  if (p === '/api/trav' && req.method === 'POST') {
+    const r = accueilReglages('job_pres');
+    if (!r.actif) return sendJson(res, 200, { ok: false, code: 'desactive', error: 'La recherche d’emploi est désactivée par KLEAN pour le moment.' }), true;
+    if (!hitsAutorises('travnew:' + ip, 6)) return sendJson(res, 429, { error: 'Trop de publications d’un coup — patientez quelques minutes' }), true;
+    const net = (x, n) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().slice(0, n);
+    const v = {
+      nom: net(B.nom, 60), prenom: net(B.prenom, 60), tel: String(B.tel || '').replace(/[^\d+ ]/g, '').trim().slice(0, 20),
+      ville: net(B.ville, 60), quartier: net(B.quartier, 60), zoneAcceptee: net(B.zoneAcceptee, 120),
+      metier: net(B.metier, 90), competences: net(B.competences, 400), experience: net(B.experience, 300),
+      qualifications: net(B.qualifications, 400), diplomes: net(B.diplomes, 400),
+      disponibilite: net(B.disponibilite, 90), description: net(B.description, 800),
+      type: (['regulier', 'ponctuel', 'mission'].indexOf(B.type) >= 0 ? B.type : ''),
+      portee: (['pres', 'ville', 'ci', 'zone'].indexOf(B.portee) >= 0 ? B.portee : 'ville'),
+      lat: (typeof B.lat === 'number' && isFinite(B.lat)) ? B.lat : null,
+      lng: (typeof B.lng === 'number' && isFinite(B.lng)) ? B.lng : null,
+      publierTel: !!B.publierTel
+    };
+    if (v.nom.length < 2) return sendJson(res, 400, { champ: 'nom', error: 'Indiquez votre nom (au moins 2 lettres).' }), true;
+    if (v.tel.replace(/\D/g, '').length < 8) return sendJson(res, 400, { champ: 'tel', error: 'Indiquez un numéro de téléphone joignable.' }), true;
+    if (!v.ville && !v.quartier) return sendJson(res, 400, { champ: 'ville', error: 'Indiquez votre ville ou votre quartier : c’est ce qui permet de vous trouver.' }), true;
+    if (!v.metier && !v.competences) return sendJson(res, 400, { champ: 'metier', error: 'Dites quel travail vous cherchez (par exemple « ménage », « chauffeur », « chantier »…).' }), true;
+    /* 🧠 compréhension automatique du travail écrit avec ses propres mots */
+    const c = travComprendre([v.metier, v.competences, v.qualifications, v.description, v.diplomes].join(' '), { portee: v.portee });
+    if (c.metier && !v.metier) v.metier = c.metier.nom;
+    /* 🛡️ modération contextuelle AVANT publication */
+    const a = modAnalyser([v.metier, v.competences, v.experience, v.qualifications, v.diplomes, v.description, v.titre].filter(Boolean), {});
+    const ev = modNoter('profil', null, [v.metier, v.description].filter(Boolean).join(' — '), a);
+    if (a.risque === 'bloquer') {
+      return sendJson(res, 200, { ok: false, code: 'bloque', error: a.message, motifs: a.motifs.map(m => m.txt) }), true;
+    }
+    const x = Object.assign(v, {
+      id: uid('TR'), statut: (a.risque === 'verifier') ? 'en_verification' : 'publie',
+      valide: false, metierId: c.metier ? c.metier.id : 'autre', metierNom: c.metier ? c.metier.nom : '',
+      code: String(Math.floor(100000 + Math.random() * 899999)),
+      clientId: moi && moi.clientId ? moi.clientId : null, agentId: moi && moi.agentId ? moi.agentId : null,
+      at: nowISO(), majAt: nowISO(), vues: 0, contacts: 0, modId: ev ? ev.id : null, ip,
+      journal: [{ at: nowISO(), quoi: 'création', par: moi ? moi.type : 'visiteur', risque: a.risque }]
+    });
+    if (B.photo) {
+      const ph = travPhotoGarder(x.id, B.photo);
+      if (!ph.ok) return sendJson(res, 400, { ok: false, code: 'photo', error: ph.error }), true;
+      x.photo = true;
+    }
+    db.trav.unshift(x);
+    db.trav = db.trav.slice(0, 3000);
+    emitAdmin('emploi', '💼 Nouvelle recherche d’emploi' + (x.metierNom ? ' — ' + x.metierNom : '') + ' à ' + (x.ville || x.quartier || '?') +
+      (x.statut === 'en_verification' ? ' — 🟠 À VÉRIFIER' : ''));
+    /* les professionnels qui cherchent quelqu'un sont prévenus s'ils correspondent */
+    try {
+      db.travBesoins.filter(travVisible).forEach(b => {
+        if (b.metierId && x.metierId && b.metierId === x.metierId) {
+          travNotifier({ agentId: b.agentId, clientId: b.clientId }, { type: 'trav_profil', profilId: x.id, metierNom: x.metierNom, ville: x.ville, resume: 'Une personne cherche du travail : ' + (x.metierNom || '') });
+        }
+      });
+    } catch (e) { }
+    saveDb();
+    return sendJson(res, 201, {
+      ok: true, id: x.id, code: x.code, statut: x.statut, compris: c.resume,
+      message: x.statut === 'en_verification'
+        ? '⏳ Votre recherche est envoyée à KLEAN pour vérification — elle sera publiée très vite. Gardez votre code de suivi.'
+        : '✅ Votre recherche est publiée. Les professionnels qui cherchent quelqu’un peuvent la voir. Conservez votre code de suivi.'
+    }), true;
+  }
+  if (p === '/api/trav/fiche' && req.method === 'GET') {
+    const id = String(url.searchParams.get('id') || ''), code = String(url.searchParams.get('code') || '');
+    const x = db.trav.find(z => z.id === id);
+    if (!x) return sendJson(res, 404, { error: 'Profil introuvable' }), true;
+    const proprio = code && code === x.code;
+    const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+    if (!travVisible(x) && !proprio && !hq) return sendJson(res, 404, { error: 'Profil introuvable' }), true;
+    if (!proprio) { x.vues = (x.vues || 0) + 1; if (x.vues % 5 === 0) saveDb(); }
+    return sendJson(res, 200, { ok: true, profil: travProfilPublic(x, !!proprio), suivis: proprio ? 1 : 0, moderation: x.statut === 'en_verification' ? 'votre demande est en vérification' : '' }), true;
+  }
+  if (p === '/api/trav/modifier' && req.method === 'POST') {
+    const x = db.trav.find(z => z.id === String(B.id || ''));
+    if (!x) return sendJson(res, 404, { error: 'Profil introuvable' }), true;
+    if (!B.code || B.code !== x.code) return sendJson(res, 403, { error: 'Code de suivi incorrect — seul l’auteur (ou KLEAN) peut modifier ce profil.' }), true;
+    const net = (v2, n) => String(v2 == null ? '' : v2).replace(/\s+/g, ' ').trim().slice(0, n);
+    const champs = ['nom', 'prenom', 'ville', 'quartier', 'zoneAcceptee', 'metier', 'competences', 'experience', 'qualifications', 'diplomes', 'disponibilite', 'description'];
+    const fusion = Object.assign({}, x, {});
+    champs.forEach(k => { if (typeof B[k] === 'string') fusion[k] = net(B[k], k === 'description' ? 800 : 400); });
+    if (typeof B.tel === 'string') fusion.tel = String(B.tel).replace(/[^\d+ ]/g, '').trim().slice(0, 20);
+    const a = modAnalyser([fusion.metier, fusion.competences, fusion.experience, fusion.qualifications, fusion.diplomes, fusion.description], {});
+    modNoter('profil', x.id, fusion.description, a, a.risque === 'ok' ? 'actualisation' : null);
+    if (a.risque === 'bloquer') return sendJson(res, 200, { ok: false, code: 'bloque', error: a.message }), true;
+    Object.assign(x, fusion);
+    const c = travComprendre([x.metier, x.competences, x.description].join(' '), {});
+    if (c.metier) { x.metierId = c.metier.id; x.metierNom = c.metier.nom; }
+    if (typeof B.publierTel === 'boolean') x.publierTel = B.publierTel;
+    if (B.photo === '') { delete db.travPhotos[x.id]; x.photo = false; }
+    else if (B.photo) { const ph = travPhotoGarder(x.id, B.photo); if (!ph.ok) return sendJson(res, 400, { ok: false, code: 'photo', error: ph.error }), true; x.photo = true; }
+    x.statut = a.risque === 'verifier' ? 'en_verification' : 'publie';
+    x.majAt = nowISO(); x.journal.push({ at: nowISO(), quoi: 'modification', par: 'auteur' });
+    saveDb();
+    return sendJson(res, 200, { ok: true, statut: x.statut, message: '✅ Votre recherche est mise à jour.' }), true;
+  }
+  if (p === '/api/trav/retirer' && req.method === 'POST') {
+    const x = db.trav.find(z => z.id === String(B.id || ''));
+    if (!x) return sendJson(res, 404, { error: 'Profil introuvable' }), true;
+    const d = (moi && moi.type === 'pdg') || (B.code && B.code === x.code);
+    if (!d) return sendJson(res, 403, { error: 'Code de suivi incorrect' }), true;
+    x.statut = 'desactive'; x.majAt = nowISO(); x.motif = String(B.motif || '').slice(0, 200);
+    x.journal.push({ at: nowISO(), quoi: 'retrait', par: (moi && moi.type === 'pdg') ? 'PDG' : 'auteur' });
+    saveDb();
+    return sendJson(res, 200, { ok: true, message: '🗑️ Votre recherche n’est plus visible.' }), true;
+  }
+  if (p === '/api/trav/photo' && req.method === 'GET') {
+    const id = String(url.searchParams.get('id') || '');
+    const x = (db.trav || []).find(z => z.id === id);
+    if (!x || !x.photo || !db.travPhotos[id]) return sendJson(res, 404, { error: 'Photo introuvable' }), true;
+    if (!travVisible(x)) {
+      const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+      if (!hq) return sendJson(res, 403, { error: 'Photo non publiée' }), true;
+    }
+    if (!hitsAutorises('travph:' + ip, 300)) return sendJson(res, 429, { error: 'Trop de consultations' }), true;
+    return travPhotoEnvoi(res, db.travPhotos[id].b64), true;
+  }
+
+  /* ═══════════ ② CÔTÉ PROFESSIONNEL : « JE CHERCHE UN TRAVAILLEUR » ═══════════ */
+  if (p === '/api/trav/besoins' && req.method === 'GET') {
+    const rp = accueilReglages('job_pres'), rt = accueilReglages('job_trav');
+    if (!rp.actif && !rt.actif) return sendJson(res, 200, { ok: true, actif: false, liste: [], total: 0, message: 'Cette option est désactivée par KLEAN pour le moment.' }), true;
+    if (!hitsAutorises('besoins:' + ip, 60)) return sendJson(res, 429, { error: 'Trop de recherches — patientez une minute' }), true;
+    const lat = url.searchParams.get('lat'), lng = url.searchParams.get('lng');
+    const q = {
+      q: url.searchParams.get('q') || '', metier: url.searchParams.get('metier') || '', ville: url.searchParams.get('ville') || '',
+      portee: url.searchParams.get('portee') || 'ci',
+      lat: (lat !== null && lat !== '' && isFinite(Number(lat))) ? Number(lat) : null,
+      lng: (lng !== null && lng !== '' && isFinite(Number(lng))) ? Number(lng) : null,
+      rayonKm: Number(url.searchParams.get('rayonKm')) || 60
+    };
+    const c = travComprendre([q.q, q.ville].filter(Boolean).join(' '), { portee: q.portee });
+    if (c.metier && !q.metier) q.metier = c.metier.id;
+    const texte = travNet(q.q);
+    let liste = db.travBesoins.filter(travVisible).filter(x => {
+      if (q.metier && x.metierId !== q.metier) return false;
+      if (texte) {
+        const gros = travNet([x.titre, x.metier, x.description, x.ville, x.quartier, x.zone].join(' '));
+        const mots = texte.split(' ').filter(w => w.length > 2 && TRAV_VIDES.indexOf(w) < 0 && TRAV_MOTS_TRAVAIL.indexOf(w) < 0);
+        if (mots.length && !mots.some(w => gros.indexOf(w) >= 0)) return false;
+      }
+      if (!travFiltreGeo(x, q)) return false;
+      return true;
+    }).map(x => ({ x, s: travScore(x, q) }))
+      .sort((a, b) => (a.s.rang - b.s.rang) || String(b.x.at || '').localeCompare(String(a.x.at || '')))
+      .slice(0, 80).map(o => Object.assign(travBesoinPublic(o.x, false), { distanceKm: o.s.dist === null ? null : Math.round(o.s.dist * 10) / 10 }));
+    liste.forEach(l => { const x = db.travBesoins.find(z => z.id === l.id); if (x) x.vues = (x.vues || 0) + 1; });
+    return sendJson(res, 200, { ok: true, actif: true, liste, total: liste.length, compris: c.resume, message: liste.length ? '' : 'Aucune recherche de travailleur dans cette zone pour l’instant.' }), true;
+  }
+  if (p === '/api/trav/besoins' && req.method === 'POST') {
+    const r = accueilReglages('job_trav');
+    if (!r.actif) return sendJson(res, 200, { ok: false, code: 'desactive', error: 'Cette option est désactivée par KLEAN pour le moment.' }), true;
+    if (!hitsAutorises('besoinn:' + ip, 6)) return sendJson(res, 429, { error: 'Trop de publications d’un coup — patientez quelques minutes' }), true;
+    const net = (x, n) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().slice(0, n);
+    const v = {
+      titre: net(B.titre, 120), metier: net(B.metier, 90), description: net(B.description, 900),
+      ville: net(B.ville, 60), quartier: net(B.quartier, 60), zone: net(B.zone, 120),
+      quand: net(B.quand, 60), salaire: net(B.salaire, 60),
+      type: (['regulier', 'ponctuel', 'mission'].indexOf(B.type) >= 0 ? B.type : ''),
+      urgent: !!B.urgent, nom: net(B.nom, 60), tel: String(B.tel || '').replace(/[^\d+ ]/g, '').trim().slice(0, 20),
+      lat: (typeof B.lat === 'number' && isFinite(B.lat)) ? B.lat : null,
+      lng: (typeof B.lng === 'number' && isFinite(B.lng)) ? B.lng : null
+    };
+    if (!v.titre) v.titre = 'Recherche d’un travailleur';
+    if (!v.description && !v.metier) return sendJson(res, 400, { champ: 'description', error: 'Dites ce que vous cherchez (par exemple « je cherche une femme de ménage »).' }), true;
+    if (!v.ville && !v.quartier) return sendJson(res, 400, { champ: 'ville', error: 'Indiquez la ville ou le quartier du travail.' }), true;
+    if (!moi && v.tel.replace(/\D/g, '').length < 8) return sendJson(res, 400, { champ: 'tel', error: 'Indiquez un téléphone joignable pour être contacté.' }), true;
+    const c = travComprendre([v.titre, v.metier, v.description].join(' '), {});
+    const a = modAnalyser([v.titre, v.metier, v.description].join(' '), {});
+    const ev = modNoter('besoin', null, [v.titre, v.description].filter(Boolean).join(' — '), a);
+    if (a.risque === 'bloquer') return sendJson(res, 200, { ok: false, code: 'bloque', error: a.message, motifs: a.motifs.map(m => m.txt) }), true;
+    const b = Object.assign(v, {
+      id: uid('BS'), statut: (a.risque === 'verifier') ? 'en_verification' : 'publie',
+      qui: moi ? (moi.type === 'professionnel' ? 'professionnel' : moi.type) : 'visiteur',
+      nom: v.nom || (moi ? moi.nom : ''), tel: v.tel || (moi ? moi.tel : ''),
+      agentId: moi && moi.agentId ? moi.agentId : null, clientId: moi && moi.clientId ? moi.clientId : null,
+      metierId: c.metier ? c.metier.id : 'autre', metierNom: c.metier ? c.metier.nom : '',
+      code: String(Math.floor(100000 + Math.random() * 899999)),
+      at: nowISO(), majAt: nowISO(), vues: 0, reponses: 0, modId: ev ? ev.id : null, ip,
+      journal: [{ at: nowISO(), quoi: 'création', par: moi ? moi.type : 'visiteur', risque: a.risque }]
+    });
+    db.travBesoins.unshift(b);
+    db.travBesoins = db.travBesoins.slice(0, 3000);
+    emitAdmin('emploi', '🧑‍💼 Nouvelle recherche de travailleur' + (b.metierNom ? ' — ' + b.metierNom : '') + ' à ' + (b.ville || '?') + (b.statut === 'en_verification' ? ' — 🟠 À VÉRIFIER' : ''));
+    /* 🔔 les personnes qui cherchent CE travail sont prévenues : le système marche dans les deux sens */
+    try {
+      db.trav.filter(travVisible).forEach(x => {
+        if (b.metierId && x.metierId && b.metierId === x.metierId) {
+          travNotifier({ clientId: x.clientId, agentId: x.agentId }, { type: 'trav_besoin', besoinId: b.id, metierNom: b.metierNom, ville: b.ville, resume: 'On cherche : ' + (b.metierNom || b.titre || '') + (b.ville ? ' — ' + b.ville : '') });
+        }
+      });
+    } catch (e) { }
+    saveDb();
+    return sendJson(res, 201, {
+      ok: true, id: b.id, code: b.code, statut: b.statut, compris: c.resume,
+      message: b.statut === 'en_verification' ? '⏳ Votre recherche est envoyée à KLEAN pour vérification.' : '✅ Votre recherche est publiée : les personnes disponibles peuvent la voir et vous proposer leurs services.'
+    }), true;
+  }
+  if (p === '/api/trav/besoins/fiche' && req.method === 'GET') {
+    const id = String(url.searchParams.get('id') || '');
+    const b = db.travBesoins.find(z => z.id === id);
+    if (!b) return sendJson(res, 404, { error: 'Recherche introuvable' }), true;
+    const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+    if (!travVisible(b) && !hq) return sendJson(res, 404, { error: 'Recherche introuvable' }), true;
+    b.vues = (b.vues || 0) + 1;
+    return sendJson(res, 200, { ok: true, besoin: travBesoinPublic(b, !!hq) }), true;
+  }
+  if (p === '/api/trav/besoins/repondre' && req.method === 'POST') {
+    /* une personne disponible répond à une recherche de travailleur */
+    const b = db.travBesoins.find(z => z.id === String(B.besoinId || ''));
+    if (!b) return sendJson(res, 404, { error: 'Cette recherche n’est plus disponible' }), true;
+    if (!hitsAutorises('repond:' + ip, 10)) return sendJson(res, 429, { error: 'Trop de réponses d’un coup — patientez une minute' }), true;
+    const nom = String(B.nom || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const tel = String(B.tel || '').replace(/[^\d+ ]/g, '').trim().slice(0, 20);
+    const msg = String(B.message || '').replace(/\s+/g, ' ').trim().slice(0, 700);
+    if (nom.length < 2 || tel.replace(/\D/g, '').length < 8) return sendJson(res, 400, { error: 'Indiquez votre nom et un téléphone joignable.' }), true;
+    const a = modAnalyser([msg, nom], {});
+    if (a.risque === 'bloquer') { modNoter('reponse', b.id, msg, a); return sendJson(res, 200, { ok: false, code: 'bloque', error: a.message }), true; }
+    const rep = {
+      id: uid('RP'), besoinId: b.id, profilId: B.profilId || null, nom, tel, message: msg,
+      ville: String(B.ville || '').slice(0, 60), statut: 'envoyee', at: nowISO(), ip
+    };
+    b.reponses = (b.reponses || 0) + 1;
+    db.travContacts.unshift({
+      id: uid('TC'), type: 'reponse', besoinId: b.id, deNom: nom, deTel: tel, deVille: rep.ville, deMessage: msg,
+      versNom: b.nom || 'Employeur', versTel: b.tel, versClientId: b.clientId || null, versAgentId: b.agentId || null,
+      sujet: b.titre || b.metierNom || 'Recherche de travailleur', statut: 'envoyee', at: nowISO(),
+      clientId: null, deRep: rep.id
+    });
+    travNotifier({ clientId: b.clientId, agentId: b.agentId }, { type: 'trav_reponse', besoinId: b.id, nom, tel, message: msg });
+    emitAdmin('emploi', '🙋 ' + nom + ' propose ses services pour « ' + (b.titre || b.metierNom || '') + ' »');
+    saveDb();
+    return sendJson(res, 201, { ok: true, id: rep.id, message: '✅ Votre proposition est envoyée. La personne vous appellera au ' + tel + ' si elle est intéressée.' }), true;
+  }
+  if (p === '/api/trav/besoins/retirer' && req.method === 'POST') {
+    const b = db.travBesoins.find(z => z.id === String(B.id || ''));
+    if (!b) return sendJson(res, 404, { error: 'Recherche introuvable' }), true;
+    const d = (moi && moi.type === 'pdg') || (B.code && B.code === b.code) ||
+      (moi && moi.agentId && b.agentId === moi.agentId) || (moi && moi.clientId && b.clientId === moi.clientId);
+    if (!d) return sendJson(res, 403, { error: 'Seul l’auteur (ou KLEAN) peut retirer cette recherche.' }), true;
+    b.statut = 'desactive'; b.majAt = nowISO();
+    b.journal.push({ at: nowISO(), quoi: 'retrait', par: (moi && moi.type === 'pdg') ? 'PDG' : 'auteur' });
+    saveDb();
+    return sendJson(res, 200, { ok: true, message: '🗑️ Recherche retirée.' }), true;
+  }
+
+  /* ═══════════ ③ LA MISE EN RELATION : VOIR → CONTACTER → DISCUTER → CONVENIR ═══════════ */
+  if (p === '/api/trav/contact' && req.method === 'POST') {
+    const net = (x, n) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().slice(0, n);
+    const profil = B.profilId ? db.trav.find(z => z.id === B.profilId) : null;
+    const besoin = B.besoinId ? db.travBesoins.find(z => z.id === B.besoinId) : null;
+    if (!profil && !besoin) return sendJson(res, 404, { error: 'Publication introuvable' }), true;
+    if (!hitsAutorises('contact:' + ip, 12)) return sendJson(res, 429, { error: 'Trop de demandes d’un coup — patientez une minute' }), true;
+    const demandeur = moi ? { nom: moi.nom, tel: moi.tel, ville: moi.ville, clientId: moi.clientId, agentId: moi.agentId } :
+      { nom: net(B.nom, 60), tel: String(B.tel || '').replace(/[^\d+ ]/g, '').trim().slice(0, 20), ville: net(B.ville, 60) };
+    if (!demandeur.nom || demandeur.nom.length < 2) return sendJson(res, 400, { error: 'Indiquez votre nom.' }), true;
+    if (!demandeur.tel || String(demandeur.tel).replace(/\D/g, '').length < 8) return sendJson(res, 400, { error: 'Indiquez un téléphone joignable.' }), true;
+    const msg = net(B.message, 600);
+    const a = modAnalyser([msg, demandeur.nom], {});
+    if (a.risque === 'bloquer') { modNoter('mise_en_relation', profil ? profil.id : besoin.id, msg, a); return sendJson(res, 200, { ok: false, code: 'bloque', error: a.message }), true; }
+    const cible = profil || besoin;
+    const versNom = profil ? (profil.prenom ? (profil.nom + ' ' + profil.prenom) : profil.nom) : (besoin.nom || 'Employeur');
+    const c = {
+      id: uid('TC'), type: profil ? 'profil' : 'besoin', profilId: profil ? profil.id : null, besoinId: besoin ? besoin.id : null,
+      deNom: demandeur.nom, deTel: demandeur.tel, deVille: demandeur.ville || '', deMessage: msg,
+      versNom, versTel: cible.tel, versVille: cible.ville || '', versClientId: null, versAgentId: null,
+      clientId: demandeur.clientId || null, agentId: demandeur.agentId || null,
+      sujet: profil ? (profil.metierNom || profil.metier || 'Recherche d’emploi') : (besoin.titre || besoin.metierNom || 'Recherche de travailleur'),
+      statut: 'envoyee', at: nowISO(), code: String(Math.floor(100000 + Math.random() * 899999)),
+      journal: [{ at: nowISO(), quoi: 'demande', par: moi ? moi.type : 'visiteur' }]
+    };
+    /* la personne visée est prévenue sur son compte KLEAN si elle en a un */
+    if (profil) { c.versClientId = profil.clientId || null; c.versAgentId = profil.agentId || null; profil.contacts = (profil.contacts || 0) + 1; }
+    else { c.versClientId = besoin.clientId || null; c.versAgentId = besoin.agentId || null; }
+    db.travContacts.unshift(c);
+    db.travContacts = db.travContacts.slice(0, 4000);
+    travNotifier({ clientId: c.versClientId, agentId: c.versAgentId },
+      { type: 'trav_contact', contactId: c.id, nom: demandeur.nom, sujet: c.sujet, message: msg });
+    emitAdmin('emploi', '🤝 Mise en relation : ' + demandeur.nom + ' → ' + versNom + ' (' + c.sujet + ')');
+    saveDb();
+    return sendJson(res, 201, {
+      ok: true, contactId: c.id, code: c.code, statut: 'envoyee', tel: cible.tel ? (String(cible.tel).slice(0, 2) + '•• •• •• ' + String(cible.tel).slice(-2)) : '',
+      message: '✅ Votre demande est transmise. Vous pouvez déjà discuter ici ; le numéro complet est échangé dès que la personne accepte.'
+    }), true;
+  }
+  if (p === '/api/trav/contact' && req.method === 'GET') {
+    const c = db.travContacts.find(z => z.id === String(url.searchParams.get('id') || ''));
+    if (!c) return sendJson(res, 404, { error: 'Demande introuvable' }), true;
+    const code = String(url.searchParams.get('code') || '');
+    const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+    const estDemandeur = (code && code === c.code) || (moi && ((moi.clientId && moi.clientId === c.clientId) || (moi.agentId && moi.agentId === c.agentId)));
+    const estDest = (code && code === c.codeVers) || (moi && ((moi.clientId && moi.clientId === c.versClientId) || (moi.agentId && moi.agentId === c.versAgentId)));
+    if (!hq && !estDemandeur && !estDest) return sendJson(res, 403, { error: 'Code de suivi incorrect' }), true;
+    const cote = hq ? 'pdg' : (estDemandeur ? 'demandeur' : 'destinataire');
+    return sendJson(res, 200, { ok: true, contact: travContactPublic(c, hq ? 'proprietaire' : cote), cote }), true;
+  }
+  if (p === '/api/trav/contact/decider' && req.method === 'POST') {
+    const c = db.travContacts.find(z => z.id === String(B.id || ''));
+    if (!c) return sendJson(res, 404, { error: 'Demande introuvable' }), true;
+    const code = String(B.code || '');
+    const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+    const proprio = hq || (moi && ((moi.clientId && (moi.clientId === c.versClientId || moi.clientId === c.clientId)) || (moi.agentId && (moi.agentId === c.versAgentId || moi.agentId === c.agentId))));
+    if (!proprio) return sendJson(res, 403, { error: 'Seule la personne concernée (ou KLEAN) peut accepter ou refuser.' }), true;
+    const d = (B.decision === 'accepter') ? 'acceptee' : (B.decision === 'refuser' ? 'refusee' : '');
+    if (!d) return sendJson(res, 400, { error: 'Décision inconnue' }), true;
+    if (d === 'acceptee' && !c.codeVers) c.codeVers = String(Math.floor(100000 + Math.random() * 899999));
+    c.statut = d; c.majAt = nowISO();
+    c.journal.push({ at: nowISO(), quoi: d, par: hq ? 'PDG' : 'destinataire' });
+    travNotifier({ clientId: c.clientId, agentId: c.agentId },
+      { type: 'trav_decision', contactId: c.id, statut: d, message: d === 'acceptee' ? '✅ Contact accepté — vous pouvez échanger vos numéros' : 'Cette demande de contact a été refusée.' });
+    emitAdmin('emploi', (d === 'acceptee' ? '✅ Contact accepté' : '⛔ Contact refusé') + ' : ' + c.deNom + ' ↔ ' + c.versNom);
+    saveDb();
+    return sendJson(res, 200, {
+      ok: true, statut: d, codeVers: c.codeVers,
+      message: d === 'acceptee' ? '✅ Accepté : les deux numéros sont maintenant visibles.' : 'Refusé : la demande est classée.'
+    }), true;
+  }
+  if (p === '/api/trav/chat' && req.method === 'GET') {
+    const c = db.travContacts.find(z => z.id === String(url.searchParams.get('contactId') || ''));
+    if (!c) return sendJson(res, 404, { error: 'Discussion introuvable' }), true;
+    const code = String(url.searchParams.get('code') || '');
+    const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+    const dedans = hq || (code && (code === c.code || code === c.codeVers)) ||
+      (moi && ((moi.clientId && (moi.clientId === c.clientId || moi.clientId === c.versClientId)) || (moi.agentId && (moi.agentId === c.agentId || moi.agentId === c.versAgentId))));
+    if (!dedans) return sendJson(res, 403, { error: 'Vous ne faites pas partie de cette discussion.' }), true;
+    const depuis = Number(url.searchParams.get('depuis')) || 0;
+    const msgs = db.travChat.filter(m => m.contactId === c.id && (!depuis || new Date(m.at).getTime() > depuis)).slice(-120);
+    return sendJson(res, 200, { ok: true, contact: travContactPublic(c, hq ? 'proprietaire' : ''), messages: msgs.map(m => ({ id: m.id, de: m.de, texte: m.texte, at: m.at })) }), true;
+  }
+  if (p === '/api/trav/chat' && req.method === 'POST') {
+    const c = db.travContacts.find(z => z.id === String(B.contactId || ''));
+    if (!c) return sendJson(res, 404, { error: 'Discussion introuvable' }), true;
+    const code = String(B.code || ''), hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+    const cote = (code === c.code) ? 'demandeur' : (code === c.codeVers ? 'destinataire' : (hq ? 'pdg' : (moi && moi.clientId === c.clientId || moi && moi.agentId === c.agentId ? 'demandeur' : (moi && (moi.clientId === c.versClientId || moi.agentId === c.versAgentId) ? 'destinataire' : ''))));
+    if (!cote) return sendJson(res, 403, { error: 'Vous ne faites pas partie de cette discussion.' }), true;
+    const txt = String(B.text || '').replace(/\s+/g, ' ').trim().slice(0, 700);
+    if (txt.length < 1) return sendJson(res, 400, { error: 'Écrivez un message.' }), true;
+    const a = modAnalyser([txt], {});
+    if (a.risque === 'bloquer') { modNoter('message', c.id, txt, a); return sendJson(res, 200, { ok: false, code: 'bloque', error: a.message }), true; }
+    const m = { id: uid('TM'), contactId: c.id, de: cote, texte: txt, at: nowISO(), lu: false };
+    db.travChat.push(m);
+    db.travChat = db.travChat.slice(-4000);
+    if (cote === 'pdg') c.lu = true;
+    travNotifier({ clientId: cote === 'demandeur' ? c.versClientId : c.clientId, agentId: cote === 'demandeur' ? c.versAgentId : c.agentId },
+      { type: 'trav_msg', contactId: c.id, texte: txt, de: cote });
+    saveDb();
+    if (a.risque === 'verifier') { modNoter('message', c.id, txt, a); return sendJson(res, 201, { ok: true, id: m.id, avertissement: 'Votre message est publié mais KLEAN l’examine (contenu à vérifier).' }), true; }
+    return sendJson(res, 201, { ok: true, id: m.id }), true;
+  }
+  if (p === '/api/trav/mes' && req.method === 'GET') {
+    /* « mes demandes » : ce que j'ai publié et les contacts reçus (par mon compte, ou par code) */
+    const code = String(url.searchParams.get('code') || '');
+    const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+    const mesProfils = db.trav.filter(x => (hq && false) || (moi && ((moi.clientId && x.clientId === moi.clientId) || (moi.agentId && x.agentId === moi.agentId))) || (code && x.code === code));
+    const mesBesoins = db.travBesoins.filter(x => (moi && ((moi.clientId && x.clientId === moi.clientId) || (moi.agentId && x.agentId === moi.agentId))) || (code && x.code === code));
+    const ids = new Set([...mesProfils.map(x => x.id), ...mesBesoins.map(x => x.id)]);
+    const mesContacts = db.travContacts.filter(c => (c.profilId && ids.has(c.profilId)) || (c.besoinId && ids.has(c.besoinId)) ||
+      (moi && ((moi.clientId && (c.clientId === moi.clientId || c.versClientId === moi.clientId)) || (moi.agentId && (c.agentId === moi.agentId || c.versAgentId === moi.agentId)))));
+    return sendJson(res, 200, {
+      ok: true,
+      profils: mesProfils.map(x => travProfilPublic(x, true)),
+      besoins: mesBesoins.map(x => travBesoinPublic(x, true)),
+      contacts: mesContacts.slice(0, 60).map(c => travContactPublic(c, 'proprietaire'))
+    }), true;
+  }
+
+  /* ═══════════ ④ LE TABLEAU DE BORD DU PDG ═══════════ */
+  if (p.indexOf('/api/admin/trav') === 0 || p.indexOf('/api/admin/mod') === 0) {
+    const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+    if (!hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise', code: 'session' }), true;
+    if (p === '/api/admin/trav' && req.method === 'GET') {
+      return sendJson(res, 200, {
+        ok: true, role: hq.role, pdg: hq.role === 'pdg',
+        profils: db.trav.slice(0, 300).map(x => Object.assign(travProfilPublic(x, true), { code: x.code, ip: x.ip, modId: x.modId, journal: x.journal || [], motif: x.motif || '' })),
+        besoins: db.travBesoins.slice(0, 300).map(b => Object.assign(travBesoinPublic(b, true), { code: b.code, ip: b.ip, modId: b.modId, journal: b.journal || [] })),
+        contacts: db.travContacts.slice(0, 200).map(c => travContactPublic(c, 'proprietaire')),
+        moderation: db.modQ.slice(0, 200),
+        stats: travSante(),
+        reglages: {
+          job_pres: accueilReglages('job_pres').actif, job_trav: accueilReglages('job_trav').actif,
+          profilsDansLAccueil: !!accueilReglages('job_pres').params.profilsDansLAccueil,
+          metiers: TRAV_METIERS.map(m => ({ id: m.id, nom: m.nom, ic: m.ic, cles: m.cle.length }))
+        }
+      }), true;
+    }
+    if (p === '/api/admin/trav' && req.method === 'POST') {
+      if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG : seul le compte principal modère les demandes d’emploi', code: 'pdg' }), true;
+      const cible = String(B.cible || ''), id = String(B.id || ''), action = String(B.action || '');
+      /* ⚠️ correctif : ces deux actes ne visent AUCUNE publication précise — ils doivent passer AVANT
+         la vérification de la cible, sinon ils étaient refusés (« Cible inconnue »). */
+      if (action === 'tout_reexaminer') {
+        db.trav.filter(x => x.statut === 'bloque' || x.statut === 'en_verification').forEach(x => { x.statut = 'en_verification'; x.reexamineAt = nowISO(); if (x.journal) x.journal.push({ at: nowISO(), quoi: 'reexaminer', par: 'PDG' }); });
+        emitAdmin('emploi', '🔍 Toutes les demandes bloquées sont repassées en vérification');
+        saveDb();
+        return sendJson(res, 200, { ok: true, message: '🔍 Les demandes bloquées sont remises à l’examen' }), true;
+      }
+      if (action === 'regler') {
+        const o = db.accueil.options['job_pres'] || db.accueil.options['job_trav'];
+        if (B.params && typeof B.params === 'object' && o) Object.assign(o.params, B.params);
+        db.accueil.version = (db.accueil.version || 0) + 1;
+        accueilJournal('params', '💼 Recherche d’emploi : réglages ' + JSON.stringify(o ? o.params : {}), hq.nom || true);
+        emitAccueilMaj('options', 'job_pres'); saveDb();
+        return sendJson(res, 200, { ok: true, params: o ? o.params : {}, message: '✅ Réglages enregistrés' }), true;
+      }
+      const liste = cible === 'profil' ? db.trav : (cible === 'besoin' ? db.travBesoins : (cible === 'contact' ? db.travContacts : (cible === 'mod' ? db.modQ : null)));
+      if (!liste) return sendJson(res, 400, { error: 'Cible inconnue' }), true;
+      const item = id ? liste.find(z => z.id === id) : null;
+      if (id && !item) return sendJson(res, 404, { error: 'Publication introuvable' }), true;
+      const journaliser = (x, quoi) => { if (x && x.journal) x.journal.push({ at: nowISO(), quoi, par: 'PDG' }); };
+      const actes = {
+        activer: () => { item.statut = 'publie'; journaliser(item, 'activer'); return '✅ Publication ACTIVÉE'; },
+        desactiver: () => { item.statut = 'desactive'; journaliser(item, 'desactiver'); return '⚪ Publication DÉSACTIVÉE'; },
+        approuver: () => { item.statut = 'publie'; item.valide = true; item.verifieAt = nowISO(); journaliser(item, 'approuver'); return '✅ Publication APPROUVÉE'; },
+        refuser: () => { item.statut = 'refuse'; item.motif = String(B.motif || 'refusé par KLEAN').slice(0, 200); journaliser(item, 'refuser'); return '⛔ Publication REFUSÉE'; },
+        masquer: () => { item.statut = 'masque'; journaliser(item, 'masquer'); return '🙈 Publication MASQUÉE'; },
+        actualiser: () => { item.majAt = nowISO(); journaliser(item, 'actualiser'); return '🔄 Publication actualisée'; },
+        signaler: () => { item.signale = true; item.motifSignal = String(B.motif || '').slice(0, 200); journaliser(item, 'signaler'); return '🚩 Publication SIGNALÉE'; },
+        reexaminer: () => { item.statut = item.statut === 'bloque' ? 'en_verification' : item.statut; item.reexamineAt = nowISO(); journaliser(item, 'reexaminer'); return '🔍 Publication remise à l’examen'; },
+        supprimer: () => { const i = liste.indexOf(item); if (i >= 0) liste.splice(i, 1); if (cible === 'profil') delete db.travPhotos[item.id]; return '❌ Publication supprimée'; }
+      };
+      if (!actes[action]) return sendJson(res, 400, { error: 'Action inconnue : ' + action }), true;
+      const msg = actes[action]();
+      emitAdmin('emploi', 'PDG — ' + msg + (item && item.nom ? ' (' + item.nom + ')' : ''));
+      saveDb();
+      return sendJson(res, 200, { ok: true, message: msg }), true;
+    }
+    if (p === '/api/admin/mod' && req.method === 'GET') {
+      /* 🚩 signalements, blocages, contenus à vérifier (confidentialité : le texte exact reste réservé au PDG) */
+      const filtre = String(url.searchParams.get('quoi') || '');
+      let liste = db.modQ.slice();
+      if (filtre === 'bloques') liste = liste.filter(m => m.risque === 'bloquer' || m.motif === 'signalement');
+      if (filtre === 'verifier') liste = liste.filter(m => m.risque === 'verifier');
+      return sendJson(res, 200, { ok: true, liste: liste.slice(0, 300), total: liste.length, pdg: hq.role === 'pdg', stats: travSante() }), true;
+    }
+    if (p === '/api/admin/mod' && req.method === 'POST') {
+      if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG', code: 'pdg' }), true;
+      const e = db.modQ.find(z => z.id === String(B.id || ''));
+      const action = String(B.action || '');
+      if (action === 'signaler' && !e) {
+        const a = { risque: 'verifier', motifs: [{ id: 'signalement' }], contexte: [] };
+        const ev = modNoter(String(B.quoi || 'profil'), B.ref || null, String(B.texte || ''), a, 'signalement');
+        saveDb();
+        return sendJson(res, 200, { ok: true, id: ev.id, message: '🚩 Signalement enregistré' }), true;
+      }
+      if (!e) return sendJson(res, 404, { error: 'Événement introuvable' }), true;
+      if (action === 'reexaminer') { e.statut = 'a_verifier'; e.reexamineAt = nowISO(); e.par = 'PDG'; }
+      else if (action === 'bloquer') { e.statut = 'bloque'; e.par = 'PDG'; }
+      else if (action === 'lever') { e.statut = 'leve'; e.par = 'PDG'; }
+      else if (action === 'supprimer') { const i = db.modQ.indexOf(e); if (i >= 0) db.modQ.splice(i, 1); }
+      else return sendJson(res, 400, { error: 'Action inconnue' }), true;
+      saveDb();
+      return sendJson(res, 200, { ok: true, message: '✅ Modération mise à jour : ' + (e.statut || 'supprimé') }), true;
+    }
+  }
+  return false;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
    🧩 29/09 — LOT 123 : LES GRANDES OPTIONS DE LA PAGE D'ACCUEIL (registre centralisé)
    ═══════════════════════════════════════════════════════════════════════════════════
    Objectif du PDG : « chaque grande option de la page d'accueil doit fonctionner, et je
@@ -5288,7 +6162,10 @@ const ACCUEIL_OPTIONS_DEF = [
     sous: 'Le catalogue national complet, métiers et prix', defaut: { actif: true, visible: true, ordre: 20 }, params: {} },
   { id: 'job_pres', titre: 'Je cherche un job près de moi', icone: '🔎', ou: 'la grande option du bas de l’accueil',
     sous: 'Trouver du travail ou une mission près de chez soi', defaut: { actif: true, visible: true, ordre: 30 },
-    params: { rayonKm: 30, limite: 60 } },
+    params: { rayonKm: 30, limite: 60, profilsDansLAccueil: true } },
+  { id: 'job_trav', titre: 'Je cherche un travailleur', icone: '🧑‍💼', ou: 'l’option des comptes professionnels',
+    sous: 'Trouver une personne qui propose ses compétences', defaut: { actif: true, visible: true, ordre: 35 },
+    params: { rayonKm: 60, limite: 80 } },
   { id: 'avis_recherche', titre: 'Avis de recherche', icone: '📢', ou: 'la grande option du bas de l’accueil',
     sous: 'Publier, consulter et partager les avis de recherche', defaut: { actif: true, visible: true, ordre: 40 },
     params: { moderation: 'auto' } },      /* auto = publication immédiate · avant = validation par le PDG avant publication */
@@ -5472,8 +6349,20 @@ function jobsOpportunites(q) {
     });
   });
 
+  /* ③ les recherches de travailleurs publiées par les professionnels : du travail, là aussi */
+  (db.travBesoins || []).filter(travVisible).forEach(b => {
+    let d = null;
+    if (lat !== null && typeof b.lat === 'number') d = haversineKm(lat, lng, b.lat, b.lng);
+    out.push({
+      id: b.id, source: 'besoin', titre: b.titre || ('On cherche : ' + (b.metierNom || b.metier || 'travailleur')),
+      metier: b.metierId || b.metier || '', description: b.description || '',
+      quartier: b.quartier || '', ville: b.ville || '',
+      quand: b.quand || '', prix: b.salaire || '', contact: b.nom || '', tel: '', at: b.at, urgent: !!b.urgent, dist: d, type: 'besoin'
+    });
+  });
+
   let liste = out.filter(o => {
-    if (type && o.type !== type) return false;
+    if (type && o.type !== type && !(type === 'demande' && o.type === 'besoin')) return false;
     if (villeQ && String(o.ville || '').toLowerCase().indexOf(villeQ) < 0) return false;
     if (texte) {
       const gros = (o.titre + ' ' + o.metier + ' ' + o.description + ' ' + o.quartier + ' ' + o.ville).toLowerCase();
@@ -6031,6 +6920,8 @@ const server = http.createServer(async (req, res) => {
   if (shieldGate(req, res, p)) return;
   /* 🧩 LOT 123 — Les grandes options de la page d'accueil (routeur centralisé) */
   if (await accueilRoutes(req, res, p, url)) return;
+  /* 💼 LOT 124 — Recherche d'emploi & mise en relation (routeur centralisé) */
+  if (await travRoutes(req, res, p, url)) return;
 
   /* --- API --- */
   if (p === '/api/health') return sendJson(res, 200, { ok: true, storage: pgClient ? 'postgres' : 'fichier', agentsEnLigne: onlineAgents().length, agentsTotal: db.agents.length, clientsTotal: db.clients.length, missions: db.missions.length, writeFrozen: writesFrozen(), live: liveHome() });

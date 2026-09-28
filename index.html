@@ -1465,6 +1465,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     <div id="acc-grandes-zone" style="margin-top:6px">
       <h2 class="acc-sect" id="acc-grandes-titre">Autres options</h2>
       <div id="acc-grandes"></div>
+      <div id="acc-trav-lien"></div>
       <div id="acc-secours"></div>
       <div id="acc-opts-etat"></div>
     </div>
@@ -1780,6 +1781,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     <div id="push-slot" style="margin-top:10px"></div>
     <div id="veille-slot" style="margin-top:12px"></div>
     <div id="pro-roam" style="margin-top:12px"></div>
+    <div id="pro-trav-slot" style="margin-top:12px"></div>
 
     <div class="gain-grid">
       <div class="gain-card"><span>💰 Gains aujourd'hui</span><b id="gain-today">0 F</b><small>votre part : 75%</small></div>
@@ -3597,6 +3599,7 @@ function freshGains(){
 }
 function renderAgentDash(){
   try{ renderPushBtn(); }catch(e){}
+  try{ proTravPeindre(); }catch(e){}
   freshGains();
   renderAgentGate();
   const online = agent.online;
@@ -5206,7 +5209,7 @@ let FLIP = null, FLIP_SESS = null, FLIP_T0 = 0;
   try{ if(window.kVeilleRetirer) window.kVeilleRetirer(); }catch(e){}   /* l'alerte éventuelle s'efface d'elle-même */
   /* 🔎 « Vérifier les mises à jour » : le client (et le PDG) peut savoir d'un geste s'il a la
      dernière page. Sans cela, un téléphone pouvait rester sur l'ancienne version sans le dire. */
-  window.KLEAN_VERSION = '118.6';
+  window.KLEAN_VERSION = '124.1';
   window.kVerifierVersion = function(){
     try{ toast('🔍 Vérification de la mise à jour…'); }catch(e){}
     try{
@@ -8704,6 +8707,7 @@ const KLEAN_OPTS_DEF = {
   tous_services:  { cibles: ['#btn-tous-svc'], zone: 'accueil', vue: 'view-home', action: 'catNatOuvrir', quoi: 'le catalogue national' },
   job_pres:       { cibles: ['#opt-job-pres'], zone: 'grandes', vue: 'view-jobs', action: 'jobsOuvrir', quoi: 'les opportunités de travail' },
   avis_recherche: { cibles: ['#opt-avis'], zone: 'grandes', vue: 'view-avis', action: 'avisOuvrir', quoi: 'les avis de recherche' },
+  job_trav:       { cibles: ['#opt-job-trav', '#pro-job-trav'], zone: 'accueil', vue: 'view-trav', monteVue: 'travMonter', action: 'travOuvrir', quoi: 'la recherche d’un travailleur' },
   urgence:        { cibles: ['#rap-urgence'], zone: 'accueil', vue: 'view-urgence', action: 'ouvrirRubrique', arg: 'urgence', quoi: 'les urgences' },
   points:         { cibles: ['#rap-points'], zone: 'accueil', vue: 'view-points', action: 'ouvrirRubrique', arg: 'points', quoi: 'les Klean Points' },
   quiz:           { cibles: ['#rap-quiz'], zone: 'accueil', vue: 'view-quiz', action: 'ouvrirRubrique', arg: 'quiz', quoi: 'le quiz' },
@@ -8786,16 +8790,43 @@ function optHTMLPuces(liste) {
   if (!petits.length) return '';
   return petits.map(o => {
     const off = (o.actif === false);
-    return '<button type="button" class="cat-chip" data-opt="' + o.id + '" onclick="optOuvrir(\'' + o.id + '\')" title="' + (o.titre || '') + '"'
+    return '<button type="button" id="opt-' + String(o.id).replace(/_/g, '-') + '" class="cat-chip" data-opt="' + o.id + '" onclick="optOuvrir(\'' + o.id + '\')" title="' + (o.titre || '') + '"'
       + ' style="' + (off ? 'opacity:.55;' : '') + 'border-color:#eee"><span>' + (o.icone || '') + '</span><b>' + (o.titre || '') + '</b>' + (off ? '<span style="font-size:11px">⏸️</span>' : '') + '</button>';
   }).join('');
 }
+/* 🧑‍💼 LOT 124 — le raccourci « je cherche un travailleur » de l'ESPACE PROFESSIONNEL.
+   Le PDG a demandé qu'il soit présent dans TOUS les comptes professionnels ; il suit l'état
+   de l'option (désactivée par le PDG → on l'annonce proprement, jamais un bouton mort). */
+function proTravPeindre() {
+  const z = document.getElementById('pro-trav-slot');
+  if (!z) return;
+  let o = {};
+  try { o = (typeof optEtat === 'function') ? (optEtat('job_trav') || {}) : {}; } catch (e) { }
+  if (o.actif === false || o.visible === false) {
+    z.innerHTML = '<div style="background:#f3f4f6;border:1.5px dashed var(--line);border-radius:15px;padding:13px;font-size:13.5px;color:var(--muted)">🧑‍💼 « Je cherche un travailleur » : option ' + (o.actif === false ? 'désactivée' : 'masquée') + ' par KLEAN pour le moment.</div>';
+    return;
+  }
+  const nb = document.getElementById('trav-accueil-nb');
+  z.innerHTML = '<button type="button" id="pro-job-trav" data-opt="job_trav" onclick="optOuvrir(\'job_trav\')" style="width:100%;border:none;background:linear-gradient(135deg,#0d7a5f,#0a6247);color:#fff;font:inherit;font-weight:900;font-size:16.5px;padding:15px;border-radius:15px;cursor:pointer;min-height:54px">🧑‍💼 Je cherche un travailleur</button>'
+    + '<div style="font-size:12.5px;color:var(--muted);margin-top:6px;text-align:center">Trouvez une personne près de chez vous : ménage, chauffeur, maçon, cuisinier…</div>';
+  if (nb) { }   /* réserve : le nombre de personnes disponibles s'affichera ici */
+}
+try { window.proTravPeindre = proTravPeindre; } catch (e) { }
+
 function optsRendu() {
+  try { proTravPeindre(); } catch (e) { }
   /* ① les grandes options du bas de l'accueil (ordre du PDG) */
   const zone = document.getElementById('acc-grandes');
   if (zone) {
     const grandes = KLEAN_OPTS.options.filter(o => o.grande && o.visible !== false);
     zone.innerHTML = grandes.map(optHTMLGrande).join('') || '';
+  /* 🧑‍💼 un raccourci professionnel, écrit par le registre (identifiant stable), jamais en dur */
+  const zt = document.getElementById('acc-trav-lien');
+  if (zt) {
+    const ot = optEtat('job_trav');
+    zt.innerHTML = (ot.actif === false || ot.visible === false) ? '' :
+      '<button type="button" id="opt-job-trav" data-opt="job_trav" onclick="optOuvrir(\'job_trav\')" style="width:100%;margin-top:11px;border:2px dashed var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:15px;cursor:pointer;min-height:52px">🧑‍💼 Je cherche un travailleur</button>';
+  }
     const titre = document.getElementById('acc-grandes-titre');
     if (titre) titre.style.display = grandes.length ? '' : 'none';
   }
@@ -8923,7 +8954,12 @@ function optsAnalyser() {
     /* 2. mène-t-il quelque part ? */
     if (d.action && typeof window[d.action] !== 'function') { r.etat = 'panne'; r.message = 'la fonction « ' + d.action + ' » manque'; rapport.push(r); return; }
     /* 3. la page d'arrivée existe-t-elle ? */
-    if (d.vue && !document.getElementById(d.vue)) { r.etat = 'panne'; r.message = 'la page « ' + d.vue + ' » n’existe pas'; rapport.push(r); return; }
+    if (d.vue && !document.getElementById(d.vue)) {
+      /* certains écrans (recherche d'un travailleur, avis…) sont construits à la demande :
+         si la fonction de construction est là, ce n'est PAS une panne — et le PDG peut la réparer. */
+      if (d.monteVue && typeof window[d.monteVue] === 'function') { rapport.push(r); return; }
+      r.etat = 'panne'; r.message = 'la page « ' + d.vue + ' » n’existe pas'; rapport.push(r); return;
+    }
     rapport.push(r);
   });
   return rapport;
@@ -8964,6 +9000,7 @@ async function optsReparer(ordreId) {
   try {
     if (!document.getElementById('view-jobs')) { try { jobsMonter(); reussies.push('écran « job près de moi » recréé'); } catch (e) { echecs.push('écran job : ' + e.message); } }
     if (!document.getElementById('view-avis')) { try { avisMonter(); reussies.push('écran « avis de recherche » recréé'); } catch (e) { echecs.push('écran avis : ' + e.message); } }
+    if (!document.getElementById('view-trav')) { try { travMonter(); reussies.push('écran « je cherche un travailleur » recréé'); } catch (e) { echecs.push('écran travail : ' + e.message); } }
   } catch (e) { }
   /* c. le bouton de chaque option est rebranché (les écouteurs peuvent avoir été perdus) */
   try { window.__optsBranche = false; optsBrancher(); reussies.push('touches rebranchées'); } catch (e) { echecs.push('branchement : ' + e.message); }
@@ -9000,6 +9037,7 @@ function optionsReparer(action, id) {
       const cible = action.split(':')[1] || '';
       if (cible === 'job_pres') { try { jobsMonter(); } catch (e) { } }
       if (cible === 'avis_recherche') { try { avisMonter(); } catch (e) { } }
+      if (cible === 'job_trav') { try { travMonter(); } catch (e) { } }
       optsReparer(id || cible);
     }
   } catch (e) { }
@@ -9031,6 +9069,624 @@ window.kleanOnAvisMaj = function () { try { if (document.getElementById('view-av
   document.addEventListener('visibilitychange', function () { if (!document.hidden) optsRapport(null); });
   window.addEventListener('focus', function () { if (Date.now() - _opsEnvoi > 45000) optsRapport(null); });
 })();
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   💼 29/09 — LOT 124 : RECHERCHE D'EMPLOI & MISE EN RELATION (dans l'application)
+   ═══════════════════════════════════════════════════════════════════════════════════
+   ① CÔTÉ PERSONNE QUI CHERCHE DU TRAVAIL (écran « Je cherche un job près de moi ») :
+      publier sa recherche avec SES mots, sa zone, sa photo — jamais de document ;
+      voir ce que les professionnels recherchent ; proposer ses services ; suivre ses contacts.
+   ② CÔTÉ PROFESSIONNEL : « 🧑‍💼 JE CHERCHE UN TRAVAILLEUR » — écrire avec ses mots
+      (« besoin gars pour chantier »), KLEAN comprend et propose les personnes disponibles.
+   ③ MISE EN RELATION : voir le profil → demander le contact → discuter → convenir.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+const EMP = { photo: '', code: '', suivi: '', compris: '', besoinSuivi: '', contactId: '', contactCode: '', chatT: null };
+const TRAV = { q: '', portee: 'ci', ville: '', lat: null, lng: null, liste: [], total: 0, compris: '', fiche: null, chatT: null };
+
+function empBoite(titre, sous, couleur) {
+  return '<div style="background:' + (couleur || '#FFF9F2') + ';border:2px solid var(--p);border-radius:18px;padding:15px;margin-top:12px">'
+    + '<b style="font-size:17.5px;line-height:1.25">' + titre + '</b>'
+    + (sous ? '<p style="font-size:13.5px;color:var(--muted);margin:7px 0 0;line-height:1.45">' + sous + '</p>' : '');
+}
+function empChamp2(id, label, placeholder, valeur, type) {
+  return '<label class="acc-lbl" style="margin-top:11px;font-size:15px">' + label + '</label>'
+    + '<input id="' + id + '" type="' + (type || 'text') + '" class="acc-input" style="font-size:16px;padding:13px" placeholder="' + (placeholder || '') + '" value="' + String(valeur || '').replace(/"/g, '&quot;') + '">';
+}
+function empZone2(id, label, placeholder, valeur) {
+  return '<label class="acc-lbl" style="margin-top:11px;font-size:15px">' + label + '</label>'
+    + '<textarea id="' + id + '" class="acc-input" style="font-size:16px;padding:13px;min-height:80px" placeholder="' + (placeholder || '') + '">' + String(valeur || '') + '</textarea>';
+}
+/* les 4 portées de recherche, proposées partout où l'on cherche */
+function empPorteesHTML(nom, courant) {
+  const P = [['pres', '📍 Près de moi'], ['ville', '🏙️ Dans ma ville'], ['ci', '🇨🇮 Partout en Côte d’Ivoire'], ['zone', '🗺️ Une autre zone']];
+  return '<div class="acc-chips" style="margin-top:9px">' + P.map(p =>
+    '<button type="button" class="cat-chip' + ((courant === p[0]) ? ' on' : '') + '" data-' + nom + '="' + p[0] + '" onclick="empPortee(\'' + nom + '\',\'' + p[0] + '\')"><b>' + p[1] + '</b></button>').join('') + '</div>';
+}
+function empPortee(ou, val) {
+  if (ou === 'trav') { TRAV.portee = val; document.querySelectorAll('[data-trav]').forEach(b => b.classList.toggle('on', b.getAttribute('data-trav') === val)); if (val === 'pres') travMaPosition(); else travChercher(); }
+  else { EMP.portee = val; document.querySelectorAll('[data-emp]').forEach(b => b.classList.toggle('on', b.getAttribute('data-emp') === val)); }
+}
+try { window.empPortee = empPortee; } catch (e) { }
+
+/* ═════════════ ① LA PERSONNE QUI CHERCHE DU TRAVAIL ═════════════ */
+function emploiPeindre() {
+  const z = document.getElementById('jobs-emploi');
+  if (!z) return;
+  const o = optEtat('job_pres');
+  if (o.actif === false) { z.innerHTML = ''; return; }
+  z.innerHTML = '<div style="margin-top:14px">'
+    + '<button type="button" id="opt-emploi" data-opt="job_pres" onclick="emploiNouveau()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;font-size:17.5px;background:linear-gradient(135deg,#0d7a5f,#0a6247);color:#fff;padding:16px;border-radius:16px;min-height:56px">✋ JE PUBLIE MA RECHERCHE D’EMPLOI</button>'
+    + '<div style="font-size:13px;color:var(--muted);margin-top:7px;line-height:1.45">Écrivez avec vos mots : « je cherche boulot de ménage », « chauffeur », « chantier »… KLEAN comprend.</div>'
+    + '<div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">'
+    + '<button type="button" onclick="emploiBesoins()" style="flex:1;min-width:150px;border:2px solid var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:15.5px;padding:14px;border-radius:14px;cursor:pointer;min-height:52px">🧑‍💼 Qui cherche quelqu’un ?</button>'
+    + '<button type="button" onclick="emploiMesContacts()" style="flex:1;min-width:150px;border:2px solid var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:15.5px;padding:14px;border-radius:14px;cursor:pointer;min-height:52px">🤝 Mes contacts</button>'
+    + '</div>'
+    + '<div id="emploi-suivi-zone" style="margin-top:11px"></div>'
+    + '<div id="emploi-form"></div>'
+    + '<div id="emploi-besoins"></div>'
+    + '</div>';
+}
+try { window.emploiPeindre = emploiPeindre; } catch (e) { }
+function emploiNouveau() {
+  const o = optEtat('job_pres');
+  if (o.actif === false) { try { toast(optMessageEtat('job_pres', o)); } catch (e) { } return; }
+  const moi = (typeof client !== 'undefined' && client) ? client : null;
+  const f = document.getElementById('emploi-form');
+  EMP.photo = '';
+  f.innerHTML = empBoite('✋ Ma recherche d’emploi', 'Remplissez ce que vous pouvez. Vous n’êtes pas obligé de tout remplir — surtout, dites ce que vous savez faire.')
+    + empChamp2('em-nom', 'Votre nom', 'Nom de famille', moi ? moi.nom : '')
+    + empChamp2('em-prenom', 'Votre(s) prénom(s)', 'Prénoms', '')
+    + empChamp2('em-tel', 'Téléphone (on vous appellera)', '07 00 00 00 00', moi ? String(moi.tel || '').replace(/\D/g, '') : '', 'tel')
+    + empChamp2('em-metier', 'Quel travail cherchez-vous ?', 'ex. ménage, chauffeur, chantier, cuisine…', '')
+    + '<div id="em-compris" style="font-size:13.5px;color:var(--pd);font-weight:800;margin-top:7px"></div>'
+    + '<div class="acc-chips" style="margin-top:8px" id="em-suggestions"></div>'
+    + empChamp2('em-ville', 'Ville', 'ex. Abidjan, Bouaké…', '')
+    + empChamp2('em-quartier', 'Quartier ou zone', 'ex. Yopougon, Air France…', '')
+    + '<div class="acc-lbl" style="margin-top:12px;font-size:15px">Où acceptez-vous de travailler ?</div>'
+    + empPorteesHTML('emp', EMP.portee || 'ville')
+    + empChamp2('em-zone', 'Précisez la zone si besoin', 'ex. toute la ville d’Abidjan', '')
+    + empChamp2('em-comp', 'Vos compétences', 'ex. repassage, lessive, cuisine…', '')
+    + empChamp2('em-exp', 'Votre expérience', 'ex. 3 ans comme chauffeur', '')
+    + empChamp2('em-dipl', 'Diplômes et qualifications (écrits par vous)', 'ex. BEPC, BAC, BTS comptabilité, formation en plomberie', '')
+    + '<div style="font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.45">⚠️ Écrivez-les simplement. KLEAN ne les présente <b>jamais</b> comme vérifiés : la personne qui vous contacte peut les vérifier avec vous.</div>'
+    + empChamp2('em-dispo', 'Quand pouvez-vous commencer ?', 'ex. tout de suite, lundi prochain…', '')
+    + '<div class="acc-lbl" style="margin-top:12px;font-size:15px">Combien de temps ?</div>'
+    + '<div class="acc-chips"><button type="button" class="cat-chip" data-emt="regulier" onclick="empType(\'regulier\')"><b>Travail régulier</b></button>'
+    + '<button type="button" class="cat-chip" data-emt="ponctuel" onclick="empType(\'ponctuel\')"><b>Quelques jours</b></button>'
+    + '<button type="button" class="cat-chip" data-emt="mission" onclick="empType(\'mission\')"><b>Une mission</b></button></div>'
+    + empZone2('em-desc', 'Décrivez-vous librement', 'ex. je cherche boulot, je suis sérieuse et disponible tous les jours')
+    + '<div class="acc-lbl" style="margin-top:12px;font-size:15px">📷 Photo de profil (facultative)</div>'
+    + '<div style="font-size:12.5px;color:var(--muted);margin:4px 0 6px;line-height:1.45">Une photo aide beaucoup. <b>Photo uniquement</b> : aucun document, ni diplôme, ni PDF n’est reçu ici.</div>'
+    + '<div style="display:flex;gap:8px"><button type="button" onclick="document.getElementById(\'em-ph-cam\').click()" style="flex:1;border:2px solid var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:15px;padding:13px;border-radius:13px;cursor:pointer;min-height:50px">📷 Photo</button>'
+    + '<button type="button" onclick="document.getElementById(\'em-ph-gal\').click()" style="flex:1;border:2px solid var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:15px;padding:13px;border-radius:13px;cursor:pointer;min-height:50px">🖼️ Galerie</button></div>'
+    + '<input id="em-ph-cam" type="file" accept="image/*" capture="user" style="display:none" onchange="emploiPhoto(this)">'
+    + '<input id="em-ph-gal" type="file" accept="image/*" style="display:none" onchange="emploiPhoto(this)">'
+    + '<div id="em-ph-prev" style="margin-top:9px"></div>'
+    + '<label style="display:flex;gap:9px;align-items:flex-start;margin-top:12px;font-size:13.5px;line-height:1.45"><input id="em-cert" type="checkbox" style="width:22px;height:22px;flex:none"><span>Je certifie que ce que j’écris est vrai et j’accepte que les professionnels KLEAN me contactent.</span></label>'
+    + '<div style="display:flex;gap:9px;margin-top:13px">'
+    + '<button type="button" onclick="emploiEnvoyer()" style="flex:2;border:none;background:linear-gradient(135deg,#0d7a5f,#0a6247);color:#fff;font:inherit;font-weight:900;font-size:17px;padding:16px;border-radius:14px;cursor:pointer;min-height:54px">📢 Publier ma recherche</button>'
+    + '<button type="button" onclick="document.getElementById(\'emploi-form\').innerHTML=\'\'" style="flex:1;border:1.5px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-weight:800;font-size:16px;padding:16px;border-radius:14px;cursor:pointer;min-height:54px">Annuler</button>'
+    + '</div><div id="em-msg" style="margin-top:10px;font-size:14.5px;line-height:1.5"></div></div>';
+  emploiEcouteCompris();
+  const mi = document.getElementById('em-metier'); if (mi) mi.focus();
+}
+try { window.emploiNouveau = emploiNouveau; } catch (e) { }
+function empType(t) {
+  EMP.type = t;
+  document.querySelectorAll('[data-emt]').forEach(b => b.classList.toggle('on', b.getAttribute('data-emt') === t));
+}
+try { window.empType = empType; } catch (e) { }
+/* 🔎 KLEAN montre ce qu'il a compris, et propose des métiers à toucher (français simple) */
+function emploiEcouteCompris() {
+  const i = document.getElementById('em-metier'), z = document.getElementById('em-compris'), s = document.getElementById('em-suggestions');
+  if (!i) return;
+  let t = null;
+  const maj = async () => {
+    const q = i.value.trim();
+    if (q.length < 3) { if (z) z.innerHTML = ''; if (s) s.innerHTML = ''; return; }
+    try {
+      const d = await fetch('/api/trav/comprendre?q=' + encodeURIComponent(q), { cache: 'no-store' }).then(r => r.json());
+      if (z) z.innerHTML = d.metierNom ? ('✅ KLEAN a compris : <b>' + d.ic + ' ' + d.metierNom + '</b>' + (d.ville ? ' — ' + d.ville : '')) : '🤔 Précisez le travail (ex. « ménage », « chauffeur ») ou touchez une proposition ci-dessous';
+      if (s && d.suggestions) s.innerHTML = d.suggestions.slice(0, 8).map(x => '<button type="button" class="cat-chip" onclick="document.getElementById(\'em-metier\').value=\'' + x.nom.replace(/'/g, "\\'") + '\';emploiEcouteCompris();"><b>' + x.ic + ' ' + x.nom + '</b></button>').join('');
+      if (d.moderation && d.moderation.risque === 'bloquer') {
+        if (z) z.innerHTML = '⛔ <b style="color:#b91c1c">' + d.moderation.message + '</b>';
+      } else if (d.moderation && d.moderation.risque === 'verifier') {
+        if (z) z.innerHTML += '<div style="color:#b45309;margin-top:5px">🟠 KLEAN vérifiera votre demande avant publication.</div>';
+      }
+    } catch (e) { }
+  };
+  i.addEventListener('input', () => { clearTimeout(t); t = setTimeout(maj, 350); });
+  maj();
+}
+function emploiPhoto(inp) {
+  const f = inp && inp.files && inp.files[0];
+  if (!f) return;
+  if (!/^image\//.test(f.type || '')) { try { toast('📷 Seules les photos sont acceptées (pas de document).'); } catch (e) { } return; }
+  if (f.size > 12 * 1024 * 1024) { try { toast('📷 Photo trop lourde — reprenez-la'); } catch (e) { } return; }
+  fileToThumb(f, 800, 0.72).then(d => {
+    EMP.photo = d;
+    const z = document.getElementById('em-ph-prev');
+    if (z) z.innerHTML = '<img src="' + d + '" alt="ma photo" style="width:120px;height:120px;object-fit:cover;border-radius:14px;background:#f2f2f2">'
+      + '<button type="button" onclick="EMP.photo=\'\';document.getElementById(\'em-ph-prev\').innerHTML=\'\'" style="margin-left:9px;border:1.5px solid var(--line);background:#fff;font:inherit;font-weight:800;font-size:13.5px;padding:9px 12px;border-radius:11px;cursor:pointer">✕ Retirer</button>';
+  }).catch(() => { try { toast('⚠️ Photo illisible — essayez-en une autre'); } catch (e) { } });
+}
+try { window.emploiPhoto = emploiPhoto; } catch (e) { }
+async function emploiEnvoyer() {
+  const g = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+  const c = id => { const e = document.getElementById(id); return !!(e && e.checked); };
+  const msg = document.getElementById('em-msg');
+  if (!c('em-cert')) { msg.innerHTML = '⚠️ Cochez la case pour publier.'; return; }
+  const corps = {
+    nom: g('em-nom'), prenom: g('em-prenom'), tel: g('em-tel'), metier: g('em-metier'),
+    ville: g('em-ville'), quartier: g('em-quartier'), zoneAcceptee: g('em-zone'),
+    competences: g('em-comp'), experience: g('em-exp'), diplomes: g('em-dipl'),
+    qualifications: g('em-dipl'), disponibilite: g('em-dispo'), description: g('em-desc'),
+    type: EMP.type || '', portee: EMP.portee || 'ville', photo: EMP.photo || '',
+    lat: EMP.lat, lng: EMP.lng
+  };
+  if (!corps.nom || corps.nom.trim().length < 2) { msg.innerHTML = '⚠️ Indiquez votre nom.'; return; }
+  if ((corps.tel || '').replace(/\D/g, '').length < 8) { msg.innerHTML = '⚠️ Indiquez un téléphone joignable.'; return; }
+  if (!corps.ville && !corps.quartier) { msg.innerHTML = '⚠️ Indiquez votre ville ou votre quartier.'; return; }
+  if (!corps.metier && !corps.competences) { msg.innerHTML = '⚠️ Dites quel travail vous cherchez.'; return; }
+  msg.innerHTML = '⏳ Publication…';
+  try {
+    const r = await fetch('/api/trav', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, cliHdrs()), body: JSON.stringify(corps) });
+    const d = await r.json().catch(() => ({}));
+    if (d.code === 'bloque') {
+      msg.innerHTML = '<div style="background:#fdecec;border:1.5px solid #e5484d;border-radius:13px;padding:12px"><b style="color:#b91c1c">⛔ ' + (d.error || 'Demande bloquée') + '</b>'
+        + '<div style="font-size:13px;margin-top:6px">Si vous pensez que c’est une erreur, écrivez à KLEAN depuis le support : votre demande sera réexaminée.</div></div>';
+      return;
+    }
+    if (!r.ok || !d.ok) { msg.innerHTML = '⚠️ ' + (d.error || 'Publication impossible pour l’instant'); return; }
+    EMP.suivi = d.id; EMP.code = d.code;
+    msg.innerHTML = '<div style="background:#fff;border:2px solid ' + (d.statut === 'publie' ? '#0d7a5f' : '#b45309') + ';border-radius:14px;padding:13px">'
+      + '<b style="font-size:16px">' + (d.message || '') + '</b>'
+      + (d.compris ? '<div style="margin-top:7px;font-size:14px">KLEAN a compris : <b>' + d.compris + '</b></div>' : '')
+      + '<div style="margin-top:9px;font-size:14.5px">Numéro de suivi : <b>' + d.id + '</b><br>Code : <b style="font-size:19px;letter-spacing:1px">' + d.code + '</b></div>'
+      + '<div style="font-size:13px;color:var(--muted);margin-top:6px">✍️ Notez ce code : il sert à modifier ou retirer votre recherche.</div>'
+      + '<button type="button" onclick="emploiMesContacts()" style="width:100%;margin-top:11px;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:13px;cursor:pointer;min-height:50px">Voir mes contacts</button></div>';
+    try { toast('✅ Recherche publiée'); } catch (e) { }
+    emploiSuiviPeindre(d.id, d.code, d.statut);
+  } catch (e) { msg.innerHTML = '⚠️ Réseau indisponible — réessayez dans un instant.'; }
+}
+try { window.emploiEnvoyer = emploiEnvoyer; } catch (e) { }
+function emploiSuiviPeindre(id, code, statut) {
+  const z = document.getElementById('emploi-suivi-zone');
+  if (!z) return;
+  z.innerHTML = '<div style="background:var(--card2);border-radius:14px;padding:11px;font-size:13.5px">'
+    + '<b>📋 Ma recherche : ' + id + '</b> <span style="font-weight:900;color:' + (statut === 'publie' ? '#0d7a5f' : '#b45309') + '">' + (statut === 'publie' ? '🟢 PUBLIÉE' : '🟠 EN VÉRIFICATION') + '</span>'
+    + '<div style="margin-top:7px;display:flex;gap:7px;flex-wrap:wrap">'
+    + '<button type="button" onclick="emploiModifier(\'' + id + '\',\'' + code + '\')" style="border:1.5px solid var(--pd);background:#fff;color:var(--pd);font:inherit;font-weight:800;font-size:13.5px;padding:9px 12px;border-radius:11px;cursor:pointer">✍️ Modifier</button>'
+    + '<button type="button" onclick="emploiRetirer(\'' + id + '\',\'' + code + '\')" style="border:1.5px solid #e5484d;background:#fff;color:#e5484d;font:inherit;font-weight:800;font-size:13.5px;padding:9px 12px;border-radius:11px;cursor:pointer">🗑️ Retirer</button>'
+    + '</div></div>';
+}
+function emploiRetirer(id, code) {
+  if (!confirm('Retirer votre recherche d’emploi ? Elle ne sera plus visible.')) return;
+  fetch('/api/trav/retirer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, code }) })
+    .then(r => r.json()).then(d => { try { toast(d.message || 'Retirée'); } catch (e) { } const z = document.getElementById('emploi-suivi-zone'); if (z) z.innerHTML = ''; })
+    .catch(() => { try { toast('⚠️ Réseau indisponible'); } catch (e) { } });
+}
+try { window.emploiRetirer = emploiRetirer; } catch (e) { }
+function emploiModifier(id, code) {
+  const f = document.getElementById('emploi-form');
+  if (!f) return;
+  f.innerHTML = empBoite('✍️ Modifier ma recherche', 'Changez ce que vous voulez — le reste est conservé.')
+    + empChamp2('em-m-metier', 'Quel travail cherchez-vous ?', 'ex. ménage, chauffeur…', '')
+    + empChamp2('em-m-comp', 'Compétences', '', '')
+    + empChamp2('em-m-exp', 'Expérience', '', '')
+    + empChamp2('em-m-dipl', 'Diplômes et qualifications (déclarés par vous)', '', '')
+    + empChamp2('em-m-dispo', 'Disponibilité', '', '')
+    + empChamp2('em-m-ville', 'Ville', '', '')
+    + empChamp2('em-m-quartier', 'Quartier', '', '')
+    + empZone2('em-m-desc', 'Description', '')
+    + '<button type="button" onclick="emploiModifierEnreg(\'' + id + '\',\'' + code + '\')" style="width:100%;margin-top:12px;border:none;background:linear-gradient(135deg,#0d7a5f,#0a6247);color:#fff;font:inherit;font-weight:900;font-size:16.5px;padding:15px;border-radius:14px;cursor:pointer;min-height:52px">💾 Enregistrer</button>'
+    + '<div id="em-m-msg" style="margin-top:9px;font-size:14px"></div></div>';
+}
+try { window.emploiModifier = emploiModifier; } catch (e) { }
+async function emploiModifierEnreg(id, code) {
+  const g = k => { const e = document.getElementById(k); return e ? e.value : ''; };
+  const corps = { id, code, metier: g('em-m-metier'), competences: g('em-m-comp'), experience: g('em-m-exp'), diplomes: g('em-m-dipl'), qualifications: g('em-m-dipl'), disponibilite: g('em-m-dispo'), ville: g('em-m-ville'), quartier: g('em-m-quartier'), description: g('em-m-desc') };
+  const msg = document.getElementById('em-m-msg');
+  try {
+    const d = await fetch('/api/trav/modifier', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) }).then(r => r.json());
+    msg.innerHTML = d.ok ? '<b style="color:#0d7a5f">' + (d.message || 'Mis à jour') + '</b>' : '⚠️ ' + (d.error || 'Impossible');
+  } catch (e) { msg.innerHTML = '⚠️ Réseau indisponible'; }
+}
+try { window.emploiModifierEnreg = emploiModifierEnreg; } catch (e) { }
+/* 🧑‍💼 ce que les professionnels recherchent (l'autre sens) */
+async function emploiBesoins() {
+  const z = document.getElementById('emploi-besoins'); if (!z) return;
+  z.innerHTML = '<div style="margin-top:14px"><b style="font-size:16.5px">🧑‍💼 Des professionnels cherchent quelqu’un</b>'
+    + '<div style="font-size:13px;color:var(--muted);margin-top:4px">Touchez « Je suis disponible » : la personne recevra votre nom et votre numéro.</div>'
+    + '<div id="emp-b-list" style="margin-top:10px">Chargement…</div></div>';
+  const l = document.getElementById('emp-b-list');
+  try {
+    const d = await fetch('/api/trav/besoins?portee=ci', { cache: 'no-store' }).then(r => r.json());
+    if (d.actif === false) { l.innerHTML = '⏸️ <b>Cette option est temporairement désactivée par KLEAN.</b>'; return; }
+    if (!d.liste.length) { l.innerHTML = '<div style="background:var(--card);border:1.5px dashed var(--line);border-radius:15px;padding:14px;color:var(--muted);font-size:14px">Personne ne cherche quelqu’un pour l’instant. Revenez plus tard.</div>'; return; }
+    l.innerHTML = d.liste.map(b => '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:15px;padding:13px;margin-bottom:10px">'
+      + '<b style="font-size:16px">' + (b.urgent ? '⚡ ' : '') + b.titre + '</b>'
+      + '<div style="font-size:13.5px;color:var(--muted);margin-top:4px">' + [b.quartier, b.ville].filter(Boolean).join(' · ') + (b.salaire ? ' · ' + b.salaire : '') + (b.quand ? ' · ' + b.quand : '') + '</div>'
+      + (b.description ? '<div style="font-size:14px;margin-top:6px;line-height:1.5">' + b.description + '</div>' : '')
+      + '<button type="button" onclick="emploiRepondre(\'' + b.id + '\',\'' + String(b.titre).replace(/'/g, "\\'") + '\')" style="width:100%;margin-top:9px;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;font-size:15.5px;padding:13px;border-radius:13px;cursor:pointer;min-height:48px">✋ Je suis disponible</button>'
+      + '</div>').join('');
+  } catch (e) { l.innerHTML = '⚠️ Impossible de charger pour l’instant.'; }
+}
+try { window.emploiBesoins = emploiBesoins; } catch (e) { }
+function emploiRepondre(id, titre) {
+  const z = document.getElementById('emp-b-list');
+  const moi = (typeof client !== 'undefined' && client) ? client : null;
+  z.insertAdjacentHTML('afterbegin', '<div id="emp-rep" style="background:#FFF9F2;border:2px solid var(--p);border-radius:15px;padding:13px;margin-bottom:10px">'
+    + '<b>✋ Se proposer — ' + titre + '</b>'
+    + empChamp2('rp-nom', 'Votre nom', '', moi ? moi.nom : '')
+    + empChamp2('rp-tel', 'Votre téléphone', '', moi ? String(moi.tel || '').replace(/\D/g, '') : '', 'tel')
+    + empZone2('rp-msg', 'Votre message (facultatif)', 'ex. je suis disponible lundi, j’habite à côté')
+    + '<div style="display:flex;gap:8px;margin-top:10px"><button type="button" onclick="emploiRepondreEnvoyer(\'' + id + '\')" style="flex:2;border:none;background:linear-gradient(135deg,#0d7a5f,#0a6247);color:#fff;font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:13px;cursor:pointer;min-height:50px">📨 Envoyer</button>'
+    + '<button type="button" onclick="document.getElementById(\'emp-rep\').remove()" style="flex:1;border:1.5px solid var(--line);background:#fff;font:inherit;font-weight:800;font-size:15px;padding:14px;border-radius:13px;cursor:pointer;min-height:50px">Annuler</button></div>'
+    + '<div id="rp-msg2" style="margin-top:8px;font-size:14px"></div></div>');
+  document.getElementById('emp-rep').scrollIntoView && document.getElementById('emp-rep').scrollIntoView({ block: 'nearest' });
+}
+try { window.emploiRepondre = emploiRepondre; } catch (e) { }
+async function emploiRepondreEnvoyer(id) {
+  const g = k => { const e = document.getElementById(k); return e ? e.value : ''; };
+  const msg = document.getElementById('rp-msg2');
+  try {
+    const d = await fetch('/api/trav/besoins/repondre', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ besoinId: id, nom: g('rp-nom'), tel: g('rp-tel'), message: g('rp-msg') }) }).then(r => r.json());
+    msg.innerHTML = d.ok ? '<b style="color:#0d7a5f">' + d.message + '</b>' : '⛔ ' + (d.error || 'Envoi impossible');
+    if (d.ok) { const rep = document.getElementById('emp-rep'); if (rep) setTimeout(() => rep.remove(), 2500); }
+  } catch (e) { msg.innerHTML = '⚠️ Réseau indisponible'; }
+}
+try { window.emploiRepondreEnvoyer = emploiRepondreEnvoyer; } catch (e) { }
+/* 🤝 mes contacts et la discussion */
+async function emploiMesContacts() {
+  const z = document.getElementById('emploi-besoins'); if (!z) return;
+  z.innerHTML = '<div style="margin-top:14px"><b style="font-size:16.5px">🤝 Mes contacts</b>'
+    + '<div style="font-size:13px;color:var(--muted);margin-top:4px">Les personnes et professionnels qui vous ont contacté, et ceux que vous avez contactés.</div>'
+    + '<div id="emp-c-list" style="margin-top:10px">Chargement…</div></div>';
+  const l = document.getElementById('emp-c-list');
+  try {
+    const d = await fetch('/api/trav/mes' + (EMP.code ? ('?code=' + encodeURIComponent(EMP.code)) : ''), { cache: 'no-store', headers: cliHdrs() }).then(r => r.json());
+    if (!d.ok) throw new Error('erreur');
+    if (!d.contacts.length) { l.innerHTML = '<div style="background:var(--card);border:1.5px dashed var(--line);border-radius:15px;padding:14px;color:var(--muted);font-size:14px">Aucun contact pour l’instant. Publiez votre recherche pour être trouvé.</div>'; return; }
+    l.innerHTML = d.contacts.map(c => '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:15px;padding:13px;margin-bottom:10px">'
+      + '<b style="font-size:15.5px">' + c.de.nom + ' → ' + c.vers.nom + '</b>'
+      + '<div style="font-size:13px;font-weight:900;margin-top:4px;color:' + (c.statut === 'acceptee' ? '#0d7a5f' : (c.statut === 'refusee' ? '#b91c1c' : '#b45309')) + '">' + (c.statut === 'acceptee' ? '✅ Contact accepté' : (c.statut === 'refusee' ? '⛔ Refusé' : '🟠 En attente d’accord')) + '</div>'
+      + (c.de.message ? '<div style="font-size:14px;margin-top:5px">« ' + c.de.message + ' »</div>' : '')
+      + (c.statut === 'acceptee' ? '<div style="font-size:14px;margin-top:6px">📞 ' + (c.de.tel || c.vers.tel) + '</div>' : '')
+      + '<button type="button" onclick="empFil(\'' + c.id + '\')" style="width:100%;margin-top:8px;border:1.5px solid var(--pd);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:14.5px;padding:12px;border-radius:12px;cursor:pointer;min-height:46px">💬 Discuter</button>'
+      + '<div id="emp-fil-' + c.id + '"></div></div>').join('');
+  } catch (e) { l.innerHTML = '⚠️ Impossible de charger pour l’instant.'; }
+}
+try { window.emploiMesContacts = emploiMesContacts; } catch (e) { }
+function empFil(id) {
+  const z = document.getElementById('emp-fil-' + id);
+  if (!z) return;
+  if (z.innerHTML) { z.innerHTML = ''; return; }
+  z.innerHTML = '<div style="margin-top:9px;background:var(--card2);border-radius:12px;padding:10px">'
+    + '<div id="emp-fil-msgs-' + id + '" style="max-height:230px;overflow:auto;font-size:14px">…</div>'
+    + '<div style="display:flex;gap:7px;margin-top:8px"><input id="emp-fil-in-' + id + '" class="acc-input" style="font-size:15px;padding:11px" placeholder="Écrivez votre message…">'
+    + '<button type="button" onclick="empFilEnvoyer(\'' + id + '\')" style="border:none;background:var(--pd);color:#fff;font:inherit;font-weight:900;padding:11px 15px;border-radius:11px;cursor:pointer">➤</button></div>'
+    + '<div style="font-size:12px;color:var(--muted);margin-top:6px">✍️ Ici, on peut convenir des conditions. Le numéro complet s’affiche dès que la personne accepte.</div></div>';
+  empFilCharger(id);
+  clearInterval(EMP.chatT);
+  EMP.chatT = setInterval(() => empFilCharger(id), 10000);
+}
+function empFilCharger(id) {
+  const z = document.getElementById('emp-fil-msgs-' + id); if (!z) return;
+  fetch('/api/trav/chat?contactId=' + encodeURIComponent(id) + (EMP.code ? ('&code=' + encodeURIComponent(EMP.code)) : ''), { cache: 'no-store', headers: cliHdrs() })
+    .then(r => r.json()).then(d => {
+      if (!d.ok) { z.innerHTML = '<div style="color:var(--muted)">Discussion indisponible (' + (d.error || '') + ')</div>'; return; }
+      z.innerHTML = (d.messages && d.messages.length)
+        ? d.messages.map(m => '<div style="margin:6px 0;text-align:' + (m.de === 'demandeur' ? 'right' : 'left') + '"><span style="display:inline-block;max-width:86%;background:' + (m.de === 'demandeur' ? 'var(--pl)' : '#fff') + ';border-radius:11px;padding:8px 11px">' + m.texte + '</span></div>').join('')
+        : '<div style="color:var(--muted)">Aucun message pour l’instant — écrivez le premier.</div>';
+    }).catch(() => { z.innerHTML = '<div style="color:var(--muted)">⚠️ Réseau indisponible</div>'; });
+}
+async function empFilEnvoyer(id) {
+  const i = document.getElementById('emp-fil-in-' + id);
+  const txt = i ? i.value.trim() : '';
+  if (!txt) return;
+  i.value = '';
+  try {
+    const d = await fetch('/api/trav/chat', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, cliHdrs()), body: JSON.stringify({ contactId: id, code: EMP.code, text: txt }) }).then(r => r.json());
+    if (d.code === 'bloque') { try { toast('⛔ ' + d.error); } catch (e) { } return; }
+    empFilCharger(id);
+  } catch (e) { try { toast('⚠️ Réseau indisponible'); } catch (x) { } }
+}
+try { window.empFil = empFil; window.empFilEnvoyer = empFilEnvoyer; } catch (e) { }
+
+/* ═════════════ ② LE PROFESSIONNEL : « JE CHERCHE UN TRAVAILLEUR » ═════════════ */
+function travMonter() {
+  let v = document.getElementById('view-trav');
+  if (v) return v;
+  v = document.createElement('div');
+  v.className = 'view';
+  v.id = 'view-trav';
+  v.innerHTML = optRetourHTML('🧑‍💼 Je cherche un travailleur',
+    'Écrivez avec vos mots (« besoin gars pour chantier », « je cherche une femme de ménage »). KLEAN comprend et vous montre les personnes disponibles.')
+    + '<div style="padding:0 12px">'
+    + '<div id="trav-etat" style="font-size:13.5px;color:var(--muted);margin:8px 0 10px"></div>'
+    + '<input id="trav-q" class="acc-input" style="font-size:17px;padding:15px" placeholder="ex. je cherche une femme de ménage" oninput="travFiltre()" autocomplete="off">'
+    + '<div id="trav-compris" style="font-size:14px;font-weight:800;color:var(--pd);margin-top:8px"></div>'
+    + '<div class="acc-chips" style="margin-top:8px" id="trav-suggestions"></div>'
+    + empPorteesHTML('trav', TRAV.portee)
+    + '<div style="display:flex;gap:8px;margin-top:9px">'
+    + '<button type="button" id="trav-geo" onclick="travMaPosition()" style="flex:1;min-width:130px;border:2px solid var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:14.5px;padding:13px;border-radius:13px;cursor:pointer;min-height:48px">📍 Utiliser ma position</button>'
+    + '<input id="trav-ville" class="acc-input" style="flex:1;min-width:130px;font-size:15px;padding:12px" placeholder="Ville" oninput="travFiltre()">'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">'
+    + '<button type="button" onclick="travBesoinForm()" style="flex:1;min-width:150px;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;font-size:15.5px;padding:14px;border-radius:14px;cursor:pointer;min-height:52px">📢 Publier mon besoin</button>'
+    + '<button type="button" onclick="travMesContacts()" style="flex:1;min-width:150px;border:2px solid var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:15.5px;padding:14px;border-radius:14px;cursor:pointer;min-height:52px">🤝 Mes contacts</button>'
+    + '</div>'
+    + '<div id="trav-form"></div>'
+    + '<div id="trav-liste" style="margin-top:13px"></div>'
+    + '<div id="trav-fiche"></div>'
+    + '<div id="trav-contacts" style="margin-top:14px"></div>'
+    + '<p style="font-size:13px;color:var(--muted);margin-top:16px;line-height:1.5">🛡️ Les qualifications et diplômes affichés sont <b>déclarés</b> par la personne : vous pouvez les vérifier avec elle. KLEAN bloque automatiquement les demandes dangereuses ou illégales.</p>'
+    + '</div>' + optFermerHTML();
+  document.body.insertBefore(v, document.getElementById('nav-client') || null);
+  return v;
+}
+try { window.travMonter = travMonter; } catch (e) { }
+function travOuvrir() {
+  travMonter();
+  const o = optEtat('job_trav');
+  try { showView('view-trav', null, 'client'); } catch (e) { }
+  const etat = document.getElementById('trav-etat');
+  if (o.actif === false) {
+    if (etat) etat.innerHTML = '⏸️ <b>Cette option est temporairement désactivée par KLEAN.</b> Vous pouvez continuer avec le reste de l’application.';
+    const l = document.getElementById('trav-liste'); if (l) l.innerHTML = '';
+    return false;
+  }
+  if (etat) etat.innerHTML = 'Chargement des personnes disponibles…';
+  travChercher();
+  return true;
+}
+try { window.travOuvrir = travOuvrir; } catch (e) { }
+async function travChercher() {
+  const o = optEtat('job_trav');
+  if (o.actif === false) return false;
+  const q = document.getElementById('trav-q'), v = document.getElementById('trav-ville');
+  const p = new URLSearchParams();
+  const texte = q ? q.value.trim() : '';
+  if (texte) p.set('q', texte);
+  if (v && v.value) p.set('ville', v.value);
+  p.set('portee', TRAV.portee || 'ci');
+  if (TRAV.lat !== null && TRAV.portee === 'pres') { p.set('lat', TRAV.lat); p.set('lng', TRAV.lng); p.set('rayonKm', '60'); }
+  try {
+    const d = await fetch('/api/trav?' + p.toString(), { cache: 'no-store' }).then(r => r.json());
+    if (d.actif === false) { travPeindreEtat('⏸️ Option désactivée par KLEAN'); return false; }
+    TRAV.liste = d.liste || []; TRAV.total = d.total || 0; TRAV.compris = d.compris || '';
+    travPeindre(d.message || '');
+    return true;
+  } catch (e) {
+    travPeindreEtat('⚠️ Impossible de charger pour l’instant — réessayez.');
+    return false;
+  }
+}
+try { window.travChercher = travChercher; } catch (e) { }
+function travPeindreEtat(txt) { const e = document.getElementById('trav-etat'); if (e) e.innerHTML = txt; }
+function travPeindre(message) {
+  const l = document.getElementById('trav-liste'); if (!l) return;
+  const z = document.getElementById('trav-compris');
+  if (z) z.innerHTML = TRAV.compris ? ('✅ KLEAN a compris : ' + TRAV.compris) : '💡 Écrivez ce que vous cherchez — KLEAN comprend le français simple.';
+  travPeindreEtat('<b>' + TRAV.total + '</b> personne(s) disponible(s)'
+    + (TRAV.portee === 'pres' ? ' · autour de vous' : TRAV.portee === 'ci' ? ' · partout en Côte d’Ivoire' : ''));
+  if (!TRAV.liste.length) {
+    l.innerHTML = '<div style="background:var(--card);border:1.5px dashed var(--line);border-radius:16px;padding:16px;color:var(--muted);font-size:14.5px;line-height:1.5">'
+      + (message || 'Personne ne correspond pour l’instant.') + '<br><b>Astuce :</b> touchez « 🇨🇮 Partout en Côte d’Ivoire », ou publiez votre besoin — les personnes disponibles seront prévenues.</div>';
+    return;
+  }
+  l.innerHTML = TRAV.liste.map(p => '<div style="display:flex;gap:11px;background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:12px;margin-bottom:10px">'
+    + (p.photo ? '<img src="' + p.photo + '" alt="photo" style="width:64px;height:64px;object-fit:cover;border-radius:13px;flex:none;background:#f2f2f2">'
+      : '<span style="width:64px;height:64px;border-radius:13px;flex:none;background:var(--pl);display:flex;align-items:center;justify-content:center;font-size:26px">👤</span>')
+    + '<div style="flex:1;min-width:0">'
+    + '<b style="font-size:16.5px">' + p.nom + (p.prenom ? ' ' + p.prenom : '') + (p.valide ? ' <span style="font-size:11px;font-weight:900;background:#e9f7ef;color:#0d7a5f;padding:2px 7px;border-radius:99px">✅ validé</span>' : '') + '</b>'
+    + '<div style="font-size:13.5px;color:var(--pd);font-weight:800;margin-top:3px">' + (p.metierNom || p.metier || 'Travail non précisé') + '</div>'
+    + '<div style="font-size:13px;color:var(--muted);margin-top:3px">' + p.repere + (typeof p.distanceKm === 'number' ? ' · ' + (p.distanceKm < 1 ? 'à moins d’1 km' : p.distanceKm + ' km') : '') + '</div>'
+    + (p.competences ? '<div style="font-size:13.5px;margin-top:5px">' + p.competences + '</div>' : '')
+    + (p.disponibilite ? '<div style="font-size:13px;color:var(--muted);margin-top:4px">🕒 ' + p.disponibilite + '</div>' : '')
+    + '<button type="button" onclick="travFiche(\'' + p.id + '\')" style="width:100%;margin-top:9px;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;font-size:15px;padding:12px;border-radius:12px;cursor:pointer;min-height:46px">👤 Voir le profil complet</button>'
+    + '</div></div>').join('');
+}
+let _travT = null;
+function travFiltre() { clearTimeout(_travT); _travT = setTimeout(travChercher, 380); }
+try { window.travFiltre = travFiltre; } catch (e) { }
+function travMaPosition() {
+  const b = document.getElementById('trav-geo');
+  if (!navigator.geolocation) { try { toast('📍 Votre appareil ne donne pas la position — écrivez la ville'); } catch (e) { } return; }
+  if (b) { b.textContent = '📍 Position en cours…'; b.disabled = true; }
+  navigator.geolocation.getCurrentPosition(pos => {
+    TRAV.lat = Math.round(pos.coords.latitude * 10000) / 10000;
+    TRAV.lng = Math.round(pos.coords.longitude * 10000) / 10000;
+    TRAV.portee = 'pres';
+    document.querySelectorAll('[data-trav]').forEach(x => x.classList.toggle('on', x.getAttribute('data-trav') === 'pres'));
+    if (b) { b.textContent = '📍 Position utilisée'; b.disabled = false; }
+    travChercher();
+  }, () => {
+    if (b) { b.textContent = '📍 Utiliser ma position'; b.disabled = false; }
+    try { toast('📍 Position refusée — écrivez la ville, ça marche aussi'); } catch (e) { }
+  }, { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 });
+}
+try { window.travMaPosition = travMaPosition; } catch (e) { }
+async function travFiche(id) {
+  const f = document.getElementById('trav-fiche'); if (!f) return;
+  f.innerHTML = '<div style="padding:13px;color:var(--muted)">Chargement du profil…</div>';
+  try {
+    const d = await fetch('/api/trav/fiche?id=' + encodeURIComponent(id), { cache: 'no-store' }).then(r => r.json());
+    if (!d.ok) { f.innerHTML = '<div style="padding:13px">⚠️ ' + (d.error || 'Profil introuvable') + '</div>'; return; }
+    const p = d.profil;
+    TRAV.fiche = p;
+    f.innerHTML = '<div style="background:var(--card);border:2px solid var(--p);border-radius:18px;padding:15px;margin-top:6px">'
+      + '<div style="display:flex;gap:9px;align-items:flex-start">'
+      + (p.photo ? '<img src="' + p.photo + '" alt="photo" style="width:84px;height:84px;object-fit:cover;border-radius:15px;flex:none">' : '')
+      + '<div style="flex:1;min-width:0"><b style="font-size:19px">' + p.nom + (p.prenom ? ' ' + p.prenom : '') + '</b>'
+      + (p.valide ? '<div style="font-size:12px;font-weight:900;color:#0d7a5f;margin-top:3px">✅ Profil validé par KLEAN</div>' : '')
+      + '<div style="font-size:14px;color:var(--pd);font-weight:800;margin-top:4px">' + (p.metierNom || p.metier || '') + '</div>'
+      + '<div style="font-size:13.5px;color:var(--muted);margin-top:3px">' + p.repere + ' · zone acceptée : ' + (p.zoneAcceptee || p.portee || 'non précisée') + '</div></div>'
+      + '<button type="button" onclick="document.getElementById(\'trav-fiche\').innerHTML=\'\'" style="border:none;background:var(--card2);border-radius:10px;font:inherit;font-weight:900;font-size:16px;padding:8px 12px;cursor:pointer">✕</button></div>'
+      + '<div style="font-size:14.5px;line-height:1.6;margin-top:10px">'
+      + (p.competences ? '<b>Compétences :</b> ' + p.competences + '<br>' : '')
+      + (p.experience ? '<b>Expérience :</b> ' + p.experience + '<br>' : '')
+      + (p.diplomes ? '<b>Diplômes / qualifications :</b> ' + p.diplomes + '<br>' : '')
+      + (p.disponibilite ? '<b>Disponibilité :</b> ' + p.disponibilite + '<br>' : '')
+      + (p.type ? '<b>Type :</b> ' + (p.type === 'regulier' ? 'travail régulier' : p.type === 'ponctuel' ? 'quelques jours' : 'une mission') + '<br>' : '')
+      + '</div>'
+      + '<div style="background:#FFF7ED;border-radius:12px;padding:10px;font-size:12.5px;color:#8a5a00;margin-top:10px;line-height:1.45">⚠️ ' + p.diplomesAvertissement + '</div>'
+      + (p.description ? '<p style="font-size:15px;line-height:1.6;margin:10px 0 0">« ' + p.description + ' »</p>' : '')
+      + (p.tel ? '<a href="tel:' + p.tel + '" style="display:block;text-align:center;background:#0d7a5f;color:#fff;font-weight:900;padding:14px;border-radius:14px;text-decoration:none;margin-top:11px">📞 ' + p.tel + '</a>' : '')
+      + '<button type="button" onclick="travContacter(\'' + p.id + '\')" style="width:100%;margin-top:10px;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;font-size:17px;padding:16px;border-radius:14px;cursor:pointer;min-height:54px">🤝 Demander le contact</button>'
+      + '<div id="trav-contact-form"></div>'
+      + '</div>';
+    f.scrollIntoView && f.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) { f.innerHTML = '<div style="padding:13px">⚠️ Réseau indisponible</div>'; }
+}
+try { window.travFiche = travFiche; } catch (e) { }
+function travContacter(id) {
+  const z = document.getElementById('trav-contact-form');
+  const moi = (typeof client !== 'undefined' && client) ? client : null;
+  z.innerHTML = '<div style="background:#FFF9F2;border:2px solid var(--p);border-radius:15px;padding:13px;margin-top:11px">'
+    + '<b>🤝 Demander le contact</b>'
+    + '<div style="font-size:13px;color:var(--muted);margin-top:5px">Votre nom et votre numéro sont transmis. Vous pouvez discuter ici tout de suite ; les numéros complets s’échangent dès que la personne accepte.</div>'
+    + empChamp2('tc-nom', 'Votre nom / entreprise', '', moi ? moi.nom : '')
+    + empChamp2('tc-tel', 'Votre téléphone', '', moi ? String(moi.tel || '').replace(/\D/g, '') : '', 'tel')
+    + empZone2('tc-msg', 'Votre message', 'ex. Bonjour, je cherche quelqu’un pour mon magasin à partir de lundi')
+    + '<div style="display:flex;gap:8px;margin-top:10px"><button type="button" onclick="travContacterEnvoyer(\'' + id + '\')" style="flex:2;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:13px;cursor:pointer;min-height:50px">📨 Envoyer la demande</button>'
+    + '<button type="button" onclick="document.getElementById(\'trav-contact-form\').innerHTML=\'\'" style="flex:1;border:1.5px solid var(--line);background:#fff;font:inherit;font-weight:800;font-size:15px;padding:14px;border-radius:13px;cursor:pointer;min-height:50px">Annuler</button></div>'
+    + '<div id="tc-msg2" style="margin-top:9px;font-size:14px"></div></div>';
+}
+try { window.travContacter = travContacter; } catch (e) { }
+async function travContacterEnvoyer(id) {
+  const g = k => { const e = document.getElementById(k); return e ? e.value : ''; };
+  const msg = document.getElementById('tc-msg2');
+  try {
+    const d = await fetch('/api/trav/contact', {
+      method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, cliHdrs()),
+      body: JSON.stringify({ profilId: id, nom: g('tc-nom'), tel: g('tc-tel'), message: g('tc-msg'), ville: (document.getElementById('trav-ville') || {}).value || '' })
+    }).then(r => r.json());
+    if (d.code === 'bloque') { msg.innerHTML = '⛔ ' + d.error; return; }
+    if (!d.ok) { msg.innerHTML = '⚠️ ' + (d.error || 'Envoi impossible'); return; }
+    msg.innerHTML = '<div style="background:#fff;border:2px solid #0d7a5f;border-radius:13px;padding:11px">'
+      + '<b style="color:#0d7a5f">' + d.message + '</b>'
+      + '<div style="font-size:13px;color:var(--muted);margin-top:6px">Demande n° ' + d.contactId + ' · code de suivi : <b>' + d.code + '</b></div></div>';
+    TRAV.contact = { id: d.contactId, code: d.code };
+    travMesContacts();
+  } catch (e) { msg.innerHTML = '⚠️ Réseau indisponible'; }
+}
+try { window.travContacterEnvoyer = travContacterEnvoyer; } catch (e) { }
+/* 📢 publier un besoin : « je cherche quelqu'un » */
+function travBesoinForm() {
+  const z = document.getElementById('trav-form'); if (!z) return;
+  if (z.innerHTML) { z.innerHTML = ''; return; }
+  const moi = (typeof client !== 'undefined' && client) ? client : null;
+  const prov = (typeof NET !== 'undefined' && NET.agentId) ? NET.agentId : (kLS.get('k2_agentId') || '');
+  z.innerHTML = empBoite('📢 Mon besoin de travailleur', 'Écrivez simplement. Les personnes disponibles seront prévenues.')
+    + empChamp2('tb-titre', 'Ce que vous cherchez', 'ex. Je cherche une femme de ménage')
+    + empChamp2('tb-metier', 'Métier (si vous le savez)', 'ex. ménage, chauffeur, maçon…')
+    + empZone2('tb-desc', 'Détaillez le travail', 'ex. besoin gars pour chantier : 3 jours, carrelage d’une salle')
+    + empChamp2('tb-ville', 'Ville', '', (typeof city !== 'undefined' && city && city.nom) ? city.nom : '')
+    + empChamp2('tb-quartier', 'Quartier', '')
+    + empChamp2('tb-quand', 'Quand ?', 'ex. dès lundi, cette semaine…')
+    + empChamp2('tb-salaire', 'Salaire proposé (facultatif)', 'ex. 80 000 F/mois, 10 000 F/jour…')
+    + empChamp2('tb-nom', 'Votre nom / entreprise', '', moi ? moi.nom : '')
+    + empChamp2('tb-tel', 'Téléphone', '', moi ? String(moi.tel || '').replace(/\D/g, '') : '', 'tel')
+    + '<label style="display:flex;gap:9px;align-items:flex-start;margin-top:11px;font-size:13.5px;line-height:1.45"><input id="tb-urgent" type="checkbox" style="width:22px;height:22px;flex:none"><span>C’est urgent ⚡</span></label>'
+    + '<button type="button" onclick="travBesoinEnvoyer()" style="width:100%;margin-top:12px;border:none;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;font:inherit;font-weight:900;font-size:17px;padding:16px;border-radius:14px;cursor:pointer;min-height:54px">📢 Publier mon besoin</button>'
+    + '<div id="tb-msg" style="margin-top:9px;font-size:14px"></div></div>';
+  z.setAttribute('data-agent', prov);
+  const t = document.getElementById('tb-titre');
+  if (t) t.focus();
+}
+try { window.travBesoinForm = travBesoinForm; } catch (e) { }
+async function travBesoinEnvoyer() {
+  const g = k => { const e = document.getElementById(k); return e ? e.value : ''; };
+  const msg = document.getElementById('tb-msg');
+  const prov = (typeof NET !== 'undefined' && NET.agentId) ? NET.agentId : (kLS.get('k2_agentId') || '');
+  const corps = {
+    titre: g('tb-titre'), metier: g('tb-metier'), description: g('tb-desc'), ville: g('tb-ville'), quartier: g('tb-quartier'),
+    quand: g('tb-quand'), salaire: g('tb-salaire'), nom: g('tb-nom'), tel: g('tb-tel'),
+    urgent: !!(document.getElementById('tb-urgent') || {}).checked,
+    agentId: prov || undefined, jeton: (typeof agent !== 'undefined' && agent && agent.jeton) ? agent.jeton : (kLS.get('k2_agent_jeton') || undefined)
+  };
+  msg.innerHTML = '⏳ Publication…';
+  try {
+    const d = await fetch('/api/trav/besoins', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, cliHdrs()), body: JSON.stringify(corps) }).then(r => r.json());
+    if (d.code === 'bloque') { msg.innerHTML = '<b style="color:#b91c1c">⛔ ' + d.error + '</b>'; return; }
+    if (!d.ok) { msg.innerHTML = '⚠️ ' + (d.error || 'Publication impossible'); return; }
+    msg.innerHTML = '<div style="background:#fff;border:2px solid #0d7a5f;border-radius:13px;padding:11px"><b style="color:#0d7a5f">' + d.message + '</b>'
+      + (d.compris ? '<div style="font-size:13.5px;margin-top:6px">KLEAN a compris : <b>' + d.compris + '</b></div>' : '')
+      + '<div style="font-size:13px;color:var(--muted);margin-top:6px">Suivi n° ' + d.id + ' · code : <b>' + d.code + '</b></div></div>';
+    try { toast('✅ Besoin publié'); } catch (e) { }
+  } catch (e) { msg.innerHTML = '⚠️ Réseau indisponible'; }
+}
+try { window.travBesoinEnvoyer = travBesoinEnvoyer; } catch (e) { }
+async function travMesContacts() {
+  const z = document.getElementById('trav-contacts'); if (!z) return;
+  z.innerHTML = '<b style="font-size:16.5px">🤝 Mes contacts</b><div id="trav-c-list" style="margin-top:9px">Chargement…</div>';
+  const l = document.getElementById('trav-c-list');
+  try {
+    const d = await fetch('/api/trav/mes', { cache: 'no-store', headers: cliHdrs() }).then(r => r.json());
+    if (!d.ok) throw new Error('erreur');
+    if (!d.contacts.length) { l.innerHTML = '<div style="background:var(--card);border:1.5px dashed var(--line);border-radius:15px;padding:14px;color:var(--muted);font-size:14px">Aucun contact pour l’instant. Cherchez une personne disponible et demandez son contact.</div>'; return; }
+    l.innerHTML = d.contacts.map(c => '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:15px;padding:13px;margin-bottom:10px">'
+      + '<b style="font-size:15.5px">' + c.de.nom + ' → ' + c.vers.nom + '</b>'
+      + '<div style="font-size:13px;font-weight:900;margin-top:4px;color:' + (c.statut === 'acceptee' ? '#0d7a5f' : (c.statut === 'refusee' ? '#b91c1c' : '#b45309')) + '">'
+      + (c.statut === 'acceptee' ? '✅ Accepté — numéro complet : ' + (c.vers.tel || c.de.tel) : (c.statut === 'refusee' ? '⛔ Refusé' : '🟠 En attente d’accord')) + '</div>'
+      + (c.de.message ? '<div style="font-size:14px;margin-top:5px">« ' + c.de.message + ' »</div>' : '')
+      + '<button type="button" onclick="travFil(\'' + c.id + '\')" style="width:100%;margin-top:8px;border:1.5px solid var(--pd);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:14.5px;padding:12px;border-radius:12px;cursor:pointer;min-height:46px">💬 Discuter</button>'
+      + '<div id="trav-fil-' + c.id + '"></div></div>').join('');
+  } catch (e) { l.innerHTML = '⚠️ Impossible de charger pour l’instant.'; }
+}
+try { window.travMesContacts = travMesContacts; } catch (e) { }
+function travFil(id) {
+  const z = document.getElementById('trav-fil-' + id);
+  if (!z) return;
+  if (z.innerHTML) { z.innerHTML = ''; return; }
+  z.innerHTML = '<div style="margin-top:9px;background:var(--card2);border-radius:12px;padding:10px">'
+    + '<div id="trav-fil-msgs-' + id + '" style="max-height:230px;overflow:auto;font-size:14px">…</div>'
+    + '<div style="display:flex;gap:7px;margin-top:8px"><input id="trav-fil-in-' + id + '" class="acc-input" style="font-size:15px;padding:11px" placeholder="Écrivez votre message…">'
+    + '<button type="button" onclick="travFilEnvoyer(\'' + id + '\')" style="border:none;background:var(--pd);color:#fff;font:inherit;font-weight:900;padding:11px 15px;border-radius:11px;cursor:pointer">➤</button></div></div>';
+  travFilCharger(id);
+  clearInterval(TRAV.chatT);
+  TRAV.chatT = setInterval(() => travFilCharger(id), 10000);
+}
+function travFilCharger(id) {
+  const z = document.getElementById('trav-fil-msgs-' + id); if (!z) return;
+  fetch('/api/trav/chat?contactId=' + encodeURIComponent(id), { cache: 'no-store', headers: cliHdrs() })
+    .then(r => r.json()).then(d => {
+      if (!d.ok) { z.innerHTML = '<div style="color:var(--muted)">Discussion indisponible</div>'; return; }
+      z.innerHTML = (d.messages && d.messages.length) ? d.messages.map(m => '<div style="margin:6px 0">' + (m.de === 'pdg' ? '👑 ' : '') + '<span style="display:inline-block;max-width:86%;background:#fff;border-radius:11px;padding:8px 11px">' + m.texte + '</span></div>').join('')
+        : '<div style="color:var(--muted)">Aucun message pour l’instant.</div>';
+    }).catch(() => { });
+}
+async function travFilEnvoyer(id) {
+  const i = document.getElementById('trav-fil-in-' + id);
+  const txt = i ? i.value.trim() : '';
+  if (!txt) return;
+  i.value = '';
+  try {
+    const d = await fetch('/api/trav/chat', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, cliHdrs()), body: JSON.stringify({ contactId: id, text: txt }) }).then(r => r.json());
+    if (d.code === 'bloque') { try { toast('⛔ ' + d.error); } catch (e) { } return; }
+    travFilCharger(id);
+  } catch (e) { }
+}
+try { window.travFil = travFil; window.travFilEnvoyer = travFilEnvoyer; } catch (e) { }
+try { window.emploiZone = window.emploiZone || {}; } catch (e) { }
+
+/* 🔔 le serveur prévient en direct : on met à jour l'écran ouvert, sans jamais le casser */
+window.kleanOnTravMaj = function (m) {
+  if (!m) return;
+  try {
+    const vj = document.getElementById('view-jobs'), vt = document.getElementById('view-trav');
+    if (vj && vj.classList.contains('active')) {
+      if (m.type === 'trav_besoin' || m.type === 'trav_reponse') emploiBesoins();
+      if (m.type === 'trav_contact' || m.type === 'trav_decision' || m.type === 'trav_msg') emploiMesContacts();
+    }
+    if (vt && vt.classList.contains('active')) {
+      if (m.type === 'trav_profil') travChercher();
+      if (m.type === 'trav_contact' || m.type === 'trav_decision' || m.type === 'trav_msg') travMesContacts();
+    }
+  } catch (e) { }
+};
 
 /* ═══════════════════════════════════════════════════════════════════════════════════
    💼 « JE CHERCHE UN JOB PRÈS DE MOI »  ·  📢 « AVIS DE RECHERCHE »  (lot 123)
@@ -9075,6 +9731,8 @@ function jobsMonter() {
     + '    <button type="button" class="cat-chip" data-jt="demande" onclick="jobsType(\'demande\')"><b>🔧 Missions</b></button>'
     + '    <button type="button" class="cat-chip" data-jt="offre" onclick="jobsType(\'offre\')"><b>💼 Offres</b></button>'
     + '  </div>'
+    + '  <div id="jobs-emploi"></div>'
+    + '  <h2 class="acc-sect" style="margin-top:16px">Les opportunités</h2>'
     + '  <div id="jobs-liste" style="margin-top:12px"></div>'
     + '  <div id="jobs-fiche"></div>'
     + '  <div id="jobs-form"></div>'
@@ -9094,6 +9752,7 @@ function jobsOuvrir() {
     return false;
   }
   if (etat) etat.innerHTML = 'Chargement des opportunités…';
+  emploiPeindre();     /* ✋ publier ma recherche d’emploi · 🧑‍💼 qui cherche quelqu’un · 🤝 mes contacts */
   jobsCharger();
   return true;
 }
