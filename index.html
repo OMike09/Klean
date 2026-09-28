@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <link rel="icon" href="/klean-icon-192.png" type="image/png">
-<title>KLEAN — Le Yango des services à domicile | Côte d'Ivoire</title>
+<title>Klean-Services — Tout commence par une mise en relation. | Côte d'Ivoire</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#E85D04">
 <link rel="apple-touch-icon" href="/klean-icon-192.png">
@@ -517,7 +517,7 @@
 })();
 </script>
 
-<div id="splash"><img src="/klean-icon-512.png" alt="KLEAN"><b>KLEAN</b><span>Services à domicile · Côte d'Ivoire 🇨🇮</span><div class="sp-bar"><i></i></div></div>
+<div id="splash"><img src="/klean-icon-512.png" alt="KLEAN"><b>KLEAN</b><span>Klean-Services — Tout commence par une mise en relation.</span><div class="sp-bar"><i></i></div></div>
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -1280,7 +1280,7 @@
       <img src="/klean-icon-192.png" alt="KLEAN" style="width:34px;height:34px;border-radius:10px;box-shadow:0 3px 10px rgba(194,65,12,.35)">
       <span style="text-align:left;line-height:1.05">
         <b style="display:block;font-size:19px;letter-spacing:1.4px;color:var(--pd)">KLEAN</b>
-        <small style="display:block;font-size:12px;font-weight:800;color:var(--muted);letter-spacing:.2px">SERVICES CI</small>
+        <small style="display:block;font-size:11.5px;font-weight:800;color:var(--muted);letter-spacing:.1px">Tout commence par une mise en relation.</small>
       </span>
     </button>
     <div style="display:flex;align-items:center;gap:8px">
@@ -1466,12 +1466,20 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
       <h2 class="acc-sect" id="acc-grandes-titre">Autres options</h2>
       <div id="acc-grandes"></div>
       <div id="acc-trav-lien"></div>
+      <div id="acc-ecole-lien"></div>
+      <div id="acc-pro-lien"></div>
+      <div id="acc-favoris"></div>
       <div id="acc-secours"></div>
       <div id="acc-opts-etat"></div>
     </div>
     <p class="note" style="margin-top:14px">KLEAN — la plateforme ivoirienne des services à domicile.<br>📍 Côte d’Ivoire 🇨🇮</p>
   </div>
 </div>
+
+<!-- ═══ 🏫 29/09 (lot 126) — ÉCOLE & FAMILLE ═══ -->
+<div class="view" id="view-ecole"></div>
+<!-- ═══ 🧑‍💼 29/09 (lot 126) — DEVENIR PROFESSIONNEL (le même compte) ═══ -->
+<div class="view" id="view-devenir-pro"></div>
 
 <!-- ══════════════════ CLIENT : RÉSERVATION ══════════════════ -->
 <div class="view" id="view-book">
@@ -5261,12 +5269,622 @@ let FLIP = null, FLIP_SESS = null, FLIP_T0 = 0;
       }catch(e){}
     }
   }
-  try{ window.__kleanInit = 1; }catch(e){}     /* ✅ le démarrage est allé au bout */
+  /* ══════════════════════════════════════════════════════════════════════════════════════
+   🧩 29/09 — LOT 126 : L'APPLICATION (compte unique → professionnel · école & famille · ⭐ favoris)
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   🧩 29/09 — LOT 126 : L'APPLICATION (compte unique → professionnel · école & famille · ⭐ favoris)
+   Tout est branché sur des routes STABLES, avec des messages simples en français.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+function l126Hdrs() {
+  const h = { 'Content-Type': 'application/json' };
+  try { Object.assign(h, cliHdrs()); } catch (e) { }
+  try { Object.assign(h, jetonProHeaders()); } catch (e) { }
+  return h;
+}
+async function l126J(u, corps, methode) {
+  try {
+    const r = await fetch(u, { method: methode || (corps ? 'POST' : 'GET'), headers: l126Hdrs(), cache: 'no-store', body: corps ? JSON.stringify(corps) : undefined });
+    return await r.json();
+  } catch (e) { return { ok: false, error: 'Pas de réseau pour le moment' }; }
+}
+const L126_ECH = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function l126Panneau(id, titre, sous, corps) {
+  return '<div style="max-width:640px;margin:0 auto;padding:14px 14px 90px">'
+    + '<div style="background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;border-radius:16px;padding:14px 16px">'
+    + '<b style="font-size:19px;display:block">' + titre + '</b>'
+    + (sous ? '<small style="opacity:.94;font-size:13.5px">' + sous + '</small>' : '') + '</div>'
+    + '<div id="' + id + '" style="margin-top:13px">' + (corps || 'Chargement…') + '</div></div>';
+}
+function l126Bouton(txt, fn, couleur) {
+  return '<button type="button" onclick="' + fn + '" style="width:100%;margin-top:9px;background:' + (couleur || 'var(--p)') + ';color:#fff;border:none;font:inherit;font-weight:900;font-size:15.5px;padding:14px;border-radius:14px;cursor:pointer;min-height:52px">' + txt + '</button>';
+}
+function l126Champ(id, label, val, ph, type) {
+  return '<label style="display:block;font-size:12.5px;font-weight:800;margin-top:9px">' + label
+    + '<input id="' + id + '" type="' + (type || 'text') + '" value="' + L126_ECH(val || '') + '" placeholder="' + L126_ECH(ph || '') + '" style="width:100%;margin-top:4px;padding:12px;border-radius:11px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit"></label>';
+}
+function l126Zone(id, label, val, ph) {
+  return '<label style="display:block;font-size:12.5px;font-weight:800;margin-top:9px">' + label
+    + '<textarea id="' + id + '" rows="3" placeholder="' + L126_ECH(ph || '') + '" style="width:100%;margin-top:4px;padding:12px;border-radius:11px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">' + L126_ECH(val || '') + '</textarea></label>';
+}
+
+/* ══════════════════════ ⭐ LES FAVORIS (mis en avant par le PDG) ══════════════════════ */
+async function accFavorisCharger() {
+  const z = document.getElementById('acc-favoris'); if (!z) return;
+  const d = await l126J('/api/favoris');
+  if (!d || d.ok === false) { z.innerHTML = ''; return; }
+  if (!d.affiche) { z.innerHTML = ''; return; }
+  const periode = (d.periode && d.periode.actif && d.periode.nom && d.dansLaPeriode !== false)
+    ? '<div style="font-size:12px;font-weight:800;color:var(--pd);margin:0 0 6px">🎯 ' + L126_ECH(d.periode.nom) + '</div>' : '';
+  z.innerHTML = '<h2 class="acc-sect" style="margin-top:16px">⭐ Mis en avant</h2>' + periode
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + (d.liste || []).map(s => '<button type="button" data-fav="' + L126_ECH(s.id) + '" data-nom="' + L126_ECH(s.nom) + '" onclick="accFavoriOuvrir(this)" style="display:flex;align-items:center;gap:6px;background:#fff;border:1.5px solid var(--p);color:var(--pd);font:inherit;font-weight:900;font-size:14px;padding:11px 13px;border-radius:99px;cursor:pointer;min-height:46px">' + (s.ic || '🛠️') + ' ' + L126_ECH(s.nom) + '</button>').join('')
+    + '</div>'
+    + ((d.categories || []).length ? '<div style="font-size:12.5px;color:var(--muted);margin-top:7px">Catégories du moment : ' + d.categories.map(c => (c.ic || '📂') + ' ' + L126_ECH(c.nom)).join(' · ') + '</div>' : '');
+}
+function accFavoriOuvrir(btn) {
+  const nom = btn.getAttribute('data-nom') || '';
+  try {
+    const i = document.getElementById('home-svc-search');
+    if (i) i.value = nom;
+    if (typeof accueilSug === 'function') accueilSug(nom);
+    if (typeof showView === 'function') showView('view-home');
+    if (typeof langAfficherPros === 'function') langAfficherPros('accueil');
+    else toast('Recherche : ' + nom);
+  } catch (e) { try { toast('Recherche : ' + nom); } catch (x) { } }
+}
+try { window.accFavorisCharger = accFavorisCharger; window.accFavoriOuvrir = accFavoriOuvrir; } catch (e) { }
+
+/* ══════════════════════ 🏫 ÉCOLE & FAMILLE ══════════════════════ */
+let L126_ECOLE_ETAT = null;
+async function ecoleOuvrir() {
+  const o = (typeof optEtat === 'function') ? (optEtat('ecole') || {}) : {};
+  const v = document.getElementById('view-ecole');
+  if (!v) { try { toast('⚠️ Écran École & famille introuvable — rechargez la page'); } catch (e) { } return false; }
+  v.innerHTML = l126Panneau('ecole-corps', '🏫 École & famille', 'Le lien entre l’école et les parents — informations, convocations, réunions');
+  try { showView('view-ecole', null, 'client'); } catch (e) { }
+  if (o.actif === false) {
+    document.getElementById('ecole-corps').innerHTML = '<div style="background:#FFF9F2;border:1.5px dashed var(--p);border-radius:14px;padding:13px;font-size:14px">⏸️ <b>École & famille est désactivé par KLEAN pour le moment.</b> Vous pouvez continuer avec le reste de l’application.</div>';
+    return false;
+  }
+  await ecoleMonter();
+  return true;
+}
+async function ecoleMonter() {
+  const z = document.getElementById('ecole-corps'); if (!z) return;
+  const d = await l126J('/api/ecole/moi');
+  const moi = (typeof client !== 'undefined' && client) ? client : null;
+  if (!d || d.ok === false) {
+    z.innerHTML = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px;line-height:1.6;font-size:14px">'
+      + '🧍 <b>Pour suivre votre enfant</b>, créez d’abord votre compte INTER (une seule fois) : c’est le même compte qui vous sert pour tout le reste.'
+      + l126Bouton('✨ Créer mon compte INTER', "ouvrirEcran('view-account')")
+      + '<div style="margin-top:12px">🏫 <b>Vous êtes une école ?</b> Envoyez votre demande : elle sera vérifiée par KLEAN avant toute activation.</div>'
+      + l126Bouton('🏫 Demander un espace école', 'ecoleFormDemande()', '#0d7a5f')
+      + '</div>';
+    return;
+  }
+  const mesEcoles = d.mesEcoles || [], mesFamilles = d.mesFamilles || [];
+  let h = '';
+  /* ① mon espace école (si je suis personnel) */
+  mesEcoles.forEach(x => {
+    const ech = x.ecole || {}, m = x.membre || {};
+    h += '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px;margin-bottom:11px">'
+      + '<b style="font-size:16px">🏫 ' + L126_ECH(ech.nom) + '</b> <span style="font-size:12px">' + L126_ECH(ech.ville || '') + '</span><br>'
+      + '<small>Votre rôle : <b>' + L126_ECH(m.roleTxt || '') + '</b> · statut : <b>' + L126_ECH(m.statutTxt || '') + '</b></small>'
+      + (m.statut === 'valide' && ech.statut === 'valide'
+        ? l126Bouton('📋 Ouvrir le tableau de bord de l’école', "ecoleTableau('" + ech.id + "')", '#0d7a5f')
+        : '<div style="margin-top:8px;font-size:13px;color:var(--muted)">⏳ En attente de validation par KLEAN. Aucune fonction professionnelle n’est ouverte avant la validation.</div>')
+      + '</div>';
+  });
+  /* ② mon espace famille (mes enfants) */
+  mesFamilles.forEach(x => {
+    const ech = x.ecole || {}, p = x.parent || {};
+    h += '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px;margin-bottom:11px">'
+      + '<b style="font-size:16px">👨‍👩‍👧 ' + L126_ECH(ech.nom) + '</b> <span style="font-size:12px">' + L126_ECH(ech.ville || '') + '</span><br>'
+      + '<small>Mes enfants : <b>' + ((x.enfants || []).map(e => L126_ECH(e.nom) + (e.classe ? ' (' + L126_ECH(e.classe) + ')' : '')).join(', ') || '—') + '</b> · ' + L126_ECH(p.statutTxt || '') + '</small>'
+      + (p.statut === 'valide' ? l126Bouton('👀 Voir ce que l’école a transmis', "ecoleFamille('" + p.id + "')", '#0d7a5f')
+        : '<div style="margin-top:8px;font-size:13px;color:var(--muted)">⏳ Votre rattachement est en attente. Un parent ne voit que ses propres enfants, et seulement après validation.</div>')
+      + '</div>';
+  });
+  h += '<div style="background:#F7FAF9;border:1.5px dashed var(--line);border-radius:15px;padding:12px">'
+    + '<b style="font-size:14.5px">Vous êtes une école ?</b><div style="font-size:13px;color:var(--muted);margin:5px 0 2px">Créez l’espace de votre école : il ne s’ouvre qu’après validation par KLEAN.</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'
+    + '<button type="button" onclick="ecoleFormDemande()" style="background:#0d7a5f;color:#fff;border:none;font:inherit;font-weight:800;font-size:13.5px;padding:11px 13px;border-radius:11px;cursor:pointer">🏫 Créer un espace école</button>'
+    + '<button type="button" onclick="ecoleFormParent()" style="background:#fff;border:1.5px solid var(--p);color:var(--pd);font:inherit;font-weight:800;font-size:13.5px;padding:11px 13px;border-radius:11px;cursor:pointer">👨‍👩‍👧 Suivre mon enfant</button>'
+    + '<button type="button" onclick="ecoleFormMembre()" style="background:#fff;border:1.5px solid var(--line);color:var(--ink);font:inherit;font-weight:800;font-size:13.5px;padding:11px 13px;border-radius:11px;cursor:pointer">🧑‍🏫 Rejoindre une école (personnel)</button>'
+    + '</div></div>';
+  z.innerHTML = h;
+}
+function ecoleFormDemande() {
+  const z = document.getElementById('ecole-corps'); if (!z) return;
+  z.innerHTML = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px">'
+    + '<b style="font-size:16px">🏫 Demander un espace école</b>'
+    + l126Champ('ec-nom', 'Nom de l’école', '', 'Ex. École primaire Les Palmiers')
+    + '<label style="display:block;font-size:12.5px;font-weight:800;margin-top:9px">Type<select id="ec-type" style="width:100%;margin-top:4px;padding:12px;border-radius:11px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">'
+    + (['maternelle', 'primaire', 'secondaire', 'technique', 'supérieur', 'autre'].map(t => '<option value="' + t + '">' + t + '</option>').join('')) + '</select></label>'
+    + l126Champ('ec-ville', 'Ville', (typeof client !== 'undefined' && client && client.ville) || '', 'Ex. Bouaké')
+    + l126Champ('ec-quartier', 'Quartier', '', 'Ex. Air France')
+    + l126Champ('ec-tel', 'Téléphone de l’école', (typeof client !== 'undefined' && client && client.tel) || '', '07 00 00 00 00')
+    + l126Champ('ec-directeur', 'Nom du responsable', (typeof client !== 'undefined' && client && client.nom) || '', 'Nom et prénom')
+    + l126Champ('ec-fonction', 'Votre fonction', '', 'Ex. directeur, fondateur, secrétaire')
+    + l126Champ('ec-eleves', 'Nombre d’élèves (environ)', '', 'Ex. 240', 'number')
+    + l126Bouton('📨 Envoyer la demande', 'ecoleEnvoiDemande()', '#0d7a5f')
+    + l126Bouton('← Retour', 'ecoleMonter()', '#fff')
+    + '<div id="ec-msg" style="margin-top:9px;font-size:13.5px;font-weight:800;color:var(--red)"></div>'
+    + '<div style="font-size:12px;color:var(--muted);margin-top:8px">⏳ Une école ne peut pas utiliser les fonctions professionnelles avant validation par KLEAN.</div></div>';
+}
+async function ecoleEnvoiDemande() {
+  const g = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const m = document.getElementById('ec-msg');
+  const d = await l126J('/api/ecole/demande', { nom: g('ec-nom'), type: g('ec-type'), ville: g('ec-ville'), quartier: g('ec-quartier'), tel: g('ec-tel'), directeur: g('ec-directeur'), fonction: g('ec-fonction'), eleves: g('ec-eleves') });
+  if (!d || d.ok === false) { if (m) m.textContent = '⚠️ ' + ((d && d.error) || 'Envoi impossible'); return; }
+  if (m) m.style.color = 'var(--p)';
+  if (m) m.textContent = d.message || '✅ Demande envoyée';
+  await ecoleMonter();
+}
+function ecoleFormParent() {
+  const z = document.getElementById('ecole-corps'); if (!z) return;
+  z.innerHTML = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px">'
+    + '<b style="font-size:16px">👨‍👩‍👧 Suivre mon enfant</b>'
+    + '<div style="font-size:13px;color:var(--muted);margin-top:4px">Indiquez l’école telle qu’elle est enregistrée. Un parent ne voit <b>que ses propres enfants</b>.</div>'
+    + l126Champ('ep-ecole', 'Nom de l’école', '', 'Ex. École primaire Les Palmiers')
+    + l126Champ('ep-nom', 'Votre nom', (typeof client !== 'undefined' && client && client.nom) || '', 'Nom et prénom')
+    + l126Champ('ep-tel', 'Votre téléphone', (typeof client !== 'undefined' && client && client.tel) || '', '07 00 00 00 00')
+    + l126Champ('ep-enfant', 'Nom de votre enfant', '', 'Nom et prénom de l’élève')
+    + l126Champ('ep-classe', 'Sa classe', '', 'Ex. CM2 A')
+    + l126Bouton('📨 Envoyer la demande', 'ecoleEnvoiParent()', '#0d7a5f')
+    + l126Bouton('← Retour', 'ecoleMonter()', '#fff')
+    + '<div id="ep-msg" style="margin-top:9px;font-size:13.5px;font-weight:800;color:var(--red)"></div></div>';
+}
+async function ecoleEnvoiParent() {
+  const g = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const m = document.getElementById('ep-msg');
+  const nomEcole = g('ep-ecole');
+  const liste = await l126J('/api/ecole/annuaire?q=' + encodeURIComponent(nomEcole));
+  let ecoleId = '';
+  if (liste && liste.ok && (liste.ecoles || []).length) {
+    const exact = liste.ecoles.find(e => String(e.nom).toLowerCase() === nomEcole.toLowerCase()) || liste.ecoles[0];
+    ecoleId = exact.id;
+  }
+  if (!ecoleId) { if (m) m.textContent = '⚠️ École introuvable. Vérifiez le nom (ou demandez à l’école de s’inscrire).'; return; }
+  const d = await l126J('/api/ecole/parent', { ecoleId: ecoleId, nom: g('ep-nom'), tel: g('ep-tel'), eleveNom: g('ep-enfant'), classe: g('ep-classe') });
+  if (!d || d.ok === false) { if (m) m.textContent = '⚠️ ' + ((d && d.error) || 'Envoi impossible'); return; }
+  if (m) { m.style.color = 'var(--p)'; m.textContent = d.message || '✅ Demande envoyée'; }
+  await ecoleMonter();
+}
+function ecoleFormMembre() {
+  const z = document.getElementById('ecole-corps'); if (!z) return;
+  z.innerHTML = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px">'
+    + '<b style="font-size:16px">🧑‍🏫 Rejoindre une école (personnel)</b>'
+    + l126Champ('em-ecole', 'Nom de l’école', '', 'Ex. École primaire Les Palmiers')
+    + l126Champ('em-nom', 'Votre nom', (typeof client !== 'undefined' && client && client.nom) || '', 'Nom et prénom')
+    + l126Champ('em-tel', 'Votre téléphone', (typeof client !== 'undefined' && client && client.tel) || '', '07 00 00 00 00')
+    + '<label style="display:block;font-size:12.5px;font-weight:800;margin-top:9px">Votre rôle demandé<select id="em-role" style="width:100%;margin-top:4px;padding:12px;border-radius:11px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">'
+    + '<option value="gestionnaire">Gestionnaire d’école</option><option value="direction">Direction</option><option value="personnel">Personnel autorisé</option><option value="enseignant">Enseignant</option><option value="autre">Autre personnel autorisé</option></select></label>'
+    + l126Champ('em-fonction', 'Votre fonction', '', 'Ex. secrétaire, surveillant…')
+    + l126Bouton('📨 Envoyer la demande', 'ecoleEnvoiMembre()', '#0d7a5f')
+    + l126Bouton('← Retour', 'ecoleMonter()', '#fff')
+    + '<div id="ecm-msg" style="margin-top:9px;font-size:13.5px;font-weight:800;color:var(--red)"></div>'
+    + '<div style="font-size:12px;color:var(--muted);margin-top:8px">Chaque rôle a uniquement les permissions nécessaires. Le PDG peut modifier les rôles et les permissions.</div></div>';
+}
+async function ecoleEnvoiMembre() {
+  const g = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const m = document.getElementById('ecm-msg');
+  const nomEcole = g('em-ecole');
+  const liste = await l126J('/api/ecole/annuaire?q=' + encodeURIComponent(nomEcole));
+  let ecoleId = '';
+  if (liste && liste.ok && (liste.ecoles || []).length) { const exact = liste.ecoles.find(e => String(e.nom).toLowerCase() === nomEcole.toLowerCase()) || liste.ecoles[0]; ecoleId = exact.id; }
+  if (!ecoleId) { if (m) m.textContent = '⚠️ École introuvable.'; return; }
+  const d = await l126J('/api/ecole/membre', { ecoleId: ecoleId, nom: g('em-nom'), tel: g('em-tel'), role: g('em-role'), fonction: g('em-fonction') });
+  if (!d || d.ok === false) { if (m) m.textContent = '⚠️ ' + ((d && d.error) || 'Envoi impossible'); return; }
+  if (m) { m.style.color = 'var(--p)'; m.textContent = d.message || '✅ Demande envoyée'; }
+  await ecoleMonter();
+}
+async function ecoleTableau(ecoleId) {
+  const z = document.getElementById('ecole-corps'); if (!z) return;
+  z.innerHTML = 'Chargement du tableau de bord de l’école…';
+  const d = await l126J('/api/ecole/tableau?ecoleId=' + encodeURIComponent(ecoleId));
+  if (!d || d.ok === false) { z.innerHTML = '<div style="color:var(--red);font-weight:800">⚠️ ' + ((d && d.error) || 'Impossible') + '</div>' + l126Bouton('← Retour', 'ecoleMonter()', '#fff'); return; }
+  const e = d.ecole, p = d.moi.perms || [];
+  let h = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px;margin-bottom:11px">'
+    + '<b style="font-size:16px">🏫 ' + L126_ECH(e.nom) + '</b> <span style="font-size:12px">' + L126_ECH(e.ville || '') + '</span><br>'
+    + '<small>Votre rôle : <b>' + L126_ECH(d.moi.role) + '</b> · ' + (d.eleves || []).length + ' élève(s) · ' + (d.parents || []).length + ' famille(s) · ' + (d.membres || []).length + ' personnel</small>'
+    + '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">'
+    + (p.indexOf('annonces') >= 0 ? '<button type="button" onclick="ecoleNouvelleAnnonce(\'' + e.id + '\')" style="background:#0d7a5f;color:#fff;border:none;font:inherit;font-weight:800;font-size:13px;padding:10px 12px;border-radius:10px;cursor:pointer">📢 Information</button>' : '')
+    + (p.indexOf('convocations') >= 0 ? '<button type="button" onclick="ecoleNouvelleConvocation(\'' + e.id + '\')" style="background:#fff;border:1.5px solid var(--p);color:var(--pd);font:inherit;font-weight:800;font-size:13px;padding:10px 12px;border-radius:10px;cursor:pointer">✉️ Convocation</button>' : '')
+    + (p.indexOf('reunions') >= 0 ? '<button type="button" onclick="ecoleNouvelleReunion(\'' + e.id + '\')" style="background:#fff;border:1.5px solid var(--p);color:var(--pd);font:inherit;font-weight:800;font-size:13px;padding:10px 12px;border-radius:10px;cursor:pointer">📅 Réunion</button>' : '')
+    + (p.indexOf('eleves_gerer') >= 0 ? '<button type="button" onclick="ecoleNouvelEleve(\'' + e.id + '\')" style="background:#fff;border:1.5px solid var(--line);font:inherit;font-weight:800;font-size:13px;padding:10px 12px;border-radius:10px;cursor:pointer">🎒 Élève</button>' : '')
+    + (p.indexOf('chat') >= 0 ? '<button type="button" onclick="ecoleMessage(\'' + e.id + '\')" style="background:#fff;border:1.5px solid var(--line);font:inherit;font-weight:800;font-size:13px;padding:10px 12px;border-radius:10px;cursor:pointer">💬 Message aux familles</button>' : '')
+    + '</div></div>';
+  const bloc = (t, arr, f) => arr.length ? ('<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:12px;margin-bottom:11px"><b style="font-size:14.5px">' + t + '</b>' + arr.map(f).join('') + '</div>') : '';
+  h += bloc('📢 Informations publiées', d.annonces || [], a => '<div style="padding:7px 0;border-bottom:1px solid var(--line)"><b>' + L126_ECH(a.titre) + '</b> <small style="color:var(--muted)">' + String(a.at || '').slice(0, 16).replace('T', ' à ') + ' · ' + (a.touches || 0) + ' famille(s)</small><div style="font-size:13px">' + L126_ECH(a.texte) + '</div></div>');
+  h += bloc('✉️ Convocations', d.convocations || [], c => '<div style="padding:7px 0;border-bottom:1px solid var(--line)"><b>' + L126_ECH(c.titre) + '</b> <small style="color:var(--muted)">' + L126_ECH(c.quand || '') + ' · ' + (c.dest || []).length + ' famille(s)</small></div>');
+  h += bloc('📅 Réunions', d.reunions || [], r => '<div style="padding:7px 0;border-bottom:1px solid var(--line)"><b>' + L126_ECH(r.titre) + '</b> <small style="color:var(--muted)">' + L126_ECH(r.date) + ' ' + L126_ECH(r.heure || '') + (r.aDistance ? ' · à distance' : (' · ' + L126_ECH(r.lieu || ''))) + '</small></div>');
+  h += bloc('🎒 Élèves', (d.eleves || []).slice(0, 40), el => '<div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px"><b>' + L126_ECH(el.nom) + '</b> <small style="color:var(--muted)">' + L126_ECH(el.classe || '') + (el.parent ? ' · parent ' + L126_ECH(el.parent) : '') + '</small></div>');
+  h += bloc('👨‍👩‍👧 Familles', (d.parents || []).slice(0, 40), pp => '<div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px"><b>' + L126_ECH(pp.nom) + '</b> <small style="color:var(--muted)">' + L126_ECH(pp.statutTxt || '') + ' · ' + (pp.enfants || []).join(', ') + '</small></div>');
+  h += bloc('💬 Derniers messages', (d.messages || []).slice(-12), ms => '<div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px"><b>' + (ms.de === 'ecole' ? '🏫' : '👨‍👩‍👧 ' + L126_ECH(ms.nom || '')) + '</b> ' + L126_ECH(ms.texte) + ' <small style="color:var(--muted)">' + String(ms.at || '').slice(11, 16) + '</small></div>');
+  h += '<div style="font-size:12px;color:var(--muted);margin:6px 0 12px">🔐 Chaque parent ne voit que ses propres enfants et les informations qui les concernent. Les autres familles ne voient rien.</div>';
+  h += l126Bouton('← Retour', 'ecoleMonter()', '#fff');
+  z.innerHTML = h;
+}
+function ecoleNouvelleAnnonce(ecoleId) {
+  const z = document.getElementById('ecole-corps');
+  z.innerHTML = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px"><b style="font-size:16px">📢 Nouvelle information</b>'
+    + l126Champ('an-titre', 'Titre', '', 'Ex. Rentrée décalée lundi')
+    + l126Zone('an-texte', 'Texte de l’information', '', 'Écrivez simplement ce que les familles doivent savoir…')
+    + '<label style="display:flex;align-items:center;gap:8px;margin-top:9px;font-size:13.5px;font-weight:800"><input type="checkbox" id="an-urgent"> 🔴 Information urgente</label>'
+    + cibleEcole(ecoleId, 'an')
+    + l126Bouton('📨 Publier', "ecoleAnnonce('" + ecoleId + "')", '#0d7a5f')
+    + l126Bouton('← Retour', "ecoleTableau('" + ecoleId + "')", '#fff')
+    + '<div id="an-msg" style="margin-top:9px;font-size:13.5px;font-weight:800;color:var(--red)"></div></div>';
+}
+function cibleEcole(ecoleId, pref) {
+  return '<label style="display:block;font-size:12.5px;font-weight:800;margin-top:9px">À qui ?<select id="' + pref + '-cible" style="width:100%;margin-top:4px;padding:12px;border-radius:11px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">'
+    + '<option value="tous">Toutes les familles</option><option value="classe">Une classe</option><option value="eleve">Un élève</option></select></label>'
+    + l126Champ(pref + '-cibleId', 'Classe ou nom de l’élève (si besoin)', '', 'Ex. CM2 A');
+}
+async function ecoleAnnonce(ecoleId) {
+  const g = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const m = document.getElementById('an-msg');
+  const cible = g('an-cible');
+  const cibleId = g('an-cibleId');
+  const d = await l126J('/api/ecole/action', { ecoleId: ecoleId, action: 'annonce', titre: g('an-titre'), texte: g('an-texte'), urgent: !!(document.getElementById('an-urgent') || {}).checked, cible: cible, cibleId: cible === 'eleve' ? await ecoleIdEleve(ecoleId, cibleId) : cibleId });
+  if (!d || d.ok === false) { if (m) m.textContent = '⚠️ ' + ((d && d.error) || 'Impossible'); return; }
+  await ecoleTableau(ecoleId);
+}
+async function ecoleIdEleve(ecoleId, nom) {
+  const d = await l126J('/api/ecole/tableau?ecoleId=' + encodeURIComponent(ecoleId));
+  const el = ((d && d.eleves) || []).find(x => String(x.nom).toLowerCase() === String(nom).toLowerCase()) || ((d && d.eleves) || [])[0];
+  return el ? el.id : nom;
+}
+function ecoleNouvelleConvocation(ecoleId) {
+  const z = document.getElementById('ecole-corps');
+  z.innerHTML = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px"><b style="font-size:16px">✉️ Envoyer une convocation</b>'
+    + l126Champ('cv-titre', 'Objet', '', 'Ex. Remise des bulletins')
+    + l126Zone('cv-texte', 'Détails', '', 'Ce que le parent doit apporter, préparer…')
+    + l126Champ('cv-quand', 'Date et heure demandées', '', 'Ex. vendredi 3 octobre à 10 h')
+    + l126Champ('cv-lieu', 'Lieu', '', 'Ex. bureau de la direction')
+    + cibleEcole(ecoleId, 'cv')
+    + l126Bouton('📨 Envoyer la convocation', "ecoleConvocation('" + ecoleId + "')", '#0d7a5f')
+    + l126Bouton('← Retour', "ecoleTableau('" + ecoleId + "')", '#fff')
+    + '<div id="cv-msg" style="margin-top:9px;font-size:13.5px;font-weight:800;color:var(--red)"></div></div>';
+}
+async function ecoleConvocation(ecoleId) {
+  const g = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const m = document.getElementById('cv-msg');
+  const cible = g('cv-cible'), cibleId = g('cv-cibleId');
+  const d = await l126J('/api/ecole/action', { ecoleId: ecoleId, action: 'convocation', titre: g('cv-titre'), texte: g('cv-texte'), quand: g('cv-quand'), lieu: g('cv-lieu'), cible: cible, cibleId: cible === 'eleve' ? await ecoleIdEleve(ecoleId, cibleId) : cibleId });
+  if (!d || d.ok === false) { if (m) m.textContent = '⚠️ ' + ((d && d.error) || 'Impossible'); return; }
+  await ecoleTableau(ecoleId);
+}
+function ecoleNouvelleReunion(ecoleId) {
+  const z = document.getElementById('ecole-corps');
+  z.innerHTML = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px"><b style="font-size:16px">📅 Créer une réunion</b>'
+    + l126Champ('re-titre', 'Titre', '', 'Ex. Réunion des parents d’élèves')
+    + l126Champ('re-date', 'Date', '', '2026-10-05')
+    + l126Champ('re-heure', 'Heure', '', '10:00')
+    + l126Champ('re-lieu', 'Lieu', '', 'Ex. salle polyvalente de l’école')
+    + '<label style="display:flex;align-items:center;gap:8px;margin-top:9px;font-size:13.5px;font-weight:800"><input type="checkbox" id="re-distance"> Réunion à distance</label>'
+    + l126Champ('re-lien', 'Lien ou indication à distance (si besoin)', '', 'Ex. Nous vous appellerons / lien de réunion')
+    + cibleEcole(ecoleId, 're')
+    + l126Zone('re-message', 'Message aux familles', '', 'Ex. Votre présence est importante, nous parlerons des résultats.')
+    + '<label style="display:flex;align-items:center;gap:8px;margin-top:9px;font-size:13.5px;font-weight:800"><input type="checkbox" id="re-rappel" checked> Envoyer un rappel la veille</label>'
+    + l126Bouton('📨 Créer et prévenir les familles', "ecoleReunion('" + ecoleId + "')", '#0d7a5f')
+    + l126Bouton('← Retour', "ecoleTableau('" + ecoleId + "')", '#fff')
+    + '<div id="re-msg" style="margin-top:9px;font-size:13.5px;font-weight:800;color:var(--red)"></div></div>';
+}
+async function ecoleReunion(ecoleId) {
+  const g = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const m = document.getElementById('re-msg');
+  const cible = g('re-cible'), cibleId = g('re-cibleId');
+  const d = await l126J('/api/ecole/action', {
+    ecoleId: ecoleId, action: 'reunion', titre: g('re-titre'), date: g('re-date'), heure: g('re-heure'), lieu: g('re-lieu'),
+    aDistance: !!(document.getElementById('re-distance') || {}).checked, lien: g('re-lien'),
+    concernes: cible, cibleId: cible === 'eleve' ? await ecoleIdEleve(ecoleId, cibleId) : cibleId,
+    message: g('re-message'), rappel: !!(document.getElementById('re-rappel') || {}).checked
+  });
+  if (!d || d.ok === false) { if (m) m.textContent = '⚠️ ' + ((d && d.error) || 'Impossible'); return; }
+  await ecoleTableau(ecoleId);
+}
+function ecoleNouvelEleve(ecoleId) {
+  const z = document.getElementById('ecole-corps');
+  z.innerHTML = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px"><b style="font-size:16px">🎒 Enregistrer un élève</b>'
+    + '<div style="font-size:12.5px;color:var(--muted);margin-top:4px">Seules les informations autorisées : nom, classe, date de naissance, téléphone du parent.</div>'
+    + l126Champ('el-nom', 'Nom et prénom de l’élève', '', 'Ex. Koffi Ama')
+    + l126Champ('el-classe', 'Classe', '', 'Ex. CM2 A')
+    + l126Champ('el-naissance', 'Date de naissance', '', '2016-05-12')
+    + l126Champ('el-parentTel', 'Téléphone du parent', '', '07 00 00 00 00')
+    + l126Bouton('💾 Enregistrer', "ecoleEleve('" + ecoleId + "')", '#0d7a5f')
+    + l126Bouton('← Retour', "ecoleTableau('" + ecoleId + "')", '#fff')
+    + '<div id="el-msg" style="margin-top:9px;font-size:13.5px;font-weight:800;color:var(--red)"></div></div>';
+}
+async function ecoleEleve(ecoleId) {
+  const g = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const m = document.getElementById('el-msg');
+  const d = await l126J('/api/ecole/action', { ecoleId: ecoleId, action: 'eleve', nom: g('el-nom'), classe: g('el-classe'), naissance: g('el-naissance'), parentTel: g('el-parentTel') });
+  if (!d || d.ok === false) { if (m) m.textContent = '⚠️ ' + ((d && d.error) || 'Impossible'); return; }
+  await ecoleTableau(ecoleId);
+}
+function ecoleMessage(ecoleId) {
+  const z = document.getElementById('ecole-corps');
+  z.innerHTML = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px"><b style="font-size:16px">💬 Écrire aux familles</b>'
+    + l126Zone('ms-texte', 'Message', '', 'Votre message…')
+    + l126Bouton('📨 Envoyer', "ecoleEnvoiMessage('" + ecoleId + "')", '#0d7a5f')
+    + l126Bouton('← Retour', "ecoleTableau('" + ecoleId + "')", '#fff')
+    + '<div id="ms-msg" style="margin-top:9px;font-size:13.5px;font-weight:800;color:var(--red)"></div></div>';
+}
+async function ecoleEnvoiMessage(ecoleId) {
+  const g = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const m = document.getElementById('ms-msg');
+  const d = await l126J('/api/ecole/action', { ecoleId: ecoleId, action: 'message', texte: g('ms-texte'), cible: 'tous' });
+  if (!d || d.ok === false) { if (m) m.textContent = '⚠️ ' + ((d && d.error) || 'Impossible'); return; }
+  await ecoleTableau(ecoleId);
+}
+async function ecoleFamille(parentId) {
+  const z = document.getElementById('ecole-corps'); if (!z) return;
+  z.innerHTML = 'Chargement…';
+  const d = await l126J('/api/ecole/famille');
+  if (!d || d.ok === false) { z.innerHTML = '<div style="color:var(--red);font-weight:800">⚠️ ' + ((d && d.error) || 'Impossible') + '</div>' + l126Bouton('← Retour', 'ecoleMonter()', '#fff'); return; }
+  const f = (d.familles || []).find(x => x.moi.id === parentId) || (d.familles || [])[0];
+  if (!f) {
+    /* ⏳ rien à afficher : soit le rattachement attend la validation de KLEAN, soit il n'y en a pas */
+    const att = (d.enAttente || [])[0];
+    z.innerHTML = '<div style="background:#FFF9F2;border:1.5px solid var(--p);border-radius:15px;padding:14px;font-size:14.5px;font-weight:700">'
+      + (att ? ('⏳ Votre rattachement à <b>' + L126_ECH(att.ecoleNom) + '</b> est en attente de validation par KLEAN (' + L126_ECH(att.statutTxt || '') + '). Vous verrez les informations de l’école dès que ce sera validé.')
+              : 'Aucune école rattachée à votre compte pour le moment. Demandez le rattachement depuis « 🏫 École &amp; famille ».')
+      + '</div>' + l126Bouton('← Retour', 'ecoleMonter()', '#fff');
+    return;
+  }
+  const bloc = (t, arr, f2) => arr.length ? ('<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:12px;margin-bottom:11px"><b style="font-size:14.5px">' + t + '</b>' + arr.map(f2).join('') + '</div>') : '';
+  let h = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px;margin-bottom:11px">'
+    + '<b style="font-size:16px">🏫 ' + L126_ECH(f.ecole.nom) + '</b><br><small>Mes enfants : <b>' + f.enfants.map(e => L126_ECH(e.nom) + (e.classe ? ' (' + L126_ECH(e.classe) + ')' : '')).join(', ') + '</b></small>'
+    + '<div style="font-size:12.5px;color:var(--muted);margin-top:6px">🔐 Vous voyez seulement les informations de vos enfants.</div></div>';
+  h += bloc('📢 Informations de l’école', f.annonces || [], a => '<div style="padding:7px 0;border-bottom:1px solid var(--line)"><b>' + (a.urgent ? '🔴 ' : '') + L126_ECH(a.titre) + '</b> <small style="color:var(--muted)">' + String(a.at || '').slice(0, 16).replace('T', ' à ') + '</small><div style="font-size:13.5px">' + L126_ECH(a.texte) + '</div></div>');
+  h += bloc('✉️ Convocations', f.convocations || [], c => '<div style="padding:7px 0;border-bottom:1px solid var(--line)"><b>' + L126_ECH(c.titre) + '</b><div style="font-size:13.5px">' + L126_ECH(c.texte || '') + (c.quand ? '<br>📅 ' + L126_ECH(c.quand) : '') + (c.lieu ? ' · 📍 ' + L126_ECH(c.lieu) : '') + '</div></div>');
+  h += bloc('📅 Réunions', f.reunions || [], r => '<div style="padding:7px 0;border-bottom:1px solid var(--line)"><b>' + L126_ECH(r.titre) + '</b><div style="font-size:13.5px">📅 ' + L126_ECH(r.date) + ' ' + L126_ECH(r.heure || '') + (r.aDistance ? ' · à distance' + (r.lien ? ' (' + L126_ECH(r.lien) + ')' : '') : (r.lieu ? ' · 📍 ' + L126_ECH(r.lieu) : '')) + (r.message ? '<br>' + L126_ECH(r.message) : '') + (r.rappel ? '<br><small style="color:var(--muted)">🔔 Un rappel vous sera envoyé</small>' : '') + '</div></div>');
+  h += bloc('🔔 Mes rappels', (f.rappels || []).map(t => ({ t: t })), x => '<div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px">' + L126_ECH(x.t) + '</div>');
+  h += bloc('💬 Conversation avec l’école', (f.messages || []).slice(-20), ms => '<div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px"><b>' + (ms.de === 'ecole' ? '🏫 École' : '👨‍👩‍👧 Vous') + '</b> ' + L126_ECH(ms.texte) + '</div>');
+  h += '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:12px;margin-bottom:11px"><b style="font-size:14.5px">💬 Écrire à l’école</b>'
+    + l126Zone('fm-texte', 'Votre message', '', 'Ex. Bonjour, je voudrais des nouvelles de mon enfant…')
+    + l126Bouton('📨 Envoyer', "ecoleMessageParent('" + f.moi.id + "')", '#0d7a5f') + '<div id="fm-msg" style="margin-top:8px;font-size:13.5px;font-weight:800"></div></div>';
+  h += l126Bouton('← Retour', 'ecoleMonter()', '#fff');
+  z.innerHTML = h;
+}
+async function ecoleMessageParent(parentId) {
+  const g = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const m = document.getElementById('fm-msg');
+  const d = await l126J('/api/ecole/famille/message', { parentId: parentId, texte: g('fm-texte') });
+  if (!d || d.ok === false) { if (m) { m.style.color = 'var(--red)'; m.textContent = '⚠️ ' + ((d && d.error) || 'Impossible'); } return; }
+  if (m) { m.style.color = 'var(--p)'; m.textContent = '✅ ' + (d.message || 'Message envoyé'); }
+  setTimeout(() => ecoleFamille(parentId), 700);
+}
+try { window.ecoleOuvrir = ecoleOuvrir; window.ecoleMonter = ecoleMonter; window.ecoleTableau = ecoleTableau; window.ecoleFamille = ecoleFamille; } catch (e) { }
+
+/* ══════════════════════ 🧑‍💼 DEVENIR PROFESSIONNEL (même compte) ══════════════════════ */
+let L126_PRO = null;
+async function proOuvrir() {
+  const v = document.getElementById('view-devenir-pro');
+  if (!v) { try { toast('⚠️ Écran introuvable — rechargez la page'); } catch (e) { } return false; }
+  v.innerHTML = l126Panneau('pro-corps', '🧑‍💼 Devenir professionnel', 'Le même compte sert pour tout : vous restez utilisateur et vous devenez professionnel.');
+  try { showView('view-devenir-pro', null, 'client'); } catch (e) { }
+  await proMonter();
+  return true;
+}
+async function proMonter() {
+  const z = document.getElementById('pro-corps'); if (!z) return;
+  const d = await l126J('/api/pro/etat');
+  if (!d || d.ok === false) {
+    z.innerHTML = '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px;font-size:14px;line-height:1.6">'
+      + '🧍 Créez d’abord <b>votre compte INTER</b> (une seule fois) : c’est ce même compte qui deviendra professionnel, sans en créer un deuxième.'
+      + l126Bouton('✨ Créer mon compte INTER', "ouvrirEcran('view-account')") + '</div>';
+    return;
+  }
+  L126_PRO = d;
+  const st = d.statut, dd = d.demande || {}, pr = d.professionnel;
+  let h = '';
+  if (st === 'en_attente') {
+    h = '<div style="background:#FFF9F2;border:1.5px solid var(--p);border-radius:15px;padding:13px">'
+      + '<b style="font-size:16px">🟠 Demande envoyée — EN ATTENTE de validation</b>'
+      + '<div style="font-size:13.5px;margin-top:6px">Domaine : <b>' + L126_ECH(dd.categorieIc || '') + ' ' + L126_ECH(dd.categorieNom || '') + '</b><br>Ville : <b>' + L126_ECH(dd.ville || '') + '</b><br>Services : ' + (dd.services || []).map(L126_ECH).join(', ') + '</div>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:8px">Vous restez utilisateur normal en attendant. Aucune fonction professionnelle n’est ouverte avant la validation par INTER.</div>'
+      + l126Bouton('← Retour', "ouvrirEcran('view-home')", '#fff') + '</div>';
+  } else if (st === 'valide' || pr) {
+    h = '<div style="background:#F3FBF8;border:1.5px solid #0d7a5f;border-radius:15px;padding:13px">'
+      + '<b style="font-size:16px">🟢 Vous êtes UTILISATEUR + PROFESSIONNEL (même compte)</b>'
+      + '<div style="font-size:13.5px;margin-top:6px">Numéro professionnel : <b>' + L126_ECH(pr.numPro || '') + '</b><br>Services : ' + ((pr.services || []).map(L126_ECH).join(', ') || '—') + '</div>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:6px">Vos permissions professionnelles : ' + ((pr.droits || []).length ? (pr.droits || []).map(x => ({ missions: 'recevoir des missions', besoins: 'chercher un travailleur', emploi: 'chercher du travail', profil_publique: 'profil visible', devis: 'envoyer des prix', paiements: 'être payé par INTER' }[x] || x)).join(' · ') : '— (le PDG les règle)') + '</div>'
+      + l126Bouton('🧑‍💼 Ouvrir mon espace professionnel', 'proOuvrirEspace()', '#0d7a5f')
+      + l126Bouton('👤 Rester dans mon espace utilisateur', "ouvrirEcran('view-home')", '#fff') + '</div>';
+  } else {
+    h = (st === 'refuse' ? '<div style="background:#FFF4F4;border:1.5px solid var(--red);border-radius:15px;padding:13px;margin-bottom:11px"><b>🔴 Demande refusée</b>' + (dd.motif ? '<div style="font-size:13.5px">Motif : ' + L126_ECH(dd.motif) + '</div>' : '') + '<div style="font-size:13px;margin-top:5px">Vous pouvez corriger et renvoyer votre demande — toujours avec le même compte.</div></div>' : '')
+      + (st === 'suspendu' ? '<div style="background:#F7FAF9;border:1.5px solid var(--line);border-radius:15px;padding:13px;margin-bottom:11px"><b>⚪ Statut professionnel suspendu</b><div style="font-size:13px">Contactez KLEAN pour rétablir votre statut.</div></div>' : '')
+      + proFormulaire(d);
+  }
+  z.innerHTML = h;
+}
+function proFormulaire(d) {
+  const cats = d.categories || [], svcs = d.servicesPossibles || [];
+  const prev = (d.demande || {});
+  return '<div style="background:#fff;border:1.5px solid var(--line);border-radius:15px;padding:13px">'
+    + '<b style="font-size:16px">📝 Votre demande</b>'
+    + '<div style="font-size:13px;color:var(--muted);margin-top:4px">4 étapes simples : votre domaine → ce que vous savez faire → où → les règles professionnelles.</div>'
+    + '<label style="display:block;font-size:12.5px;font-weight:800;margin-top:10px">① Mon domaine / service<select id="pr-cat" style="width:100%;margin-top:4px;padding:12px;border-radius:11px;border:1.5px solid var(--line);background:var(--card2);color:var(--ink);font:inherit">'
+    + cats.map(c => '<option value="' + L126_ECH(c.id) + '"' + (prev.categorie === c.id ? ' selected' : '') + '>' + L126_ECH(c.ic + ' ' + c.nom) + '</option>').join('') + '</select></label>'
+    + '<div style="font-size:12.5px;font-weight:800;margin-top:10px">② Ce que je sais faire <small style="font-weight:600;color:var(--muted)">(touchez pour choisir)</small></div>'
+    + '<div id="pr-svcs" style="display:flex;gap:7px;flex-wrap:wrap;margin-top:6px">'
+    + svcs.slice(0, 40).map(s => '<button type="button" data-svc="' + L126_ECH(s.id) + '" onclick="proBascule(this)" style="background:var(--card2);border:1.5px solid var(--line);color:var(--ink);font:inherit;font-weight:800;font-size:13px;padding:10px 12px;border-radius:99px;cursor:pointer;min-height:44px">' + L126_ECH((s.ic || '🛠️') + ' ' + s.nom) + '</button>').join('')
+    + '</div>'
+    + '<div style="font-size:12.5px;font-weight:800;margin-top:11px">③ Où je travaille</div>'
+    + l126Champ('pr-ville', 'Ville', prev.ville || '', 'Ex. Bouaké')
+    + l126Champ('pr-quartier', 'Quartier', prev.quartier || '', 'Ex. Air France')
+    + l126Champ('pr-tel', 'Téléphone joignable', prev.tel || '', '07 00 00 00 00')
+    + l126Champ('pr-experience', 'Expérience (années ou description)', prev.experience || '', 'Ex. 5 ans dans le bâtiment')
+    + l126Champ('pr-tarif', 'Tarif indicatif (F CFA, optionnel)', prev.tarifIndicatif || '', 'Ex. 10000', 'number')
+    + l126Zone('pr-desc', 'Décrivez votre activité en quelques mots', prev.description || '', 'Ex. Je fais la plomberie et les installations sanitaires…')
+    + '<div style="font-size:12.5px;font-weight:800;margin-top:11px">④ Les règles professionnelles</div>'
+    + '<div style="font-size:13px;background:#F7FAF9;border-radius:12px;padding:11px;margin-top:5px;line-height:1.5">' + L126_ECH(d.regles || '') + '</div>'
+    + '<label style="display:flex;align-items:flex-start;gap:8px;margin-top:9px;font-size:13.5px;font-weight:800"><input type="checkbox" id="pr-regles" style="margin-top:3px"> J’accepte les règles professionnelles Klean-Services.</label>'
+    + l126Bouton('📨 Envoyer ma demande', 'proEnvoyer()', '#0d7a5f')
+    + '<div id="pr-msg" style="margin-top:9px;font-size:13.5px;font-weight:800;color:var(--red)"></div>'
+    + '<div style="font-size:12px;color:var(--muted);margin-top:8px">⛔ Aucun nouveau professionnel n’est officiellement validé sans passer par les règles de validation du tableau de bord.</div></div>';
+}
+function proBascule(btn) {
+  const on = btn.getAttribute('data-on') === '1';
+  btn.setAttribute('data-on', on ? '0' : '1');
+  btn.style.background = on ? 'var(--card2)' : 'linear-gradient(135deg,var(--p),var(--pd))';
+  btn.style.color = on ? 'var(--ink)' : '#fff';
+  btn.style.borderColor = on ? 'var(--line)' : 'transparent';
+}
+async function proEnvoyer() {
+  const g = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  const m = document.getElementById('pr-msg');
+  const services = [...document.querySelectorAll('#pr-svcs [data-on="1"]')].map(b => b.getAttribute('data-svc'));
+  const corps = {
+    categorie: g('pr-cat'), services: services, ville: g('pr-ville'), quartier: g('pr-quartier'), tel: g('pr-tel'),
+    experience: g('pr-experience'), tarifIndicatif: g('pr-tarif'), description: g('pr-desc'),
+    regles: !!(document.getElementById('pr-regles') || {}).checked
+  };
+  if (!services.length) { if (m) m.textContent = '⚠️ Choisissez au moins un service que vous savez faire.'; return; }
+  const d = await l126J('/api/pro/demande', corps);
+  if (!d || d.ok === false) { if (m) m.textContent = '⚠️ ' + ((d && d.error) || 'Envoi impossible'); return; }
+  if (d.agentId && d.jeton) proMemoriser(d);
+  await proMonter();
+  try { toast(d.message || 'Demande envoyée'); } catch (e) { }
+}
+function proMemoriser(d) {
+  try {
+    kLS.set('k2_agentId', d.agentId);
+    if (d.jeton) kLS.set('k2_agent_jeton', d.jeton);
+    const nom = (L126_PRO && L126_PRO.utilisateur && L126_PRO.utilisateur.nom) || 'Professionnel';
+    const ag = { nom: nom, quartier: (L126_PRO && L126_PRO.utilisateur && L126_PRO.utilisateur.quartier) || '', tel: (L126_PRO && L126_PRO.utilisateur && L126_PRO.utilisateur.tel) || '', online: false, rating: 5.0, missionsDone: 0, gains: { day: '', today: 0, total: 0, comm: 0 }, hist: [] };
+    try { agent = Object.assign({}, agent || {}, ag); } catch (e) { }
+    if (typeof saveAll === 'function') saveAll();
+    try { if (NET) { NET.agentId = d.agentId; NET.jeton = d.jeton; } } catch (e) { }
+  } catch (e) { }
+}
+function proOuvrirEspace() {
+  try { toast('🧑‍💼 Bienvenue dans votre espace professionnel — même compte'); } catch (e) { }
+  try { setMode('agent'); } catch (e) { try { ouvrirEcran('view-agent'); } catch (x) { } }
+}
+/* 🔌 29/09 — LOT 126 : BRANCHER LES GESTES DE L'ÉCRAN SUR LA PAGE RÉELLE
+   Dans une vraie page, un bouton écrit onclick avec le nom de sa fonction cherche ce nom dans la portée
+   GÉNÉRALE. Or tous ces gestes vivent dans une enveloppe : sans ce branchement, les boutons des
+   écrans « 🏫 École & famille » et « 🧑‍💼 Devenir professionnel » ne faisaient RIEN au clic — des
+   boutons muets, exactement ce que le PDG refuse. Chaque geste est exposé un par un (aucun eval),
+   et le banc « l'application en vrai » touche vraiment chaque bouton pour le prouver.
+   Défaut trouvé le 29/09 par ce banc : « ReferenceError: proBascule is not defined ». */
+try { window.l126J = l126J; } catch (e) { }
+try { window.l126Panneau = l126Panneau; } catch (e) { }
+try { window.l126Bouton = l126Bouton; } catch (e) { }
+try { window.l126Champ = l126Champ; } catch (e) { }
+try { window.l126Zone = l126Zone; } catch (e) { }
+try { window.accFavorisCharger = accFavorisCharger; } catch (e) { }
+try { window.accFavoriOuvrir = accFavoriOuvrir; } catch (e) { }
+try { window.ecoleOuvrir = ecoleOuvrir; } catch (e) { }
+try { window.ecoleMonter = ecoleMonter; } catch (e) { }
+try { window.ecoleFormDemande = ecoleFormDemande; } catch (e) { }
+try { window.ecoleEnvoiDemande = ecoleEnvoiDemande; } catch (e) { }
+try { window.ecoleFormParent = ecoleFormParent; } catch (e) { }
+try { window.ecoleEnvoiParent = ecoleEnvoiParent; } catch (e) { }
+try { window.ecoleFormMembre = ecoleFormMembre; } catch (e) { }
+try { window.ecoleEnvoiMembre = ecoleEnvoiMembre; } catch (e) { }
+try { window.ecoleTableau = ecoleTableau; } catch (e) { }
+try { window.ecoleNouvelleAnnonce = ecoleNouvelleAnnonce; } catch (e) { }
+try { window.cibleEcole = cibleEcole; } catch (e) { }
+try { window.ecoleAnnonce = ecoleAnnonce; } catch (e) { }
+try { window.ecoleIdEleve = ecoleIdEleve; } catch (e) { }
+try { window.ecoleNouvelleConvocation = ecoleNouvelleConvocation; } catch (e) { }
+try { window.ecoleConvocation = ecoleConvocation; } catch (e) { }
+try { window.ecoleNouvelleReunion = ecoleNouvelleReunion; } catch (e) { }
+try { window.ecoleReunion = ecoleReunion; } catch (e) { }
+try { window.ecoleNouvelEleve = ecoleNouvelEleve; } catch (e) { }
+try { window.ecoleEleve = ecoleEleve; } catch (e) { }
+try { window.ecoleMessage = ecoleMessage; } catch (e) { }
+try { window.ecoleEnvoiMessage = ecoleEnvoiMessage; } catch (e) { }
+try { window.ecoleFamille = ecoleFamille; } catch (e) { }
+try { window.ecoleMessageParent = ecoleMessageParent; } catch (e) { }
+try { window.proOuvrir = proOuvrir; } catch (e) { }
+try { window.proMonter = proMonter; } catch (e) { }
+try { window.proFormulaire = proFormulaire; } catch (e) { }
+try { window.proBascule = proBascule; } catch (e) { }
+try { window.proEnvoyer = proEnvoyer; } catch (e) { }
+try { window.proMemoriser = proMemoriser; } catch (e) { }
+try { window.proOuvrirEspace = proOuvrirEspace; } catch (e) { }
+try { window.l126AccueilPainte = l126AccueilPainte; } catch (e) { }
+
+try { window.proOuvrir = proOuvrir; window.proMonter = proMonter; } catch (e) { }
+
+/* ══════════════════════ 🧩 branchements sur l'accueil ══════════════════════ */
+function l126AccueilPainte() {
+  try { accFavorisCharger(); } catch (e) { }
+  /* 🏫 le bouton École & famille (identifiant stable pour le registre du PDG) */
+  const ze = document.getElementById('acc-ecole-lien');
+  if (ze) {
+    const o = (typeof optEtat === 'function') ? (optEtat('ecole') || {}) : {};
+    ze.innerHTML = (o.actif === false || o.visible === false) ? '' :
+      '<button type="button" id="opt-ecole" data-opt="ecole" onclick="optOuvrir(\'ecole\')" style="width:100%;margin-top:11px;border:2px solid #0d7a5f;background:#fff;color:#0d7a5f;font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:15px;cursor:pointer;min-height:52px">🏫 École &amp; famille</button>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:5px;text-align:center">Suivre la scolarité de son enfant, recevoir les informations, les convocations et les réunions</div>';
+  }
+  /* 🧑‍💼 le bouton « devenir professionnel » (même compte) */
+  const zp = document.getElementById('acc-pro-lien');
+  if (zp) {
+    const o = (typeof optEtat === 'function') ? (optEtat('devenir_pro') || {}) : {};
+    zp.innerHTML = (o.actif === false || o.visible === false) ? '' :
+      '<button type="button" id="opt-devenir-pro" data-opt="devenir_pro" onclick="optOuvrir(\'devenir_pro\')" style="width:100%;margin-top:11px;border:2px dashed var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:15px;cursor:pointer;min-height:52px">🧑‍💼 Devenir professionnel (avec mon compte)</button>'
+      + '<div style="font-size:12.5px;color:var(--muted);margin-top:5px;text-align:center">Un seul compte : vous restez utilisateur et vous devenez professionnel après validation par INTER</div>';
+  }
+}
+try { window.l126AccueilPainte = l126AccueilPainte; } catch (e) { }
+(function l126Brancher() {
+  const essais = [0, 300, 900, 2000];
+  essais.forEach(t => setTimeout(() => { try { l126AccueilPainte(); } catch (e) { } }, t));
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   💬 29/09 — LOT 126 : LA BULLE DE SUPPORT QUI MANQUAIT
+   L'option « support » était bien enregistrée dans l'accueil (avec son réglage au HQ : ACTIVER /
+   DÉSACTIVER / METTRE EN AVANT…), mais son bloc #sup-fab n'existait NULLE PART : le bouton ne
+   pouvait rien faire — un bouton décoratif, exactement ce que le PDG refuse. Ici on construit la
+   bulle : elle ouvre l'assistance RÉELLE de l'application (Mon compte → 🤝 Assistance), qui écrit
+   au support et joint le WhatsApp réglé par le PDG. Si le PDG désactive l'option, la bulle
+   disparaît toute seule (la boucle des options s'en occupe).
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+function supBuild(){
+  try{
+    if(document.getElementById('sup-fab')) return true;
+    var b = document.createElement('button');
+    b.id = 'sup-fab'; b.type = 'button';
+    b.setAttribute('aria-label', 'Contacter Klean-Service');
+    b.title = 'Contacter Klean-Service';
+    b.innerHTML = '💬';
+    b.style.cssText = 'position:fixed;right:14px;bottom:86px;z-index:9200;width:54px;height:54px;border-radius:50%;border:none;'
+      + 'background:linear-gradient(135deg,#0d7a5f,#0a6247);color:#fff;font-size:24px;line-height:1;cursor:pointer;'
+      + 'box-shadow:0 6px 18px rgba(0,0,0,.25);padding:0';
+    b.addEventListener('click', function(ev){
+      try{ if(ev && ev.preventDefault) ev.preventDefault(); }catch(e){}
+      try{
+        if(typeof accAssistance === 'function'){ accAssistance(); return; }
+        if(typeof kContactSecours === 'function'){ kContactSecours(); return; }
+        if(typeof toast === 'function'){ toast('Assistance indisponible pour le moment — réessayez'); return; }
+      }catch(e){
+        try{ if(typeof kContactSecours === 'function'){ kContactSecours(); return; } }catch(x){}
+      }
+      try{ showView('view-account', null, 'client'); }catch(e){}
+    });
+    document.body.appendChild(b);
+    return true;
+  }catch(e){ return false; }
+}
+try{ window.supBuild = supBuild; }catch(e){}
+try{ supBuild(); }catch(e){}
+try{ if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', function(){ try{ supBuild(); }catch(e){} }); } }catch(e){}
+
+try{ window.__kleanInit = 1; }catch(e){}     /* ✅ le démarrage est allé au bout */
   try{ window._kleanBootMs = (window.kVeilleDuree ? window.kVeilleDuree() : 0); }catch(e){}
   try{ if(window.kVeilleRetirer) window.kVeilleRetirer(); }catch(e){}   /* l'alerte éventuelle s'efface d'elle-même */
   /* 🔎 « Vérifier les mises à jour » : le client (et le PDG) peut savoir d'un geste s'il a la
      dernière page. Sans cela, un téléphone pouvait rester sur l'ancienne version sans le dire. */
-  window.KLEAN_VERSION = '125.0';
+  window.KLEAN_VERSION = '126.0';
   window.kVerifierVersion = function(){
     try{ toast('🔍 Vérification de la mise à jour…'); }catch(e){}
     try{
@@ -8776,7 +9394,10 @@ const KLEAN_OPTS_DEF = {
   annonce:        { cibles: ['#aff-bar'], zone: 'publie', vue: 'view-home', action: null, module: 'loadAffiche', quoi: 'l’affiche aux utilisateurs' },
   support:        { cibles: ['#sup-fab'], zone: 'publie', vue: 'view-home', action: null, module: 'supBuild', quoi: 'le support' },
   espace_pro:     { cibles: ['#espace-pro-btn'], zone: 'accueil', vue: 'view-home', action: 'setMode', arg: 'agent', quoi: 'l’espace professionnel' },
-  langues:        { cibles: ['#lang-barre-accueil'], zone: 'accueil', vue: 'view-home', action: null, module: 'langBarre', quoi: 'le choix des langues' }
+  langues:        { cibles: ['#lang-barre-accueil'], zone: 'accueil', vue: 'view-home', action: null, module: 'langBarre', quoi: 'le choix des langues' },
+  /* 🏫🧑‍💼 29/09 (lot 126) : le compte unique — école ↔ famille, et le passage au statut professionnel */
+  ecole:          { cibles: ['#opt-ecole'], zone: 'accueil', vue: 'view-ecole', action: 'ecoleOuvrir', quoi: 'école & famille', peintParModule: true },
+  devenir_pro:    { cibles: ['#opt-devenir-pro'], zone: 'accueil', vue: 'view-devenir-pro', action: 'proOuvrir', quoi: 'le passage au statut professionnel', peintParModule: true }
 };
 const KLEAN_OPTS_CLES = Object.keys(KLEAN_OPTS_DEF);
 /* 📖 le registre est lisible de l'extérieur (contrôles automatiques, outils du PDG) : c'est lui qui
@@ -8913,6 +9534,7 @@ function optsRendu() {
     const manquants = KLEAN_OPTS.options.filter(o => {
       if (o.zone === 'publie' || o.actif === false) return false;
       const d = KLEAN_OPTS_DEF[o.id]; if (!d) return false;
+      if (d.peintParModule) return false;   /* 🏫🧑‍💼 lot 126 : le bouton est écrit par son module (école & famille, devenir professionnel) — jamais de doublon dans l'îlot de secours */
       return (d.cibles || []).length > 0 && !(d.cibles || []).some(sel => { try { return !!document.querySelector(sel); } catch (e) { return false; } });
     });
     secours.innerHTML = manquants.length

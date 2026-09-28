@@ -140,6 +140,10 @@ function poserDefauts() {
   justifEnsure();     /* 🪚 justificatifs professionnels (lot 122) : poses au demarrage */
   accueilEnsure();    /* 🧩 grandes options de l'accueil + jobs + avis de recherche (lot 123) */
   travEnsure();       /* 💼 lot 124 : recherche d'emploi, besoins, mise en relation, modération */
+  svc126Ensure();     /* 🧩 lot 126 : une seule source de services + favoris + réglages par module */
+  tx126Ensure();      /* 💰 lot 126 : le registre central des transactions */
+  eco126Ensure();     /* 🏫 lot 126 : écoles, personnel, familles, élèves, réunions, messages automatiques */
+  pro126Ensure();     /* 🧑‍💼 lot 126 : demandes de statut professionnel, catégories, permissions pro */
   db.catalog = db.catalog || [];
   /* ═══ 🎮 FLIP FIZZ · KLEAN POINTS · RÉCOMPENSES · QUIZ · INFOS · URGENCE (lot 96) ═══
      ⚠️ Par défaut le jeu est DÉSACTIVÉ et INVISIBLE sur l'accueil : seul le PDG l'active. */
@@ -4618,10 +4622,16 @@ function readBodyBig(req, max) {
 }
 
 function readBody(req) {
+  /* ⚠️ 🔧 29/09 — LOT 126 : le corps d'une requête ne peut être lu QU'UNE fois. Depuis que les routes du lot 126
+     (services centraux, favoris, modules) examinent le corps AVANT le routeur principal, une route qui retombait
+     dans ce routeur restait bloquée : le corps était déjà consommé, `end` ne revenait jamais et la requête ne
+     recevait JAMAIS de réponse (le PDG voyait « ça tourne » indéfiniment). On garde donc le corps lu en mémoire :
+     la deuxième lecture rend le MÊME objet, instantanément. */
+  if (req && req._corps126 !== undefined) return Promise.resolve(req._corps126);
   return new Promise(r => {
     let d = '';
     req.on('data', c => { d += c; if (d.length > 8e6) req.destroy(); });
-    req.on('end', () => { try { r(JSON.parse(d || '{}')); } catch (e) { r({}); } });
+    req.on('end', () => { try { const o = JSON.parse(d || '{}'); if (req) req._corps126 = o; r(o); } catch (e) { if (req) req._corps126 = {}; r({}); } });
   });
 }
 /* corps BRUT (nécessaire pour vérifier la signature HMAC des webhooks de paiement) */
@@ -6163,6 +6173,1480 @@ async function travRoutes(req, res, p, url) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════
+   🧩 LOT 126 — MODULE « SERVICES CENTRAUX & FAVORIS & RÉGLAGES PAR MODULE »
+   (§4 une seule source de services · §10 favoris contrôlés par le PDG · §18 un réglage par
+    fonctionnalité · §19 organisation du tableau de bord)
+
+   RÈGLE : on ne remplace rien, on ne duplique rien. Le catalogue qui existe déjà (métiers de
+   l'application + catalogue national + créations du PDG) reste LA source ; ce module ajoute
+   par-dessus une couche de DÉCISIONS (actif, visible, ordre, favori, période) et un contrôle
+   de cohérence qui garantit la chaîne :
+     TABLEAU DE BORD → SERVICES → CATÉGORIES → SOUS-CATÉGORIES → CLIENTS → PROFESSIONNELS
+                     → RECHERCHE → DEMANDES → FAVORIS
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+const SVC126_TYPES = { metier: 'Métier de l’application', service: 'Service', categorie: 'Catégorie', sous: 'Sous-catégorie', tache: 'Tâche' };
+function svc126Ensure() {
+  db.svcEtat = db.svcEtat || {};
+  const E = db.svcEtat;
+  E.actif = E.actif || {};      /* id → false quand le PDG a désactivé ce service */
+  E.visible = E.visible || {};  /* id → false quand le PDG l'a masqué sans le désactiver */
+  E.ordre = E.ordre || {};      /* id → nombre (rang voulu par le PDG) */
+  E.hist = E.hist || [];        /* qui a changé quoi, quand */
+  E.version = E.version || 1;
+  if (!Array.isArray(E.incoherences)) E.incoherences = [];
+  db.favoris = db.favoris || {};
+  const F = db.favoris;
+  if (!Array.isArray(F.ids)) F.ids = [];                 /* services mis en avant (⭐) */
+  if (!Array.isArray(F.categories)) F.categories = [];   /* catégories mises en avant */
+  if (!Array.isArray(F.priorite)) F.priorite = [];       /* services prioritaires (remontent d'abord) */
+  F.ordre = F.ordre || {};
+  F.periode = Object.assign({ nom: '', du: '', au: '', actif: false }, F.periode || {});
+  if (!Array.isArray(F.hist)) F.hist = [];
+  db.modules = db.modules || {};
+  db.modules.etat = db.modules.etat || {};
+  db.modules.hist = db.modules.hist || [];
+  return { E: E, F: F };
+}
+function svc126Journal(quoi, detail, par) {
+  const { E } = svc126Ensure();
+  E.hist.unshift({ at: nowISO(), quoi: quoi, detail: detail || '', par: par || 'PDG' });
+  E.hist = E.hist.slice(0, 600);
+  try { auditLog('services_' + quoi, { detail: detail || '' }); } catch (e) { }
+}
+/* ─────────── ① LA LISTE UNIQUE (chaîne complète : métier → catégorie → service → sous → tâche) ─────────── */
+function svc126Elements() {
+  const out = [];
+  /* a) les métiers visibles dans l'application (catalogue complet : livrés + créés par le PDG) */
+  try {
+    catalogueComplet().forEach(s => out.push({
+      id: 'metier:' + s.id, ref: s.id, type: 'metier', nom: s.nom, ic: s.ic || '🛠️',
+      cat: s.cat || '', source: s.builtin ? 'KLEAN' : 'créé par le PDG', desc: s.desc || '', base: s.base || 0
+    }));
+  } catch (e) { }
+  /* b) le catalogue national, niveau par niveau (services → sous-catégories → tâches) */
+  try {
+    const arbre = catalogueNational();
+    (arbre.services || []).forEach(sv => {
+      out.push({ id: 'service:' + sv.num, ref: String(sv.num), type: 'service', nom: sv.nom, ic: sv.ic || '📚', cat: sv.famille || '', source: 'catalogue national', sous: (sv.sous || []).length });
+      (sv.sous || []).forEach(ss => {
+        out.push({ id: 'sous:' + ss.num, ref: String(ss.num), type: 'sous', nom: ss.nom, ic: '•', cat: sv.nom, source: 'catalogue national', metier: ss.metier || '', taches: (ss.taches || []).length });
+        (ss.taches || []).forEach(t => out.push({
+          id: 'tache:' + (t.num || (ss.num + ':' + t.nom)), ref: String(t.num || ''), type: 'tache', nom: typeof t === 'string' ? t : (t.nom || ''), ic: '·',
+          cat: ss.nom, source: 'catalogue national', metier: ss.metier || ''
+        }));
+      });
+    });
+    (arbre.familles || []).forEach(f => out.push({ id: 'categorie:' + f.id, ref: f.id, type: 'categorie', nom: f.nom, ic: f.ic || '📂', cat: 'familles', source: 'catalogue national' }));
+  } catch (e) { }
+  return out;
+}
+/* l'état décidé par le PDG (par défaut : tout est actif — rien ne change sans une décision) */
+function svc126Etat(id) {
+  const { E } = svc126Ensure();
+  return {
+    actif: E.actif[id] !== false,
+    visible: E.visible[id] !== false,
+    ordre: (typeof E.ordre[id] === 'number') ? E.ordre[id] : null,
+    touche: (E.actif[id] !== undefined || E.visible[id] !== undefined || E.ordre[id] !== undefined)
+  };
+}
+function svc126Visible(id) { const e = svc126Etat(id); return e.actif && e.visible; }
+/* 🔎 ce que l'application montre : utile à la fois au client, au professionnel et au HQ */
+function svc126Publiques(q) {
+  svc126Ensure();
+  const f = String(q || '').toLowerCase().trim();
+  const toutes = svc126Elements().filter(e => svc126Visible(e.id));
+  const liste = f ? toutes.filter(e => (e.nom + ' ' + e.cat + ' ' + e.id).toLowerCase().indexOf(f) >= 0) : toutes;
+  return { total: toutes.length, totalGeneral: svc126Elements().length, liste };
+}
+/* 🚦 §4 : l'arbre du catalogue national suit EXACTEMENT les décisions du PDG.
+   Défaut = visible (rien ne change tant que le PDG ne touche à rien) ; dès qu'il désactive
+   ou masque un service / une sous-catégorie / une tâche, elle disparaît des écrans clients,
+   des écrans pros et de la recherche — sans jamais être supprimée de la base. */
+function svc126FiltreArbre(services) {
+  const garde = (id) => { try { return svc126Visible(id); } catch (e) { return true; } };
+  return (services || []).map(sv => {
+    if (!garde('service:' + sv.num)) return null;
+    const sous = (sv.sous || []).map(ss => {
+      if (!garde('sous:' + ss.num)) return null;
+      const taches = (ss.taches || []).filter(t => garde('tache:' + (t && t.num ? t.num : (ss.num + ':' + (t && t.nom ? t.nom : '')))));
+      if (!taches.length && (ss.taches || []).length) return null;
+      return Object.assign({}, ss, { taches: taches });
+    }).filter(Boolean);
+    return Object.assign({}, sv, { sous: sous });
+  }).filter(Boolean);
+}
+/* ⭐ LES FAVORIS — quels services sont mis en avant, et quand */
+function fav126Actifs() {
+  const { F } = svc126Ensure();
+  const p = F.periode || {};
+  let dansLaPeriode = true;
+  const jour = nowISO().slice(0, 10);
+  if (p.actif) {
+    if (p.du && jour < p.du) dansLaPeriode = false;
+    if (p.au && jour > p.au) dansLaPeriode = false;
+  }
+  const elems = svc126Elements();
+  const parId = {}; elems.forEach(e => { parId[e.id] = e; parId[e.ref] = parId[e.ref] || e; });
+  const liste = F.ids
+    .map(id => parId[id] || parId['metier:' + id] || null)
+    .filter(Boolean)
+    .filter(e => svc126Visible(e.id))
+    .map(e => Object.assign({}, e, {
+      favori: true, prioritaire: F.priorite.indexOf(e.id) >= 0 || F.priorite.indexOf(e.ref) >= 0,
+      rang: (typeof F.ordre[e.id] === 'number') ? F.ordre[e.id] : 100
+    }))
+    .sort((a, b) => (b.prioritaire - a.prioritaire) || (a.rang - b.rang) || a.nom.localeCompare(b.nom));
+  const cats = F.categories.map(id => { const f2 = (catalogueNational().familles || []).find(x => x.id === id); return { id: id, nom: f2 ? f2.nom : id, ic: f2 ? (f2.ic || '📂') : '📂' }; });
+  return { dansLaPeriode: dansLaPeriode, periode: { nom: p.nom || '', du: p.du || '', au: p.au || '', actif: !!p.actif }, liste: dansLaPeriode ? liste : [], categories: cats, affiche: dansLaPeriode && (liste.length > 0 || cats.length > 0) };
+}
+/* 🔍 LE CONTRÔLE DE COHÉRENCE (ce que le PDG a demandé au §4) */
+function svc126Coherence() {
+  svc126Ensure();
+  const elems = svc126Elements();
+  const incoherences = [];
+  /* ① un élément désactivé qui apparaîtrait encore côté application */
+  try {
+    const app = catalogueComplet().map(s => s.nom);
+    elems.filter(e => e.type === 'metier' && !svc126Visible(e.id)).forEach(e => {
+      if (app.indexOf(e.nom) >= 0) incoherences.push({ niveau: '🔴', quoi: 'Service désactivé encore visible dans l’application', detail: e.nom + ' (' + e.id + ')', action: 'Réactiver ou retirer du catalogue' });
+    });
+  } catch (e) { }
+  /* ② un service du tableau de bord sans lien vers l'application (métier national orphelin) */
+  try {
+    const appMetiers = new Set(catalogueComplet().map(s => s.id));
+    const arbre = catalogueNational();
+    (arbre.services || []).forEach(sv => (sv.sous || []).forEach(ss => {
+      if (ss.metier && !appMetiers.has(ss.metier)) incoherences.push({ niveau: '🟠', quoi: 'Service du catalogue national sans écran client/pro', detail: sv.nom + ' → ' + ss.nom + ' (métier ' + ss.metier + ')', action: 'Relier à un métier de l’application' });
+    }));
+  } catch (e) { }
+  /* ③ les doublons de nom */
+  try {
+    const vus = {}, doublons = [];
+    elems.filter(e => e.type === 'metier').forEach(e => {
+      const k = (e.nom || '').toLowerCase().trim();
+      if (vus[k]) doublons.push(e.nom); else vus[k] = 1;
+    });
+    doublons.forEach(n => incoherences.push({ niveau: '🟠', quoi: 'Doublon de nom dans les services', detail: n, action: 'Fusionner (ne jamais supprimer à l’aveugle)' }));
+  } catch (e) { }
+  /* ④ un favori qui vise un service désactivé */
+  const { F } = svc126Ensure();
+  F.ids.forEach(id => {
+    const e = elems.find(x => x.id === id || x.ref === id);
+    if (e && !svc126Visible(e.id)) incoherences.push({ niveau: '🟠', quoi: 'Favori pointant vers un service désactivé', detail: e.nom, action: 'Retirer des favoris ou réactiver le service' });
+  });
+  db.svcEtat.incoherences = incoherences.slice(0, 200);
+  db.svcEtat.verifAt = nowISO();
+  return { at: db.svcEtat.verifAt, nb: incoherences.length, liste: incoherences.slice(0, 200), chaine: svc126Chaine() };
+}
+/* la chaîne affichée au PDG : chaque maillon avec son compte, pour voir d'un coup d'œil ce qui est relié */
+function svc126Chaine() {
+  const elems = svc126Elements();
+  const c = t => elems.filter(e => e.type === t).length;
+  const vis = t => elems.filter(e => e.type === t && svc126Visible(e.id)).length;
+  let pros = 0; try { pros = (db.agents || []).length; } catch (e) { }
+  let clients = 0; try { clients = (db.clients || []).length; } catch (e) { }
+  let demandes = 0; try { demandes = (db.missions || []).length; } catch (e) { }
+  return [
+    { id: 'services', nom: '🧰 Services (tableau de bord)', n: c('metier') + c('service'), visible: vis('metier') + vis('service') },
+    { id: 'categories', nom: '📂 Catégories', n: c('categorie'), visible: vis('categorie') },
+    { id: 'sous', nom: '📁 Sous-catégories', n: c('sous'), visible: vis('sous') },
+    { id: 'taches', nom: '✅ Tâches', n: c('tache'), visible: vis('tache') },
+    { id: 'clients', nom: '🧍 Clients', n: clients, visible: clients },
+    { id: 'pros', nom: '🧑‍💼 Professionnels', n: pros, visible: pros },
+    { id: 'recherche', nom: '🔎 Recherche (application)', n: c('metier'), visible: vis('metier') },
+    { id: 'demandes', nom: '📋 Demandes & prestations', n: demandes, visible: demandes },
+    { id: 'favoris', nom: '⭐ Favoris mis en avant', n: fav126Actifs().liste.length, visible: fav126Actifs().liste.length }
+  ];
+}
+/* ─────────── ③ LES MODULES (§18 : un réglage pour CHAQUE grande fonctionnalité) ─────────── */
+const MODULES_126 = [
+  { id: 'accueil', nom: 'Page d’accueil & options', ic: '🏠', quoi: 'Les options de l’accueil (recherche, services, jobs, avis…)', panel: 'panel-accueil', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'afficher', 'masquer', 'stats'], source: 'accueil' },
+  { id: 'services', nom: 'Services & catalogue', ic: '🧰', quoi: 'Une seule source : services, catégories, sous-catégories', panel: 'panel-svc-browse', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'afficher', 'masquer', 'stats', 'permissions'] },
+  { id: 'favoris', nom: 'Favoris & mise en avant', ic: '⭐', quoi: 'Ce qui apparaît en favori chez les utilisateurs, et pendant quelles périodes', panel: 'panel-favoris', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'afficher', 'masquer', 'mettre_en_avant', 'stats'] },
+  { id: 'argent', nom: 'Paiements & finances', ic: '💰', quoi: 'Chaque paiement → une transaction suivie (commission, net pro, remboursement, reversement)', panel: 'panel-finances', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'stats', 'permissions'] },
+  { id: 'pros', nom: 'Professionnels', ic: '🧑‍💼', quoi: 'Demandes de passage professionnel, validation, suspension, catégories', panel: 'panel-pros', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'stats', 'utilisateurs', 'permissions'] },
+  { id: 'ecole', nom: 'École & famille', ic: '🏫', quoi: 'Écoles validées, personnel, élèves, annonces, convocations, réunions', panel: 'panel-ecoles', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'afficher', 'masquer', 'stats', 'utilisateurs', 'permissions'] },
+  { id: 'emploi', nom: 'Recherche d’emploi & travailleurs', ic: '💼', quoi: 'Les deux sens : personne ↔ professionnel', panel: 'panel-trav', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'stats'] },
+  { id: 'avis', nom: 'Avis de recherche', ic: '📢', quoi: 'Publier, modérer, marquer retrouvé', panel: 'panel-avis', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'stats'] },
+  { id: 'jobs', nom: 'Jobs & offres de travail', ic: '💼', quoi: 'Offres publiées par KLEAN et candidatures', panel: 'panel-jobs', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'stats'] },
+  { id: 'publicite', nom: 'Publicité de l’accueil', ic: '📣', quoi: 'Affiche choisie par le PDG', panel: 'panel-ads', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'afficher', 'masquer', 'stats'] },
+  { id: 'urgences', nom: 'Alertes d’urgence', ic: '🆘', quoi: 'SOS et contacts d’urgence', panel: 'panel-urgences', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'stats'] },
+  { id: 'litiges', nom: 'Litiges & remboursements', ic: '🟠', quoi: 'Réclamations, remboursements, indemnités', panel: 'panel-litiges', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'stats', 'permissions'] },
+  { id: 'conditions', nom: 'Conditions Klean-Services', ic: '📜', quoi: 'Articles client et professionnel, acceptation obligatoire', panel: 'panel-conditions', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'stats'] },
+  { id: 'tarif', nom: 'Moteur de tarification', ic: '💰', quoi: 'Prix, unités, coefficients, zones', panel: 'panel-tarif', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'stats'] },
+  { id: 'securite', nom: 'Sécurité & bouclier', ic: '🛡️', quoi: 'Bouclier anti-malveillance, IP, blocage global, sauvegardes', panel: 'panel-shield', actions: ['activer', 'desactiver', 'configurer', 'actualiser', 'stats', 'permissions'] },
+  { id: 'gestionnaires', nom: 'Gestionnaires & administrateurs', ic: '👑', quoi: 'Comptes du tableau de bord, rôles et permissions', panel: 'panel-team', actions: ['configurer', 'actualiser', 'stats', 'utilisateurs', 'permissions'] }
+];
+const MODULE_ACTIONS_TXT = {
+  activer: '🟢 ACTIVER', desactiver: '🔴 DÉSACTIVER', configurer: '⚙️ CONFIGURER', actualiser: '🔄 ACTUALISER',
+  afficher: '👁️ AFFICHER', masquer: '🙈 MASQUER', mettre_en_avant: '⭐ METTRE EN AVANT', stats: '📊 STATISTIQUES',
+  utilisateurs: '👥 GÉRER LES UTILISATEURS', permissions: '🔐 GÉRER LES PERMISSIONS'
+};
+function mod126Etat(id) {
+  svc126Ensure();
+  const m = MODULES_126.find(x => x.id === id);
+  if (!m) return null;
+  const e = db.modules.etat[id] || {};
+  /* 🏠 pour les options de l'accueil : l'état vivant est celui du registre du lot 123 (une seule vérité) */
+  if (m.source === 'accueil') {
+    let actifs = 0, tot = 0;
+    try { ACCUEIL_OPTIONS_DEF.forEach(d => { tot++; if (accueilReglages(d.id).actif) actifs++; }); } catch (err) { }
+    return { id: id, nom: m.nom, ic: m.ic, quoi: m.quoi, panel: m.panel, actions: m.actions, actif: actifs > 0, visible: true, misEnAvant: false, detail: actifs + '/' + tot + ' options actives', params: {} };
+  }
+  return { id: id, nom: m.nom, ic: m.ic, quoi: m.quoi, panel: m.panel, actions: m.actions, actif: e.actif !== false, visible: e.visible !== false, misEnAvant: !!e.misEnAvant, detail: e.detail || '', params: e.params || {} };
+}
+function mod126Publiques() { return MODULES_126.map(m => mod126Etat(m.id)).filter(m => m && m.actif !== false && m.visible !== false).map(m => ({ id: m.id, nom: m.nom, ic: m.ic, visible: m.visible })); }
+/* ─────────── ④ LES ROUTES ─────────── */
+async function lot126SvcRoutes(req, res, p, url) {
+  const dedans = p.indexOf('/api/services') === 0 || p.indexOf('/api/favoris') === 0 || p.indexOf('/api/modules') === 0 || p.indexOf('/api/admin/services') === 0 || p.indexOf('/api/admin/favoris') === 0 || p.indexOf('/api/admin/modules') === 0;
+  if (!dedans) return false;
+  svc126Ensure();
+  const B = (req.method === 'POST' || req.method === 'PUT') ? await readBody(req).catch(() => ({})) : {};
+  const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+
+  /* ① ce que voit l'application : la liste des services réellement à l'écran */
+  if (p === '/api/services/central' && req.method === 'GET') {
+    const r = svc126Publiques(url.searchParams.get('q') || '');
+    return sendJson(res, 200, { ok: true, total: r.total, totalGeneral: r.totalGeneral, liste: r.liste.slice(0, 500), favoris: fav126Actifs() }), true;
+  }
+  /* ② les favoris du moment (⭐) */
+  if (p === '/api/favoris' && req.method === 'GET')
+    return sendJson(res, 200, Object.assign({ ok: true }, fav126Actifs())), true;
+  /* ③ les modules actifs (l'application masque ce que le PDG a masqué) */
+  if (p === '/api/modules' && req.method === 'GET')
+    return sendJson(res, 200, { ok: true, modules: mod126Publiques() }), true;
+
+  /* ④ la route existante /api/services garde son comportement : on lui ajoute l'état central */
+  if (p === '/api/services' && req.method === 'GET') {
+    const liste = catalogueComplet().filter(s => svc126Visible('metier:' + s.id));
+    return sendJson(res, 200, {
+      ok: true, services: liste, version: db.catalogVersion || 1, deployAt: db.catalogDeployAt || null, deployBy: db.catalogDeployBy || '',
+      dirty: !!db.catalogDirty, nbMetiers: SVC_CAT.length, nbCrees: (db.catalog || []).length,
+      central: { total: liste.length, retires: catalogueComplet().length - liste.length, favoris: fav126Actifs().liste.length }
+    }), true;
+  }
+
+  /* ─────────── LE TABLEAU DE BORD ─────────── */
+  if (p.indexOf('/api/admin/') === 0 && !hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise' }), true;
+  if (p === '/api/admin/services/central' && req.method === 'GET') {
+    const q = String(url.searchParams.get('q') || '');
+    const type = String(url.searchParams.get('type') || '');
+    const elems = svc126Elements().filter(e => !type || e.type === type);
+    const f = q.toLowerCase().trim();
+    const liste = (f ? elems.filter(e => (e.nom + ' ' + e.cat + ' ' + e.id).toLowerCase().indexOf(f) >= 0) : elems).slice(0, 600)
+      .map(e => Object.assign({}, e, svc126Etat(e.id)));
+    return sendJson(res, 200, {
+      ok: true, total: elems.length, liste: liste, types: SVC126_TYPES,
+      chaine: svc126Chaine(), incoherences: db.svcEtat.incoherences || [], verifAt: db.svcEtat.verifAt || null,
+      histo: (db.svcEtat.hist || []).slice(0, 60), version: db.svcEtat.version
+    }), true;
+  }
+  if (p === '/api/admin/services/central' && req.method === 'POST') {
+    if (!hq || hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG : seul le compte principal règle les services', code: 'pdg' }), true;
+    const action = String(B.action || ''), id = String(B.id || '');
+    const elems = svc126Elements();
+    const el = elems.find(e => e.id === id || e.ref === id);
+    if (['activer', 'desactiver', 'afficher', 'masquer', 'ordre', 'favori', 'retirer_favori'].indexOf(action) >= 0 && !el)
+      return sendJson(res, 404, { error: 'Service introuvable dans la source centrale' }), true;
+    const { E, F } = svc126Ensure();
+    if (action === 'activer' || action === 'desactiver') {
+      E.actif[el.id] = (action === 'activer');
+      svc126Journal(action, el.type + ' ' + el.nom + ' (' + el.id + ')');
+      if (action === 'desactiver' && F.ids.indexOf(el.id) >= 0) { F.ids = F.ids.filter(x => x !== el.id); }
+      try { bcAll({ type: 'services_maj', id: el.id, actif: E.actif[el.id] }); } catch (e) { }
+    } else if (action === 'afficher' || action === 'masquer') {
+      E.visible[el.id] = (action === 'afficher');
+      svc126Journal(action, el.nom);
+    } else if (action === 'ordre') {
+      E.ordre[el.id] = Math.max(0, Math.min(999, parseInt(B.ordre, 10) || 0));
+      svc126Journal('ordre', el.nom + ' → ' + E.ordre[el.id]);
+    } else if (action === 'favori' || action === 'retirer_favori') {
+      if (action === 'favori') { if (F.ids.indexOf(el.id) < 0) F.ids.push(el.id); }
+      else F.ids = F.ids.filter(x => x !== el.id);
+      svc126Journal(action, el.nom);
+      try { bcAll({ type: 'favoris_maj' }); } catch (e) { }
+    } else if (action === 'verifier') {
+      const c = svc126Coherence();
+      return sendJson(res, 200, { ok: true, message: c.nb ? ('🔴 ' + c.nb + ' incohérence(s) trouvée(s) — voir la liste') : '🟢 Chaîne complète : services, catégories, sous-catégories, clients, pros, recherche, demandes et favoris sont reliés', coherence: c }), true;
+    } else if (action === 'deployer') {
+      E.version = (E.version || 1) + 1;
+      db.catalogVersion = (db.catalogVersion || 1) + 1; db.catalogDeployAt = nowISO(); db.catalogDeployBy = 'PDG'; db.catalogDirty = false;
+      svc126Journal('deployer', 'version ' + E.version);
+      try { bcAll({ type: 'services_deploy', version: E.version, at: db.catalogDeployAt }); } catch (e) { }
+      saveDb();
+      return sendJson(res, 200, { ok: true, message: '🚀 Services actualisés sur tous les écrans (version ' + E.version + ')' }), true;
+    } else return sendJson(res, 400, { error: 'Action inconnue : ' + action }), true;
+    saveDb();
+    return sendJson(res, 200, { ok: true, etat: el ? svc126Etat(el.id) : {}, chaine: svc126Chaine(), message: '✅ Réglage enregistré' }), true;
+  }
+  /* ─────────── ⭐ LES FAVORIS ─────────── */
+  if (p === '/api/admin/favoris' && req.method === 'GET') {
+    const f = fav126Actifs();
+    return sendJson(res, 200, {
+      ok: true, pdg: !!(hq && hq.role === 'pdg'), ids: db.favoris.ids, categories: db.favoris.categories, priorite: db.favoris.priorite,
+      ordre: db.favoris.ordre, periode: db.favoris.periode, actifs: f.liste, actifsTxt: f, dansLaPeriode: f.dansLaPeriode,
+      familles: (catalogueNational().familles || []).map(x => ({ id: x.id, nom: x.nom, ic: x.ic || '📂' })),
+      metiers: catalogueComplet().map(s => ({ id: 'metier:' + s.id, nom: s.nom, ic: s.ic || '🛠️', cat: s.cat || '' })),
+      histo: db.favoris.hist.slice(0, 60), majAt: db.favoris.majAt, par: db.favoris.par
+    }), true;
+  }
+  if (p === '/api/admin/favoris' && req.method === 'POST') {
+    if (!hq || hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG : seul le compte principal choisit les favoris', code: 'pdg' }), true;
+    const action = String(B.action || ''), { F } = svc126Ensure();
+    const journal = (q, d) => { F.hist.unshift({ at: nowISO(), quoi: q, detail: d || '', par: 'PDG' }); F.hist = F.hist.slice(0, 300); F.majAt = nowISO(); F.par = 'PDG'; };
+    if (action === 'ajouter' || action === 'retirer') {
+      const id = String(B.id || ''); if (!id) return sendJson(res, 400, { error: 'Service inconnu' }), true;
+      if (action === 'ajouter') { if (F.ids.indexOf(id) < 0) F.ids.push(id); } else { F.ids = F.ids.filter(x => x !== id); F.priorite = F.priorite.filter(x => x !== id); }
+      journal(action + '_favori', id);
+    } else if (action === 'categorie') {
+      /* ⭐ §10 : les catégories mises en avant sont choisies PARMI les catégories du catalogue
+         (on accepte « maison » ou « categorie:maison », jamais un identifiant inventé). */
+      const fams = (() => { try { return catalogueNational().familles || []; } catch (e) { return []; } })();
+      const brut = String(B.id || '').replace(/^categorie:/, '');
+      const fam = fams.find(x => x.id === brut);
+      if (!fam) return sendJson(res, 400, { error: 'Catégorie inconnue — choisissez une catégorie du catalogue' }), true;
+      const id = fam.id; const i = F.categories.indexOf(id);
+      if (i < 0) F.categories.push(id); else F.categories.splice(i, 1);
+      journal('categorie' + (i < 0 ? '_ajoutee' : '_retiree'), fam.nom);
+    } else if (action === 'priorite') {
+      const id = String(B.id || ''); const i = F.priorite.indexOf(id);
+      if (i < 0) F.priorite.push(id); else F.priorite.splice(i, 1);
+      journal('priorite' + (i < 0 ? '_ajoutee' : '_retiree'), id);
+    } else if (action === 'ordre') {
+      F.ordre[String(B.id || '')] = Math.max(0, Math.min(999, parseInt(B.ordre, 10) || 0));
+      journal('ordre', B.id + ' → ' + F.ordre[B.id]);
+    } else if (action === 'periode') {
+      F.periode = { nom: String(B.nom || '').slice(0, 80), du: String(B.du || '').slice(0, 10), au: String(B.au || '').slice(0, 10), actif: true };
+      journal('periode', (F.periode.nom || 'période') + ' · du ' + (F.periode.du || '—') + ' au ' + (F.periode.au || '—'));
+    } else if (action === 'fin_periode') { F.periode.actif = false; journal('fin_periode', F.periode.nom || ''); }
+    else if (action === 'actualiser') { journal('actualiser', F.ids.length + ' favori(s)'); }
+    else return sendJson(res, 400, { error: 'Action inconnue : ' + action }), true;
+    saveDb();
+    try { bcAll({ type: 'favoris_maj' }); } catch (e) { }
+    return sendJson(res, 200, { ok: true, message: '✅ Favoris mis à jour', ids: F.ids, actifs: fav126Actifs().liste.length }), true;
+  }
+  /* ─────────── 🎛️ LES MODULES ─────────── */
+  if (p === '/api/admin/modules' && req.method === 'GET') {
+    return sendJson(res, 200, {
+      ok: true, pdg: !!(hq && hq.role === 'pdg'),
+      modules: MODULES_126.map(m => Object.assign({}, mod126Etat(m.id), { actionsTxt: m.actions.map(a => ({ id: a, txt: MODULE_ACTIONS_TXT[a] || a })) })),
+      histo: db.modules.hist.slice(0, 60)
+    }), true;
+  }
+  if (p === '/api/admin/modules' && req.method === 'POST') {
+    if (!hq || hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG', code: 'pdg' }), true;
+    const id = String(B.id || ''), action = String(B.action || '');
+    const m = MODULES_126.find(x => x.id === id);
+    if (!m) return sendJson(res, 404, { error: 'Module inconnu' }), true;
+    svc126Ensure();
+    const e = db.modules.etat[id] = db.modules.etat[id] || {};
+    if (action === 'activer') e.actif = true;
+    else if (action === 'desactiver') e.actif = false;
+    else if (action === 'afficher') e.visible = true;
+    else if (action === 'masquer') e.visible = false;
+    else if (action === 'mettre_en_avant') e.misEnAvant = !e.misEnAvant;
+    else if (action === 'configurer') e.params = Object.assign({}, e.params || {}, B.params || {});
+    else if (action === 'actualiser') e.detail = 'actualisé le ' + nowISO().slice(0, 16).replace('T', ' à ');
+    else if (['stats', 'utilisateurs', 'permissions'].indexOf(action) >= 0) { /* ces trois gestes ouvrent le panneau du module : rien à écrire */ }
+    else return sendJson(res, 400, { error: 'Action inconnue : ' + action }), true;
+    db.modules.hist.unshift({ at: nowISO(), module: id, action: action, par: 'PDG' });
+    db.modules.hist = db.modules.hist.slice(0, 300);
+    saveDb();
+    try { bcAll({ type: 'modules_maj', id: id }); } catch (err) { }
+    return sendJson(res, 200, { ok: true, message: '✅ ' + MODULE_ACTIONS_TXT[action] + ' — ' + m.nom, module: mod126Etat(id) }), true;
+  }
+  return false;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   💰 LOT 126 — MODULE « TOUT L'ARGENT QUI PASSE PAR INTER EST TRAÇABLE »
+   (§5 transactions uniques · §6 fenêtre 💰 PAIEMENT dans la conversation · §7 argent en espèces
+    prévu / déclaré / confirmé · §8 tableau de bord financier du PDG)
+
+   PRINCIPE : aucune somme ne circule sans laisser une trace.
+     · chaque paiement existant (db.paiements) est projeté dans LE REGISTRE CENTRAL db.tx ;
+     · un paiement convenu DANS LA CONVERSATION devient lui aussi une transaction liée à la
+       prestation — impossible d'échanger de l'argent « à côté » du système ;
+     · un clic sur « j'ai payé » ne vaut JAMAIS réussite : il enregistre une DÉCLARATION ;
+     · l'argent en espèces n'est jamais présenté comme reçu par INTER : il est PRÉVU, DÉCLARÉ,
+       puis CONFIRMÉ (par le professionnel ou le PDG) — avec les personnes et la prestation.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+const TX126_STATUTS = {
+  en_attente: '🟠 En attente', reussi: '🟢 Réussi', echoue: '🔴 Échoué',
+  annule: '⚪ Annulé', rembourse: '🔵 Remboursé', reverse: '🟣 Reversé'
+};
+const TX126_ESPECES = {
+  '': '', prevu: '💵 Paiement en espèces prévu', declare: '💵 Paiement en espèces déclaré', confirme: '💵 Paiement en espèces confirmé'
+};
+const TX126_MOYEN_TXT = { especes: 'Espèces (main à main)', om: 'Orange Money', moov: 'Moov Money', wave: 'Wave', carte: 'Carte bancaire', cinetpay: 'CinetPay', autre: 'Autre' };
+/* qui parle, et à qui envoyer la mise à jour (les personnes de CETTE prestation) */
+function tx126Qui(req, m) {
+  const cl = findClientByToken(req);
+  if (cl && m.clientId === cl.id) return { role: 'client', qui: cl.nom, id: cl.id };
+  const jt = String((req.headers && req.headers['x-agent-token']) || '').trim();
+  const ag = jt ? (db.agents || []).find(a => a.jeton && a.jeton === jt) : null;
+  if (ag && (m.agentId === ag.id || m.cible === ag.id || (m.rel && (m.rel.pros || []).some(p => p.proId === ag.id))))
+    return { role: 'pro', qui: ag.nom, id: ag.id, ag: ag };
+  return null;
+}
+function tx126Notifier(m, obj) {
+  try {
+    const list = [...sockets].filter(s2 => s2.meta && ((m.clientId && s2.meta.clientId === m.clientId) || (s2.meta.agentId && (s2.meta.agentId === m.agentId || s2.meta.agentId === m.cible || (m.rel && (m.rel.pros || []).some(p => p.proId === s2.meta.agentId))))));
+    broadcast(list, obj);
+  } catch (e) { }
+}
+function tx126Ensure() {
+  db.tx = Array.isArray(db.tx) ? db.tx : [];
+  db.txCompteur = db.txCompteur || 0;
+  return db.tx;
+}
+function tx126Num() {
+  db.txCompteur = (db.txCompteur || 0) + 1;
+  const d = nowISO().slice(0, 10).replace(/-/g, '');
+  return 'TX-' + d + '-' + String(db.txCompteur).padStart(5, '0');
+}
+/* 🧾 créer UNE transaction (jamais deux fois la même : on passe toujours par la référence) */
+function tx126Creer(info) {
+  tx126Ensure();
+  const deja = db.tx.find(t => (info.payId && t.payId === info.payId) || (info.ref && t.ref === info.ref));
+  if (deja) return deja;
+  const montant = Math.max(0, Math.round(Number(info.montant) || 0));
+  const commission = (typeof info.commission === 'number') ? Math.round(info.commission) : Math.round(montant * feePct());
+  const t = {
+    id: uid('TX'), ref: info.ref || tx126Num(), at: nowISO(), majAt: nowISO(),
+    source: info.source || 'mission', missionId: info.missionId || '', contactId: info.contactId || '',
+    serviceId: info.serviceId || '', serviceNom: info.serviceNom || '',
+    clientId: info.clientId || '', clientNom: info.clientNom || '', clientTel: info.clientTel || '',
+    proId: info.proId || '', proNom: info.proNom || '',
+    montant: montant, commission: commission, netPro: Math.max(0, montant - commission),
+    moyen: info.moyen || 'especes', moyenTxt: TX126_MOYEN_TXT[info.moyen] || info.moyen || '—',
+    payMethodId: info.payMethodId || '', payId: info.payId || '',
+    statut: info.statut || 'en_attente', especes: info.especes || '',
+    refOperateur: info.refOperateur || '', payeurTel: info.payeurTel || '',
+    remboursement: null, reversement: null, hist: [],
+    par: info.par || 'système', note: info.note || ''
+  };
+  t.hist.push({ at: t.at, quoi: 'création', par: t.par, detail: TX126_STATUTS[t.statut] + (t.especes ? ' · ' + TX126_ESPECES[t.especes] : '') });
+  db.tx.unshift(t);
+  db.tx = db.tx.slice(0, 20000);
+  saveDb();
+  return t;
+}
+function tx126Trace(t, quoi, par, detail) {
+  t.hist = t.hist || [];
+  t.hist.push({ at: nowISO(), quoi: quoi, par: par || 'système', detail: detail || '' });
+  t.hist = t.hist.slice(-80);
+  t.majAt = nowISO();
+}
+/* 🔄 projeter le système de paiement existant dans le registre central (idempotent) */
+function tx126SyncPaiements() {
+  tx126Ensure();
+  let n = 0;
+  try {
+    paiements().forEach(pa => {
+      if (db.tx.some(t => t.payId === pa.id)) return;
+      const m = db.missions.find(x => x.id === (pa.missionId || ''));
+      const moyen = (pa.moyen && (pa.moyen.operateur || '').toLowerCase().indexOf('orange') >= 0) ? 'om'
+        : (pa.moyen && (pa.moyen.operateur || '').toLowerCase().indexOf('moov') >= 0) ? 'moov'
+          : (pa.payMethodId === 'especes' ? 'especes' : 'autre');
+      tx126Creer({
+        payId: pa.id, ref: pa.ref, source: 'mission', missionId: pa.missionId || '',
+        serviceId: m ? (m.service || '') : '', serviceNom: m ? (SVC_NAMES[m.service] || m.service || '') : '',
+        clientId: pa.clientId || '', clientNom: pa.clientNom || '', proId: pa.proId || '', proNom: (db.agents.find(a => a.id === pa.proId) || {}).nom || '',
+        montant: pa.montant, moyen: moyen, payMethodId: pa.payMethodId || '', statut: tx126DepuisStatut(pa.statut),
+        refOperateur: pa.txOperateur || '', payeurTel: pa.payeurTel || '', par: 'synchronisation'
+      });
+      n++;
+    });
+  } catch (e) { }
+  if (n) saveDb();
+  return n;
+}
+function tx126DepuisStatut(s) { return s === 'reussi' ? 'reussi' : (s === 'declare' ? 'en_attente' : (s === 'annule' ? 'annule' : 'en_attente')); }
+/* 📤 version publique (le client et le pro voient LEUR transaction, jamais celle d'un autre) */
+function tx126Publie(t) {
+  return {
+    id: t.id, ref: t.ref, at: t.at, majAt: t.majAt, statut: t.statut, statutTxt: TX126_STATUTS[t.statut] || t.statut,
+    especes: t.especes, especesTxt: TX126_ESPECES[t.especes] || '', moyen: t.moyen, moyenTxt: t.moyenTxt,
+    montant: t.montant, commission: t.commission, netPro: t.netPro,
+    serviceNom: t.serviceNom || '', missionId: t.missionId || '', contactId: t.contactId || '',
+    clientNom: t.clientNom || '', proNom: t.proNom || '', refOperateur: t.refOperateur || '',
+    remboursement: t.remboursement || null, reversement: t.reversement || null,
+    hist: (t.hist || []).slice(-20).map(x => ({ at: x.at, quoi: x.quoi, par: x.par, detail: x.detail })),
+    payId: t.payId || ''
+  };
+}
+function tx126Find(ref) { tx126Ensure(); return db.tx.find(t => t.id === ref || t.ref === ref) || null; }
+/* 💰 LA FENÊTRE DE PAIEMENT DE LA CONVERSATION */
+function rel126Paiement(m) {
+  tx126Ensure();
+  const t = db.tx.find(x => x.missionId === m.id && ['annule', 'echoue'].indexOf(x.statut) < 0) || null;
+  const devis = m.devis && m.devis.total ? m.devis.total : 0;
+  const dernier = (m.rel && m.rel.msgs || []).filter(x => x.type === 'prix' && x.montant).slice(-1)[0];
+  const montantConvenu = (m.devis && m.devis.total) || (dernier ? dernier.montant : 0) || 0;
+  const taxe = Math.round(montantConvenu * feePct());
+  return {
+    existe: !!t, transaction: t ? tx126Publie(t) : null,
+    convenu: montantConvenu, commission: taxe, netPro: Math.max(0, montantConvenu - taxe), commissionPct: Math.round(feePct() * 100),
+    moyens: [{ id: 'especes', nom: '💵 Espèces (main à main)' }, { id: 'mobile', nom: '📱 Mobile Money / Wave / Carte (via KLEAN)' }]
+  };
+}
+async function lot126ArgentRoutes(req, res, p, url) {
+  const dedans = p === '/api/tx' || p.indexOf('/api/tx/') === 0 || p.indexOf('/api/admin/tx') === 0 || p.indexOf('/api/admin/finances') === 0 || /^\/api\/missions\/[^/]+\/rel\/paiement/.test(p);
+  if (!dedans) return false;
+  tx126Ensure();
+  const B = (req.method === 'POST') ? await readBody(req).catch(() => ({})) : {};
+  const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+  const cli = (() => { try { return findClientByToken(req); } catch (e) { return null; } })();
+  const jt = String(req.headers['x-agent-token'] || B.jeton || '').trim();
+  const ag = jt ? (db.agents || []).find(a => a.jeton && a.jeton === jt) : null;
+
+  /* ─────────── ⑥ LA FENÊTRE 💰 PAIEMENT DANS LA CONVERSATION ─────────── */
+  const mPay = p.match(/^\/api\/missions\/([^/]+)\/rel\/paiement$/);
+  if (mPay && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mPay[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' }), true;
+    const qui = tx126Qui(req, m);
+    if (!qui && !hq) return sendJson(res, 401, { error: 'Connectez-vous (client ou professionnel concerné)' }), true;
+    const quiOk = qui || { role: 'pdg', qui: 'PDG', id: 'pdg' };
+    const montant = Math.round(Number(B.montant) || ((m.devis && m.devis.total) || 0));
+    if (montant <= 0) return sendJson(res, 400, { error: 'Indiquez le montant convenu pour la prestation' }), true;
+    if (montant > 5000000) return sendJson(res, 400, { error: 'Montant trop élevé — contactez KLEAN' }), true;
+    const especes = (String(B.moyen || '') === 'especes');
+    const t = tx126Creer({
+      source: 'mission', missionId: m.id, serviceId: m.service || '', serviceNom: SVC_NAMES[m.service] || m.service || 'Prestation',
+      clientId: m.clientId || '', clientNom: (m.client && m.client.nom) || 'Client',
+      proId: (qui && qui.ag && qui.ag.id) || m.agentId || '', proNom: (qui && qui.ag && qui.ag.nom) || (db.agents.find(a => a.id === m.agentId) || {}).nom || 'Professionnel',
+      montant: montant, moyen: especes ? 'especes' : (B.moyen || 'mobile'), payMethodId: B.payMethodId || '',
+      statut: 'en_attente', especes: especes ? 'prevu' : '', par: quiOk.role + ' ' + quiOk.qui
+    });
+    tx126Trace(t, 'fenêtre de paiement ouverte', quiOk.qui, (especes ? 'espèces prévues' : 'paiement en ligne') + ' · ' + montant.toLocaleString('fr-FR') + ' F');
+    saveDb();
+    try { relMsgsys(relDe(m), '💰 Paiement ' + t.ref + ' — ' + montant.toLocaleString('fr-FR') + ' F (' + (especes ? 'espèces à confirmer' : 'paiement en ligne') + ') : commission INTER ' + t.commission.toLocaleString('fr-FR') + ' F, montant professionnel ' + t.netPro.toLocaleString('fr-FR') + ' F.'); } catch (e) { }
+    try { tx126Notifier(m, { type: 'paiement_maj', missionId: m.id, transaction: tx126Publie(t) }); } catch (e) { }
+    emitAdmin('pay', '💰 Paiement convenu ' + t.ref + ' — ' + montant.toLocaleString('fr-FR') + ' F · ' + t.moyenTxt + ' (' + t.clientNom + ' → ' + t.proNom + ')');
+    return sendJson(res, 201, { ok: true, transaction: tx126Publie(t), paiement: rel126Paiement(m), message: especes ? '💵 Paiement en espèces PRÉVU — il sera « déclaré » puis « confirmé » par la personne qui reçoit l’argent.' : '💰 Paiement en attente : le client paie par le moyen choisi, puis KLEAN confirme la réception.' }), true;
+  }
+  const mDecl = p.match(/^\/api\/missions\/([^/]+)\/rel\/paiement\/declarer$/);
+  if (mDecl && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mDecl[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' }), true;
+    const t = db.tx.find(x => x.missionId === m.id && ['annule', 'echoue'].indexOf(x.statut) < 0);
+    if (!t) return sendJson(res, 404, { error: 'Aucune fenêtre de paiement ouverte pour cette prestation' }), true;
+    const estClient = (cli && t.clientId && cli.id === t.clientId) || (ag && t.proId && ag.id === t.proId);
+    if (!estClient && !hq) return sendJson(res, 403, { error: 'Seules les personnes concernées peuvent déclarer ce paiement' }), true;
+    const ref = String(B.refOperateur || '').replace(/[^A-Za-z0-9\-\.\/]/g, '').slice(0, 40);
+    if (t.moyen === 'especes') {
+      t.especes = 'declare';
+      tx126Trace(t, 'espèces déclarées', (cli && cli.nom) || (ag && ag.nom) || 'PDG', 'déclaration de remise en espèces' + (ref ? ' · réf ' + ref : ''));
+    } else {
+      if (!ref) return sendJson(res, 400, { error: 'Indiquez la référence reçue de l’opérateur (SMS)' }), true;
+      t.refOperateur = ref; t.statut = 'en_attente';
+      tx126Trace(t, 'paiement déclaré', (cli && cli.nom) || (ag && ag.nom) || 'PDG', 'référence opérateur ' + ref + ' — en attente de confirmation réelle');
+    }
+    saveDb();
+    try { relMsgsys(relDe(m), t.moyen === 'especes' ? ('💵 Paiement en espèces DÉCLARÉ pour ' + t.ref + ' — à confirmer par la personne qui a reçu l’argent.') : ('📨 Paiement ' + t.ref + ' déclaré (réf ' + ref + ') — KLEAN vérifie auprès de l’opérateur, aucun succès n’est décidé sur un simple clic.')); } catch (e) { }
+    try { tx126Notifier(m, { type: 'paiement_maj', missionId: m.id, transaction: tx126Publie(t) }); } catch (e) { }
+    emitAdmin('pay', '📨 ' + t.ref + ' — ' + t.moyenTxt + ' déclaré (' + (ref || 'espèces') + ') — à vérifier');
+    return sendJson(res, 200, { ok: true, transaction: tx126Publie(t), message: t.moyen === 'especes' ? '💵 Déclaration enregistrée : le paiement en espèces est DÉCLARÉ (pas encore confirmé).' : '📨 Déclaration enregistrée : KLEAN confirme la réception auprès de l’opérateur avant tout statut « Réussi ».' }), true;
+  }
+  const mConf = p.match(/^\/api\/missions\/([^/]+)\/rel\/paiement\/confirmer$/);
+  if (mConf && req.method === 'POST') {
+    const m = db.missions.find(x => x.id === mConf[1]);
+    if (!m) return sendJson(res, 404, { error: 'Demande introuvable' }), true;
+    const t = db.tx.find(x => x.missionId === m.id && ['annule', 'echoue'].indexOf(x.statut) < 0);
+    if (!t) return sendJson(res, 404, { error: 'Aucune fenêtre de paiement pour cette prestation' }), true;
+    /* qui peut confirmer ? le professionnel qui a reçu l'argent, ou le PDG (jamais le client seul) */
+    const estPro = (ag && t.proId && ag.id === t.proId) || !!(hq && hq.role === 'pdg');
+    if (!estPro) return sendJson(res, 403, { error: 'Seul le professionnel concerné (ou KLEAN) confirme la réception' }), true;
+    if (t.moyen === 'especes') {
+      t.especes = 'confirme'; t.statut = 'reussi';
+      tx126Trace(t, 'espèces confirmées', (ag && ag.nom) || 'PDG', 'argent réellement reçu en main');
+    } else {
+      t.statut = 'reussi';
+      tx126Trace(t, 'paiement confirmé', (hq ? 'PDG' : (ag && ag.nom)), 'réception confirmée' + (t.refOperateur ? ' · réf ' + t.refOperateur : ''));
+    }
+    saveDb();
+    try { relMsgsys(relDe(m), '🟢 Paiement ' + t.ref + ' CONFIRMÉ — ' + t.montant.toLocaleString('fr-FR') + ' F (commission INTER ' + t.commission.toLocaleString('fr-FR') + ' F, part professionnel ' + t.netPro.toLocaleString('fr-FR') + ' F).'); } catch (e) { }
+    try { tx126Notifier(m, { type: 'paiement_maj', missionId: m.id, transaction: tx126Publie(t) }); } catch (e) { }
+    emitAdmin('pay', '🟢 ' + t.ref + ' confirmé — ' + t.montant.toLocaleString('fr-FR') + ' F');
+    return sendJson(res, 200, { ok: true, transaction: tx126Publie(t), message: '🟢 Paiement confirmé et enregistré dans le registre central.' }), true;
+  }
+
+  /* ─────────── mes transactions (client ou professionnel) ─────────── */
+  if (p === '/api/tx' && req.method === 'GET') {
+    tx126SyncPaiements();
+    let liste = [];
+    if (cli) liste = db.tx.filter(t => t.clientId === cli.id);
+    else if (ag) liste = db.tx.filter(t => t.proId === ag.id);
+    else if (hq) liste = db.tx;
+    else return sendJson(res, 401, { error: 'Connexion requise' }), true;
+    return sendJson(res, 200, { ok: true, transactions: liste.slice(0, 200).map(tx126Publie), statuts: TX126_STATUTS, especes: TX126_ESPECES }), true;
+  }
+
+  /* ─────────── ⑧ LE TABLEAU DE BORD FINANCIER DU PDG ─────────── */
+  if (p === '/api/admin/finances' && req.method === 'GET') {
+    if (!hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise' }), true;
+    tx126SyncPaiements();
+    return sendJson(res, 200, Object.assign({ ok: true, pdg: hq.role === 'pdg', statuts: TX126_STATUTS, especes: TX126_ESPECES }, argent126Resume(url.searchParams.get('q') || '')), true);
+  }
+  if (p === '/api/admin/tx' && req.method === 'GET') {
+    if (!hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise' }), true;
+    tx126SyncPaiements();
+    const q = String(url.searchParams.get('q') || '').toLowerCase().trim();
+    const statut = String(url.searchParams.get('statut') || '');
+    let liste = db.tx;
+    if (statut) liste = liste.filter(t => t.statut === statut || t.especes === statut);
+    if (q) liste = liste.filter(t => [t.ref, t.clientNom, t.proNom, t.serviceNom, t.refOperateur, t.missionId, t.moyenTxt].join(' ').toLowerCase().indexOf(q) >= 0);
+    return sendJson(res, 200, { ok: true, total: liste.length, transactions: liste.slice(0, 300).map(t => Object.assign(tx126Publie(t), { clientId: t.clientId, proId: t.proId })) }), true;
+  }
+  if (p === '/api/admin/tx' && req.method === 'POST') {
+    if (!hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise' }), true;
+    const action = String(B.action || ''), ref = String(B.ref || '');
+    const t = tx126Find(ref);
+    if (!t) return sendJson(res, 404, { error: 'Transaction introuvable' }), true;
+    const motif = String(B.motif || '').slice(0, 200);
+    if (action === 'confirmer') { t.statut = 'reussi'; if (t.moyen === 'especes') t.especes = 'confirme'; tx126Trace(t, 'confirmé', hq.nom || 'PDG', motif || 'réception confirmée'); }
+    else if (action === 'echouer') { t.statut = 'echoue'; tx126Trace(t, 'échoué', hq.nom || 'PDG', motif); }
+    else if (action === 'annuler') { t.statut = 'annule'; tx126Trace(t, 'annulé', hq.nom || 'PDG', motif); }
+    else if (action === 'espece_confirme') { t.especes = 'confirme'; t.statut = 'reussi'; tx126Trace(t, 'espèces confirmées', hq.nom || 'PDG', motif || 'espèces reçues en main'); }
+    else if (action === 'espece_declare') { t.especes = 'declare'; tx126Trace(t, 'espèces déclarées', hq.nom || 'PDG', motif); }
+    else if (action === 'rembourser') {
+      if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG : un remboursement engage la plateforme', code: 'pdg' }), true;
+      const montant = Math.min(t.montant, Math.max(1, Math.round(Number(B.montant) || t.montant)));
+      t.remboursement = { at: nowISO(), montant: montant, motif: motif || 'remboursement', par: 'PDG' };
+      t.statut = 'rembourse';
+      tx126Trace(t, 'remboursé', 'PDG', montant.toLocaleString('fr-FR') + ' F · ' + (motif || ''));
+      try { emitAdmin('pay', '🔵 Remboursement ' + montant.toLocaleString('fr-FR') + ' F sur ' + t.ref); } catch (e) { }
+    } else if (action === 'reverser') {
+      if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG : un reversement engage la plateforme', code: 'pdg' }), true;
+      const montant = Math.min(t.netPro, Math.max(1, Math.round(Number(B.montant) || t.netPro)));
+      t.reversement = { at: nowISO(), montant: montant, reference: String(B.reference || '').slice(0, 60), par: 'PDG' };
+      t.statut = 'reverse';
+      tx126Trace(t, 'reversé au professionnel', 'PDG', montant.toLocaleString('fr-FR') + ' F' + (B.reference ? ' · réf ' + String(B.reference).slice(0, 40) : ''));
+    }
+    else if (action === 'sync') { const n = tx126SyncPaiements(); return sendJson(res, 200, { ok: true, message: '🔄 ' + n + ' paiement(s) projeté(s) dans le registre' }), true; }
+    else return sendJson(res, 400, { error: 'Action inconnue : ' + action }), true;
+    saveDb();
+    return sendJson(res, 200, { ok: true, transaction: tx126Publie(t), message: '✅ Transaction mise à jour (' + (TX126_STATUTS[t.statut] || t.statut) + ')' }), true;
+  }
+  return false;
+}
+/* 🧮 le résumé financier demandé au §8 (totaux + par jour, mois, service, professionnel, moyen) */
+function argent126Resume(q) {
+  tx126Ensure();
+  const f = String(q || '').toLowerCase().trim();
+  const liste = f ? db.tx.filter(t => [t.ref, t.clientNom, t.proNom, t.serviceNom, t.moyenTxt].join(' ').toLowerCase().indexOf(f) >= 0) : db.tx;
+  const somme = (arr, f2) => arr.reduce((s, t) => s + (f2 ? f2(t) : t.montant), 0);
+  const encaisse = liste.filter(t => t.statut === 'reussi' || t.statut === 'reverse');
+  const enAttente = liste.filter(t => t.statut === 'en_attente');
+  const echoue = liste.filter(t => t.statut === 'echoue');
+  const rembourse = liste.filter(t => t.statut === 'rembourse');
+  const reverse = liste.filter(t => t.reversement);
+  const especesDeclares = liste.filter(t => t.especes === 'declare' || (t.especes === 'confirme' && t.statut === 'reussi'));
+  const encaisseSur = liste.filter(t => (t.statut === 'reussi' || t.statut === 'reverse') && (!t.especes || t.especes === 'confirme'));
+  const especesAttente = liste.filter(t => t.especes === 'prevu' || t.especes === 'declare');
+  const parCle = (cle, txt) => {
+    const m = {};
+    liste.forEach(t => { const k = cle(t) || '—'; m[k] = m[k] || { cle: k, nom: (txt ? txt(t) : k), n: 0, montant: 0, commission: 0 }; m[k].n++; m[k].montant += t.montant; m[k].commission += t.commission; });
+    return Object.values(m).sort((a, b) => b.montant - a.montant).slice(0, 40);
+  };
+  return {
+    totalTransactions: liste.length,
+    totalEncaisse: somme(encaisse), commissions: somme(encaisse, t => t.commission),
+    duAuxPros: somme(encaisse, t => t.netPro) - somme(reverse, t => t.reversement.montant),
+    reverses: somme(reverse, t => t.reversement.montant),
+    enAttente: somme(enAttente), nbEnAttente: enAttente.length,
+    echoues: somme(echoue), nbEchoues: echoue.length,
+    remboursements: somme(rembourse, t => (t.remboursement ? t.remboursement.montant : t.montant)), nbRemboursements: rembourse.length,
+    encaisseConfirme: somme(encaisseSur),                    /* 💰 l'argent RÉELLEMENT reçu (une déclaration d'espèces n'est pas un encaissement) */
+    pctCommission: Math.round(feePct() * 100),
+    especesDeclares: somme(especesDeclares), nbEspecesDeclares: especesDeclares.length,
+    especesPrevus: somme(liste.filter(t => t.especes === 'prevu')),
+    especesAConfirmer: especesAttente.length,
+    nbReverses: reverse.length,
+    especesTxt: especesAttente.slice(0, 100).map(t => ({ ref: t.ref, montant: t.montant, clientNom: t.clientNom, proNom: t.proNom, serviceNom: t.serviceNom, statut: t.especes, statutTxt: TX126_ESPECES[t.especes] || '', at: t.at })),
+    parJour: parCle(t => t.at.slice(0, 10)), parMois: parCle(t => t.at.slice(0, 7)),
+    parService: parCle(t => t.serviceNom || t.serviceId, t => t.serviceNom || t.serviceId),
+    parPro: parCle(t => t.proId, t => t.proNom || t.proId),
+    parMoyen: parCle(t => t.moyen, t => t.moyenTxt || t.moyen),
+    parStatut: parCle(t => t.statut, t => TX126_STATUTS[t.statut] || t.statut),
+    dernieres: liste.slice(0, 60).map(tx126Publie)
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   🏫 LOT 126 — MODULE « ÉCOLE ↔ FAMILLE » (§11 à §17 + §21 confidentialité)
+
+   OBJECTIF : un lien numérique simple entre une ÉCOLE et les FAMILLES, pour qu'un parent
+   suive la vie scolaire de son enfant même loin de l'école.
+
+   RÈGLE ABSOLUE (§16) : une école ne peut RIEN faire sans validation. Tout passe par un
+   statut 🟠 EN ATTENTE → 🟢 VALIDÉ / 🔴 REFUSÉ / ⚪ SUSPENDU, et par des permissions.
+   RÈGLE ABSOLUE (§21) : un parent ne voit QUE ses enfants et CE QUI LES CONCERNE — jamais
+   les informations d'une autre famille. Le contrôle est fait ICI, côté serveur.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+const ECOLE_STATUTS = { en_attente: '🟠 En attente', valide: '🟢 Validé', refuse: '🔴 Refusé', suspendu: '⚪ Suspendu' };
+const ECOLE_ROLES = {
+  gestionnaire: { nom: 'Gestionnaire d’école', permissions: ['ecole_modifier', 'personnel_gerer', 'eleves_gerer', 'parents_gerer', 'annonces', 'convocations', 'reunions', 'chat', 'stats'] },
+  direction: { nom: 'Direction', permissions: ['ecole_modifier', 'personnel_gerer', 'eleves_gerer', 'parents_gerer', 'annonces', 'convocations', 'reunions', 'chat', 'stats', 'valider'] },
+  personnel: { nom: 'Personnel autorisé', permissions: ['annonces', 'convocations', 'reunions', 'chat'] },
+  enseignant: { nom: 'Enseignant', permissions: ['annonces', 'chat', 'notes'] },
+  autre: { nom: 'Autre personnel autorisé', permissions: ['chat'] }
+};
+const ECOLE_AUTO_DEF = [
+  { id: 'reunion_annonce', nom: 'Annonce de réunion', texte: 'Bonjour, une réunion est prévue le {date} à {heure} ({lieu}). {message}' },
+  { id: 'reunion_rappel', nom: 'Rappel de réunion', texte: 'Rappel : la réunion aura lieu demain à {heure} ({lieu}). Votre présence est importante.' },
+  { id: 'info_publiee', nom: 'Nouvelle information publiée', texte: 'Une nouvelle information a été publiée par l’école : {titre}.' },
+  { id: 'convocation', nom: 'Convocation', texte: 'Votre présence est demandée à {lieu} le {date} à {heure}. Objet : {titre}.' },
+  { id: 'convocation_envoyee', nom: 'Convocation envoyée', texte: 'Une convocation vient d’être envoyée par l’école au sujet de {eleve}.' },
+  { id: 'annonce_urgente', nom: 'Annonce urgente', texte: '🔴 Information urgente de l’école : {titre} — {texte}' }
+];
+function eco126Ensure() {
+  db.ecoles = db.ecoles || [];
+  db.ecoleMembres = db.ecoleMembres || [];
+  db.ecoleParents = db.ecoleParents || [];
+  db.ecoleEleves = db.ecoleEleves || [];
+  db.ecoleAnnonces = db.ecoleAnnonces || [];
+  db.ecoleConvocations = db.ecoleConvocations || [];
+  db.ecoleReunions = db.ecoleReunions || [];
+  db.ecoleChat = db.ecoleChat || [];
+  db.ecoleJournal = db.ecoleJournal || [];
+  db.ecoleReglages = Object.assign({ auto: true, rappelHeures: 24, parentAuto: false, permValiderGest: false, types: ['primaire', 'secondaire', 'maternelle', 'technique', 'supérieur', 'autre'] }, db.ecoleReglages || {});
+  db.ecoleAuto = Array.isArray(db.ecoleAuto) && db.ecoleAuto.length ? db.ecoleAuto : ECOLE_AUTO_DEF.map(a => Object.assign({ actif: true, at: nowISO(), par: 'KLEAN' }, a));
+  /* on complète toujours les modèles manquants (une mise à jour n'efface jamais un modèle) */
+  ECOLE_AUTO_DEF.forEach(d => { if (!db.ecoleAuto.some(a => a.id === d.id)) db.ecoleAuto.push(Object.assign({ actif: true, at: nowISO(), par: 'KLEAN' }, d)); });
+  return db.ecoleReglages;
+}
+function eco126Journal(quoi, detail, par, ecoleId) {
+  eco126Ensure();
+  db.ecoleJournal.unshift({ at: nowISO(), quoi: quoi, detail: detail || '', par: par || 'système', ecoleId: ecoleId || '' });
+  db.ecoleJournal = db.ecoleJournal.slice(0, 1000);
+}
+function eco126Auto(id, remp) {
+  eco126Ensure();
+  if (!db.ecoleReglages.auto) return null;
+  const mod = db.ecoleAuto.find(a => a.id === id);
+  if (!mod || !mod.actif) return null;
+  let t = String(mod.texte || '');
+  Object.keys(remp || {}).forEach(k => { t = t.split('{' + k + '}').join(String(remp[k] == null ? '' : remp[k])); });
+  return t.replace(/\s+/g, ' ').trim();
+}
+/* qui suis-je dans cette école ? (membre validé, ou PDG, ou parent) */
+function eco126Membre(req, ecoleId) {
+  eco126Ensure();
+  const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+  if (hq && hq.role === 'pdg') return { role: 'pdg', nom: 'PDG', perms: ['*'], peut: () => true };
+  const cl = (() => { try { return findClientByToken(req); } catch (e) { return null; } })();
+  const m = cl ? db.ecoleMembres.find(x => x.ecoleId === ecoleId && x.clientId === cl.id && x.statut === 'valide') : null;
+  if (!m) return null;
+  const perms = (ECOLE_ROLES[m.role] || ECOLE_ROLES.autre).permissions;
+  return { role: m.role, nom: m.nom, membre: m, perms: perms, peut: p => perms.indexOf(p) >= 0 };
+}
+function eco126Parent(req, ecoleId) {
+  eco126Ensure();
+  const cl = (() => { try { return findClientByToken(req); } catch (e) { return null; } })();
+  if (!cl) return null;
+  return db.ecoleParents.find(x => x.ecoleId === ecoleId && x.clientId === cl.id && x.statut !== 'refuse') || null;
+}
+function eco126EcolePublique(e) {
+  return { id: e.id, nom: e.nom, type: e.type || '', ville: e.ville || '', quartier: e.quartier || '', tel: e.tel || '', statut: e.statut, statutTxt: ECOLE_STATUTS[e.statut] || e.statut, at: e.at, motif: e.motif || '' };
+}
+function eco126EcoleActive(e) { return e && e.statut === 'valide'; }
+/* 🎯 à QUI s'adresse une information : on calcule les familles concernées (jamais plus) */
+function eco126Destinataires(ecoleId, cible, cibleId) {
+  eco126Ensure();
+  const parents = db.ecoleParents.filter(x => x.ecoleId === ecoleId && x.statut === 'valide');
+  const enfantsDe = pid => db.ecoleEleves.filter(el => el.ecoleId === ecoleId && (el.parentId === pid || (el.parentTel && db.ecoleParents.some(pp => pp.id === pid && pp.tel === el.parentTel))));
+  if (!cible || cible === 'tous') return parents.map(p => ({ parent: p, enfants: enfantsDe(p.id) }));
+  if (cible === 'famille') return parents.filter(p => p.id === cibleId).map(p => ({ parent: p, enfants: enfantsDe(p.id) }));
+  if (cible === 'parent') return parents.filter(p => p.clientId === cibleId || p.id === cibleId).map(p => ({ parent: p, enfants: enfantsDe(p.id) }));
+  if (cible === 'eleve') {
+    const el = db.ecoleEleves.find(x => x.id === cibleId && x.ecoleId === ecoleId);
+    if (!el) return [];
+    return parents.filter(p => p.id === el.parentId || (el.parentTel && p.tel === el.parentTel)).map(p => ({ parent: p, enfants: [el] }));
+  }
+  if (cible === 'classe') {
+    const els = db.ecoleEleves.filter(x => x.ecoleId === ecoleId && String(x.classe) === String(cibleId));
+    const ids = new Set(els.map(e2 => e2.parentId).filter(Boolean));
+    return parents.filter(p => ids.has(p.id) || els.some(e2 => e2.parentTel && e2.parentTel === p.tel)).map(p => ({ parent: p, enfants: enfantsDe(p.id) }));
+  }
+  return [];
+}
+function eco126Notifier(ecoleId, obj) {
+  try {
+    const list = [...sockets].filter(s2 => s2.meta && (s2.meta.clientId && (db.ecoleMembres.some(m => m.ecoleId === ecoleId && m.clientId === s2.meta.clientId && m.statut === 'valide') || db.ecoleParents.some(p => p.ecoleId === ecoleId && p.clientId === s2.meta.clientId && p.statut === 'valide'))));
+    broadcast(list, obj);
+  } catch (e) { }
+}
+/* ═══════════════════════════ LES ROUTES ═══════════════════════════ */
+async function lot126EcoleRoutes(req, res, p, url) {
+  const dedans = p.indexOf('/api/ecole') === 0 || p.indexOf('/api/admin/ecole') === 0;
+  if (!dedans) return false;
+  const R = eco126Ensure();
+  const B = (req.method === 'POST') ? await readBody(req).catch(() => ({})) : {};
+  const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+  const cl = (() => { try { return findClientByToken(req); } catch (e) { return null; } })();
+  const net = (x, n) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().slice(0, n);
+
+  /* ═══ ⑯ une école fait sa demande (elle n'a AUCUN droit avant validation) ═══ */
+  if (p === '/api/ecole/demande' && req.method === 'POST') {
+    if (!cl && !hq) return sendJson(res, 401, { error: 'Créez d’abord votre compte INTER (une seule fois) : c’est lui qui portera votre école' }), true;
+    const nom = net(B.nom, 90), ville = net(B.ville, 60);
+    if (nom.length < 3) return sendJson(res, 400, { error: 'Indiquez le nom de l’école' }), true;
+    if (!ville) return sendJson(res, 400, { error: 'Indiquez la ville de l’école' }), true;
+    const tel = String(B.tel || '').replace(/\D/g, '').slice(0, 16);
+    if (tel.length < 8) return sendJson(res, 400, { error: 'Indiquez un numéro joignable' }), true;
+    const deja = db.ecoles.find(e => e.nom.toLowerCase() === nom.toLowerCase() && e.ville.toLowerCase() === ville.toLowerCase() && e.statut !== 'refuse');
+    if (deja) return sendJson(res, 409, { error: 'Cette école est déjà enregistrée (' + ECOLE_STATUTS[deja.statut] + '). Si c’est la vôtre, demandez le rattachement à votre compte.' }), true;
+    const e = {
+      id: uid('EC'), nom: nom, type: net(B.type, 40) || 'primaire', ville: ville, quartier: net(B.quartier, 60), tel: tel,
+      mail: net(B.mail, 80), directeur: net(B.directeur, 80), elevesDeclares: Math.max(0, parseInt(B.eleves, 10) || 0),
+      statut: 'en_attente', at: nowISO(), par: cl ? cl.nom : (hq ? 'PDG' : ''), clientId: cl ? cl.id : null, hist: [{ at: nowISO(), quoi: 'demande' }]
+    };
+    db.ecoles.unshift(e);
+    /* le demandeur devient gestionnaire EN ATTENTE (aucun droit avant validation) */
+    const m = { id: uid('EM'), ecoleId: e.id, nom: net(B.directeur, 80) || (cl ? cl.nom : 'Demandeur'), tel: tel, clientId: cl ? cl.id : null, role: 'gestionnaire', fonction: net(B.fonction, 60), statut: 'en_attente', at: nowISO(), code: String(Math.floor(100000 + Math.random() * 899999)) };
+    db.ecoleMembres.push(m);
+    eco126Journal('demande_ecole', nom + ' (' + ville + ')', m.nom, e.id);
+    emitAdmin('admin', '🏫 Nouvelle demande d’école : ' + nom + ' — ' + ville + ' (à valider par le PDG)');
+    saveDb();
+    return sendJson(res, 201, {
+      ok: true, ecole: eco126EcolePublique(e), statut: e.statut, statutTxt: ECOLE_STATUTS[e.statut], code: m.code,
+      message: '⏳ Votre demande est envoyée à KLEAN. Une école ne peut utiliser les fonctions professionnelles qu’après validation : vous serez prévenu ici.'
+    }), true;
+  }
+  /* ═══ ce que je vois : mes écoles (membre) et mes enfants (parent) ═══ */
+  if (p === '/api/ecole/moi' && req.method === 'GET') {
+    if (!cl && !hq) return sendJson(res, 401, { error: 'Connectez-vous avec votre compte INTER' }), true;
+    const mesEcoles = db.ecoleMembres.filter(m => (cl && m.clientId === cl.id) || (hq && false)).map(m => ({ membre: { id: m.id, role: m.role, roleTxt: (ECOLE_ROLES[m.role] || {}).nom, statut: m.statut, statutTxt: ECOLE_STATUTS[m.statut], perms: (ECOLE_ROLES[m.role] || ECOLE_ROLES.autre).permissions }, ecole: eco126EcolePublique(db.ecoles.find(e => e.id === m.ecoleId) || {}) }));
+    const mesFamilles = db.ecoleParents.filter(x => cl && x.clientId === cl.id).map(x => ({
+      parent: { id: x.id, statut: x.statut, statutTxt: ECOLE_STATUTS[x.statut], code: x.code, eleveIds: x.eleveIds || [] },
+      ecole: eco126EcolePublique(db.ecoles.find(e => e.id === x.ecoleId) || {}),
+      enfants: (x.eleveIds || []).map(id => { const el = db.ecoleEleves.find(e => e.id === id); return el ? { id: el.id, nom: el.nom, classe: el.classe } : null; }).filter(Boolean)
+    }));
+    return sendJson(res, 200, {
+      ok: true, actif: R, roles: Object.keys(ECOLE_ROLES).map(k => ({ id: k, nom: ECOLE_ROLES[k].nom, permissions: ECOLE_ROLES[k].permissions })),
+      mesEcoles: mesEcoles, mesFamilles: mesFamilles,
+      types: R.types, enAttente: mesEcoles.filter(x => x.membre.statut !== 'valide').length + mesFamilles.filter(x => x.parent.statut !== 'valide').length
+    }), true;
+  }
+  /* ═══ ⑯ un membre du personnel demande à rejoindre une école (validation obligatoire) ═══ */
+  if (p === '/api/ecole/membre' && req.method === 'POST') {
+    if (!cl) return sendJson(res, 401, { error: 'Connectez-vous avec votre compte INTER' }), true;
+    const e = db.ecoles.find(x => x.id === String(B.ecoleId || ''));
+    if (!e) return sendJson(res, 404, { error: 'École introuvable' }), true;
+    const nom = net(B.nom, 80) || cl.nom;
+    const role = ECOLE_ROLES[B.role] ? B.role : 'personnel';
+    const deja = db.ecoleMembres.find(m => m.ecoleId === e.id && m.clientId === cl.id);
+    if (deja) return sendJson(res, 409, { error: 'Vous avez déjà une demande pour cette école (' + ECOLE_STATUTS[deja.statut] + ')' }), true;
+    const m = { id: uid('EM'), ecoleId: e.id, nom: nom, tel: net(B.tel, 16), clientId: cl.id, role: role, fonction: net(B.fonction, 60), statut: 'en_attente', at: nowISO(), code: String(Math.floor(100000 + Math.random() * 899999)) };
+    db.ecoleMembres.push(m);
+    eco126Journal('demande_membre', nom + ' → ' + (ECOLE_ROLES[role] || {}).nom, nom, e.id);
+    emitAdmin('admin', '🏫 ' + nom + ' demande à rejoindre ' + e.nom + ' (' + (ECOLE_ROLES[role] || {}).nom + ') — à valider');
+    saveDb();
+    return sendJson(res, 201, { ok: true, statut: m.statut, statutTxt: ECOLE_STATUTS[m.statut], message: '⏳ Demande envoyée. Aucun accès avant validation par KLEAN.' }), true;
+  }
+  /* ═══ ⑬ un parent se rattache à un enfant ═══ */
+  if (p === '/api/ecole/parent' && req.method === 'POST') {
+    const e = db.ecoles.find(x => x.id === String(B.ecoleId || ''));
+    if (!e) return sendJson(res, 404, { error: 'École introuvable' }), true;
+    const nom = net(B.nom, 80) || (cl ? cl.nom : '');
+    if (nom.length < 2) return sendJson(res, 400, { error: 'Indiquez votre nom' }), true;
+    const tel = String(B.tel || (cl ? cl.tel : '') || '').replace(/\D/g, '').slice(0, 16);
+    if (tel.length < 8) return sendJson(res, 400, { error: 'Indiquez un numéro joignable' }), true;
+    const eleveNom = net(B.eleveNom, 80), classe = net(B.classe, 40);
+    if (eleveNom.length < 2) return sendJson(res, 400, { error: 'Indiquez le nom de votre enfant' }), true;
+    let p2 = db.ecoleParents.find(x => x.ecoleId === e.id && (x.tel === tel || (cl && x.clientId === cl.id)));
+    if (!p2) {
+      p2 = { id: uid('EP'), ecoleId: e.id, nom: nom, tel: tel, clientId: cl ? cl.id : null, eleveIds: [], statut: R.parentAuto ? 'valide' : 'en_attente', at: nowISO(), code: String(Math.floor(100000 + Math.random() * 899999)) };
+      db.ecoleParents.push(p2);
+    }
+    /* l'enfant : on rattache à une fiche existante (même nom + classe) sinon on crée la fiche en attente */
+    let el = db.ecoleEleves.find(x => x.ecoleId === e.id && x.nom.toLowerCase() === eleveNom.toLowerCase() && (!classe || String(x.classe) === String(classe)));
+    if (!el) {
+      el = { id: uid('EL'), ecoleId: e.id, nom: eleveNom, classe: classe, naissance: net(B.naissance, 20), parentId: p2.id, parentTel: tel, statut: 'en_attente', at: nowISO(), par: 'parent' };
+      db.ecoleEleves.push(el);
+    } else if (!el.parentId) { el.parentId = p2.id; }
+    if ((p2.eleveIds || []).indexOf(el.id) < 0) p2.eleveIds.push(el.id);
+    eco126Journal('demande_parent', nom + ' → ' + eleveNom + ' (' + classe + ')', nom, e.id);
+    emitAdmin('admin', '👨‍👩‍👧 ' + nom + ' demande à suivre ' + eleveNom + ' — ' + e.nom);
+    saveDb();
+    return sendJson(res, 201, {
+      ok: true, parent: { id: p2.id, statut: p2.statut, statutTxt: ECOLE_STATUTS[p2.statut], code: p2.code }, enfant: { id: el.id, nom: el.nom, classe: el.classe },
+      message: p2.statut === 'valide' ? '✅ Vous êtes rattaché : vous suivez maintenant la scolarité de ' + el.nom + '.' : '⏳ Demande envoyée. Un parent ne voit que ses propres enfants, et seulement après validation.'
+    }), true;
+  }
+  /* ═══ ⑫ le tableau de bord de l'école (personnel validé seulement) ═══ */
+  if (p === '/api/ecole/tableau' && req.method === 'GET') {
+    const e = db.ecoles.find(x => x.id === String(url.searchParams.get('ecoleId') || ''));
+    if (!e) return sendJson(res, 404, { error: 'École introuvable' }), true;
+    const moi = eco126Membre(req, e.id);
+    if (!moi) return sendJson(res, 403, { error: 'Vous n’êtes pas un personnel validé de cette école' }), true;
+    if (!eco126EcoleActive(e) && moi.role !== 'pdg') return sendJson(res, 403, { error: 'Cette école n’est pas encore validée (' + ECOLE_STATUTS[e.statut] + ')' }), true;
+    const membres = db.ecoleMembres.filter(x => x.ecoleId === e.id);
+    const eleves = db.ecoleEleves.filter(x => x.ecoleId === e.id);
+    const parents = db.ecoleParents.filter(x => x.ecoleId === e.id);
+    return sendJson(res, 200, {
+      ok: true, ecole: eco126EcolePublique(e), moi: { role: moi.role, nom: moi.nom, perms: moi.perms, peut: moi.perms },
+      statuts: ECOLE_STATUTS, roles: Object.keys(ECOLE_ROLES).map(k => ({ id: k, nom: ECOLE_ROLES[k].nom, permissions: ECOLE_ROLES[k].permissions })),
+      membres: membres.map(m => ({ id: m.id, nom: m.nom, tel: m.tel, role: m.role, roleTxt: (ECOLE_ROLES[m.role] || {}).nom, fonction: m.fonction, statut: m.statut, statutTxt: ECOLE_STATUTS[m.statut], at: m.at })),
+      eleves: eleves.map(el => ({ id: el.id, nom: el.nom, classe: el.classe, naissance: el.naissance, statut: el.statut, parent: (parents.find(pp => pp.id === el.parentId) || {}).nom || '', at: el.at })),
+      parents: parents.map(pp => ({ id: pp.id, nom: pp.nom, tel: pp.tel, statut: pp.statut, statutTxt: ECOLE_STATUTS[pp.statut], enfants: (pp.eleveIds || []).map(id => (db.ecoleEleves.find(z => z.id === id) || {}).nom).filter(Boolean), at: pp.at })),
+      annonces: db.ecoleAnnonces.filter(x => x.ecoleId === e.id).slice(0, 60),
+      convocations: db.ecoleConvocations.filter(x => x.ecoleId === e.id).slice(0, 60),
+      reunions: db.ecoleReunions.filter(x => x.ecoleId === e.id).slice(0, 60),
+      messages: db.ecoleChat.filter(x => x.ecoleId === e.id).slice(-120),
+      classes: [...new Set(eleves.map(x => x.classe).filter(Boolean))],
+      auto: db.ecoleAuto.map(a => ({ id: a.id, nom: a.nom, texte: a.texte, actif: !!a.actif })),
+      journal: db.ecoleJournal.filter(x => x.ecoleId === e.id).slice(0, 40)
+    }), true;
+  }
+  /* ═══ ⑫ les gestes du personnel : élèves, annonces, convocations, réunions, messages ═══ */
+  if (p === '/api/ecole/action' && req.method === 'POST') {
+    const e = db.ecoles.find(x => x.id === String(B.ecoleId || ''));
+    if (!e) return sendJson(res, 404, { error: 'École introuvable' }), true;
+    const moi = eco126Membre(req, e.id);
+    if (!moi) return sendJson(res, 403, { error: 'Réservé au personnel validé de cette école' }), true;
+    if (!eco126EcoleActive(e) && moi.role !== 'pdg') return sendJson(res, 403, { error: 'École non validée (' + ECOLE_STATUTS[e.statut] + ') : aucune fonction professionnelle n’est ouverte' }), true;
+    const action = String(B.action || '');
+    const besoin = (p2, quoi) => { if (!moi.peut(p2) && moi.role !== 'pdg') { const err = { error: 'Votre rôle (' + (ECOLE_ROLES[moi.role] || {}).nom + ') ne permet pas : ' + quoi }; sendJson(res, 403, err); return false; } return true; };
+    /* ① élève */
+    if (action === 'eleve') {
+      if (!besoin('eleves_gerer', 'gérer les élèves')) return true;
+      const nom = net(B.nom, 80); if (nom.length < 2) return sendJson(res, 400, { error: 'Indiquez le nom de l’élève' }), true;
+      let el = B.id ? db.ecoleEleves.find(x => x.id === B.id && x.ecoleId === e.id) : null;
+      const tel = String(B.parentTel || '').replace(/\D/g, '').slice(0, 16);
+      let parentId = null;
+      if (tel) { const pp = db.ecoleParents.find(x => x.ecoleId === e.id && x.tel === tel); if (pp) parentId = pp.id; }
+      if (el) { Object.assign(el, { nom: nom, classe: net(B.classe, 40), naissance: net(B.naissance, 20), parentTel: tel || el.parentTel, parentId: parentId || el.parentId, majAt: nowISO() }); }
+      else {
+        el = { id: uid('EL'), ecoleId: e.id, nom: nom, classe: net(B.classe, 40), naissance: net(B.naissance, 20), parentTel: tel, parentId: parentId, statut: 'valide', at: nowISO(), par: moi.nom };
+        db.ecoleEleves.push(el);
+        if (parentId) { const pp = db.ecoleParents.find(x => x.id === parentId); pp.eleveIds = pp.eleveIds || []; if (pp.eleveIds.indexOf(el.id) < 0) pp.eleveIds.push(el.id); }
+      }
+      eco126Journal('eleve', (el.id ? 'modification ' : 'création ') + nom, moi.nom, e.id);
+      eco126Notifier(e.id, { type: 'ecole_maj', quoi: 'eleve' });
+      saveDb();
+      return sendJson(res, 201, { ok: true, eleve: { id: el.id, nom: el.nom, classe: el.classe }, message: '✅ Élève enregistré (seules les informations autorisées).' }), true;
+    }
+    /* ② annonce / information */
+    if (action === 'annonce') {
+      if (!besoin('annonces', 'publier une information')) return true;
+      const titre = net(B.titre, 120), texte = net(B.texte, 1200);
+      if (titre.length < 3 || texte.length < 3) return sendJson(res, 400, { error: 'Indiquez le titre et le texte de l’information' }), true;
+      const cible = ['tous', 'classe', 'eleve', 'famille', 'parent'].indexOf(String(B.cible)) >= 0 ? String(B.cible) : 'tous';
+      const dest = eco126Destinataires(e.id, cible, B.cibleId);
+      const a = { id: uid('AN'), ecoleId: e.id, titre: titre, texte: texte, urgent: !!B.urgent, cible: cible, cibleId: String(B.cibleId || ''), at: nowISO(), par: moi.nom, touches: dest.length, auto: [] };
+      const auto = eco126Auto(B.urgent ? 'annonce_urgente' : 'info_publiee', { titre: titre, texte: texte, ecole: e.nom });
+      if (auto) a.auto.push(auto);
+      db.ecoleAnnonces.unshift(a);
+      db.ecoleChat.push({ id: uid('MS'), ecoleId: e.id, de: 'ecole', nom: moi.nom, texte: (auto ? auto + ' ' : '') + '📢 ' + titre + ' — ' + texte, at: nowISO(), annonceId: a.id });
+      dest.forEach(d2 => { eco126Notifier(e.id, { type: 'ecole_annonce', ecoleId: e.id, titre: titre, urgent: !!a.urgent, texte: auto || texte }); });
+      eco126Journal('annonce', titre + ' (' + dest.length + ' famille(s))', moi.nom, e.id);
+      emitAdmin('admin', '🏫 ' + e.nom + ' — information publiée : ' + titre);
+      saveDb();
+      return sendJson(res, 201, { ok: true, annonce: a, famillesTouchees: dest.length, message: '✅ Information publiée — ' + dest.length + ' famille(s) concernée(s) prévenue(s).' }), true;
+    }
+    /* ③ convocation */
+    if (action === 'convocation') {
+      if (!besoin('convocations', 'envoyer une convocation')) return true;
+      const titre = net(B.titre, 120), texte = net(B.texte, 800);
+      const quand = net(B.quand, 40), lieu = net(B.lieu, 120);
+      if (titre.length < 3) return sendJson(res, 400, { error: 'Indiquez l’objet de la convocation' }), true;
+      const cible = ['eleve', 'famille', 'parent', 'tous', 'classe'].indexOf(String(B.cible)) >= 0 ? String(B.cible) : 'eleve';
+      /* on accepte aussi les noms simples (eleveId / parentId) : la convocation doit toujours trouver SA famille */
+      const cibleId = String(B.cibleId || B.eleveId || B.parentId || '');
+      const dest = eco126Destinataires(e.id, cible, cibleId);
+      if (!dest.length) return sendJson(res, 400, { error: 'Aucune famille concernée : vérifiez l’élève ou la classe' }), true;
+      const c2 = { id: uid('CV'), ecoleId: e.id, titre: titre, texte: texte, quand: quand, lieu: lieu, cible: cible, cibleId: cibleId, at: nowISO(), par: moi.nom, dest: dest.map(d2 => d2.parent.id), statut: 'envoyee' };
+      db.ecoleConvocations.unshift(c2);
+      const auto = eco126Auto('convocation', { titre: titre, lieu: lieu || e.nom, date: quand, heure: net(B.heure, 10), eleve: (dest[0].enfants[0] || {}).nom || '' });
+      dest.forEach(d2 => {
+        const txt = (auto || ('Votre présence est demandée ' + (lieu ? 'à ' + lieu : 'à l’école') + ' ' + (quand ? 'le ' + quand : '') + '. Objet : ' + titre));
+        d2.parent.recus = d2.parent.recus || [];
+        d2.parent.recus.unshift({ type: 'convocation', id: c2.id, titre: titre, texte: txt, at: nowISO() });
+        d2.parent.recus = d2.parent.recus.slice(0, 200);
+        eco126Notifier(e.id, { type: 'ecole_convocation', ecoleId: e.id, titre: titre, texte: txt, quand: quand });
+      });
+      const autoEnv = eco126Auto('convocation_envoyee', { eleve: net(B.eleveNom, 60) });
+      if (autoEnv) db.ecoleChat.push({ id: uid('MS'), ecoleId: e.id, de: 'ecole', nom: moi.nom, texte: '✅ ' + autoEnv + ' Objet : ' + titre, at: nowISO(), convocationId: c2.id });
+      eco126Journal('convocation', titre + ' (' + dest.length + ' famille(s))', moi.nom, e.id);
+      emitAdmin('admin', '🏫 ' + e.nom + ' — convocation envoyée : ' + titre);
+      saveDb();
+      return sendJson(res, 201, { ok: true, convocation: c2, famillesTouchees: dest.length, message: '✅ Convocation envoyée à ' + dest.length + ' famille(s).' }), true;
+    }
+    /* ④ réunion */
+    if (action === 'reunion') {
+      if (!besoin('reunions', 'créer une réunion')) return true;
+      const titre = net(B.titre, 120), date = net(B.date, 20), heure = net(B.heure, 10);
+      if (titre.length < 3 || !date) return sendJson(res, 400, { error: 'Indiquez le titre et la date de la réunion' }), true;
+      const cible = ['tous', 'classe', 'eleve', 'famille'].indexOf(String(B.concernes)) >= 0 ? String(B.concernes) : 'tous';
+      const dest = eco126Destinataires(e.id, cible, B.cibleId);
+      const r2 = {
+        id: uid('RE'), ecoleId: e.id, titre: titre, date: date, heure: heure, lieu: net(B.lieu, 120),
+        aDistance: !!B.aDistance, lien: net(B.lien, 300), concernes: cible, cibleId: String(B.cibleId || ''),
+        message: net(B.message, 600), rappel: (B.rappel === false) ? false : true, rappelHeures: Math.max(1, parseInt(B.rappelHeures, 10) || (R.rappelHeures || 24)),
+        at: nowISO(), par: moi.nom, touches: dest.length
+      };
+      db.ecoleReunions.unshift(r2);
+      const auto = eco126Auto('reunion_annonce', { date: date, heure: heure || '', lieu: r2.aDistance ? ('à distance' + (r2.lien ? ' — ' + r2.lien : '')) : (r2.lieu || e.nom), message: r2.message || '' });
+      dest.forEach(d2 => {
+        d2.parent.recus = d2.parent.recus || [];
+        d2.parent.recus.unshift({ type: 'reunion', id: r2.id, titre: titre, texte: auto || ('Réunion le ' + date + ' ' + (heure || '')), at: nowISO(), quand: date + ' ' + heure });
+        d2.parent.recus = d2.parent.recus.slice(0, 200);
+        eco126Notifier(e.id, { type: 'ecole_reunion', ecoleId: e.id, titre: titre, date: date, heure: heure, lieu: r2.lieu, aDistance: r2.aDistance, texte: auto || '' });
+      });
+      db.ecoleChat.push({ id: uid('MS'), ecoleId: e.id, de: 'ecole', nom: moi.nom, texte: (auto || ('📅 Réunion : ' + titre + ' le ' + date)) , at: nowISO(), reunionId: r2.id });
+      eco126Journal('reunion', titre + ' le ' + date + ' (' + dest.length + ' famille(s))', moi.nom, e.id);
+      emitAdmin('admin', '🏫 ' + e.nom + ' — réunion créée : ' + titre + ' le ' + date);
+      saveDb();
+      return sendJson(res, 201, { ok: true, reunion: r2, famillesTouchees: dest.length, message: '✅ Réunion créée — ' + dest.length + ' famille(s) prévenue(s).' + (r2.rappel ? ' Un rappel sera envoyé ' + r2.rappelHeures + ' h avant.' : '') }), true;
+    }
+    /* ⑤ message individuel ou collectif dans le fil */
+    if (action === 'message') {
+      if (!besoin('chat', 'écrire aux familles')) return true;
+      const texte = net(B.texte, 800);
+      if (texte.length < 1) return sendJson(res, 400, { error: 'Écrivez votre message' }), true;
+      const cible = String(B.cible || 'tous');
+      const dest = eco126Destinataires(e.id, cible, B.cibleId);
+      const ms = { id: uid('MS'), ecoleId: e.id, de: 'ecole', nom: moi.nom, texte: texte, at: nowISO(), vers: cible, versId: String(B.cibleId || ''), prive: cible !== 'tous' };
+      db.ecoleChat.push(ms);
+      dest.forEach(d2 => {
+        if (d2.parent.recus) { d2.parent.recus.unshift({ type: 'message', id: ms.id, titre: 'Message de l’école', texte: texte, at: nowISO() }); d2.parent.recus = d2.parent.recus.slice(0, 200); }
+        eco126Notifier(e.id, { type: 'ecole_message', ecoleId: e.id, texte: texte, de: 'ecole' });
+      });
+      saveDb();
+      return sendJson(res, 201, { ok: true, message: '✅ Message envoyé' }), true;
+    }
+    return sendJson(res, 400, { error: 'Action inconnue : ' + action }), true;
+  }
+  /* ═══ ⑬ l'espace FAMILLE : seulement MES enfants, seulement CE QUI LES CONCERNE ═══ */
+  if (p === '/api/ecole/famille' && req.method === 'GET') {
+    if (!cl && !hq) return sendJson(res, 401, { error: 'Connectez-vous avec votre compte INTER' }), true;
+    /* 🔒 §13 et §16 : on ne voit SA famille qu'après validation par le PDG (et toujours seulement ses enfants).
+       Les demandes en attente sont annoncées à part, sans aucune donnée de l'école. */
+    const mesAttente = db.ecoleParents.filter(x => cl && x.clientId === cl.id && x.statut !== 'valide');
+    const mes = db.ecoleParents.filter(x => cl && x.clientId === cl.id && x.statut === 'valide');
+    const out = mes.map(pp => {
+      const e = db.ecoles.find(z => z.id === pp.ecoleId) || {};
+      const mesEnfants = (pp.eleveIds || []).map(id => db.ecoleEleves.find(z => z.id === id)).filter(Boolean);
+      const annonces = db.ecoleAnnonces.filter(a => a.ecoleId === pp.ecoleId).filter(a => {
+        if (a.cible === 'tous') return true;
+        return eco126Destinataires(pp.ecoleId, a.cible, a.cibleId).some(d2 => d2.parent.id === pp.id);
+      }).slice(0, 40);
+      const convocations = db.ecoleConvocations.filter(c => c.ecoleId === pp.ecoleId && (c.dest || []).indexOf(pp.id) >= 0).slice(0, 40);
+      const reunions = db.ecoleReunions.filter(r2 => r2.ecoleId === pp.ecoleId).filter(r2 => r2.concernes === 'tous' || eco126Destinataires(pp.ecoleId, r2.concernes, r2.cibleId).some(d2 => d2.parent.id === pp.id)).slice(0, 40);
+      const messages = db.ecoleChat.filter(x => x.ecoleId === pp.ecoleId).filter(x => !x.prive || x.versId === pp.id || x.de === 'parent' && x.parentId === pp.id || !x.prive).slice(-120);
+      return {
+        ecole: eco126EcolePublique(e), moi: { id: pp.id, nom: pp.nom, statut: pp.statut, statutTxt: ECOLE_STATUTS[pp.statut], code: pp.code },
+        enfants: mesEnfants.map(el => ({ id: el.id, nom: el.nom, classe: el.classe, naissance: el.naissance, statut: el.statut })),
+        annonces: annonces.map(a => ({ id: a.id, titre: a.titre, texte: a.texte, urgent: !!a.urgent, at: a.at, par: a.par })),
+        convocations: convocations.map(c => ({ id: c.id, titre: c.titre, texte: c.texte, quand: c.quand, lieu: c.lieu, at: c.at, statut: c.statut })),
+        reunions: reunions.map(r2 => ({ id: r2.id, titre: r2.titre, date: r2.date, heure: r2.heure, lieu: r2.lieu, aDistance: !!r2.aDistance, lien: r2.lien, message: r2.message, rappel: !!r2.rappel })),
+        messages: messages.map(x => ({ id: x.id, de: x.de, nom: x.nom || '', texte: x.texte, at: x.at })),
+        recus: (pp.recus || []).slice(0, 60),
+        rappels: db.ecoleReunions.filter(r2 => r2.ecoleId === pp.ecoleId && r2.rappel).slice(0, 10).map(r2 => eco126Auto('reunion_rappel', { heure: r2.heure || '', lieu: r2.lieu || 'l’école' }) || ('Rappel : réunion le ' + r2.date))
+      };
+    });
+    return sendJson(res, 200, {
+      ok: true, familles: out,
+      enAttente: mesAttente.map(x => ({ id: x.id, nom: x.nom, statut: x.statut, statutTxt: ECOLE_STATUTS[x.statut], ecoleNom: (db.ecoles.find(z => z.id === x.ecoleId) || {}).nom || '' })),
+      message: out.length ? '' : (mesAttente.length ? '⏳ Votre rattachement est en cours de validation par KLEAN — vous verrez les informations de l’école dès que ce sera fait.' : 'Aucune école rattachée à votre compte pour le moment.')
+    }), true;
+  }
+  /* le parent écrit à l'école (uniquement dans SA conversation) */
+  if (p === '/api/ecole/famille/message' && req.method === 'POST') {
+    if (!cl) return sendJson(res, 401, { error: 'Connectez-vous' }), true;
+    const pp = db.ecoleParents.find(x => x.id === String(B.parentId || '') && x.clientId === cl.id);
+    if (!pp) return sendJson(res, 403, { error: 'Cette famille n’est pas la vôtre' }), true;
+    const texte = net(B.texte, 800);
+    if (texte.length < 1) return sendJson(res, 400, { error: 'Écrivez votre message' }), true;
+    const ms = { id: uid('MS'), ecoleId: pp.ecoleId, de: 'parent', parentId: pp.id, nom: pp.nom, texte: texte, at: nowISO(), prive: true };
+    db.ecoleChat.push(ms);
+    eco126Notifier(pp.ecoleId, { type: 'ecole_message', ecoleId: pp.ecoleId, texte: texte, de: 'parent', nom: pp.nom });
+    eco126Journal('message_parent', pp.nom + ' : ' + texte.slice(0, 60), pp.nom, pp.ecoleId);
+    emitAdmin('admin', '🏫 ' + pp.nom + ' a écrit à l’école');
+    saveDb();
+    return sendJson(res, 201, { ok: true, message: '✅ Message envoyé à l’école' }), true;
+  }
+  /* ═══ ⑯⑰ LE TABLEAU DE BORD DU PDG ET DES GESTIONNAIRES ═══ */
+  if (p === '/api/admin/ecoles' && req.method === 'GET') {
+    if (!hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise' }), true;
+    const q = String(url.searchParams.get('q') || '').toLowerCase().trim();
+    const filtre = arr => q ? arr.filter(x => JSON.stringify(x).toLowerCase().indexOf(q) >= 0) : arr;
+    return sendJson(res, 200, {
+      ok: true, pdg: hq.role === 'pdg', statuts: ECOLE_STATUTS,
+      roles: Object.keys(ECOLE_ROLES).map(k => ({ id: k, nom: ECOLE_ROLES[k].nom, permissions: ECOLE_ROLES[k].permissions })),
+      reglages: R, auto: db.ecoleAuto, types: R.types,
+      ecoles: filtre(db.ecoles).slice(0, 300).map(e => Object.assign(eco126EcolePublique(e), {
+        membres: db.ecoleMembres.filter(m => m.ecoleId === e.id).length,
+        eleves: db.ecoleEleves.filter(m => m.ecoleId === e.id).length,
+        familles: db.ecoleParents.filter(m => m.ecoleId === e.id).length,
+        annonces: db.ecoleAnnonces.filter(m => m.ecoleId === e.id).length,
+        reunions: db.ecoleReunions.filter(m => m.ecoleId === e.id).length
+      })),
+      membres: filtre(db.ecoleMembres).slice(0, 300).map(m => Object.assign({}, m, { ecoleNom: (db.ecoles.find(e => e.id === m.ecoleId) || {}).nom || '', roleTxt: (ECOLE_ROLES[m.role] || {}).nom, statutTxt: ECOLE_STATUTS[m.statut] })),
+      familles: filtre(db.ecoleParents).slice(0, 300).map(p2 => Object.assign({}, p2, { ecoleNom: (db.ecoles.find(e => e.id === p2.ecoleId) || {}).nom || '', statutTxt: ECOLE_STATUTS[p2.statut], enfants: (p2.eleveIds || []).map(id => (db.ecoleEleves.find(z => z.id === id) || {}).nom).filter(Boolean) })),
+      eleves: filtre(db.ecoleEleves).slice(0, 400).map(el => Object.assign({}, el, { ecoleNom: (db.ecoles.find(e => e.id === el.ecoleId) || {}).nom || '' })),
+      journal: db.ecoleJournal.slice(0, 80),
+      stats: {
+        ecoles: db.ecoles.length, validees: db.ecoles.filter(e => e.statut === 'valide').length, enAttente: db.ecoles.filter(e => e.statut === 'en_attente').length,
+        suspendues: db.ecoles.filter(e => e.statut === 'suspendu').length, refuses: db.ecoles.filter(e => e.statut === 'refuse').length,
+        membres: db.ecoleMembres.length, membresAttente: db.ecoleMembres.filter(m => m.statut === 'en_attente').length,
+        familles: db.ecoleParents.length, eleves: db.ecoleEleves.length,
+        annonces: db.ecoleAnnonces.length, convocations: db.ecoleConvocations.length, reunions: db.ecoleReunions.length, messages: db.ecoleChat.length
+      }
+    }), true;
+  }
+  if (p === '/api/admin/ecoles' && req.method === 'POST') {
+    if (!hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise' }), true;
+    const action = String(B.action || ''), id = String(B.id || '');
+    const motif = net(B.motif, 200);
+    /* 🏫 §16 : le PDG est l'autorité principale — c'est lui qui valide, refuse, suspend et
+       réactive les écoles, leur personnel et les familles. L'équipe, elle, consulte. */
+    const besoinPdg = ['role_membre', 'valider_ecole', 'refuser_ecole', 'suspendre_ecole', 'reactiver_ecole',
+      'valider_membre', 'refuser_membre', 'suspendre_membre', 'reactiver_membre',
+      'valider_parent', 'refuser_parent', 'suspendre_parent'].indexOf(action) >= 0;
+    if (besoinPdg && hq.role !== 'pdg' && !db.ecoleReglages.permValiderGest) return sendJson(res, 403, { error: 'Réservé au PDG (le PDG peut autoriser les gestionnaires depuis ses réglages)', code: 'pdg' }), true;
+    const majStatut = (arr, st) => { const x = arr.find(z => z.id === id); if (!x) return null; x.statut = st; x.statutAt = nowISO(); x.statutPar = hq.nom || 'PDG'; if (motif) x.motif = motif; x.hist = x.hist || []; x.hist.push({ at: nowISO(), quoi: st, par: hq.nom || 'PDG', motif: motif }); return x; };
+    let fait = null, msg = '';
+    if (['valider_ecole', 'refuser_ecole', 'suspendre_ecole', 'reactiver_ecole'].indexOf(action) >= 0) {
+      const e = majStatut(db.ecoles, action === 'valider_ecole' ? 'valide' : (action === 'refuser_ecole' ? 'refuse' : (action === 'suspendre_ecole' ? 'suspendu' : 'valide')));
+      if (e) { fait = eco126EcolePublique(e); msg = '🏫 ' + e.nom + ' — ' + ECOLE_STATUTS[e.statut]; eco126Journal(action, e.nom, hq.nom || 'PDG', e.id);
+        if (e.statut === 'valide') { const mm = db.ecoleMembres.find(m => m.ecoleId === e.id && m.statut === 'en_attente'); if (!mm) { } }
+        /* valider l'école n'ouvre pas tous les comptes : le personnel reste à valider un par un */
+        if (e.statut === 'valide' && B.validerDemandeur !== false) { const m = db.ecoleMembres.find(x => x.ecoleId === e.id && x.statut === 'en_attente'); if (m) { m.statut = 'valide'; m.valideAt = nowISO(); m.validePar = hq.nom || 'PDG'; msg += ' · demandeur validé'; } }
+        eco126Notifier(e.id, { type: 'ecole_statut', ecoleId: e.id, statut: e.statut });
+        try { emitAdmin('admin', msg); } catch (er) { }
+      }
+    } else if (['valider_membre', 'refuser_membre', 'suspendre_membre', 'reactiver_membre'].indexOf(action) >= 0) {
+      const m = majStatut(db.ecoleMembres, action === 'valider_membre' ? 'valide' : (action === 'refuser_membre' ? 'refuse' : (action === 'suspendre_membre' ? 'suspendu' : 'valide')));
+      if (m) { fait = { id: m.id, nom: m.nom, statut: m.statut, statutTxt: ECOLE_STATUTS[m.statut] }; msg = '👤 ' + m.nom + ' — ' + ECOLE_STATUTS[m.statut]; eco126Journal(action, m.nom, hq.nom || 'PDG', m.ecoleId); }
+    } else if (['valider_parent', 'refuser_parent', 'suspendre_parent'].indexOf(action) >= 0) {
+      const p2 = majStatut(db.ecoleParents, action === 'valider_parent' ? 'valide' : (action === 'refuser_parent' ? 'refuse' : 'suspendu'));
+      if (p2) { fait = { id: p2.id, nom: p2.nom, statut: p2.statut, statutTxt: ECOLE_STATUTS[p2.statut] }; msg = '👨‍👩‍👧 ' + p2.nom + ' — ' + ECOLE_STATUTS[p2.statut]; eco126Journal(action, p2.nom, hq.nom || 'PDG', p2.ecoleId); }
+    } else if (action === 'role_membre') {
+      const m = db.ecoleMembres.find(x => x.id === id);
+      if (!m) return sendJson(res, 404, { error: 'Personnel introuvable' }), true;
+      if (!ECOLE_ROLES[String(B.role || '')]) return sendJson(res, 400, { error: 'Rôle inconnu' }), true;
+      m.role = String(B.role); m.roleAt = nowISO();
+      fait = { id: m.id, role: m.role, roleTxt: ECOLE_ROLES[m.role].nom };
+      msg = '🪪 ' + m.nom + ' → ' + ECOLE_ROLES[m.role].nom + ' (' + ECOLE_ROLES[m.role].permissions.join(', ') + ')';
+      eco126Journal('role_membre', msg, hq.nom || 'PDG', m.ecoleId);
+    } else if (action === 'eleve_statut') {
+      const el = db.ecoleEleves.find(x => x.id === id);
+      if (!el) return sendJson(res, 404, { error: 'Élève introuvable' }), true;
+      el.statut = String(B.statut || 'valide'); el.majAt = nowISO();
+      fait = { id: el.id, statut: el.statut }; msg = '🎒 ' + el.nom + ' — ' + el.statut;
+    } else if (action === 'auto_creer' || action === 'auto_modifier' || action === 'auto_supprimer') {
+      if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG : les messages automatiques de l’école', code: 'pdg' }), true;
+      if (action === 'auto_creer') {
+        const nom = net(B.nom, 80), texte = net(B.texte, 400);
+        if (!nom || !texte) return sendJson(res, 400, { error: 'Indiquez le nom et le texte du message' }), true;
+        const a = { id: uid('MA'), nom: nom, texte: texte, actif: true, at: nowISO(), par: hq.nom || 'PDG' };
+        db.ecoleAuto.push(a); fait = a; msg = '✉️ Message automatique créé : ' + nom;
+      } else if (action === 'auto_modifier') {
+        const a = db.ecoleAuto.find(x => x.id === id);
+        if (!a) return sendJson(res, 404, { error: 'Message introuvable' }), true;
+        if (B.nom) a.nom = net(B.nom, 80);
+        if (B.texte) a.texte = net(B.texte, 400);
+        a.at = nowISO(); a.par = hq.nom || 'PDG'; fait = a; msg = '✉️ Message automatique modifié';
+      } else { db.ecoleAuto = db.ecoleAuto.filter(x => x.id !== id); fait = { id: id }; msg = '🗑️ Message automatique retiré'; }
+      eco126Journal(action, msg, hq.nom || 'PDG');
+    } else if (action === 'auto_activer' || action === 'auto_desactiver') {
+      if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG', code: 'pdg' }), true;
+      const a = db.ecoleAuto.find(x => x.id === id);
+      if (!a) return sendJson(res, 404, { error: 'Message introuvable' }), true;
+      a.actif = (action === 'auto_activer'); a.at = nowISO();
+      fait = { id: a.id, actif: a.actif }; msg = '✉️ ' + a.nom + ' — ' + (a.actif ? 'ACTIVÉ' : 'DÉSACTIVÉ');
+      eco126Journal(action, a.nom, hq.nom || 'PDG');
+    } else if (action === 'reglages') {
+      if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG', code: 'pdg' }), true;
+      if (typeof B.auto === 'boolean') db.ecoleReglages.auto = B.auto;
+      if (typeof B.permValiderGest === 'boolean') db.ecoleReglages.permValiderGest = B.permValiderGest;
+      if (typeof B.parentAuto === 'boolean') db.ecoleReglages.parentAuto = B.parentAuto;
+      if (B.rappelHeures) db.ecoleReglages.rappelHeures = Math.max(1, Math.min(168, parseInt(B.rappelHeures, 10) || 24));
+      fait = db.ecoleReglages; msg = '⚙️ Réglages de l’école enregistrés';
+      eco126Journal('reglages', JSON.stringify(db.ecoleReglages), hq.nom || 'PDG');
+    } else return sendJson(res, 400, { error: 'Action inconnue : ' + action }), true;
+    saveDb();
+    return sendJson(res, 200, { ok: true, message: msg || '✅ Fait', objet: fait }), true;
+  }
+  return false;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   🧑‍💼 LOT 126 — MODULE « UN SEUL COMPTE : UTILISATEUR → PROFESSIONNEL » (§1, §2, §3, §20)
+
+   TOUT LE MONDE COMMENCE COMME UTILISATEUR / CLIENT. Le MÊME compte peut ensuite demander le
+   statut professionnel : « DEVENIR PROFESSIONNEL » → domaine → informations → règles pro →
+   envoi → VALIDATION PAR INTER → activation. Jamais de deuxième compte.
+
+   Aucun professionnel n'est officiellement validé sans passer par les règles du tableau de bord :
+   le statut 🟠 EN ATTENTE ne donne AUCUN droit professionnel.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+const PRO_STATUTS = { en_attente: '🟠 EN ATTENTE', valide: '🟢 VALIDÉ', refuse: '🔴 REFUSÉ', suspendu: '⚪ SUSPENDU' };
+const PRO_DROITS_DEF = [
+  { id: 'missions', nom: 'Recevoir des missions', actif: true },
+  { id: 'besoins', nom: 'Publier « je cherche un travailleur »', actif: true },
+  { id: 'emploi', nom: 'Chercher du travail (recherche d’emploi)', actif: true },
+  { id: 'profil_publique', nom: 'Profil visible des clients', actif: true },
+  { id: 'devis', nom: 'Envoyer des prix / devis', actif: true },
+  { id: 'paiements', nom: 'Recevoir des paiements par INTER', actif: true }
+];
+const PRO_CATEGORIES_DEF = [
+  { id: 'services', nom: 'Services à la personne & maison', ic: '🧹' },
+  { id: 'technique', nom: 'Technique & dépannage', ic: '🔧' },
+  { id: 'artisanat', nom: 'Artisanat & bâtiment', ic: '🧱' },
+  { id: 'transport', nom: 'Transport & livraison', ic: '🚚' },
+  { id: 'commerce', nom: 'Commerce & vente', ic: '🛒' },
+  { id: 'personne', nom: 'Beauté, santé & bien-être', ic: '💇' },
+  { id: 'education', nom: 'Éducation & formation', ic: '📚' },
+  { id: 'entreprise', nom: 'Entreprise & société', ic: '🏢' },
+  { id: 'autre', nom: 'Autre activité', ic: '🛠️' }
+];
+function pro126Ensure() {
+  db.proDemandes = db.proDemandes || [];
+  db.proCategories = Array.isArray(db.proCategories) && db.proCategories.length ? db.proCategories : PRO_CATEGORIES_DEF.map(c => Object.assign({ actif: true }, c));
+  PRO_CATEGORIES_DEF.forEach(c => { if (!db.proCategories.some(x => x.id === c.id)) db.proCategories.push(Object.assign({ actif: true }, c)); });
+  db.proDroits = Array.isArray(db.proDroits) && db.proDroits.length ? db.proDroits : PRO_DROITS_DEF.map(d => Object.assign({}, d));
+  PRO_DROITS_DEF.forEach(d => { if (!db.proDroits.some(x => x.id === d.id)) db.proDroits.push(Object.assign({}, d)); });
+  db.proJournal = db.proJournal || [];
+  /* 🧑‍💼 §3 : « Le PDG ET les gestionnaires autorisés » — c'est le PDG qui AUTORISE, et par défaut
+     il garde la main : permValiderGest = false. Un seul réglage au HQ, aucun changement de code. */
+  db.proReglages = Object.assign({ autoValidation: false, permValiderGest: false, champsObligatoires: ['categorie', 'services', 'ville', 'tel'], reglesTexte: 'Je m’engage à respecter les règles professionnelles Klean-Services : travail déclaré, prix annoncé et respecté, respect des clients, aucune sortie du système INTER pour éviter la commission.' }, db.proReglages || {});
+  return db.proReglages;
+}
+function pro126Journal(quoi, detail, par) {
+  pro126Ensure();
+  db.proJournal.unshift({ at: nowISO(), quoi: quoi, detail: detail || '', par: par || 'système' });
+  db.proJournal = db.proJournal.slice(0, 800);
+}
+/* le profil professionnel lié à CE compte (jamais un autre) */
+function pro126AgentDe(cl) {
+  if (!cl) return null;
+  if (cl.agentId) { const a = (db.agents || []).find(x => x.id === cl.agentId); if (a) return a; }
+  return (db.agents || []).find(a => a.clientId === cl.id) || null;
+}
+function pro126DemandeDe(cl) {
+  pro126Ensure();
+  if (!cl) return null;
+  return db.proDemandes.find(d => d.clientId === cl.id) || null;
+}
+function pro126Publique(d, ag) {
+  if (!d) return null;
+  const cat = (db.proCategories || []).find(c => c.id === d.categorie) || {};
+  return {
+    id: d.id, statut: d.statut, statutTxt: PRO_STATUTS[d.statut] || d.statut, at: d.at, majAt: d.majAt || d.at,
+    categorie: d.categorie || '', categorieNom: cat.nom || d.categorie || '', categorieIc: cat.ic || '🛠️',
+    services: d.services || [], ville: d.ville || '', quartier: d.quartier || '', zones: d.zones || [], tel: d.tel || '',
+    experience: d.experience || '', tarifIndicatif: d.tarifIndicatif || 0, description: d.description || '',
+    entreprise: d.entreprise || '', piece: d.piece || '', regles: !!d.regles, motif: d.motif || '',
+    agentId: ag ? ag.id : '', numPro: ag ? ag.numPro || '' : '', droits: (ag && ag.droits) || [],
+    journal: (d.journal || []).slice(-30)
+  };
+}
+/* ✅ valider une demande : le MÊME compte devient utilisateur + professionnel */
+function pro126Valider(d, par) {
+  pro126Ensure();
+  const cl = (db.clients || []).find(c => c.id === d.clientId) || null;
+  let ag = cl ? pro126AgentDe(cl) : null;
+  const salt = crypto.randomBytes(12).toString('hex');
+  const pin = String(Math.floor(100000 + Math.random() * 900000));
+  if (!ag) {
+    ag = {
+      id: uid('AG'), nom: ((cl && cl.nom) || d.nom || 'Professionnel').trim(), prenom: d.prenom || '',
+      tel1: String(d.tel || (cl && cl.tel) || '').replace(/\D/g, ''), tel: String(d.tel || (cl && cl.tel) || '').replace(/\D/g, ''),
+      salt: salt, passHash: hashPassword(salt, pin), quartier: d.quartier || (cl && cl.quartier) || '', ville: d.ville || (cl && cl.ville) || '',
+      villeService: d.ville || (cl && cl.ville) || '', mail: (cl && cl.mail) || '', adresse: d.adresse || '',
+      services: d.services && d.services.length ? d.services : ['maison'], taches: d.taches || [], niveau: '', photo: '',
+      pushSubs: [], hist: [{ at: Date.now(), by: par || 'PDG', ev: '🏗️ Compte devenu professionnel depuis son compte INTER (un seul compte)' }],
+      status: 'approved', approvedAt: nowISO(), createdAt: nowISO(), createdBy: par || 'PDG',
+      claimPin: pin, codeAcces: pin, online: false, pos: null, kind: 'pro', clientId: d.clientId,
+      categoriePro: d.categorie || 'autre', droits: (db.proDroits || []).filter(x => x.actif).map(x => x.id),
+      experience: d.experience || '', tarifIndicatif: d.tarifIndicatif || 0, descriptionPro: d.description || ''
+    };
+    ag.zone = ag.zone || { km: matchCfg().rayonDefautKm, villes: [] };
+    db.agents.push(ag);
+    ensureNumPro(ag);
+  } else {
+    ag.status = 'approved'; ag.approvedAt = nowISO(); ag.clientId = d.clientId;
+    ag.categoriePro = d.categorie || ag.categoriePro || 'autre';
+    if (d.services && d.services.length) ag.services = d.services;
+    ag.hist = ag.hist || []; ag.hist.push({ at: Date.now(), by: par || 'PDG', ev: '✅ Statut professionnel validé (même compte)' });
+  }
+  if (cl) cl.agentId = ag.id;
+  d.statut = 'valide'; d.majAt = nowISO(); d.valideAt = nowISO(); d.validePar = par || 'PDG';
+  d.journal = d.journal || []; d.journal.push({ at: nowISO(), quoi: 'valide', par: par || 'PDG' });
+  const jeton = issueAgentJeton(ag);
+  pro126Journal('validation', ag.nom + ' (' + ag.numPro + ') — un seul compte, statut professionnel validé', par);
+  try { emitAdmin('agent', '🟢 Statut professionnel validé : ' + ag.nom + ' (' + ag.numPro + ') — même compte que son compte utilisateur'); } catch (e) { }
+  try { travNotifier({ clientId: d.clientId }, { type: 'pro_valide', message: '🎉 Votre statut professionnel est validé !' }); } catch (e) { }
+  return { agent: ag, jeton: jeton };
+}
+async function lot126ProRoutes(req, res, p, url) {
+  const dedans = p.indexOf('/api/pro/') === 0 || p.indexOf('/api/admin/pro') === 0;
+  if (!dedans) return false;
+  const R = pro126Ensure();
+  const B = (req.method === 'POST') ? await readBody(req).catch(() => ({})) : {};
+  const hq = (() => { try { return hqIdentity(req); } catch (e) { return null; } })();
+  const cl = (() => { try { return findClientByToken(req); } catch (e) { return null; } })();
+  const net = (x, n) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().slice(0, n);
+
+  /* ═══ ① MON ÉTAT : suis-je simple utilisateur, ou utilisateur + professionnel ? ═══ */
+  if (p === '/api/pro/etat' && req.method === 'GET') {
+    if (!cl) return sendJson(res, 401, { error: 'Connectez-vous avec votre compte INTER' }), true;
+    const d = pro126DemandeDe(cl), ag = pro126AgentDe(cl);
+    const droits = (db.proDroits || []).filter(x => x.actif).map(x => x.id);
+    return sendJson(res, 200, {
+      ok: true, utilisateur: { id: cl.id, nom: cl.nom, tel: cl.tel || '' },
+      statut: d ? d.statut : (ag ? 'valide' : 'aucun'), statutTxt: d ? (PRO_STATUTS[d.statut] || d.statut) : (ag ? '🟢 VALIDÉ' : '🟢 Utilisateur (aucune demande)'),
+      demande: pro126Publique(d, ag), professionnel: ag ? { id: ag.id, nom: ag.nom, numPro: ag.numPro || '', services: ag.services || [], categorie: ag.categoriePro || '', droits: ag.droits || droits, ville: ag.ville || '', statut: ag.status || 'approved' } : null,
+      categories: (db.proCategories || []).filter(c => c.actif).map(c => ({ id: c.id, nom: c.nom, ic: c.ic })),
+      droitsPossibles: (db.proDroits || []).map(x => ({ id: x.id, nom: x.nom, actif: !!x.actif })),
+      regles: R.reglesTexte, champsObligatoires: R.champsObligatoires, autoValidation: !!R.autoValidation,
+      servicesPossibles: (() => { try { return catalogueComplet().map(s => ({ id: s.id, nom: s.nom, ic: s.ic })); } catch (e) { return []; } })(),
+      message: d ? (d.statut === 'en_attente' ? '⏳ Votre demande de statut professionnel est en cours de validation par INTER.' : (d.statut === 'refuse' ? ('🔴 Demande refusée' + (d.motif ? ' : ' + d.motif : '')) : (d.statut === 'suspendu' ? '⚪ Votre statut professionnel est suspendu.' : '🟢 Votre statut professionnel est validé.'))) : '🟢 Vous utilisez INTER comme utilisateur. Vous pouvez devenir professionnel quand vous voulez, avec le même compte.'
+    }), true;
+  }
+  /* ═══ ② DEVENIR PROFESSIONNEL (même compte, aucune création de compte) ═══ */
+  if (p === '/api/pro/demande' && req.method === 'POST') {
+    if (!cl) return sendJson(res, 401, { error: 'Créez (une seule fois) votre compte INTER, puis demandez le statut professionnel avec ce même compte' }), true;
+    const catId = net(B.categorie, 40);
+    const cat = (db.proCategories || []).find(c => c.id === catId && c.actif);
+    if (!cat) return sendJson(res, 400, { error: 'Choisissez votre domaine d’activité', champ: 'categorie' }), true;
+    const services = Array.isArray(B.services) ? B.services.map(x => net(x, 40)).filter(Boolean).slice(0, 40) : [];
+    if (!services.length) return sendJson(res, 400, { error: 'Choisissez au moins un service que vous savez faire', champ: 'services' }), true;
+    const ville = net(B.ville, 60) || cl.ville || '';
+    const tel = String(B.tel || cl.tel || '').replace(/\D/g, '').slice(0, 16);
+    if (!ville) return sendJson(res, 400, { error: 'Indiquez votre ville de travail', champ: 'ville' }), true;
+    if (tel.length < 8) return sendJson(res, 400, { error: 'Indiquez un téléphone joignable', champ: 'tel' }), true;
+    if (B.regles !== true) return sendJson(res, 400, { error: 'Vous devez accepter les règles professionnelles', champ: 'regles' }), true;
+    const a = modAnalyser([net(B.description, 800), net(B.experience, 300), net(B.entreprise, 80)], {});
+    if (a.risque === 'bloquer') return sendJson(res, 200, { ok: false, code: 'bloque', error: a.message, motifs: a.motifs.map(m => m.txt) }), true;
+    let d = pro126DemandeDe(cl);
+    const corps = {
+      clientId: cl.id, nom: cl.nom, prenom: net(B.prenom, 60), tel: tel, ville: ville, quartier: net(B.quartier, 60),
+      zones: Array.isArray(B.zones) ? B.zones.map(x => net(x, 60)).filter(Boolean).slice(0, 20) : [],
+      categorie: cat.id, services: services, experience: net(B.experience, 300), tarifIndicatif: Math.max(0, parseInt(B.tarifIndicatif, 10) || 0),
+      description: net(B.description, 800), entreprise: net(B.entreprise, 80), adresse: net(B.adresse, 120),
+      piece: net(B.piece, 120), regles: true, majAt: nowISO()
+    };
+    if (!d) {
+      d = Object.assign({ id: uid('PD'), statut: R.autoValidation ? 'valide' : 'en_attente', at: nowISO(), journal: [{ at: nowISO(), quoi: 'demande', par: cl.nom }] }, corps);
+      db.proDemandes.unshift(d);
+      pro126Journal('demande', cl.nom + ' → ' + cat.nom + ' (' + services.length + ' service(s))', cl.nom);
+      emitAdmin('agent', '🧑‍💼 ' + cl.nom + ' demande à devenir professionnel — ' + cat.nom + ' (' + ville + ') — à valider');
+    } else {
+      if (d.statut === 'valide') return sendJson(res, 409, { error: 'Vous êtes déjà professionnel validé — vos modifications passent par votre espace professionnel' }), true;
+      Object.assign(d, corps, { statut: R.autoValidation ? 'valide' : 'en_attente' });
+      d.journal.push({ at: nowISO(), quoi: 'nouvelle demande', par: cl.nom });
+      pro126Journal('redemande', cl.nom + ' → ' + cat.nom, cl.nom);
+      emitAdmin('agent', '🧑‍💼 ' + cl.nom + ' relance sa demande professionnelle — ' + cat.nom);
+    }
+    let jeton = null, ag = null;
+    if (R.autoValidation || d.statut === 'valide') { const v = pro126Valider(d, 'règles automatiques'); ag = v.agent; jeton = v.jeton; }
+    saveDb();
+    return sendJson(res, 201, {
+      ok: true, statut: d.statut, statutTxt: PRO_STATUTS[d.statut] || d.statut, demande: pro126Publique(d, ag), jeton: jeton || undefined, agentId: ag ? ag.id : undefined, numPro: ag ? ag.numPro : undefined,
+      message: d.statut === 'en_attente'
+        ? '⏳ Votre demande est envoyée à INTER. Vous restez utilisateur normal en attendant ; votre statut professionnel s’activera après validation, SANS créer un deuxième compte.'
+        : '🟢 Statut professionnel activé ! Vous utilisez le même compte : espace utilisateur et espace professionnel.'
+    }), true;
+  }
+  /* ═══ ③ LE TABLEAU DE BORD : demandes, catégories, permissions ═══ */
+  if (p === '/api/admin/pro-demandes' && req.method === 'GET') {
+    if (!hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise' }), true;
+    const q = String(url.searchParams.get('q') || '').toLowerCase().trim();
+    const liste = (q ? db.proDemandes.filter(d => JSON.stringify(d).toLowerCase().indexOf(q) >= 0) : db.proDemandes).slice(0, 300);
+    const clById = {}; (db.clients || []).forEach(c => { clById[c.id] = c; });
+    return sendJson(res, 200, {
+      ok: true, pdg: hq.role === 'pdg', statuts: PRO_STATUTS,
+      demandes: liste.map(d => Object.assign(pro126Publique(d, db.agents.find(a => a.clientId === d.clientId)), {
+        clientId: d.clientId || '', professionnel: !!(db.agents || []).find(a => a.clientId === d.clientId),
+        clientNom: (clById[d.clientId] || {}).nom || d.nom || '', clientTel: (clById[d.clientId] || {}).tel || d.tel || ''
+      })),
+      categories: db.proCategories, droits: db.proDroits, reglages: R, journal: db.proJournal.slice(0, 80),
+      stats: {
+        total: db.proDemandes.length, attente: db.proDemandes.filter(d => d.statut === 'en_attente').length,
+        valides: db.proDemandes.filter(d => d.statut === 'valide').length, refuses: db.proDemandes.filter(d => d.statut === 'refuse').length,
+        suspendus: db.proDemandes.filter(d => d.statut === 'suspendu').length,
+        prosAvecCompte: (db.agents || []).filter(a => a.clientId).length, prosTotal: (db.agents || []).length
+      }
+    }), true;
+  }
+  if (p === '/api/admin/pro-demandes' && req.method === 'POST') {
+    if (!hq) return sendJson(res, 401, { error: 'Session du tableau de bord requise' }), true;
+    const action = String(B.action || ''), id = String(B.id || ''), motif = net(B.motif, 200);
+    const d = db.proDemandes.find(x => x.id === id);
+    let msg = '', jeton = null, ag = null;
+    if (['valider', 'refuser', 'suspendre', 'reactiver'].indexOf(action) >= 0) {
+      if (!d) return sendJson(res, 404, { error: 'Demande introuvable' }), true;
+      /* 🧑‍💼 §3 : « PDG = autorité principale, aucun professionnel validé hors règles ».
+         L'équipe CONSULTE les demandes ; c'est le compte principal qui décide. */
+      if (hq.role !== 'pdg' && !db.proReglages.permValiderGest) return sendJson(res, 403, { error: 'Réservé au PDG : seul le compte principal valide, refuse ou suspend un professionnel (le PDG peut autoriser les gestionnaires depuis ses réglages)', code: 'pdg' }), true;
+      if (action === 'valider') { const v = pro126Valider(d, hq.nom || 'PDG'); ag = v.agent; jeton = v.jeton; msg = '🟢 ' + ag.nom + ' est maintenant UTILISATEUR + PROFESSIONNEL (même compte, ' + ag.numPro + ')'; }
+      else {
+        d.statut = action === 'refuser' ? 'refuse' : (action === 'suspendre' ? 'suspendu' : 'valide');
+        d.majAt = nowISO(); if (motif) d.motif = motif;
+        d.journal = d.journal || []; d.journal.push({ at: nowISO(), quoi: d.statut, par: hq.nom || 'PDG', motif: motif });
+        const a2 = (db.clients || []).find(c => c.id === d.clientId);
+        const ag2 = a2 ? pro126AgentDe(a2) : null;
+        if (ag2 && d.statut !== 'valide') { ag2.status = d.statut === 'suspendu' ? 'suspended' : 'rejected'; if (d.statut === 'suspendu') ag2.suspendedAt = nowISO(); }
+        if (ag2 && d.statut === 'valide') { ag2.status = 'approved'; delete ag2.suspendedAt; }
+        ag = ag2;
+        msg = PRO_STATUTS[d.statut] + ' — ' + (d.nom || '') + (motif ? ' (' + motif + ')' : '');
+        pro126Journal(d.statut, msg, hq.nom || 'PDG');
+      }
+    } else if (action === 'droits') {
+      if (!d) return sendJson(res, 404, { error: 'Demande introuvable' }), true;
+      const a2 = (db.clients || []).find(c => c.id === d.clientId);
+      const ag2 = a2 ? pro126AgentDe(a2) : null;
+      if (!ag2) return sendJson(res, 404, { error: 'Ce compte n’a pas encore de profil professionnel validé' }), true;
+      const droits = Array.isArray(B.droits) ? B.droits.map(x => String(x)).slice(0, 20) : [];
+      ag2.droits = droits;
+      d.journal = d.journal || []; d.journal.push({ at: nowISO(), quoi: 'permissions', par: hq.nom || 'PDG', detail: droits.join(', ') });
+      ag = ag2; msg = '🔐 Permissions du professionnel mises à jour (' + droits.length + ')';
+      pro126Journal('droits', ag2.nom + ' → ' + droits.join(', '), hq.nom || 'PDG');
+    } else if (['categorie_nouvelle', 'categorie_renommer', 'categorie_activer', 'categorie_desactiver'].indexOf(action) >= 0) {
+      if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG : les catégories professionnelles', code: 'pdg' }), true;
+      if (action === 'categorie_nouvelle') {
+        const nom = net(B.nom, 60); if (nom.length < 3) return sendJson(res, 400, { error: 'Indiquez le nom de la catégorie' }), true;
+        const cid = nom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').slice(0, 40);
+        if (db.proCategories.some(c => c.id === cid)) return sendJson(res, 409, { error: 'Cette catégorie existe déjà' }), true;
+        db.proCategories.push({ id: cid, nom: nom, ic: net(B.ic, 4) || '🛠️', actif: true });
+        msg = '➕ Catégorie professionnelle créée : ' + nom;
+      } else {
+        const c = db.proCategories.find(x => x.id === id);
+        if (!c) return sendJson(res, 404, { error: 'Catégorie introuvable' }), true;
+        if (action === 'categorie_renommer') { c.nom = net(B.nom, 60) || c.nom; if (B.ic) c.ic = net(B.ic, 4); msg = '✍️ Catégorie renommée : ' + c.nom; }
+        else { c.actif = (action === 'categorie_activer'); msg = (c.actif ? '🟢 Catégorie activée : ' : '🔴 Catégorie désactivée : ') + c.nom; }
+      }
+      pro126Journal(action, msg, hq.nom || 'PDG');
+    } else if (action === 'droits_globaux') {
+      if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG', code: 'pdg' }), true;
+      const dr = db.proDroits.find(x => x.id === String(B.droit || ''));
+      if (!dr) return sendJson(res, 404, { error: 'Permission inconnue' }), true;
+      dr.actif = (B.actif !== false); msg = (dr.actif ? '🟢 Permission ouverte : ' : '🔴 Permission fermée : ') + dr.nom;
+      pro126Journal('droits_globaux', msg, hq.nom || 'PDG');
+    } else if (action === 'reglages') {
+      if (hq.role !== 'pdg') return sendJson(res, 403, { error: 'Réservé au PDG', code: 'pdg' }), true;
+      if (typeof B.autoValidation === 'boolean') db.proReglages.autoValidation = B.autoValidation;
+      if (typeof B.permValiderGest === 'boolean') db.proReglages.permValiderGest = B.permValiderGest;
+      if (B.reglesTexte) db.proReglages.reglesTexte = net(B.reglesTexte, 1500);
+      msg = '⚙️ Règles professionnelles enregistrées' + (db.proReglages.autoValidation ? ' — validation automatique ACTIVÉE' : ' — validation manuelle par le PDG')
+        + (db.proReglages.permValiderGest ? ' · les GESTIONNAIRES peuvent aussi valider' : ' · le PDG valide seul');
+      pro126Journal('reglages', msg, hq.nom || 'PDG');
+    } else return sendJson(res, 400, { error: 'Action inconnue : ' + action }), true;
+    saveDb();
+    return sendJson(res, 200, { ok: true, message: msg || '✅ Fait', demande: d ? pro126Publique(d, ag) : null, jeton: jeton || undefined, agentId: ag ? ag.id : undefined, numPro: ag ? ag.numPro : undefined }), true;
+  }
+  return false;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
    🔴 29/09 — LOT 125 : BLOCAGE GLOBAL D'INTER (le point de blocage EXISTANT, renforcé)
 
    ⚠️ RÈGLE DU PDG : « Le système possède DÉJÀ un point de blocage global. NE PAS en créer un
@@ -6490,7 +7974,15 @@ const ACCUEIL_OPTIONS_DEF = [
   { id: 'espace_pro', titre: 'Vous êtes professionnel ?', icone: '🧑‍💼', ou: 'le bouton vers l’espace professionnel',
     sous: 'Recevoir des missions près de chez soi', defaut: { actif: true, visible: true, ordre: 150 }, params: {} },
   { id: 'langues', titre: 'Langues', icone: '🌍', ou: 'la barre de langues de l’accueil',
-    sous: 'Changer la langue de l’application', defaut: { actif: true, visible: true, ordre: 160 }, params: {} }
+    sous: 'Changer la langue de l’application', defaut: { actif: true, visible: true, ordre: 160 }, params: {} },
+  { id: 'ecole', titre: 'École & famille', icone: '🏫', ou: 'la grande option « École & famille »',
+    sous: 'Le lien entre l’école et les parents : informations, convocations, réunions',
+    defaut: { actif: true, visible: true, ordre: 165 },
+    params: { parentAuto: false, rappelHeures: 24 } },       /* 🏫 lot 126 : école ↔ famille */
+  { id: 'devenir_pro', titre: 'Devenir professionnel', icone: '🧑‍💼', ou: 'la grande option « Devenir professionnel » de l’accueil',
+    sous: 'Passer au statut professionnel sur le MÊME compte, après validation par INTER',
+    defaut: { actif: true, visible: true, ordre: 170 },
+    params: { unSeulCompte: true, autoValidation: false } }  /* 🧑‍💼 lot 126 : un seul compte par personne — jamais de deuxième compte */
 ];
 
 /* Les options du bas de l'accueil, dans l'ordre où elles doivent apparaître (grandes, tactiles) */
@@ -6553,7 +8045,7 @@ function accueilPubliques() {
         essentielle: !!d.essentielle, actif: !!o.actif, visible: !!o.visible, ordre: o.ordre,
         grande: ACCUEIL_GRANDES.indexOf(d.id) >= 0,
         etat: v.etat || (o.actif ? 'inconnu' : 'off'), message: v.message || '', controleAt: v.at || null,
-        params: (d.id === 'job_pres' || d.id === 'avis_recherche') ? { rayonKm: o.params.rayonKm, limite: o.params.limite, moderation: o.params.moderation } : {}
+        params: (d.id === 'job_pres' || d.id === 'avis_recherche') ? { rayonKm: o.params.rayonKm, limite: o.params.limite, moderation: o.params.moderation } : ((d.id === 'ecole') ? { parentAuto: !!o.params.parentAuto, rappelHeures: o.params.rappelHeures } : {})
       };
     })
     .sort((a, b) => a.ordre - b.ordre);
@@ -7249,6 +8741,10 @@ const server = http.createServer(async (req, res) => {
   if (await accueilRoutes(req, res, p, url)) return;
   /* 💼 LOT 124 — Recherche d'emploi & mise en relation (routeur centralisé) */
   if (await blocageRoutes(req, res, p, url)) return;    /* 🔴 lot 125 : blocage global & accès exceptionnels */
+  if (await lot126SvcRoutes(req, res, p, url)) return;   /* 🧩 lot 126 : services centraux, favoris, modules */
+  if (await lot126ArgentRoutes(req, res, p, url)) return;/* 💰 lot 126 : tout l'argent traçable */
+  if (await lot126EcoleRoutes(req, res, p, url)) return; /* 🏫 lot 126 : école ↔ famille */
+  if (await lot126ProRoutes(req, res, p, url)) return;    /* 🧑‍💼 lot 126 : un seul compte → professionnel */
   if (await travRoutes(req, res, p, url)) return;
 
   /* --- API --- */
@@ -7690,7 +9186,7 @@ const server = http.createServer(async (req, res) => {
     const q = normFr(String(url.searchParams.get('q') || '')).trim();
     const fam = String(url.searchParams.get('fam') || '');
     const svc = String(url.searchParams.get('service') || '');
-    let services = arbre.services;
+    let services = svc126FiltreArbre(arbre.services);   /* 🚦 lot 126 : les décisions du PDG s'appliquent ici */
     if (fam) services = services.filter(s => s.famille === fam);
     if (svc) services = services.filter(s => String(s.num) === svc);
     if (q) {
@@ -7731,7 +9227,8 @@ const server = http.createServer(async (req, res) => {
       metier: c.principal ? { id: c.principal, nom: c.compris, ic: (svcCat(c.principal) || {}).ic || '🛠️' } : null,
       alternatives: c.alternatives || [], aide: c.aide || '',
       reglemente: c.reglemente || null,
-      catalogue: { nbServices: arbre.nbServices, nbSous: arbre.nbSous, nbTaches: arbre.nbTaches, nbMetiers: arbre.nbMetiers }
+      catalogue: { nbServices: arbre.nbServices, nbSous: arbre.nbSous, nbTaches: arbre.nbTaches, nbMetiers: arbre.nbMetiers },
+      central: { favoris: fav126Actifs().liste.length, services_actifs: svc126FiltreArbre(arbre.services).length }
     });
   }
   /* 🙋 §48/§55 — « je ne trouve pas mon service » : le client décrit, on garde pour le PDG */
