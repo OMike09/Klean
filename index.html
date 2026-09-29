@@ -591,7 +591,15 @@
     if(f){ try{ f(el); return; }catch(e){} }
     try{
       if(el.classList && el.classList.contains('modal-bg')){ el.classList.remove('show'); el.style.display = ''; return; }
-      if(el.id) el.style.display = 'none'; else el.remove();
+      /* ⛔ 29/09 — CORRECTIF MAJEUR : on ne SUPPRIME PLUS jamais un élément de la page.
+         La ligne précédente disait « if(el.id) el.style.display='none'; else el.remove(); » :
+         un bloc sans identifiant (le haut de l'accueil, la zone des options…) était effacé POUR DE
+         BON, et le client restait avec un écran amputé jusqu'au rechargement. On masque, c'est tout :
+         c'est réversible, réparable, et rien ne disparaît du téléphone. */
+      if(el.id){ el.style.display = 'none'; return; }
+      if(el.dataset && el.dataset.kleanVue === '1'){ return; }   /* un bloc de la page : on n'y touche pas */
+      el.style.display = 'none';
+      try{ el.dataset.kleanMasque = '1'; }catch(e2){}
     }catch(e){}
   }
   function kVerrou(){ try{ if(KCOUCHES.length) document.body.style.overflow = 'hidden'; }catch(e){} }
@@ -935,7 +943,24 @@
     while(p && p.nodeType === 1 && p !== document.body && k++ < 40){
       try{
         var r = p.getBoundingClientRect();
-        if(r && r.width >= vw * 0.9 && r.height >= vh * 0.9) return p;
+        /* 🚫 29/09 — CORRECTIF MAJEUR : un simple BLOC DE LA PAGE ne doit jamais être pris pour une
+           fenêtre qui « recouvre » l'écran. C'est ce qui faisait supprimer le haut de l'accueil et la
+           zone des options sur les téléphones (blocs larges ET hauts = ≥90 % de l'écran : sur un
+           téléphone, c'est le cas normal d'un bloc de contenu).
+           Un élément ne « recouvre » que s'il est DÉTACHÉ du flux (fixed ou absolute), visible, qu'il
+           n'est pas la page elle-même, et qu'il ne CONTIENT pas la page affichée. */
+        var cs = getComputedStyle(p);
+        var pos = cs.position;
+        var estLaPage = (p.id === 'view-home') || (p.classList && p.classList.contains('view'));
+        var contientLaPage = false;
+        try{ contientLaPage = !!(p.querySelector && p.querySelector('.view.active')); }catch(e2){}
+        var horsFlux = (pos === 'fixed' || pos === 'absolute');
+        /* 🎯 seuls comptent les éléments qui peuvent RÉELLEMENT bloquer le doigt : détachés du flux
+           (fixed/absolute) et qui reçoivent les touches. Un voile transparent laisse passer l'œil
+           mais bloque le doigt : il est donc bien détecté (et neutralisé). En revanche un bloc
+           NORMAL de la page (statique) n'est jamais une fenêtre, même s'il est grand. */
+        var prendLesTouches = (cs.pointerEvents !== 'none');
+        if(horsFlux && prendLesTouches && !estLaPage && !contientLaPage && r && r.width >= vw * 0.9 && r.height >= vh * 0.9) return p;
       }catch(e){}
       p = p.parentNode;
     }
@@ -1032,6 +1057,15 @@
         if(!q || q.id === 'splash' || !document.documentElement.contains(q)) continue;
         if(KCOUCHES.indexOf(q) >= 0) continue;
         if(q.dataset && q.dataset.kleanTransparent === '1') continue;
+        /* 🛡️ 29/09 — la réparation ne touche JAMAIS la page elle-même ni un bloc de la page affichée.
+           Sans cette garde, la réparation effaçait des morceaux de l'accueil (défaut signalé par le PDG). */
+        try{
+          var vueActive = document.querySelector('.view.active');
+          if(vueActive && (q === vueActive || q.contains(vueActive) || vueActive.contains(q))) continue;
+          if(q.id === 'view-home' || (q.classList && q.classList.contains('view'))) continue;
+          var csQ = getComputedStyle(q);
+          if(csQ.position !== 'fixed' && csQ.position !== 'absolute') continue;
+        }catch(e3){ continue; }
         if(kInutile(q)){
           try{ q.style.pointerEvents = 'none'; q.dataset.kleanTransparent = '1'; faits.push('voile inutile neutralisé'); }catch(e){}
         }else{
@@ -1259,7 +1293,40 @@
   };
 
   /* ce que le reste de l'application utilise */
+  /* 🧯 29/09 — GARDE-FOU « ACCUEIL COMPLET » : si un bloc essentiel de l'accueil a disparu
+     (défaut constaté sur le téléphone du PDG : le haut de l'accueil et la zone des options
+     avaient été supprimés par la réparation automatique), on le RÉTABLIT tout seul au démarrage
+     et à chaque contrôle. Le client ne peut plus se retrouver avec un accueil amputé. */
+  function kAccueilComplet(){
+    try{
+      var manque = [];
+      if(!document.getElementById('accueil-pop')) manque.push('services populaires');
+      if(!document.getElementById('acc-grandes-zone')) manque.push('zone des options');
+      if(!document.getElementById('rap-urgence')) manque.push('raccourcis');
+      if(!document.querySelector('#view-home .acc-hero') && !document.getElementById('home-svc-search')) manque.push('recherche');
+      if(manque.length){
+        try{ console.warn('Klean — accueil incomplet (' + manque.join(', ') + ') : rechargement de la page pour le rétablir.'); }catch(e){}
+        try{ window._kleanAccueilAbime = manque.join(', '); }catch(e){}
+        /* ⛔ JAMAIS DE BOUCLE : deux tentatives au maximum dans la même session. Si l'accueil est
+           encore incomplet après, on s'arrête net (mieux vaut un écran partiel qu'un écran qui
+           recharge sans fin). */
+        var n = 0;
+        try{ n = parseInt(sessionStorage.getItem('k_accueil_fix') || '0', 10) || 0; }catch(e){}
+        if(n >= 2) return false;
+        try{ sessionStorage.setItem('k_accueil_fix', String(n + 1)); }catch(e){}
+        try{ location.reload(); return false; }catch(e){ return false; }
+      }
+      try{ sessionStorage.removeItem('k_accueil_fix'); }catch(e){}   /* accueil sain : on remet le compteur à zéro */
+      return true;
+    }catch(e){ return true; }
+  }
+  try{ window.kAccueilComplet = kAccueilComplet; }catch(e){}
+  /* 🧯 on vérifie l'accueil tout seul : au démarrage, puis une fois de plus après le chargement complet.
+     Si un bloc a disparu, la page se rétablit d'elle-même (deux fois au maximum, jamais en boucle). */
+  try{ setTimeout(function(){ try{ kAccueilComplet(); }catch(e){} }, 5000); }catch(e){}
+  try{ window.addEventListener('load', function(){ setTimeout(function(){ try{ kAccueilComplet(); }catch(e){} }, 1500); }); }catch(e){}
   window.KBouclier = { ajouter: kAjouter, retirer: kRetirer, fermerDerniere: kFermerDerniere,
+                       accueilComplet: kAccueilComplet,
                        audit: kAuditEcran, reparer: kReparerEcran, rapport: kRapportEcran,
                        elementAuPoint: kElementAuPoint, secours: kAlerteEcran,
                        pleinEcran: kPleinEcran, enregistrer: function(el){ kEnregistrerSiFenetre(el); return KCOUCHES.length; },

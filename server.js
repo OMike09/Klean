@@ -12332,6 +12332,70 @@ const server = http.createServer(async (req, res) => {
     delete adPub.views;
     return sendJson(res, 200, { ad: adPub, views: Object.keys(ad.views || {}).length });
   }
+  /* ═══════════ 🛰️ TÉMOIN DE MISE À JOUR — consigne du PDG du 29/09/2026 ═══════════
+     Le PDG a dit : « Je ne vois pas la mise à jour quand je rentre sur l'application. »
+     Ce témoin répond à cette question POUR TOUJOURS — et rien n'est écrit en dur, tout est
+     MESURÉ sur place au moment où il regarde :
+       · en ligne depuis   = démarrage réel du serveur (= moment où le déploiement a pris) ;
+       · commit GitHub     = donné par l'hébergeur (RENDER_GIT_COMMIT) ;
+       · anti-502          = le garde-fou est-il réellement branché sur CE processus ? ;
+       · vos logos         = empreintes sha256 comparées aux 6 logos d'origine (règle n° 1) ;
+       · base de données, options de l'accueil, cache du téléphone.                        */
+const DERNIER_LOT = '126', VERSION_APP = 'v126.0';
+const MAJ_NOTES = {
+  '126': 'les 22 chapitres : un seul compte client + professionnel, 🏫 ÉCOLE & FAMILLE, vos favoris, l’argent tracé, le tableau de bord réorganisé',
+  '125': 'le blocage global d’INTER et les 7 cas d’exception'
+};
+const LOGOS_FIGES = {
+  'klean-icon-512.png': '14939c5f63cb14787f260635a42a937db45b7b39f720cdfb4d6c9c68ee5cfbc3',
+  'klean-icon-192.png': '26eced3c8ad28cb927c63fa6bec68c2d609c7e94fbca47ae79ebb22b4f20b721',
+  'klean-icon-m512.png': '14939c5f63cb14787f260635a42a937db45b7b39f720cdfb4d6c9c68ee5cfbc3',
+  'hq-icon-180.png': '2d89bbf8af6617711d22ac5202ffb9e59b80e3e48063bb3b27aefbb868adf01b',
+  'hq-icon-192.png': '47dd24b79f314f1a1937e378c9996eae6b24b7b51eb5f74c9de135196e722261',
+  'hq-icon-512.png': '6788a20d9fa00fcc9523ed511ce0a9f8def79999b560427acaf6b308aeec7c3d'
+};
+const SERVEUR_DEMARRE_A = new Date();
+let MAJ_LOGOS_CACHE = null;
+function majLogos() {
+  if (MAJ_LOGOS_CACHE) return MAJ_LOGOS_CACHE;
+  const r = { n: 0, ok: true, problemes: [] };
+  Object.keys(LOGOS_FIGES).forEach(nom => {
+    try {
+      const h = crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname, nom))).digest('hex');
+      r.n++;
+      if (h !== LOGOS_FIGES[nom]) r.problemes.push(nom);
+    } catch (e) { r.problemes.push(nom); }
+  });
+  r.ok = r.problemes.length === 0;
+  MAJ_LOGOS_CACHE = r; return r;
+}
+/* heure d'Abidjan (UTC+0, sans changement d'heure) : on lit l'heure universelle */
+function majHeure(d) { const s = d.toISOString(); return s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) + ' à ' + s.slice(11, 13) + ' h ' + s.slice(14, 16); }
+function majCacheApp() { try { return (fs.readFileSync(path.join(__dirname, 'sw.js'), 'utf8').match(/klean-v\d+/) || [''])[0]; } catch (e) { return ''; } }
+function majOptionsAccueil() { let actifs = 0, total = 0; try { ACCUEIL_OPTIONS_DEF.forEach(d => { total++; if (accueilReglages(d.id).actif) actifs++; }); } catch (e) { } return { actifs: actifs, total: total }; }
+
+  if (p === '/api/admin/etat-maj' && req.method === 'GET') {
+    if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
+    const up = Math.max(0, Math.floor(process.uptime()));
+    const depuis = new Date(Date.now() - up * 1000);
+    const logos = majLogos();
+    const opt = majOptionsAccueil();
+    const commit = String(process.env.RENDER_GIT_COMMIT || '').slice(0, 7);
+    const nomService = String(process.env.RENDER_SERVICE_NAME || '');
+    return sendJson(res, 200, {
+      lot: DERNIER_LOT, version: VERSION_APP, quoi: MAJ_NOTES[DERNIER_LOT] || '',
+      enLigneDepuisISO: depuis.toISOString(), enLigneDepuis: majHeure(depuis), minutesEnLigne: Math.floor(up / 60),
+      hebergement: (process.env.RENDER ? 'Render' : 'hors hébergeur (votre ordinateur)') + (nomService ? ' · ' + nomService : ''),
+      commit: commit, commitTexte: commit ? ('envoi GitHub ' + commit) : 'envoi direct (sans numéro de commit)',
+      anti502: process.listenerCount('uncaughtException') > 0,
+      logos: { ok: logos.ok, n: logos.n, problemes: logos.problemes },
+      base: pgClient ? 'postgres' : 'fichier',
+      baseTexte: pgClient ? 'PostgreSQL — vos comptes sont conservés à chaque mise à jour' : 'fichier local — vos comptes risquent d’être perdus au redéploiement',
+      optionsAccueil: opt.actifs + '/' + opt.total, cacheApp: majCacheApp(),
+      at: nowISO()
+    });
+  }
+
   if (p === '/api/admin/ads' && req.method === 'GET') {
     if (!isAdminReq(req)) return sendJson(res, 401, { error: 'non autorisé' });
     const adA = db.ad || null;

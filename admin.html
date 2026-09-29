@@ -307,6 +307,7 @@
     <button onclick="changePwd()" title="Changer le mot de passe" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">🔑 Mot de passe</button>
     <button onclick="logout()" title="Se déconnecter" style="background:var(--card2);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;padding:6px 11px;border-radius:99px;cursor:pointer;font-family:inherit">⏻ Quitter</button>
     <div class="live" id="live-pill"><span class="pt"></span><span id="live-txt">EN DIRECT</span></div>
+    <button id="maj-pill" onclick="majVoir()" title="Témoin de mise à jour : voir si la nouvelle version est bien en ligne" style="background:rgba(34,197,94,.14);border:1.5px solid rgba(34,197,94,.45);color:var(--ink);font-family:inherit;font-size:11px;font-weight:900;padding:6px 11px;border-radius:99px;cursor:pointer;white-space:nowrap">🛰️ <span id="maj-pill-t">mise à jour…</span></button>
   </div>
 </header>
 
@@ -319,6 +320,11 @@
       <div id="home-alerte" style="display:none;margin-top:10px;background:rgba(255,107,107,.12);border:1.5px solid rgba(255,107,107,.4);border-radius:12px;padding:10px 11px;font-size:12.5px;line-height:1.45"></div>
       <div id="home-stock" style="display:none;margin-top:11px;border-radius:12px;padding:10px 11px;font-size:12.5px;line-height:1.45"></div>
       <div id="home-todo" style="margin-top:12px"></div>
+      <div id="maj-boite" style="margin-top:12px;border:1.5px solid var(--line);border-radius:13px;padding:11px 12px;background:var(--card2)">
+        <b style="display:block;font-size:12.5px;color:var(--p);margin-bottom:6px">🛰️ MISE À JOUR — <span id="maj-titre">vérification en cours…</span></b>
+        <div id="maj-liste" style="font-size:12.5px;line-height:1.75;color:var(--ink)">Lecture de l’état réel du serveur…</div>
+        <button type="button" onclick="majCharge(true)" style="margin-top:8px;background:var(--p);border:none;color:#fff;font-family:inherit;font-size:11.5px;font-weight:900;padding:7px 12px;border-radius:99px;cursor:pointer">🔄 Vérifier maintenant</button>
+      </div>
       <small style="display:block;margin-top:9px;color:var(--muted);font-size:11px">Touchez une carte pour ouvrir la rubrique correspondante. Tout se met à jour tout seul.</small>
     </div>
   </div>
@@ -2134,6 +2140,47 @@ function paintHome(){
   try{ paintStockage(); }catch(e){}
   const maj = document.getElementById('home-maj');
   if(maj) maj.textContent = 'à ' + new Date().toTimeString().slice(0, 5);
+  /* 🛰️ le témoin de mise à jour se rafraîchit avec la Vue générale (au plus une fois par minute) */
+  if(!window._majAt || Date.now() - window._majAt > 60000){ window._majAt = Date.now(); try{ majCharge(); }catch(e){} }
+}
+/* 🛰️ TÉMOIN DE MISE À JOUR (consigne du PDG, 29/09) — voir d'un coup d'œil que la nouvelle version
+   est bien en ligne. Tout vient du serveur (/api/admin/etat-maj) : ici on n'invente rien. */
+async function majCharge(){
+  const pil = document.getElementById('maj-pill-t');
+  try{
+    const d = await fetchJ('/api/admin/etat-maj');
+    const okLogos = !!(d.logos && d.logos.ok);
+    const ok = d.anti502 && okLogos && d.base === 'postgres';
+    const L = [
+      ['📦', 'Version en ligne', 'mise à jour n° ' + d.lot + ' · ' + d.version, true],
+      ['📝', 'Ce qu’elle apporte', d.quoi || '—', true],
+      ['⏱️', 'En ligne depuis', d.enLigneDepuis + (d.minutesEnLigne < 2 ? ' (à l’instant)' : ' (il y a ' + d.minutesEnLigne + ' min)'), true],
+      ['☁️', 'Hébergement', d.hebergement + ' — ' + d.commitTexte, true],
+      ['🛡️', 'Protection anti-502', d.anti502 ? 'ACTIVE — en cas d’erreur le site note l’incident et continue au lieu de tomber' : '⚠️ NON DÉTECTÉE — à signaler au développeur', !!d.anti502],
+      ['🚫', 'Vos 6 logos d’origine', okLogos ? 'intacts, à l’octet près (' + d.logos.n + ' logos vérifiés)' : '⚠️ à vérifier : ' + ((d.logos && d.logos.problemes) || []).join(', '), okLogos],
+      ['🗄️', 'Vos données', d.baseTexte, d.base === 'postgres'],
+      ['🧩', 'Options de l’accueil', d.optionsAccueil + ' actives', true],
+      ['📱', 'Version gardée par le téléphone', d.cacheApp || '—', true]
+    ];
+    const li = document.getElementById('maj-liste');
+    if(li) li.innerHTML = L.map(x => '<div style="display:flex;gap:7px;align-items:flex-start;margin-bottom:3px"><span>' + x[0] + '</span><span style="flex:1"><b>' + x[1] + ' :</b> <span style="color:' + (x[3] ? '#22c55e' : '#ff6b6b') + ';font-weight:700">' + x[2] + '</span></span></div>').join('');
+    const ti = document.getElementById('maj-titre');
+    if(ti) ti.textContent = 'mise à jour n° ' + d.lot + (ok ? ' ✅ en ligne' : ' ⚠️ à vérifier');
+    if(pil) pil.textContent = ok ? ('mise à jour n° ' + d.lot + ' ✅ en ligne') : 'mise à jour : ⚠️ à vérifier';
+  }catch(e){
+    const li = document.getElementById('maj-liste');
+    if(li) li.innerHTML = '⚠️ État illisible pour l’instant (connexion ?). Touchez « Vérifier maintenant ».';
+    const ti = document.getElementById('maj-titre'); if(ti) ti.textContent = 'à vérifier';
+    if(pil) pil.textContent = 'mise à jour : ⚠️ à vérifier';
+  }
+}
+function majVoir(){
+  try{ if(typeof hqGo === 'function') hqGo('panel-home'); }catch(e){}
+  const b = document.getElementById('maj-boite'); if(!b) return;
+  try{ b.scrollIntoView({ behavior: 'smooth', block: 'center' }); }catch(e){ try{ b.scrollIntoView(); }catch(e2){} }
+  b.style.outline = '2px solid var(--p)';
+  setTimeout(() => { b.style.outline = 'none'; }, 1800);
+  majCharge();
 }
 /* ═══════════ 🎮 JEUX EN DIRECT (lot 101) ═══════════ */
 var JEUX = [], JEUX_PARTIES = [], JEU_THEMES = {}, JEUX_COURANT = null, JX_QUESTIONS = [];
