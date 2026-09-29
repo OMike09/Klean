@@ -1508,6 +1508,8 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     <div id="accueil-pop" class="acc-pop"></div>
     <button type="button" id="btn-tous-svc" data-opt="tous_services" class="acc-tous" onclick="catNatOuvrir()">📚 Voir tous les services <span id="catnat-n"></span> →</button>
     <div style="font-size:13.5px;color:var(--muted);margin-top:7px;text-align:center" id="catnat-sous">Le catalogue national — touchez une catégorie</div>
+    <!-- 🧰 lot 128 : les services du tableau de bord, tous réservables (consigne du PDG) -->
+    <button type="button" id="btn-reserver-svc" onclick="if(typeof goBook==='function'){goBook();}else{showView('view-book',null,'client');}" style="width:100%;margin-top:10px;border:2px solid #E85D04;background:#FFF6EE;color:#9A3412;font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:15px;cursor:pointer;min-height:52px">🧰 Réserver un service — <span id="acc-svc-n">—</span> disponibles →</button>
     <!-- la liste complète vit dans la fenêtre « 📚 Tous les services » : elle n'encombre plus l'accueil -->
     <div id="catnat-pop" class="hidden" aria-hidden="true" style="display:none"></div>
     <button type="button" id="home-svc-toggle" onclick="accueilToggleSvc()" style="display:none">📂 Voir la liste des métiers et leurs prix ▾</button>
@@ -1554,6 +1556,11 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
   <div class="step-label" id="step-title">Étape 1/4<b>Choisissez votre service</b></div>
 
   <div class="bstep on" id="step1">
+    <!-- 🧰 lot 128 — le client voit TOUS les services du tableau de bord (consigne du PDG) -->
+    <div id="book-note" style="margin:0 0 11px;padding:11px 13px;border-radius:13px;border:2px solid #E85D04;background:#FFF6EE;font-size:15px;line-height:1.5;color:#1A1410">
+      🧰 <b id="book-n">—</b> services disponibles — <b>tous ceux de votre tableau de bord</b>, avec leur prix de départ.<br>
+      <span style="font-size:13.5px;color:#5A4636">Cherchez ci-dessous, ou touchez directement un métier.</span>
+    </div>
     <input class="inp" id="svc-search" placeholder="🔍 Cherchez : ménage, maths, canal, nounou, frigo…" oninput="renderSvcGrids()" style="margin-bottom:12px" autocomplete="off">
     <div class="svc-grid" id="book-svc"></div>
     <div style="margin-top:16px;padding:15px 14px;border:2px dashed rgba(21,201,138,.4);border-radius:16px;background:rgba(21,201,138,.05);text-align:center">
@@ -2157,6 +2164,7 @@ function absorbServerServices(list, version, deployAt){
   const fus = {};
   list.forEach(x=>{ if(x && x.id && x.fusionne) fus[x.id] = x.fusionne; });
   FUSION = fus;
+  try{ window.FUSION = FUSION; }catch(e){}   /* la même table, vue de l'intérieur comme de la console */
   list.forEach(s=>{
     if(!s || !s.id) return;
     const i = SERVICES.findIndex(x=>x.id===s.id);
@@ -2820,6 +2828,12 @@ function showView(id, btn, navGroup){
   /* 🛡️ après chaque navigation : aucune fenêtre oubliée ne doit rester devant la page */
   try{ if(window.KBouclier) setTimeout(function(){ window.KBouclier.resync(); }, 80); }catch(e){}
 }
+/* 🧰 lot 128 : le bouton « Réserver un service » de l'accueil emprunte EXACTEMENT le même chemin
+   que l'onglet Réserver de la barre du bas. Un seul chemin = aucun bouton muet, jamais. */
+function goBook(){
+  try{ startBooking(); }
+  catch(e){ try{ showView('view-book', null, 'client'); }catch(e2){} }
+}
 function startBooking(){
   openIn1s(function(){
     if(mission && !['terminee','annulee'].includes(mission.status)) return toast('Une mission est déjà en cours 📍');
@@ -3061,17 +3075,89 @@ function renderSvcGrids(){
   ];
   const _q = normT((document.querySelector('#svc-search')||{}).value || '');
   const _match = s => !_q || normT(s.nom+' '+s.desc+' '+(s.opts||[]).map(o=>o.nom).join(' ')).includes(_q);
-  const build = onclick => GROUPS.map(([cat, label])=>{
-    /* 🔗 un métier fusionné ne s'affiche plus à part : il est regroupé sous son métier principal */
-    const items = SERVICES.filter(s=>s.cat===cat && _match(s) && !FUSION[s.id]);
+  /* 🧰 lot 128 (consigne du PDG : « tout doit faire 61 ») : l'écran RÉSERVER montre TOUS les
+     services — y compris ceux que le tableau de bord a « regroupés » sous un métier principal.
+     Ils portent alors une étiquette « 🔗 regroupé sous … » pour que le client comprenne d'un coup
+     d'œil pourquoi ils sont là. Ainsi, aucun service de son tableau de bord n'est invisible.
+     (Sur les autres grilles, on garde l'ancien comportement : pas de doublon visuel.) */
+  const build = (onclick, toutMontrer) => GROUPS.map(([cat, label])=>{
+    const items = SERVICES.filter(s=>s.cat===cat && _match(s) && (toutMontrer || !FUSION[s.id]));
     if(!items.length) return '';
     return `<div class="svc-cat">${label}</div>` +
-      items.map(s=>`<button class="svc ${c.service===s.id?'sel':''}" onclick="${onclick}('${s.id}')"><span class="ic">${s.ic}</span><b>${s.nom}</b><span>${s.desc}${(s.regroupe&&s.regroupe.length)?('<br>🔗 regroupe : '+s.regroupe.map(x=>x.nom).join(', ')):''}</span><i>${s.base ? 'dès '+fmt(s.base) : '💬 devis'}</i></button>`).join('');
+      items.map(s=>{
+        const chef = FUSION[s.id] ? (SERVICES.find(x=>x.id===FUSION[s.id]) || {}).nom || '' : '';
+        const tag = chef ? `<span style="display:block;margin-top:4px;font-size:13.5px;font-weight:900;color:#9A3412;background:#FFE8D6;border-radius:9px;padding:4px 8px">🔗 regroupé sous : ${rechEch(chef)}</span>` : '';
+        const rg = (s.regroupe&&s.regroupe.length)?('<br>🔗 regroupe : '+s.regroupe.map(x=>x.nom).join(', ')):'';
+        return `<button class="svc ${c.service===s.id?'sel':''}" onclick="${onclick}('${s.id}')"><span class="ic">${s.ic}</span><b>${s.nom}</b><span>${s.desc}${rg}${tag}</span><i>${s.base ? 'dès '+fmt(s.base) : '💬 devis'}</i></button>`;
+      }).join('');
   }).join('');
-  $('#book-svc').innerHTML = build('pickSvc');
-  $('#home-svc').innerHTML = build('quickSvc');
+  $('#book-svc').innerHTML = build('pickSvc', true);     /* 🧰 tout est réservable, rien n'est caché */
+  $('#home-svc').innerHTML = build('quickSvc', false);
 }
 try{ window.SERVICES = SERVICES; }catch(e){}   /* la liste des métiers, visible dans la console */
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════
+   🧰 LOT 128 — LES SERVICES DU TABLEAU DE BORD SONT TOUS RÉSERVABLES (consigne du PDG, 29/09/2026)
+   ───────────────────────────────────────────────────────────────────────────────────────────────────
+   Le PDG : « Ajoute le reste des services mis dans le tableau de bord dans option Réserver ? Je crois
+   tout doit faire 61. Donc actualise. »  Constat : son tableau de bord publie 61 services ; l'écran
+   « Réserver » n'en proposait que 22 → 39 services de son tableau de bord n'étaient pas réservables.
+   Ici : on lit la source centrale (/api/services), on ajoute ce qui manque (sans doublon, par
+   identifiant), et le client peut réserver les 61. Un service désactivé ou masqué au HQ disparaît d'ici.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════ */
+var SVC128 = { charge: false, liste: [], ajoutes: 0, total: 0, at: null };
+try{ window.SVC128 = SVC128; }catch(e){}
+function svc128Injecter(liste){
+  var ajout = 0;
+  (liste || []).forEach(function(x){
+    if(!x || !x.id || x.id === 'custom') return;
+    if(SERVICES.find(function(s2){ return s2.id === x.id; })) return;      /* aucun doublon d'identifiant */
+    /* 🚫 aucun doublon À L'ÉCRAN non plus : si le même métier existe déjà sous un autre identifiant
+       (ex. « Déménagement & portage » du tableau de bord et « demen » de l'application), on ne
+       l'ajoute pas — celui de l'application est le plus complet (options, questions, prix de détail). */
+    var nm = normT(x.nom || '');
+    if(nm && SERVICES.find(function(s2){ return normT(s2.nom || '') === nm; })) return;
+    var opts = (x.opts || []).filter(function(o){ return o && o.nom; }).map(function(o){
+      return { id: o.id || o.nom, nom: o.nom, prix: Number(o.prix) || 0 };
+    });
+    SERVICES.push({
+      id: x.id, ic: x.ic || '🧰', nom: x.nom || x.id, desc: x.desc || 'Service publié par KLEAN',
+      base: Number(x.base) || 0, cat: x.cat || 'home', opts: opts, central: true
+    });
+    ajout++;
+  });
+  SVC128.ajoutes = ajout;
+  return ajout;
+}
+async function svc128Charger(){
+  try{
+    var d = await fetch('/api/services', { cache: 'no-store' }).then(function(r){ return r.json(); });
+    var liste = (d && Array.isArray(d.services)) ? d.services : [];
+    /* 🚦 les décisions du PDG s'appliquent : un service retiré ou masqué n'apparaît jamais ici */
+    liste = liste.filter(function(x){ return x && x.actif !== false && x.visible !== false && x.retire !== true; });
+    SVC128.liste = liste; SVC128.total = liste.length; SVC128.charge = true; SVC128.at = d && d.at;
+    svc128Injecter(liste);
+    try{ renderSvcGrids(); }catch(e){}
+    svc128Compter();
+    return true;
+  }catch(e){ return false; }
+}
+/* le compte affiché : les services du tableau de bord + les métiers fins de l'application */
+function svc128Compter(){
+  var el = document.getElementById('book-n');
+  var dansReserver = 0;
+  try{
+    dansReserver = document.querySelectorAll('#book-svc button.svc').length;
+  }catch(e){}
+  if(el) el.textContent = String(SVC128.total || dansReserver);
+  var ela = document.getElementById('acc-svc-n');
+  if(ela) ela.textContent = String(SVC128.total || dansReserver) + ' services';
+  try{ window.SVC128_RESERVER = dansReserver; }catch(e){}
+  return dansReserver;
+}
+try{ window.svc128Charger = svc128Charger; window.svc128Compter = svc128Compter; }catch(e){}
+/* on charge au démarrage, puis après le premier affichage (le temps que l'accueil se pose) */
+try{ setTimeout(function(){ try{ svc128Charger(); }catch(e){} }, 900); }catch(e){}
+try{ window.addEventListener('load', function(){ setTimeout(function(){ try{ svc128Charger(); }catch(e){} }, 1200); }); }catch(e){}
 /* 🛠️ Demande sur mesure (service hors catalogue, avec photos) */
 const CSVC = {id:'custom', ic:'🛠️', nom:'Demande sur mesure', desc:'Vous décrivez, le professionnel évalue et propose un prix', base:0, cat:'custom', opts:[], descLabel:'📝 Décrivez précisément votre besoin *'};
 /* 🔍 Recherche de service depuis l'accueil (barre visible) */
@@ -7958,7 +8044,9 @@ async function catNatAccueil(){
     }
     const n = document.getElementById('catnat-n'); if(n) n.textContent = '(' + CATU.nbServices + ' services)';
     const s = document.getElementById('catnat-sous');
-    if(s) s.textContent = CATU.nbServices + ' services · ' + CATU.nbTaches + ' tâches — touchez une catégorie';
+    /* 🧰 29/09 : on écrit noir sur blanc qu'il s'agit du CATALOGUE NATIONAL (48 services) pour que
+       personne ne confonde avec les services réservables du tableau de bord (61 dans « Réserver »). */
+    if(s) s.textContent = CATU.nbServices + ' services au catalogue national · ' + CATU.nbTaches + ' tâches — touchez une catégorie';
     /* 📊 29/09 — le vrai nombre de services s'écrit dans SON compteur (bloc « KLEAN en chiffres », ℹ️ Infos)
        et plus par un bricolage qui cherchait le texte « 17 » partout dans la page. */
     try{ const sn = document.getElementById('svc-count-n'); if(sn) sn.textContent = String(CATU.nbServices); }catch(e){}
