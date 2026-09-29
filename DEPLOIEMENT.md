@@ -99,11 +99,40 @@ l'hébergeur gratuit effacerait tout à chaque redémarrage. Avec : rien ne se p
 Le plan gratuit de Render **endort le serveur après 15 min sans visite** : le 1er visiteur du matin
 attendrait ~40 s. Pour l'éviter :
 
-1. https://uptimerobot.com → compte gratuit.
-2. **+ Add New Monitor** → type **HTTP(s)** → URL : `https://klean-xxxx.onrender.com/api/health`
-   → intervalle **5 minutes** → créer.
+1. https://uptimerobot.com/signUp → compte gratuit (sans carte bancaire) → lien direct du
+   formulaire : **https://dashboard.uptimerobot.com/monitors/new**
+2. Dans le formulaire (écran « Create monitor ») :
+   · **Monitor type** : `HTTP / website monitoring` (déjà proposé) ;
+   · **URL to monitor** : `https://klean-xxxx.onrender.com/api/health`  ← remplacez `klean-xxxx`
+     par l'adresse de votre service Render (elle est affichée en haut de la page du service sur
+     dashboard.render.com) ;
+   · **Friendly name** (si le champ apparaît) : `KLEAN Application` ;
+   · **Notifications and alerts** : laissez **E-mail** coché (votre adresse) ;
+   · **Group / Add tags / SMS** : ne touchez à rien (facultatif, les groupes sont payants) ;
+   · **Monitoring interval** : 5 minutes (réglage automatique du plan gratuit — rien à changer) ;
+   · puis **Create monitor** → la pastille doit passer au **vert « Up »** en moins d'une minute.
+3. ⚠️ Si la pastille reste **rouge « Down »**, l'application ne répond vraiment pas à ce moment-là :
+   regardez Render (*Logs*) et prévenez-moi.
 
-UptimeRobot réveille KLEAN toutes les 5 minutes, jour et nuit. ✅
+UptimeRobot vérifie KLEAN toutes les 5 minutes, jour et nuit. ✅
+(Avec la formule payante, il ne sert plus à réveiller le serveur : il sert à **vous prévenir par
+courriel** dès que l'application ne répond plus.)
+
+### 💳 Vous êtes passé à la formule payante (≈ 7 $/mois) ? Deux choses à savoir
+
+* **Le service ne s'endort plus** : plus de réveil de 40 s, **plus jamais la page « 502 Bad Gateway »**
+  du petit matin. La formule s'applique **tout de suite** ; le prélèvement, lui, se fait **à la fin de
+  la période de facturation** (c'est normal que la banque ne voie rien passer tout de suite).
+  ⚠️ Si la carte est refusée à la facture, Render **suspend** le service : gardez la carte valide et
+  surveillez les courriels de Render (*Billing → Payment method*).
+* **Gardez UptimeRobot, mais pour être PRÉVENU** : mettez une alerte (courriel) sur
+  `https://klean-xxxx.onrender.com/api/health` — vous saurez tout de suite si l'application ne répond
+  plus, au lieu de le découvrir par un client.
+* **Contrôle en une seconde** : ouvrez `https://klean-xxxx.onrender.com/api/health`.
+  Le mot **`storage`** doit dire **`postgres`** → vos comptes sont dans votre base Neon, donc **à l'abri
+  d'un redéploiement**. S'il dit **`fichier`**, vos comptes vivent sur le disque du serveur : faites la
+  partie **Neon** ci-dessus (gratuit) avant d'avoir de vrais clients.
+* Fiche complète en cas de page noire : **`DEPANNAGE-502-RENDER.md`** (fournie dans le dossier).
 
 ---
 

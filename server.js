@@ -15325,6 +15325,22 @@ server.on('upgrade', (req, sock) => {
 
 process.on('SIGTERM', () => { try { saveDbNow(); } catch (e) {} setTimeout(() => process.exit(0), 300); });
 process.on('unhandledRejection', e => { console.log('⚠️  Promesse :', e && e.message); });
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   🛟 29/09 — PLUS JAMAIS « 502 » À CAUSE D'UNE ERREUR ISOLÉE (leçon du réveil de 06 h 22)
+   Ce serveur tourne chez l'hébergeur : si UNE erreur imprévue traverse le code (un téléphone qui
+   envoie une donnée bizarre, une réponse déjà terminée, etc.), Node s'arrêtait net — et l'application
+   ET le tableau de bord devenaient inaccessibles pour TOUT LE MONDE (page 502 côté hébergeur).
+   Désormais : l'erreur est écrite au journal du tableau de bord, la base est sauvegardée, et le
+   serveur CONTINUE de répondre. Le PDG n'est plus jamais coupé de son tableau de bord par un détail.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+let _incidents126 = 0;
+process.on('uncaughtException', e => {
+  _incidents126++;
+  const m = (e && (e.stack || e.message)) || String(e);
+  console.log('🛟 Erreur isolée — le serveur continue (' + _incidents126 + ') :', String(m).split('\n')[0]);
+  try { auditLog('incident_serveur', { message: String(m).slice(0, 300), n: _incidents126 }); } catch (x) { }
+  try { saveDbNow(); } catch (x) { }
+});
 
 /* Render vérifie /api/health dès que le port écoute : on écoute D’ABORD, Neon ensuite */
 server.listen(PORT, '0.0.0.0', () => {
