@@ -2,73 +2,19 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Administration — Klean-Services CI</title>
-<style>
-:root{--p:#0b7a6b;--p-dark:#075e52;--bg:#f1f5f4;--line:#e2e8e6;--txt:#152420;--muted:#64748b;--danger:#dc2626;--ok:#16a34a}
-*{box-sizing:border-box}
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:var(--bg);color:var(--txt);font-size:14.5px}
-.layout{display:flex;min-height:100vh}
-.side{width:235px;background:#0f2e29;color:#cde7e2;flex-shrink:0;padding:14px 0;position:sticky;top:0;height:100vh;overflow-y:auto}
-.side .logo{font-weight:800;font-size:17px;color:#fff;padding:8px 18px 16px}
-.side .grp{font-size:10.5px;letter-spacing:1.2px;font-weight:700;color:#6d9c94;padding:14px 18px 5px;text-transform:uppercase}
-.side button{display:block;width:100%;text-align:left;background:none;border:none;color:#cde7e2;padding:9px 18px;font-size:14px;cursor:pointer;font-family:inherit}
-.side button:hover{background:rgba(255,255,255,.07)}
-.side button.on{background:var(--p);color:#fff;font-weight:700}
-.side .cnt{background:var(--danger);color:#fff;border-radius:99px;font-size:11px;padding:1px 7px;margin-left:6px;font-weight:700}
-.main{flex:1;padding:22px;min-width:0}
-h1{font-size:21px;margin:0 0 18px}
-h2{font-size:16px;margin:22px 0 10px}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px}
-.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}
-.kpi .v{font-size:24px;font-weight:800;color:var(--p-dark)}
-.kpi .l{font-size:12px;color:var(--muted);font-weight:600}
-.panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:13.5px}
-th{text-align:left;color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;padding:8px;border-bottom:2px solid var(--line)}
-td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
-tr:hover td{background:#f8fbfa}
-.pill{display:inline-block;border-radius:99px;padding:3px 10px;font-size:11.5px;font-weight:700}
-.pill.ok{background:#dcfce7;color:#166534}.pill.warn{background:#fef3c7;color:#92400e}.pill.bad{background:#fee2e2;color:#991b1b}.pill.info{background:#dbeafe;color:#1e40af}.pill.off{background:#f1f5f9;color:#475569}
-.btn{background:var(--p);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
-.btn:hover{background:var(--p-dark)}
-.btn.sec{background:#e6f4f2;color:var(--p-dark)}
-.btn.warn{background:var(--danger)}
-.btn.sm{padding:5px 10px;font-size:12px}
-.btn:disabled{opacity:.5}
-input,select,textarea{border:1.5px solid var(--line);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit;outline:none;background:#fff;color:var(--txt)}
-input:focus,select:focus,textarea:focus{border-color:var(--p)}
-textarea{width:100%;min-height:90px;resize:vertical}
-.frow{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
-.frow label{display:block;font-size:12px;font-weight:700;margin-bottom:4px;color:var(--muted)}
-.tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
-.tabs button{border:1.5px solid var(--line);background:#fff;border-radius:99px;padding:7px 15px;font-size:13px;font-weight:700;cursor:pointer;color:var(--muted);font-family:inherit}
-.tabs button.on{background:var(--p);color:#fff;border-color:var(--p)}
-.muted{color:var(--muted)}.small{font-size:12.5px}
-.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center}
-.login-box{background:#fff;border:1px solid var(--line);border-radius:14px;padding:30px;width:360px}
-.login-box input{width:100%;margin-bottom:12px}
-.login-box .btn{width:100%;padding:12px}
-#toast{position:fixed;top:16px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px}
-.toast{background:#1f2937;color:#fff;border-radius:10px;padding:12px 16px;font-size:13.5px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
-.toast.ok{background:var(--ok)}.toast.err{background:var(--danger)}
-.thumb{width:44px;height:44px;border-radius:8px;object-fit:cover}
-.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px}
-.modal{background:#fff;border-radius:14px;padding:22px;width:100%;max-width:560px;max-height:88vh;overflow-y:auto}
-.modal h3{margin:0 0 14px}
-.menu-toggle{display:none;position:fixed;bottom:16px;right:16px;z-index:60;width:52px;height:52px;border-radius:50%;background:var(--p);color:#fff;border:none;font-size:22px;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.3)}
-@media(max-width:860px){
-  .side{position:fixed;left:-240px;transition:left .2s;z-index:55}
-  .side.open{left:0}
-  .menu-toggle{display:block}
-  .main{padding:14px}
-}
-.rules-ta{min-height:220px;font-size:13px}
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b7a6b">
+<title>Klean-Services CI</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-<div id="root"></div>
-<div id="toast"></div>
-<script src="/admin/admin.js"></script>
+<div id="app">
+  <div class="splash"><div class="splash-logo">K</div><div class="splash-name">Klean-Services CI</div></div>
+</div>
+<div id="toast-zone"></div>
+<script src="/app.js"></script>
 </body>
 </html>
