@@ -798,13 +798,41 @@
       if(!suivi) return;
       suivi = false;
       if(interdit) return;
+      /* 🛡️ REFONTE 129 — protections ajoutées : on ne balaie pas pendant qu'on écrit, ni pendant
+         qu'une fenêtre (paiement, formulaire, modale) est ouverte sur l'écran. Un geste ne doit
+         JAMAIS fermer un formulaire ni faire perdre ce qui est saisi. */
+      try{
+        var act = document.activeElement;
+        if(act && (/^(INPUT|TEXTAREA|SELECT)$/.test(act.tagName || '') || act.isContentEditable)) return;
+        if(document.querySelector && document.querySelector('input:focus, textarea:focus, select:focus')) return;
+        if(document.querySelector('[data-kleanCouche]')) return;
+      }catch(_){}
       var t = lire(e, 'changedTouches') || lire(e, 'touches');
       if(!t) return;
       var dx = t.clientX - x0, dy = t.clientY - y0, dt = Date.now() - t0;
-      if(dx > -64) return;                                   /* il faut aller de la droite vers la gauche */
-      if(Math.abs(dx) < Math.abs(dy) * 1.6) return;           /* geste vertical, pas un balayage */
-      if(dt > 900) return;                                    /* un appui long n'est pas un balayage */
-      kRetour();
+      if(Math.abs(dx) < 64) return;                            /* trop court : ce n'est pas un balayage */
+      if(Math.abs(dx) < Math.abs(dy) * 1.6) return;            /* geste vertical : on laisse défiler */
+      if(dt > 900) return;                                     /* un appui long n'est pas un balayage */
+      /* 🧭 NOUVELLE RÈGLE (consigne du PDG) : on tourne les pages comme un livre.
+         gauche → droite  : page PRÉCÉDENTE   ·   droite → gauche : page SUIVANTE */
+      if(dx > 0){
+        /* on ne « revient » que depuis une sous-page : sur les 5 grands onglets, il n'y a pas de
+           page précédente — le balayage n'y fait donc rien (aucune surprise pour l'utilisateur).
+           〰️ sauf si une FENÊTRE est ouverte : le geste la referme (comme le bouton Retour),
+           mais ⛔ JAMAIS si un champ a déjà été rempli : on ne perd aucune saisie. */
+        var r = ref129Ecran(), fen = false, saisie = false;
+        try{
+          var L = (window.KBouclier && window.KBouclier.ouvertes) ? window.KBouclier.ouvertes() : [];
+          fen = L.length > 0;
+          for(var i = 0; i < L.length && !saisie; i++){
+            var ch = (L[i] && L[i].querySelectorAll) ? L[i].querySelectorAll('input,textarea,select') : [];
+            for(var j = 0; j < ch.length; j++){ if(ch[j].value && String(ch[j].value).length){ saisie = true; break; } }
+          }
+        }catch(err){}
+        if(saisie) return;                                  /* ⛔ formulaire déjà rempli : on n'y touche pas */
+        if(REF129_TABS.indexOf(r) < 0 || fen){ try{ ref129Retour(); }catch(err){} }
+      }
+      else { try{ ref129Avancer(); }catch(err){} }
     }, { passive: true });
   })();
   /* ⌨️ ordinateur : Échap ferme aussi la dernière fenêtre */
@@ -1300,9 +1328,17 @@
   function kAccueilComplet(){
     try{
       var manque = [];
+      /* 🧭 REFONTE 129 (30/09) : l'accueil = recherche + 6 services populaires + voir tous + zone des
+         compléments. Les options (urgence, jeux, job, avis, points, quiz…) vivent désormais dans
+         MON COMPTE : ce garde-fou ne doit donc plus les chercher ici (sinon il rechargerait la page
+         pour rien). Il surveille exactement ce que l'accueil doit montrer.
+         🧭 01/10 (consigne du PDG : « rends simple ») : « Ajouter une photo », les choix de lieu et la
+         demande de localisation ne sont PLUS dessinés sur l'accueil (ils sont proposés à l'écran de
+         recherche). Le garde-fou ne doit donc plus les exiger, sinon il rechargeait l'accueil pour rien. */
       if(!document.getElementById('accueil-pop')) manque.push('services populaires');
-      if(!document.getElementById('acc-grandes-zone')) manque.push('zone des options');
-      if(!document.getElementById('rap-urgence')) manque.push('raccourcis');
+      if(!document.getElementById('acc-grandes-zone')) manque.push('zone des compléments (favoris du PDG, secours)');
+      if(!document.getElementById('btn-tous-svc')) manque.push('catalogue des services');
+      if(!document.getElementById('acc-btn-rechercher')) manque.push('bouton de recherche');
       if(!document.querySelector('#view-home .acc-hero') && !document.getElementById('home-svc-search')) manque.push('recherche');
       if(manque.length){
         try{ console.warn('Klean — accueil incomplet (' + manque.join(', ') + ') : rechargement de la page pour le rétablir.'); }catch(e){}
@@ -1465,27 +1501,38 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
   <div style="padding:12px 12px 0">
     <div class="acc-hero">
       <h1 class="acc-h1">De quel service avez-vous besoin&nbsp;?</h1>
-      <p class="acc-sous">Décrivez simplement votre besoin et <b>Klean-Services CI</b> vous aide à trouver le bon professionnel.</p>
+      <!-- 📄 01/10 (consigne du PDG : « donne une phrase simple et brève ») — une seule phrase courte. -->
+      <p class="acc-sous">Écrivez ce que vous voulez réparer ou nettoyer.</p>
+      <!-- 📍 01/10 (consigne du PDG : « rends simple ») — la demande de localisation ne s'affiche
+           plus ICI : elle est faite à l'étape « Position » de la recherche, avec son explication
+           (« Autoriser ma position et chercher »), la possibilité de continuer sans GPS par ville
+           et quartier, et le choix de chercher partout en Côte d'Ivoire. Le bandeau et ses fonctions
+           (ref129Gps*) restent intacts : ils se peignent dès que leur emplacement existe. -->
 
       <div class="acc-carte">
-        <label class="acc-lbl" for="home-svc-search">🔎 Écrivez ce dont vous avez besoin…</label>
+                <label class="acc-lbl" for="home-svc-search">🔎 Écrivez ce dont vous avez besoin…</label>
         <input id="home-svc-search" class="acc-input" autocomplete="off" enterkeyhint="search" aria-label="Écrivez ce dont vous avez besoin" oninput="accueilSug(this.value);langSaisie(this.value,'accueil')" onkeydown="if(event.key==='Enter'){event.preventDefault();langAfficherPros('accueil');}" placeholder="Écrivez ce dont vous avez besoin…">
-        <div style="font-size:14.5px;color:#7A6A5E;margin-top:7px;line-height:1.4">Pas besoin de connaître le nom du métier — décrivez le problème, montrez une photo ou parlez 🙂</div>
         <div id="accueil-sug" style="margin-top:9px"></div>
         <div id="lang-boite" style="margin-top:10px"></div>
         <div id="lang-barre-accueil"></div>
 
-        <div class="acc-lieu">
-          <div class="acc-lbl2">📍 Où le service doit-il être effectué&nbsp;?</div>
-          <div style="display:flex;gap:7px;flex-wrap:wrap">
-            <button type="button" id="lieu-btn-moi" onclick="accueilLieu('moi')" style="cursor:pointer;font:inherit;font-weight:900;font-size:15px;padding:12px 14px;min-height:44px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">📍 Ma position</button>
-            <button type="button" id="lieu-btn-ville" onclick="accueilLieu('ville')" style="cursor:pointer;font:inherit;font-weight:900;font-size:15px;padding:12px 14px;min-height:44px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">🏙️ Ma ville</button>
-            <button type="button" id="lieu-btn-autre" onclick="accueilLieu('autre')" style="cursor:pointer;font:inherit;font-weight:900;font-size:15px;padding:12px 14px;min-height:44px;border-radius:99px;border:1.5px solid #F6D9BE;background:#fff;color:var(--pd)">🏠 Un autre lieu</button>
-          </div>
-          <div id="accueil-lieu" style="margin-top:9px"></div>
-        </div>
+        <!-- 🧭 01/10 (consigne du PDG : « rends simple ») — les 3 choix de lieu et le champ
+             « un autre lieu » ne s'affichent PLUS sur l'accueil : ils apparaissent à l'étape
+             « Position » de la recherche (📍 Ma position · 🏙️ Ma ville · ✍️ Un autre lieu), où
+             l'utilisateur choisit AUSSI de chercher partout en Côte d'Ivoire. Rien n'est supprimé :
+             accueilLieu(), le champ de saisie et la reconnaissance des villes fonctionnent toujours
+             (le champ réapparaît dès qu'on entre dans la recherche). -->
 
         <button type="button" id="acc-btn-rechercher" data-opt="recherche" class="acc-btn" onclick="langAfficherPros('accueil')">🔎 Rechercher un service</button>
+        <!-- 📍 01/10 (consignes du PDG : « la recherche en haut » puis « Permets que le GPS soit
+             activé avant toute chose » + « donne une phrase simple et brève ») — la demande de
+             localisation vient JUSTE SOUS la recherche, en UNE phrase, jamais bloquante :
+             📍 Autoriser la localisation · Plus tard · 🏙️ Ma ville. Les fonctions d'origine
+             (ref129Gps*) sont réutilisées telles quelles : rien de nouveau, rien de perdu. -->
+        <div id="ref129-gps" style="margin:12px 0 0"></div>
+        <!-- 📷 01/10 : « Ajouter une photo » ne s'affiche plus sur l'accueil — elle est proposée
+             dès l'écran de recherche (📷 Ajouter une photo) et par « 📷 Faire une demande sur mesure ».
+             La fonction pickCustom() et tout le circuit photo restent intacts. -->
         <div id="accueil-msg" style="margin-top:10px"></div>
 
         <details class="acc-kp">
@@ -1494,10 +1541,15 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
             <input id="accueil-kp" placeholder="Son code KP — ex. KP015842" onkeydown="if(event.key==='Enter'){event.preventDefault();accueilKpGo();}" style="flex:1;min-width:0;padding:13px;border-radius:12px;border:1.5px solid var(--line);font:inherit;font-size:16px;background:#fff;color:var(--ink)">
             <button type="button" onclick="accueilKpGo()" style="border:none;background:var(--pd);color:#fff;font:inherit;font-weight:900;font-size:15.5px;padding:13px 16px;border-radius:12px;cursor:pointer;min-height:44px">Trouver</button>
           </div>
-          <div style="font-size:13.5px;color:var(--muted);margin-top:7px">Optionnel : vous n’avez jamais besoin d’un code pour utiliser Klean.</div>
+          <div style="font-size:13.5px;color:var(--muted);margin-top:7px">Pas obligatoire.</div>
         </details>
 
-        <div class="acc-droite">🔒 Recherche autour du <b>lieu de la prestation</b> · pros inscrits, actifs et disponibles · <span id="hero-phase">🇨🇮 Actif à Bouaké</span></div>
+        <!-- 🔒 01/10 (consigne du PDG) : la ligne « Recherche autour du lieu de la prestation · pros
+             inscrits, actifs et disponibles · 🌐 Actif à Bouaké » est RETIRÉE de l'accueil — elle
+             répétait ce que dit déjà la demande de localisation juste au-dessus. Les deux éléments que
+             l'application met à jour toute seule (#hero-phase et son symbole) restent dans la page,
+             masqués : aucune fonction ne casse, plus rien ne s'affiche. -->
+        <span id="hero-phase" aria-hidden="true" style="display:none"><span id="hero-symbole"></span></span>
       </div>
     </div>
   </div>
@@ -1507,9 +1559,10 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     <h2 class="acc-sect">Services populaires</h2>
     <div id="accueil-pop" class="acc-pop"></div>
     <button type="button" id="btn-tous-svc" data-opt="tous_services" class="acc-tous" onclick="catNatOuvrir()">📚 Voir tous les services <span id="catnat-n"></span> →</button>
-    <div style="font-size:13.5px;color:var(--muted);margin-top:7px;text-align:center" id="catnat-sous">Le catalogue national — touchez une catégorie</div>
-    <!-- 🧰 lot 128 : les services du tableau de bord, tous réservables (consigne du PDG) -->
-    <button type="button" id="btn-reserver-svc" onclick="if(typeof goBook==='function'){goBook();}else{showView('view-book',null,'client');}" style="width:100%;margin-top:10px;border:2px solid #E85D04;background:#FFF6EE;color:#9A3412;font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:15px;cursor:pointer;min-height:52px">🧰 Réserver un service — <span id="acc-svc-n">—</span> disponibles →</button>
+    <div style="font-size:13.5px;color:var(--muted);margin-top:7px;text-align:center" id="catnat-sous">Touchez une catégorie.</div>
+    <!-- 🧰 01/10 : le second bouton orange « Réserver un service — 61 disponibles » quitte l'accueil.
+         La réservation complète (les 61 services, un par un) reste à l'onglet 🧹 Réserver, toujours
+         présent en bas de l'écran. Le compteur #acc-svc-n reste écrit par svc128Compter() s'il existe. -->
     <!-- la liste complète vit dans la fenêtre « 📚 Tous les services » : elle n'encombre plus l'accueil -->
     <div id="catnat-pop" class="hidden" aria-hidden="true" style="display:none"></div>
     <button type="button" id="home-svc-toggle" onclick="accueilToggleSvc()" style="display:none">📂 Voir la liste des métiers et leurs prix ▾</button>
@@ -1518,16 +1571,10 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
 
   <!-- ═══ ③ ACCÈS RAPIDE — discret, SOUS la recherche (jamais devant) ═══ -->
   <div style="padding:0 12px">
-    <div class="acc-chips">
-      <button type="button" id="rap-urgence" data-opt="urgence" class="cat-chip" onclick="ouvrirRubrique('urgence')" style="display:flex;align-items:center;gap:6px;border-color:#f3c9c9"><span>🆘</span><b style="color:#c62828">Urgence</b></button>
-      <button type="button" id="rap-points" data-opt="points" class="cat-chip" onclick="ouvrirRubrique('points')" style="display:flex;align-items:center;gap:6px"><span>🪙</span><b>Klean Points</b><span id="rap-pts" style="opacity:.75"></span></button>
-      <button type="button" id="rap-quiz" data-opt="quiz" class="cat-chip" onclick="ouvrirRubrique('quiz')" style="display:flex;align-items:center;gap:6px"><span>🧠</span><b>Quiz</b></button>
-      <button type="button" class="cat-chip" id="rap-jeux" data-opt="jeux" onclick="ouvrirRubrique('jeux')" style="display:none;align-items:center;gap:6px"><span>🎮</span><b>Jeux</b></button>
-      <button type="button" id="rap-infos" data-opt="infos" class="cat-chip" onclick="ouvrirRubrique('infos')" style="display:flex;align-items:center;gap:6px"><span>ℹ️</span><b>Infos</b></button>
-      <button type="button" id="rap-options" data-opt="options_client" class="cat-chip" onclick="ouvrirRubrique('options')" style="display:flex;align-items:center;gap:6px"><span>⚙️</span><b>Options</b></button>
-    </div>
-    <div id="flip-slot" class="hidden" style="margin:0 0 13px"></div>
-    <button type="button" id="espace-pro-btn" data-opt="espace_pro" class="acc-pro" onclick="setMode('agent')">🧑‍💼 <b>Vous êtes professionnel&nbsp;?</b> Recevez des missions près de chez vous — <b>75 % du montant vous revient.</b> Rejoindre KLEAN →</button>
+    <!-- 🧭 REFONTE 129 (30/09) : 🆘 Urgence et 🎮 Jeux ont rejoint 👤 MON COMPTE.
+         Ils gardent leurs identifiants (rap-urgence, rap-jeux, rap-flip) et leurs fonctions :
+         aucun doublon sur l'accueil, rien de perdu pour l'utilisateur. -->
+    <div style="font-size:13.5px;color:var(--muted);margin:2px 0 10px;text-align:center">Tout le reste est dans <b>👤 Compte</b>.</div>
     <!-- ═══ 🧩 29/09 (lot 123) — LES GRANDES OPTIONS DE L'ACCUEIL ═══
          Elles sont écrites ici par le registre central (optsRendu) : le PDG décide lesquelles
          s'affichent, dans quel ordre, et si elles sont actives. Un écran vide = aucune option. -->
@@ -1541,7 +1588,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
       <div id="acc-secours"></div>
       <div id="acc-opts-etat"></div>
     </div>
-    <p class="note" style="margin-top:14px">KLEAN — la plateforme ivoirienne des services à domicile.<br>📍 Côte d’Ivoire 🇨🇮</p>
+    <p class="note" style="margin-top:14px">KLEAN — la plateforme ivoirienne des services à domicile.<br>📍 Côte d’Ivoire · <span id="ref129-symbole-bas" style="display:inline-flex;align-items:center;gap:5px;color:var(--pd)"><span id="ref129-symbole-ic"></span>ambition internationale</span></p>
   </div>
 </div>
 
@@ -1780,7 +1827,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
       <h3 class="sect-title">📞 Vos pros les plus proches <small>Par quartier ou GPS — appelez ou réservez</small></h3>
       <div id="proches-slot"></div>
 
-      <h3 class="sect-title">🗺️ KLEAN partout en Côte d'Ivoire 🇨🇮 <small>Activez votre ville depuis le menu 📍 en haut</small></h3>
+      <h3 class="sect-title">🗺️ KLEAN partout en Côte d'Ivoire <small>Activez votre ville depuis le menu 📍 en haut</small></h3>
       <div class="city-road" id="home-road"></div>
 
       <h3 class="sect-title">📊 KLEAN en chiffres</h3>
@@ -1799,10 +1846,16 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
       </div>
       <p class="note" style="margin-top:8px">Ces métiers ne sont <b>jamais</b> confiés à un professionnel sans diplôme ou agrément vérifié. En attendant, garde d'enfants, aide aux seniors, livraison et garde d'animaux sont <b>déjà disponibles</b> dans « 📚 Voir tous les services ».</p>
 
+      <!-- 🧭 REFONTE 129 (consigne du PDG, point ①) : ce pavé professionnel vit DANS MON COMPTE
+           (page ℹ️ Informations) et son bouton suit la logique du compte unique : la personne
+           connectée ouvre son compte professionnel sur SON compte (goProConnect rattache la
+           demande au profil), et si le compte est déjà validé elle retrouve son espace.
+           ⛔ Aucune porte vers l'espace professionnel n'est supprimée : la destination reste
+           l'espace pro, exactement comme avant. -->
       <div class="banner">
         <b>🧑‍💼 Devenez professionnel KLEAN</b>
         <p><span id="home-banner-p">Vous êtes à Bouaké ? Recevez des missions près de chez vous, quand vous voulez.</span><br><b style="font-size:14px">75% du montant de chaque mission vous revient.</b></p>
-        <button onclick="setMode('agent')">Rejoindre la flotte →</button>
+        <button onclick="infosProOuvrir()">🧑‍💼 Ouvrir mon compte professionnel →</button>
       </div>
     </div>
   </div>
@@ -1896,7 +1949,7 @@ body.opt-anim-off .acc-fill-attente{animation:none !important}
     <div class="bkg">
       <div class="agent-row" style="margin-bottom:14px">
         <div class="avatar" id="prof-avatar">A</div>
-        <div><b id="prof-name">—</b><small id="prof-sub">Professionnel KLEAN 🇨🇮</small></div>
+        <div><b id="prof-name">—</b><small id="prof-sub">Professionnel KLEAN</small></div>
       </div>
       <div class="inp-row"><label>👤 Nom complet</label><input class="inp" id="prof-nom" placeholder="Votre nom"></div>
       <div class="inp-row"><label>📍 Quartier principal</label><select class="inp" id="prof-quartier"></select></div>
@@ -2376,7 +2429,7 @@ function setCity(id, silent){
   const _cc = $('#city-chip'); if(_cc) _cc.innerHTML = '📍 '+city.nom+' ▾';
   const svcN = $('#svc-city-name'); if(svcN) svcN.textContent = city.nom+' ▾';
   /* 🛡️ chaque élément est vérifié : un identifiant manquant ne casse plus tout le changement de ville */
-  const _ph = $('#hero-phase'); if(_ph) _ph.innerHTML = '🇨🇮 Actif à '+city.nom;
+  const _ph = $('#hero-phase'); if(_ph) _ph.innerHTML = window.ref129Symbole(14) + ' Actif à '+city.nom;
   const _has = $('#hero-agents-sub'); if(_has) _has.textContent = 'Professionnels inscrits à '+city.nom;
   if(typeof refreshStats==='function') refreshStats();
   const _han = $('#hero-agents-n'); if(_han) _han.textContent = (window._stats && window._stats.agentsTotal) || '—';
@@ -2767,6 +2820,16 @@ function setMode(m){
   }
 }
 function goProConnect(){ _wantProClaim = true; setMode('agent'); }
+/* 🧭 REFONTE 129 : le pavé professionnel de la page Informations emprunte la MÊME logique que la
+   carte « compte professionnel » de Mon compte — un seul compte, la demande pro est rattachée au
+   profil connecté. Rien de nouveau côté serveur : on appelle ce qui existe déjà. */
+function infosProOuvrir(){
+  var deja = false;
+  try{ deja = !!(agent && agent.apply && agent.apply.status === 'approved'); }catch(e){}
+  if(deja){ try{ ouvrirEspacePro(); }catch(e){ goProConnect(); } }
+  else { goProConnect(); }
+}
+try { window.infosProOuvrir = infosProOuvrir; } catch (e) { }
 function goCreatePro(){ try{ setMode('agent'); window.scrollTo({top:0,behavior:'smooth'}); }catch(e){ toast('⚠️ Écran pro indisponible'); } }
 function goCreateClient(){ accTab='register'; goClientAccount(); setTimeout(function(){ var t=document.getElementById('acc-forms-slot'); if(t) t.scrollIntoView({behavior:'smooth'}); },80); }
 function goBookings(){ try{ setMode('client'); var btn=document.querySelector('#nav-client .nav-btn[data-v="view-bookings"]'); showView('view-bookings', btn, 'client'); }catch(e){} }
@@ -4912,8 +4975,8 @@ function _accHeroHTML(){
   <div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:14px;display:flex;align-items:center;gap:12px;margin-bottom:14px;box-shadow:var(--shadow)">
     <span style="font-size:27px;flex:none">🧑‍💼</span>
     <span style="flex:1;min-width:0">
-      <b style="display:block;font-size:14px">${proLinked ? 'Mon espace professionnel' : 'Créer mon compte professionnel'}</b>
-      <small style="color:var(--muted);font-size:11px;line-height:1.35;display:block">${proLinked ? 'Vos missions, votre ville de service, vos gains' : 'Travaillez à votre rythme, missions près de chez vous'}</small>
+      <b style="display:block;font-size:14px">${proLinked ? 'Mon espace professionnel' : 'Mon compte professionnel'}</b>
+      <small style="color:var(--muted);font-size:11px;line-height:1.35;display:block">${proLinked ? 'Vos missions, votre ville de service, vos gains' : 'Le même compte : travaillez à votre rythme, missions près de chez vous. Validation par INTER avant les missions.'}</small>
     </span>
     ${proLinked ? `
     <span style="flex:none;display:flex;flex-direction:column;gap:6px;text-align:center">
@@ -4922,8 +4985,8 @@ function _accHeroHTML(){
       <button class="btn-ghost" style="padding:7px 11px;font-size:11.5px;color:var(--danger)" onclick="agentLogout()">⏻ Déconnecter le pro</button>
     </span>` : `
     <span style="flex:none;display:flex;flex-direction:column;gap:6px">
-      <button class="btn-main" style="padding:9px 14px;font-size:12.5px" onclick="goCreatePro()">📝 Créer</button>
-      <button class="btn-line" style="padding:8px 11px;font-size:12px" onclick="goProConnect()">🔑 Se connecter</button>
+      <button class="btn-main" style="padding:9px 14px;font-size:12.5px" onclick="goCreatePro()" aria-label="Compléter mes informations professionnelles">📝 Devenir pro</button>
+      <button class="btn-line" style="padding:8px 11px;font-size:12px" onclick="goProConnect()">🔑 Mon espace</button>
     </span>`}
   </div>`;
   return carteClient + cartePro;
@@ -4932,11 +4995,95 @@ function ouvrirEspacePro(){
   try{ setMode('agent'); }
   catch(e){ toast('Espace professionnel indisponible'); }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   🧭 30/09 — REFONTE 129 (consigne du PDG) : « Mon compte » devient le centre de l'application.
+   Rien n'est supprimé : chaque fonction qui quitte l'accueil est DÉPLACÉE ici, avec son
+   fonctionnement intact (mêmes identifiants, mêmes actions, mêmes réglages du PDG au HQ).
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+const REFONTE129_AU_COMPTE = ['points','quiz','infos','options_client','jeux','flip','urgence',
+                              'job_pres','avis_recherche','ecole','devenir_pro','job_trav','espace_pro'];
+/* 🌍 le symbole de l'ambition internationale (remplace le drapeau comme élément général).
+   Dessiné ici en clair : aucun fichier extérieur, donc rien ne peut casser ni manquer. */
+function ref129Symbole(px){
+  var t = px || 18;
+  return '<svg viewBox="0 0 24 24" width="' + t + '" height="' + t + '" aria-hidden="true"'
+    + ' style="vertical-align:-2px;flex:none"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>'
+    + '<path d="M3.4 9.6h17.2M3.4 14.4h17.2" fill="none" stroke="currentColor" stroke-width="2"/>'
+    + '<path d="M12 3a15 15 0 0 0 0 18M12 3a15 15 0 0 1 0 18" fill="none" stroke="currentColor" stroke-width="1.8"/>'
+    + '<path d="M4 18.5c5-5.5 11-5.5 16 0" fill="none" stroke="currentColor" stroke-width="2" opacity=".5"/></svg>';
+}
+/* 💬 le message d'ouverture du compte (consigne du PDG, mot pour mot) */
+function ref129MessageHTML(){
+  return '<div id="ref129-message" style="background:linear-gradient(135deg,#FFF6EE,#FFE8D6);'
+    + 'border:2px solid #E85D04;border-radius:16px;padding:14px;margin:0 0 13px;text-align:center">'
+    + '<b style="display:block;font-size:16.5px;line-height:1.3;color:#9A3412">Klean Services</b>'
+    + '<span style="display:block;font-size:14.5px;font-weight:800;color:#1A1410;margin-top:4px">'
+    + 'Tout commence par une mise en relation.</span></div>';
+}
+/* 👤 LE COMPTE : l'accès au compte professionnel et aux activités, au même endroit */
+function ref129BlocCompte(){
+  function tuile(id, ic, titre, sous, action, attrs){
+    /* 🧭 REFONTE 129 : si le PDG a désactivé l'option au HQ, la tuile de MON COMPTE le dit
+       (⏸️ + message) au lieu de faire croire que le bouton ne répond pas. */
+    const off = !!attrs && (typeof optEstActif === 'function') && (optEstActif(attrs) === false);
+    const msg = off ? '<small style="display:block;color:#B91C1C;font-weight:900;margin-top:2px">⏸️ Option désactivée par KLEAN pour le moment</small>' : '';
+    return '<button type="button" class="hub-tile"' + (id ? ' id="' + id + '"' : '') + ' data-opt="' + (attrs || '') + '" onclick="' + action + '">'
+      + '<span class="ic">' + ic + '</span><span><b>' + titre + '</b><small>' + sous + '</small>' + msg + '</span>'
+      + '<span class="go">›</span></button>';
+  }
+  /* 🧭 REFONTE 129 : l'ORDRE des tuiles suit celui que le PDG a réglé au HQ (le même réglage
+     qu'avant, appliqué à leur nouvel emplacement dans Mon compte). */
+  function bloc(html, optId, defaut){
+    let o = defaut;
+    try { const e = (typeof optEtat === 'function') ? (optEtat(optId) || {}) : {}; if (typeof e.ordre === 'number') o = e.ordre; } catch (err) { }
+    return { o: o, h: html };
+  }
+  const liste = [
+    /* 🧑‍💼 LE COMPTE PROFESSIONNEL — même compte utilisateur, informations professionnelles en plus */
+    bloc(tuile('ref129-tuile-pro', '🧑‍💼', 'Mon compte professionnel',
+        'Le même compte : vous ajoutez vos informations professionnelles. <b>75 % du montant vous revient.</b> '
+        + 'Validation par INTER avant de recevoir des missions.',
+        "ref129Ouvrir('devenir_pro')", 'devenir_pro')
+      + '<div id="ref129-lien-pro" style="margin-top:8px"></div>', 'devenir_pro', 170),
+    /* 💼 L'EMPLOI — les deux faces, au même endroit */
+    bloc(tuile('ref129-tuile-job', '🔎', 'Je cherche un job',
+        'Trouver du travail ou une mission près de chez vous', "ref129Ouvrir('job_pres')", 'job_pres'), 'job_pres', 30),
+    bloc(tuile('ref129-tuile-emp', '🧑‍🔧', 'Je cherche un employé',
+        'Publier une offre et recevoir des candidatures', "ref129Ouvrir('job_trav')", 'job_trav'), 'job_trav', 35),
+    /* 📢 AVIS DE RECHERCHE */
+    bloc(tuile('ref129-tuile-avis', '📢', 'Avis de recherche',
+        'Consulter ou publier un avis de recherche', "ref129Ouvrir('avis_recherche')", 'avis_recherche'), 'avis_recherche', 40),
+    /* 🏫 ÉCOLE & FAMILLE */
+    bloc(tuile('ref129-tuile-ecole', '🏫', 'École & Famille',
+        'École, cours à domicile, accompagnement familial, convocations et réunions', "ref129Ouvrir('ecole')", 'ecole')
+      + '<div id="ref129-lien-ecole" style="margin-top:8px"></div>', 'ecole', 165)
+  ];
+  liste.sort((a, b) => a.o - b.o);
+  return '<div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:13px;margin:4px 0 10px">'
+    + '<b style="display:block;font-size:14px;margin-bottom:2px">🧭 Mon compte & mes activités</b>'
+    + '<small style="color:var(--muted);font-size:11.5px">Tout est ici : votre compte personnel, votre compte professionnel '
+    + 'et les activités KLEAN. Un seul compte, deux usages.</small></div>'
+    + liste.map(x => x.h).join('');
+}
+/* ouvre une option par le chemin officiel (elle respecte l'état choisi par le PDG au HQ) */
+function ref129Ouvrir(id){
+  try{ if(typeof optOuvrir === 'function' && optOuvrir(id)) return true; }catch(e){}
+  try{
+    var d = (typeof KLEAN_OPTS_DEF !== 'undefined') ? KLEAN_OPTS_DEF[id] : null;
+    if(d && d.vue){ showView(d.vue, null, 'client'); return true; }
+  }catch(e){}
+  return false;
+}
+
 function renderAccount(){
   const box = $('#acc-box');
+  /* 🧭 REFONTE 129 : on note que l'écran Mon compte a été construit — le veilleur sait alors que
+     les options rangées ici peuvent être vérifiées pour de vrai (avant, elles ne sont pas « en panne »). */
+  try { window.__comptePeint = true; } catch (e) { }
   if(client){
     const ini = (client.nom||'?')[0].toUpperCase();
-    box.innerHTML = _accHeroHTML() + `
+    box.innerHTML = ref129MessageHTML() + _accHeroHTML() + `
     <div class="acc-profile" style="text-align:center;margin-bottom:14px">
       <div style="margin:0 auto 10px;width:72px;height:72px;display:flex;align-items:center;justify-content:center">${avatarHTML(client.photo, ini, 72)}</div>
       <b style="font-size:19px;display:block">${client.nom}</b>
@@ -4957,6 +5104,7 @@ function renderAccount(){
       <p class="sub">${BLOCAGE.motif ? ('Motif : <b>'+BLOCAGE.motif+'</b><br>') : ''}Vous ne pouvez plus passer de nouvelle demande. Contactez Klean-Service pour régulariser votre situation.</p>
     </div>` : ''}
     ${hubRubriquesHTML()}
+    ${ref129BlocCompte()}
     <div style="background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:13px;margin-bottom:11px">
       <b style="display:block;font-size:14px;margin-bottom:2px">👤 Mon compte</b>
       <small style="color:var(--muted);font-size:11.5px">Tout ce qui concerne votre personne, votre sécurité et vos données.</small>
@@ -4973,10 +5121,18 @@ function renderAccount(){
     <button class="btn-line" style="color:var(--danger)" onclick="clientLogout()">⏻ <span>Se déconnecter</span></button>
     ${kBlocEcranHTML()}`;
     openIn1s(function(){ try{ paintJeu(); }catch(e){} });   /* 🎮 le jeu apparaît aussi dans le profil (si le PDG l'a choisi) */
+    /* 🧭 REFONTE 129 : les deux boutons du lot 126 (🏫 École & famille, 🧑‍💼 Devenir professionnel)
+       sont écrits DANS Mon compte — on les peint tout de suite après l'affichage du compte (sinon
+       ils n'apparaissaient qu'au prochain passage du peintre : un vrai défaut corrigé ici). */
+    try { if (typeof l126AccueilPainte === 'function') l126AccueilPainte(); } catch (e) { }
+    try { optsRendu(); } catch (e) { }   /* 🧭 REFONTE 129 : l'état des options (PDG) s'applique aux boutons de MON COMPTE */
     openIn1s(verifierMonCompte);
     return;
   }
-  box.innerHTML = _accHeroHTML() + `${kBlocEcranHTML()}<div id="acc-forms-slot"></div>
+  /* 🧭 REFONTE 129 : même sans être connecté, « Mon compte » reste le CENTRE — on y retrouve
+     Urgence, Informations, Options, Klean Points, Quiz, Jeux : chaque bouton explique lui-même
+     qu'il faut se connecter (aucun bouton mort). */
+  box.innerHTML = ref129MessageHTML() + _accHeroHTML() + `${ref129BlocCompte()}${hubRubriquesHTML()}${kBlocEcranHTML()}<div id="acc-forms-slot"></div>
   ${accTab==='register' ? `
   <div class="gate-card">
     <h4>✨ Créez votre compte KLEAN</h4>
@@ -5013,6 +5169,9 @@ function renderAccount(){
   </div>`}
   <p class="note">🔒 Votre mot de passe est stocké hashé (chiffré) — personne ne peut le lire, pas même KLEAN.</p>`;
   try{ setTimeout(majEtatConditions, 0); }catch(e){}   /* 📜 état des conditions (client) */
+  try{ paintJeu(); }catch(e){}   /* 🎮 le jeu du profil (Mon compte) */
+  try { if (typeof l126AccueilPainte === 'function') l126AccueilPainte(); } catch (e) { }   /* 🏫🧑💼 les 2 boutons du lot 126, peints dans Mon compte */
+  try { optsRendu(); } catch (e) { }   /* 🧭 REFONTE 129 : idem pour la page d'accueil non connecté */
 }
 function accRule(id, ok, txt){ const d = document.getElementById(id); if(!d) return; d.className = ok?'ok':''; d.textContent = (ok?'●':'○')+' '+txt; }
 function accStrength(){ const v = (document.getElementById('ac-pw')||{}).value || '';
@@ -5971,7 +6130,9 @@ try { window.proOuvrir = proOuvrir; window.proMonter = proMonter; } catch (e) { 
 function l126AccueilPainte() {
   try { accFavorisCharger(); } catch (e) { }
   /* 🏫 le bouton École & famille (identifiant stable pour le registre du PDG) */
-  const ze = document.getElementById('acc-ecole-lien');
+  /* 🧭 REFONTE 129 : le bouton vit désormais dans MON COMPTE (même identifiant « opt-ecole »,
+     donc le registre du PDG, les contrôles et l'action restent branchés à l'identique). */
+  const ze = document.getElementById('ref129-lien-ecole');   /* 🧭 REFONTE 129 : uniquement dans MON COMPTE */
   if (ze) {
     const o = (typeof optEtat === 'function') ? (optEtat('ecole') || {}) : {};
     ze.innerHTML = (o.actif === false || o.visible === false) ? '' :
@@ -5979,7 +6140,8 @@ function l126AccueilPainte() {
       + '<div style="font-size:12.5px;color:var(--muted);margin-top:5px;text-align:center">Suivre la scolarité de son enfant, recevoir les informations, les convocations et les réunions</div>';
   }
   /* 🧑‍💼 le bouton « devenir professionnel » (même compte) */
-  const zp = document.getElementById('acc-pro-lien');
+  /* 🧭 REFONTE 129 : idem pour « Mon compte professionnel » (même identifiant « opt-devenir-pro »). */
+  const zp = document.getElementById('ref129-lien-pro');     /* 🧭 REFONTE 129 : uniquement dans MON COMPTE */
   if (zp) {
     const o = (typeof optEtat === 'function') ? (optEtat('devenir_pro') || {}) : {};
     zp.innerHTML = (o.actif === false || o.visible === false) ? '' :
@@ -6037,7 +6199,7 @@ try{ window.__kleanInit = 1; }catch(e){}     /* ✅ le démarrage est allé au b
   try{ if(window.kVeilleRetirer) window.kVeilleRetirer(); }catch(e){}   /* l'alerte éventuelle s'efface d'elle-même */
   /* 🔎 « Vérifier les mises à jour » : le client (et le PDG) peut savoir d'un geste s'il a la
      dernière page. Sans cela, un téléphone pouvait rester sur l'ancienne version sans le dire. */
-  window.KLEAN_VERSION = '126.0';
+  window.KLEAN_VERSION = '129.0';
   window.kVerifierVersion = function(){
     try{ toast('🔍 Vérification de la mise à jour…'); }catch(e){}
     try{
@@ -6727,16 +6889,25 @@ window.__affOK = 1;   // 🛡️ publicité branchée
    Les 5 rubriques (Options, Informations, Urgence, Quiz, Points) sont ici en accès direct.
    ═══════════════════════════════════════════════════════════════════════════ */
 function hubRubriquesHTML(){
+  /* 🧭 REFONTE 129 : ces quatre-là vivaient sur l'accueil ; elles sont ICI, avec les MÊMES
+     identifiants (#rap-options, #rap-infos, #rap-quiz, #rap-points) : le registre du PDG, les
+     contrôles automatiques et les actions continuent de les trouver et de les piloter. */
   return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
-    + [['options','⚙️','Options','Réglages'],['infos','ℹ️','Informations','Actualités'],
-       ['urgence','🆘','Urgence','Aide immédiate'],['quiz','🧠','Quiz','Apprendre'],
-       ['points','🪙','Klean Points','Solde & récompenses'],['jeux','🎮','Jeux','En direct'],
-       ['flip','🎮','Flip Fizz','Jeu Klean']]
-      .map(x=>'<button type="button" onclick="'+(x[0]==='flip'?'flipOuvrir()':'ouvrirRubrique(\''+x[0]+'\')')+'" style="text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:11px;cursor:pointer;font:inherit;color:var(--ink)">'
+    + [['options','⚙️','Options','Réglages','rap-options','options_client'],
+       ['infos','ℹ️','Informations','Actualités','rap-infos','infos'],
+       ['urgence','🆘','Urgence','Aide immédiate','rap-urgence','urgence'],
+       ['quiz','🧠','Quiz','Apprendre','rap-quiz','quiz'],
+       ['points','🪙','Klean Points','Solde & récompenses','rap-points','points'],
+       ['jeux','🎮','Jeux','En direct','rap-jeux','jeux'],
+       ['flip','🎮','Flip Fizz','Jeu Klean','rap-flip','flip']]
+      .map(x=>'<button type="button"'+(x[4]?(' id="'+x[4]+'" data-opt="'+x[5]+'"'):'')
+        +' onclick="'+(x[0]==='flip'?'flipOuvrir()':'ouvrirRubrique(\''+x[0]+'\')')+'" style="text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:11px;cursor:pointer;font:inherit;color:var(--ink)">'
         + '<div style="font-size:21px">'+x[1]+'</div><b style="display:block;font-size:13px;margin-top:3px">'+x[2]+'</b><small style="color:var(--muted);font-size:11px">'+x[3]+'</small></button>').join('')
     + '</div>'
     /* 🎮 le bloc Jeux du profil est PLEINE LARGEUR (hors de la grille des rubriques) */
-    + '<div id="jeu-compte"></div>';
+    + '<div id="jeu-compte"></div>'
+    /* 🎮 Flip Fizz : l'emplacement du jeu dans MON COMPTE (🧭 REFONTE 129 : plus sur l'accueil) */
+    + '<div id="flip-compte" class="hidden"></div>';
 }
 /* 🎮 la rubrique Jeux : ce que le PDG a publié (emplacement « rubrique Jeux » dans le HQ) */
 function renderJeux(){
@@ -7373,7 +7544,9 @@ async function chargerFlipAccueil(){
   let f = null;
   try{ f = await fetch('/api/flip', { headers: cliHdrs(), cache:'no-store' }).then(r=>r.json()); }catch(e){ f = null; }
   FLIP = (f && f.flip) || null;
-  const slot = document.getElementById('flip-slot'); if(!slot) return;
+  /* 🧭 REFONTE 129 : ce bloc vivait sur l'accueil (🆘🎮🎯) — il a rejoint 👤 MON COMPTE, exactement
+     avec les mêmes réglages du PDG (actif / affiché / image / points). Rien n'a été supprimé. */
+  const slot = document.getElementById('flip-compte') || document.getElementById('flip-slot'); if(!slot) return;
   if(!FLIP || !FLIP.actif || !FLIP.accueil){ slot.classList.add('hidden'); slot.innerHTML=''; return; }
   const pts = FLIP.connecte ? ('🪙 ' + (FLIP.solde||0) + ' points') : 'Connectez-vous pour gagner';
   slot.innerHTML = '<div style="background:linear-gradient(160deg,#0d7a45,#065c33);color:#fff;border-radius:16px;padding:13px;box-shadow:0 8px 20px rgba(4,60,33,.3)">'
@@ -8046,7 +8219,7 @@ async function catNatAccueil(){
     const s = document.getElementById('catnat-sous');
     /* 🧰 29/09 : on écrit noir sur blanc qu'il s'agit du CATALOGUE NATIONAL (48 services) pour que
        personne ne confonde avec les services réservables du tableau de bord (61 dans « Réserver »). */
-    if(s) s.textContent = CATU.nbServices + ' services au catalogue national · ' + CATU.nbTaches + ' tâches — touchez une catégorie';
+    if(s) s.textContent = CATU.nbServices + ' services — touchez une catégorie';
     /* 📊 29/09 — le vrai nombre de services s'écrit dans SON compteur (bloc « KLEAN en chiffres », ℹ️ Infos)
        et plus par un bricolage qui cherchait le texte « 17 » partout dans la page. */
     try{ const sn = document.getElementById('svc-count-n'); if(sn) sn.textContent = String(CATU.nbServices); }catch(e){}
@@ -8316,7 +8489,7 @@ function langBarre(ou){
     + b('🎤','Parler',"langMicro('"+ou+"')")
     + b('📷','Ajouter une photo',"langPhoto('"+ou+"')")
     + b('📍','Ma position',"langLieuRapide('"+ou+"')")
-    + b('⚡','Urgence',"ouvrirRubrique('urgence')")
+    /* 🧭 REFONTE 129 : ⚡ Urgence est désormais dans MON COMPTE (il n'est plus dupliqué ici) */
     + '</div>'
     + '<button type="button" onclick="langJeNeSaisPas()" style="width:100%;margin-top:8px;border:1.5px dashed #DCD2FA;background:#F7F4FF;color:#4a2ea8;font:inherit;font-weight:900;padding:10px;border-radius:12px;cursor:pointer;font-size:14px">🤔 Je ne sais pas quel service choisir</button>';
 }
@@ -8671,7 +8844,10 @@ async function langAfficherPros(ou){
   if(LANG.ou === 'rech') return rechLancer();
   return rechercherDepuisAccueil();
 }
-try{ const zb = document.getElementById('lang-barre-accueil'); if(zb) zb.innerHTML = langBarre('accueil'); }catch(e){}
+/* 🧭 01/10 : cette barre (🎤 Parler · 📷 Ajouter une photo · 📍 Ma position · 🤔 Je ne sais pas
+   quel service choisir) ne s'affiche plus sur l'accueil : elle apparaît à l'écran de RECHERCHE
+   (langBarre('rech')), là où l'utilisateur décrit son besoin. Aucune fonction retirée : langMicro,
+   langPhoto, langLieuRapide et langJeNeSaisPas restent branchés, au même endroit pour l'utilisateur. */
 
 /* ═══════════ L'ÉCRAN UNIQUE : « De quoi avez-vous besoin ? » ═══════════ */
 const RECH_POP = ['cours','maison','clim','plomberie','electricite','jardinage','cuisine','placement','grand','placement'];
@@ -8692,7 +8868,7 @@ function rechVueQ(){
   const kp = rechKpDetect(RECH.q||'');
   return '<div style="background:#fff;border-radius:16px;padding:15px;box-shadow:0 2px 10px rgba(0,0,0,.05)">'
     + '<h3 style="margin:0 0 4px;font-size:16.5px">De quoi avez-vous besoin ?</h3>'
-    + '<p style="margin:0 0 11px;color:#7A6A5E;font-size:14px">Écrivez-le simplement : <b>nettoyage</b>, <b>fuite d’eau</b>, <b>cours à domicile</b>… Klean comprend et cherche autour du <b>lieu de la prestation</b>.</p>'
+    + '<p style="margin:0 0 11px;color:#7A6A5E;font-size:14px">Écrivez-le simplement — Klean comprend.</p>'
     + '<input class="inp" id="rech-q" placeholder="Écrivez comme vous parlez — ex. ma clim ne refroidit plus" value="'+rechEch(RECH.q||'')+'" oninput="RECH.q=this.value;rechMajChamp();langSaisie(this.value,\'rech\')" onkeydown="if(event.key===\'Enter\'){event.preventDefault();langAfficherPros(\'rech\');}" style="margin-bottom:9px;font-size:15px;font-weight:700" autocomplete="off">'
     + '<div id="rech-aide">'+(kp
         ? ('<div style="background:#FFF4E8;border:1.5px solid #F6D9BE;border-radius:12px;padding:10px 11px;font-size:14px;font-weight:800;color:#8a3d00;margin-bottom:10px">🎫 Code détecté : '+rechEch(kp)+' <button type="button" onclick="rechParNumCode(\''+kp+'\')" style="margin-left:6px;border:none;background:var(--p);color:#fff;font:inherit;font-weight:900;padding:6px 10px;border-radius:9px;cursor:pointer;font-size:14px">Afficher ce pro</button></div>')
@@ -8710,7 +8886,7 @@ function rechVueQ(){
     + '<div style="margin-top:12px;padding-top:11px;border-top:1.5px dashed #F6D9BE">'
     + '<div style="font-size:14px;font-weight:900;color:var(--pd)">🎫 Vous connaissez déjà votre professionnel ?</div>'
     + '<button type="button" onclick="RECH.etape=\'num\';rechPeindre()" style="width:100%;margin-top:7px;border:1.5px solid #F6D9BE;background:#FFF4E8;color:var(--pd);font:inherit;font-weight:900;padding:11px;border-radius:12px;cursor:pointer;font-size:14px">Entrer son code KP (ex. KP015842)</button></div>'
-    + '<div style="margin-top:10px;font-size:14px;color:#7A6A5E">🔒 Votre position sert uniquement au calcul de la distance et n’est jamais affichée.</div>'
+    + '<div style="margin-top:10px;font-size:14px;color:#7A6A5E">🔒 Votre position n’est jamais affichée.</div>'
     + '</div>';
 }
 /* liste de métiers proposée dans la fenêtre de recherche */
@@ -8840,8 +9016,7 @@ function rechVuePos(){
     + (RECH.chaine ? '<small style="color:#6b7c73;display:block">📚 '+rechEch([RECH.chaine.categorie, RECH.chaine.service, RECH.chaine.sous].filter(Boolean).join(' › '))+'</small>' : '')
     + '<small style="color:#6b7c73">Ville : <b>'+rechEch(rechVille()||'—')+'</b>'+(rechQuartier()?(' · quartier '+rechEch(rechQuartier())):'')+'</small></div></div>'
     + (RECH.msgErr ? ('<div style="background:#fff4f2;border:1.5px solid #ffd9d1;color:#b03a1a;border-radius:12px;padding:11px 12px;font-size:14px;font-weight:700;margin-bottom:12px">'+RECH.msgErr+'</div>') : '')
-    + '<p style="margin:0 0 12px;font-size:14px;color:#33433c">Pour vous montrer les professionnels <b>les plus proches</b>, Klean a besoin de votre position. '
-    + 'Elle sert <b>uniquement</b> au calcul de la distance : votre adresse exacte n’est <b>jamais</b> affichée, et les pros ne voient qu’une distance approximative.</p>'
+    + '<p style="margin:0 0 12px;font-size:14px;color:#33433c">Pour vous montrer les professionnels <b>les plus proches</b> — votre position n’est jamais affichée.</p>'
     + (gpsOk
       ? '<button onclick="rechLocaliser()" style="width:100%;border:none;cursor:pointer;font:inherit;font-weight:900;background:linear-gradient(135deg,var(--p),var(--pd));color:#fff;padding:14px;border-radius:14px;font-size:15px">📍 Autoriser ma position et chercher</button>'
       : '<div style="background:#fff9e6;border:1.5px solid #ffe6a3;border-radius:12px;padding:11px;font-size:14px;font-weight:700;color:#8a6100">📵 Ce téléphone ne fournit pas de position (GPS indisponible). Utilisez la recherche par ville ou par numéro professionnel.</div>')
@@ -9533,32 +9708,44 @@ async function mesPaiementsPro(){
         rechargement du registre) puis renvoie son résultat — sans passer par le code.
    ═══════════════════════════════════════════════════════════════════════════════════ */
 const KLEAN_OPTS_DEF = {
+  /* 🧭 REFONTE 129 (30/09) : le PDG a fait de MON COMPTE le centre. Les options qui vivaient
+     sur l'accueil sont DÉPLACÉES dans Mon compte — mêmes actions, mêmes écrans, mêmes
+     identifiants : seule la cible change. Le veilleur et l'îlot de secours suivent cette
+     zone « compte » et ne les remettent donc JAMAIS en double sur l'accueil. */
   recherche:      { cibles: ['#acc-btn-rechercher', '#home-svc-search'], zone: 'accueil', vue: 'view-home', action: 'langAfficherPros', arg: 'accueil', protege: true, quoi: 'la recherche d’un service' },
   tous_services:  { cibles: ['#btn-tous-svc'], zone: 'accueil', vue: 'view-home', action: 'catNatOuvrir', quoi: 'le catalogue national' },
-  job_pres:       { cibles: ['#opt-job-pres'], zone: 'grandes', vue: 'view-jobs', action: 'jobsOuvrir', quoi: 'les opportunités de travail' },
-  avis_recherche: { cibles: ['#opt-avis'], zone: 'grandes', vue: 'view-avis', action: 'avisOuvrir', quoi: 'les avis de recherche' },
-  job_trav:       { cibles: ['#opt-job-trav', '#pro-job-trav'], zone: 'accueil', vue: 'view-trav', monteVue: 'travMonter', action: 'travOuvrir', quoi: 'la recherche d’un travailleur' },
-  urgence:        { cibles: ['#rap-urgence'], zone: 'accueil', vue: 'view-urgence', action: 'ouvrirRubrique', arg: 'urgence', quoi: 'les urgences' },
-  points:         { cibles: ['#rap-points'], zone: 'accueil', vue: 'view-points', action: 'ouvrirRubrique', arg: 'points', quoi: 'les Klean Points' },
-  quiz:           { cibles: ['#rap-quiz'], zone: 'accueil', vue: 'view-quiz', action: 'ouvrirRubrique', arg: 'quiz', quoi: 'le quiz' },
-  jeux:           { cibles: ['#rap-jeux'], zone: 'accueil', vue: 'view-jeux', action: 'ouvrirRubrique', arg: 'jeux', quoi: 'les jeux' },
-  flip:           { cibles: ['#flip-slot'], zone: 'accueil', vue: 'view-home', action: null, module: 'chargerFlipAccueil', quoi: 'le jeu Flip Fizz' },
-  infos:          { cibles: ['#rap-infos'], zone: 'accueil', vue: 'view-infos', action: 'ouvrirRubrique', arg: 'infos', quoi: 'les informations' },
-  options_client: { cibles: ['#rap-options'], zone: 'accueil', vue: 'view-options', action: 'ouvrirRubrique', arg: 'options', quoi: 'les réglages' },
+  job_pres:       { cibles: ['#ref129-tuile-job'], zone: 'compte', vue: 'view-jobs', monteVue: 'jobsMonter', action: 'jobsOuvrir', quoi: 'les opportunités de travail' },
+  avis_recherche: { cibles: ['#ref129-tuile-avis'], zone: 'compte', vue: 'view-avis', monteVue: 'avisMonter', action: 'avisOuvrir', quoi: 'les avis de recherche' },
+  job_trav:       { cibles: ['#ref129-tuile-emp'], zone: 'compte', vue: 'view-trav', monteVue: 'travMonter', action: 'travOuvrir', quoi: 'la recherche d’un travailleur' },
+  urgence:        { cibles: ['#rap-urgence'], zone: 'compte', vue: 'view-urgence', action: 'ouvrirRubrique', arg: 'urgence', quoi: 'les urgences' },
+  points:         { cibles: ['#rap-points'], zone: 'compte', vue: 'view-points', action: 'ouvrirRubrique', arg: 'points', quoi: 'les Klean Points' },
+  quiz:           { cibles: ['#rap-quiz'], zone: 'compte', vue: 'view-quiz', action: 'ouvrirRubrique', arg: 'quiz', quoi: 'le quiz' },
+  jeux:           { cibles: ['#rap-jeux'], zone: 'compte', vue: 'view-jeux', action: 'ouvrirRubrique', arg: 'jeux', quoi: 'les jeux' },
+  flip:           { cibles: ['#jeu-compte', '#rap-flip'], zone: 'compte', vue: 'view-home', action: null, module: 'chargerFlipAccueil', quoi: 'le jeu Flip Fizz' },
+  infos:          { cibles: ['#rap-infos'], zone: 'compte', vue: 'view-infos', action: 'ouvrirRubrique', arg: 'infos', quoi: 'les informations' },
+  options_client: { cibles: ['#rap-options'], zone: 'compte', vue: 'view-options', action: 'ouvrirRubrique', arg: 'options', quoi: 'les réglages' },
   publicite:      { cibles: ['#ad-box'], zone: 'publie', vue: 'view-home', action: null, module: 'loadAd', quoi: 'la publicité' },
   annonce:        { cibles: ['#aff-bar'], zone: 'publie', vue: 'view-home', action: null, module: 'loadAffiche', quoi: 'l’affiche aux utilisateurs' },
-  support:        { cibles: ['#sup-fab'], zone: 'publie', vue: 'view-home', action: null, module: 'supBuild', quoi: 'le support' },
-  espace_pro:     { cibles: ['#espace-pro-btn'], zone: 'accueil', vue: 'view-home', action: 'setMode', arg: 'agent', quoi: 'l’espace professionnel' },
+  support:        { cibles: ['#sup-fab'], zone: 'publie', vue: 'view-home', action: 'supOuvrirReel', module: 'supBuild', quoi: 'le support' },
+  espace_pro:     { cibles: ['#ref129-tuile-pro'], zone: 'compte', vue: 'view-home', action: 'setMode', arg: 'agent', quoi: 'l’espace professionnel' },
   langues:        { cibles: ['#lang-barre-accueil'], zone: 'accueil', vue: 'view-home', action: null, module: 'langBarre', quoi: 'le choix des langues' },
+  /* 🧭 REFONTE 129 (30/09, 2ᵉ passe) : Klean Points, Quiz, Informations, Réglages, École & famille et
+     le passage au statut professionnel ont eux aussi leur bloc dans MON COMPTE : leur zone le dit
+     désormais (sinon le veilleur annoncerait au PDG une « absence sur l'accueil » qui n'existe pas). */
   /* 🏫🧑‍💼 29/09 (lot 126) : le compte unique — école ↔ famille, et le passage au statut professionnel */
-  ecole:          { cibles: ['#opt-ecole'], zone: 'accueil', vue: 'view-ecole', action: 'ecoleOuvrir', quoi: 'école & famille', peintParModule: true },
-  devenir_pro:    { cibles: ['#opt-devenir-pro'], zone: 'accueil', vue: 'view-devenir-pro', action: 'proOuvrir', quoi: 'le passage au statut professionnel', peintParModule: true }
+  ecole:          { cibles: ['#opt-ecole'], zone: 'compte', vue: 'view-ecole', action: 'ecoleOuvrir', quoi: 'école & famille', peintParModule: true },
+  devenir_pro:    { cibles: ['#opt-devenir-pro'], zone: 'compte', vue: 'view-devenir-pro', action: 'proOuvrir', quoi: 'le passage au statut professionnel', peintParModule: true }
 };
 const KLEAN_OPTS_CLES = Object.keys(KLEAN_OPTS_DEF);
 /* 📖 le registre est lisible de l'extérieur (contrôles automatiques, outils du PDG) : c'est lui qui
    vérifie qu'aucune mise à jour n'a débranché une grande option. */
 try { window.KLEAN_OPTS_DEF = KLEAN_OPTS_DEF; } catch (e) { }
 let KLEAN_OPTS = { charge: false, at: null, version: 0, options: [], grandes: [], map: {}, source: '' , ordresVus: 0 };
+/* 🔎 L'ÉTAT VIVANT est lisible de l'extérieur, comme le registre ci-dessus : les outils du PDG,
+   les contrôles automatiques et le tableau de bord lisent la VÉRITÉ (nombre d'options, d'où
+   elles viennent : serveur, mémoire…). Sans ça, un outil qui interroge « window.KLEAN_OPTS »
+   voit « undefined » et croit à tort que l'application n'a chargé AUCUNE option. */
+function optsExpose() { try { window.KLEAN_OPTS = KLEAN_OPTS; } catch (e) { } }
 
 function optsCacheLire() {
   try {
@@ -9579,6 +9766,7 @@ async function optsCharger() {
     KLEAN_OPTS = { charge: true, at: d.at, version: d.version || 0, options: d.options, grandes: d.grandes || [], map: {}, source: 'serveur', ordresVus: KLEAN_OPTS.ordresVus };
     KLEAN_OPTS.options.forEach(o => { KLEAN_OPTS.map[o.id] = o; });
     optsCacheEcrire();
+    optsExpose();
     optsRendu();
     return true;
   } catch (e) {
@@ -9588,6 +9776,7 @@ async function optsCharger() {
     if (c) {
       KLEAN_OPTS = { charge: false, at: c.at, version: c.version, options: c.options, grandes: c.grandes || [], map: {}, source: 'mémoire' };
       KLEAN_OPTS.options.forEach(o => { KLEAN_OPTS.map[o.id] = o; });
+      optsExpose();
       optsRendu();
     }
     return false;
@@ -9603,6 +9792,9 @@ function optEstVisible(id) { const o = optEtat(id); return o.inconnu ? true : (o
 
 /* ─────────────── ② le rendu de l'accueil : les grandes options du bas + les états ─────────────── */
 function optHTMLGrande(o) {
+  /* 🧭 REFONTE 129 : ces options ne s'affichent plus sur l'accueil — elles vivent dans Mon compte.
+     Elles gardent leur écran, leur action, leur réglage au HQ : seul l'endroit visible change. */
+  try{ if(typeof REFONTE129_AU_COMPTE !== 'undefined' && REFONTE129_AU_COMPTE.indexOf(o.id) >= 0) return ''; }catch(e){}
   const off = (o.actif === false);
   return ''
     + '<button type="button" id="opt-' + (o.id === 'job_pres' ? 'job-pres' : (o.id === 'avis_recherche' ? 'avis' : o.id)) + '" data-opt="' + o.id + '"'
@@ -9651,15 +9843,14 @@ function optsRendu() {
   /* ① les grandes options du bas de l'accueil (ordre du PDG) */
   const zone = document.getElementById('acc-grandes');
   if (zone) {
-    const grandes = KLEAN_OPTS.options.filter(o => o.grande && o.visible !== false);
+    /* 🧭 REFONTE 129 : une option qui vit dans MON COMPTE ne se réaffiche jamais sur l'accueil */
+    const grandes = KLEAN_OPTS.options.filter(o => o.grande && o.visible !== false && (KLEAN_OPTS_DEF[o.id] || {}).zone !== 'compte');
     zone.innerHTML = grandes.map(optHTMLGrande).join('') || '';
   /* 🧑‍💼 un raccourci professionnel, écrit par le registre (identifiant stable), jamais en dur */
+  /* 🧭 REFONTE 129 : « je cherche un travailleur » a sa tuile dans MON COMPTE —
+     aucun raccourci en double sur l'accueil. */
   const zt = document.getElementById('acc-trav-lien');
-  if (zt) {
-    const ot = optEtat('job_trav');
-    zt.innerHTML = (ot.actif === false || ot.visible === false) ? '' :
-      '<button type="button" id="opt-job-trav" data-opt="job_trav" onclick="optOuvrir(\'job_trav\')" style="width:100%;margin-top:11px;border:2px dashed var(--p);background:#fff;color:var(--pd);font:inherit;font-weight:900;font-size:16px;padding:14px;border-radius:15px;cursor:pointer;min-height:52px">🧑‍💼 Je cherche un travailleur</button>';
-  }
+  if (zt) zt.innerHTML = '';
     const titre = document.getElementById('acc-grandes-titre');
     if (titre) titre.style.display = grandes.length ? '' : 'none';
   }
@@ -9689,13 +9880,17 @@ function optsRendu() {
     const manquants = KLEAN_OPTS.options.filter(o => {
       if (o.zone === 'publie' || o.actif === false) return false;
       const d = KLEAN_OPTS_DEF[o.id]; if (!d) return false;
+      /* 🧭 REFONTE 129 (30/09) : une option rangée dans MON COMPTE n'est JAMAIS « rétablie » sur
+         l'accueil (c'est LÀ qu'elle vit : le registre — pas la liste du serveur — le dit). */
+      if (d.zone === 'compte') return false;
       if (d.peintParModule) return false;   /* 🏫🧑‍💼 lot 126 : le bouton est écrit par son module (école & famille, devenir professionnel) — jamais de doublon dans l'îlot de secours */
       return (d.cibles || []).length > 0 && !(d.cibles || []).some(sel => { try { return !!document.querySelector(sel); } catch (e) { return false; } });
     });
+    /* 📄 01/10 (consigne du PDG : « enlève “Raccourcis rétablis automatiquement” ») — le raccourci
+       remis garde son bouton, mais SANS cadre d'alerte ni titre qui inquiète : l'utilisateur ne voit
+       qu'une puce discrète, et rien ne lui donne l'impression que quelque chose est cassé. */
     secours.innerHTML = manquants.length
-      ? '<div style="background:#FFF9F2;border:1.5px dashed var(--p);border-radius:15px;padding:12px;margin-top:11px">'
-        + '<b style="font-size:14.5px;color:var(--pd)">🧯 Raccourcis rétablis automatiquement</b>'
-        + '<div class="acc-chips" style="margin-top:8px">' + optHTMLPuces(manquants) + '</div></div>'
+      ? '<div class="acc-chips" style="margin-top:11px">' + optHTMLPuces(manquants) + '</div>'
       : '';
   }
   const etat = document.getElementById('acc-opts-etat');
@@ -9738,6 +9933,215 @@ function optOuvrir(id) {
   }
 }
 try { window.optOuvrir = optOuvrir; } catch (e) { }
+
+/* 💬 01/10 — LE BOUTON SUPPORT DU BAS DE L'ACCUEIL NE FAISAIT RIEN.
+   Cause trouvée : la puce appelle optOuvrir('support'), dont l'action était nulle et dont la seule
+   cible (#sup-fab) est supprimée par net.js, qui remplace la bulle par le PANNEAU de discussion
+   (#sup-pane). On branche donc l'option sur la vraie ouverture — net.js d'abord, sinon le panneau,
+   sinon l'assistance de Mon compte : le bouton fait toujours quelque chose, avec ou sans net.js. */
+function supOuvrirReel() {
+  try { if (typeof window.openKleanServiceReel === 'function') { window.openKleanServiceReel(); return true; } } catch (e) { }
+  try { if (typeof window.supOpen === 'function') { window.supOpen(); return true; } } catch (e) { }
+  try { if (typeof accAssistance === 'function') { accAssistance(); return true; } } catch (e) { }
+  try { showView('view-account', null, 'client'); } catch (e) { }
+  return true;
+}
+try { window.supOuvrirReel = supOuvrirReel; } catch (e) { }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   🧭 30/09 — REFONTE 129 (reprise) : LOCALISATION, RETOUR, BALAYAGE.
+   Règle tenue partout : on AJOUTE des chemins, on n'en retire aucun. Rien ne bloque l'utilisateur.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+var REF129 = { avant:null, dernier:[], gpsFait:false, pile:[], courant:'' };
+
+/* ── ① LA LOCALISATION, EXPLIQUÉE ET JAMAIS BLOQUANTE ───────────────────────────────────────── */
+function ref129GpsPeindre(etat, texte){
+  var box = document.getElementById('ref129-gps');
+  if(!box) return;
+  if(etat === 'ok'){
+    box.innerHTML = '<div style="display:flex;align-items:center;gap:9px;background:#EAF7EF;border:1.5px solid #15803D;'
+      + 'border-radius:14px;padding:10px 12px;font-size:13.5px;font-weight:800;color:#0B5132">'
+      + '📍 <span style="flex:1;min-width:0">Position activée — ' + (texte || 'nous cherchons autour de vous') + '</span>'
+      + '<button type="button" onclick="ouvrirRecherche()" style="border:1.5px solid #15803D;background:#fff;color:#0B5132;'
+      + 'font:inherit;font-weight:900;font-size:13px;padding:8px 11px;border-radius:10px;cursor:pointer;min-height:44px">Changer de lieu</button></div>';
+    return;
+  }
+  /* 📄 01/10 (consigne du PDG : « donne une phrase simple et brève ») : UNE phrase, courte. */
+  var titre = (etat === 'refuse') ? '📍 Localisation refusée'
+                                  : '📍 Autorisez la localisation';
+  var expl = (etat === 'refuse')
+    ? 'Klean marche quand même : touchez « Réessayer ».'
+    : 'Pour vous proposer les professionnels <b>autour de vous</b>.';
+  box.innerHTML = '<div style="background:var(--card);border:2px solid #E85D04;border-radius:16px;padding:13px">'
+    + '<b style="display:block;font-size:15px;color:#9A3412;margin-bottom:5px">' + titre + '</b>'
+    + '<div style="font-size:13.5px;line-height:1.5;color:var(--ink)">' + expl + '</div>'
+    + '<div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">'
+    + '<button type="button" id="ref129-gps-oui" onclick="ref129GpsDemander()" style="flex:1;min-width:150px;min-height:52px;'
+    + 'border:none;background:#C2410C;color:#fff;font:inherit;font-weight:900;font-size:15.5px;padding:13px;border-radius:13px;cursor:pointer">'
+    + '📍 Autoriser la localisation</button>'
+    + '<button type="button" id="ref129-gps-plus-tard" onclick="ref129GpsPlusTard()" style="min-height:52px;border:2px solid var(--line);'
+    + 'background:#fff;color:var(--ink);font:inherit;font-weight:900;font-size:15.5px;padding:13px 16px;border-radius:13px;cursor:pointer">'
+    + 'Plus tard</button>'
+    + '<button type="button" onclick="accueilLieu(\'ville\');ref129GpsPlusTard()" style="min-height:52px;border:2px solid var(--line);background:#fff;'
+    + 'color:var(--ink);font:inherit;font-weight:900;font-size:15.5px;padding:13px 16px;border-radius:13px;cursor:pointer">'
+    + '🏙️ Ma ville</button>'
+    + '</div></div>';
+}
+function ref129GpsPlusTard(){
+  /* ⛔ JAMAIS définitif : on n'écrit rien dans le stockage permanent — la demande revient à la
+     prochaine ouverture de l'application. L'utilisateur n'est ni bloqué, ni harcelé. */
+  try{ sessionStorage.setItem('klean_gps_plus_tard','1'); }catch(e){}
+  var box = document.getElementById('ref129-gps'); if(box) box.innerHTML = '';
+}
+function ref129GpsDemander(){
+  var box = document.getElementById('ref129-gps');
+  if(box) box.innerHTML = '<div style="background:var(--card);border:2px solid #E85D04;border-radius:16px;padding:13px;'
+    + 'font-size:14px;font-weight:800;color:var(--pd)">📍 Recherche de votre position… <b id="ref129-gps-dot">•</b></div>';
+  ref129GpsObtenir(true);
+}
+function ref129GpsObtenir(visible){
+  if(!navigator.geolocation){ if(visible) ref129GpsPeindre('refuse',''); return; }
+  try{
+    navigator.geolocation.getCurrentPosition(function(pos){
+      REF129.gpsFait = true;
+      try{ accueilLieu('moi'); }catch(e){}
+      ref129GpsPeindre('ok','autour de vous');
+    }, function(){
+      if(visible) ref129GpsPeindre('refuse','');
+      else ref129GpsPeindre('demande','');
+    }, { timeout: 9000, maximumAge: 60000 });
+  }catch(e){ if(visible) ref129GpsPeindre('refuse',''); }
+}
+function ref129GpsDemarrer(){
+  var box = document.getElementById('ref129-gps'); if(!box) return;
+  var reporter = false;
+  try{ reporter = sessionStorage.getItem('klean_gps_plus_tard') === '1'; }catch(e){}
+  if(reporter){ box.innerHTML = ''; return; }
+  if(!navigator.geolocation){ box.innerHTML = ''; return; }
+  if(navigator.permissions && navigator.permissions.query){
+    navigator.permissions.query({name:'geolocation'}).then(function(p){
+      if(p.state === 'granted') ref129GpsObtenir(false);          /* déjà autorisé : on n'embête personne */
+      else if(p.state === 'denied') ref129GpsPeindre('refuse',''); /* refusé : on explique, on ne bloque pas */
+      else ref129GpsPeindre('demande','');                        /* jamais demandé : on explique d'abord */
+    }).catch(function(){ ref129GpsPeindre('demande',''); });
+  } else {
+    ref129GpsPeindre('demande','');
+  }
+}
+
+/* ── ② LE BOUTON RETOUR, PARTOUT ────────────────────────────────────────────────────────────── */
+var REF129_TABS = ['view-home','view-book','view-track','view-bookings','view-account',
+                   'view-agent-home','view-agent-missions','view-agent-account'];
+function ref129Ecran(){
+  var v = document.querySelector('.view.active');
+  return v ? v.id : '';
+}
+/* 🗂️ la pile des pages visitées : « Retour » revient à CELLE D'AVANT, pas systématiquement à
+   l'accueil. On empile seulement quand la page change vraiment. */
+function ref129Noter(ici){
+  if(!ici) return;
+  if(REF129.courant === ici) return;
+  if(REF129.courant) { REF129.pile.push(REF129.courant); if(REF129.pile.length > 30) REF129.pile.shift(); }
+  REF129.courant = ici;
+}
+function ref129MajRetour(id){
+  var b = document.getElementById('ref129-retour');
+  if(!b) return;
+  var ici = id || ref129Ecran();
+  ref129Noter(ici);
+  var estOnglet = REF129_TABS.indexOf(ici) >= 0;
+  /* 🧭 règle simple et prévisible (consigne du PDG) : « Retour » s'affiche dans les SOUS-PAGES,
+     celles où l'on entre depuis une autre page — jamais sur les 5 grands onglets. */
+  b.style.display = estOnglet ? 'none' : 'flex';
+}
+/* 🛟 FILET DE SÉCURITÉ : quelle que soit la situation, l'utilisateur ne doit JAMAIS se retrouver
+   devant un écran vide. S'il n'y a plus de page active, on rouvre la dernière connue, sinon l'accueil. */
+function ref129Filais(){
+  setTimeout(function(){
+    try{
+      if(document.querySelector('.view.active')) return;
+      var cible = REF129.courant || 'view-home';
+      if(typeof window.showView === 'function') window.showView(cible, null, 'client');
+      if(!document.querySelector('.view.active') && typeof window.showView === 'function') window.showView('view-home', null, 'client');
+    }catch(e){}
+  }, 280);
+}
+function ref129Retour(){
+  var ici = ref129Ecran();
+  REF129.avant = (ici && REF129_TABS.indexOf(ici) < 0) ? ici : REF129.avant;
+  /* ① une fenêtre ouverte (paiement, formulaire, modale) : c'est ELLE qu'on ferme d'abord.
+        Aucun formulaire n'est quitté, aucune saisie n'est perdue. */
+  try{
+    if(window.KBouclier && window.KBouclier.ouvertes && window.KBouclier.ouvertes().length){
+      if(window.KBouclier.fermerDerniere(false)){ ref129Filais(); return true; }
+    }
+  }catch(e){}
+  /* ② la VRAIE page précédente, celle d'où l'on vient */
+  var prev = REF129.pile.pop();
+  while(prev && prev === ici) prev = REF129.pile.pop();
+  if(prev && document.getElementById(prev)){
+    try{
+      if(typeof window.showView === 'function'){ window.showView(prev, null, 'client'); REF129.courant = prev; ref129Filais(); return true; }
+    }catch(e){}
+  }
+  /* ③ sinon le comportement historique de l'application (fermer une fenêtre ou rentrer à l'accueil) */
+  try{
+    if(window.KBouclier && typeof window.KBouclier.retour === 'function'){
+      window.KBouclier.retour(); ref129Filais(); return true;
+    }
+  }catch(e){}
+  try{ if(typeof window.showView === 'function') window.showView('view-home', null, 'client'); }catch(e){}
+  ref129Filais();
+  return false;
+  /* ⛔ plus jamais de history.back() : c'est ce qui pouvait laisser l'application sans aucune page. */
+}
+/* ── ③ AVANCER (le pendant du retour, pour le balayage) ─────────────────────────────────────── */
+function ref129Avancer(){
+  var cible = REF129.avant;
+  if(!cible || cible === ref129Ecran()) return false;
+  try{ showView(cible, null, 'client'); REF129.avant = null; return true; }catch(e){ return false; }
+}
+
+/* ── ④ on branche tout au chargement ───────────────────────────────────────────────────────── */
+(function ref129Demarrer(){
+  function poserBouton(){
+    if(document.getElementById('ref129-retour')) return;
+    var b = document.createElement('button');
+    b.type = 'button'; b.id = 'ref129-retour';
+    b.setAttribute('aria-label','Revenir à la page précédente');
+    b.innerHTML = '← <span>Retour</span>';
+    b.onclick = ref129Retour;
+    b.style.cssText = 'position:fixed;left:12px;bottom:96px;z-index:8800;display:none;align-items:center;gap:6px;'
+      + 'min-height:52px;padding:12px 16px;border-radius:15px;border:2.5px solid var(--pd);background:#fff;color:var(--pd);'
+      + 'font:inherit;font-weight:900;font-size:15px;cursor:pointer;box-shadow:0 6px 18px rgba(26,20,16,.22)';
+    try{ document.body.appendChild(b); }catch(e){}
+    ref129MajRetour();
+  }
+  function gps(){ try{ ref129GpsDemarrer(); }catch(e){} }
+  poserBouton(); gps();
+  [400, 1200, 2500].forEach(function(t){ setTimeout(function(){ poserBouton(); gps(); }, t); });
+  try{ document.addEventListener('DOMContentLoaded', function(){ poserBouton(); gps(); }); }catch(e){}
+})();
+/* le bouton Retour suit chaque changement de page, sans toucher à showView lui-même */
+(function ref129Surveiller(){
+  try{
+    var obs = new MutationObserver(function(){ try{ ref129MajRetour(); }catch(e){} });
+    obs.observe(document.body, { attributes:true, subtree:true, attributeFilter:['class'] });
+  }catch(e){}
+  document.addEventListener('click', function(){ setTimeout(function(){ try{ ref129MajRetour(); }catch(e){} }, 60); }, true);
+})();
+
+/* 🧭 REFONTE 129 : on pose le symbole international (globe + arc) dans les emplacements prévus */
+(function ref129Symboles(){
+  function poser(){
+    [['hero-symbole',14],['ref129-symbole-ic',15]].forEach(function(p){
+      var el = document.getElementById(p[0]);
+      if(el && !el.innerHTML){ try{ el.innerHTML = ref129Symbole(p[1]); }catch(e){} }
+    });
+  }
+  poser(); try{ document.addEventListener('DOMContentLoaded', poser); }catch(e){}
+  [300,1200,2600].forEach(function(t){ setTimeout(poser,t); });
+})();
 try { window.KLEAN_OPTS_REGISTRE = KLEAN_OPTS; } catch (e) { }
 
 /* ─────────────── l'interception : si le PDG a désactivé une option, on le DIT (propre) ─────────────── */
@@ -9771,8 +10175,13 @@ function optsAnalyser() {
     const r = { id, titre: (o.titre || id), etat: 'ok', message: '' };
     if (o.actif === false) { r.etat = 'off'; r.message = 'désactivée par le PDG'; rapport.push(r); return; }
     /* 1. le bouton (ou le bloc) est-il là ? */
-    const presents = (d.cibles || []).filter(sel => { try { return !!document.querySelector(sel); } catch (e) { return false; } });
+    const cherche = () => (d.cibles || []).filter(sel => { try { return !!document.querySelector(sel); } catch (e) { return false; } });
+    let presents = cherche();
     if (!presents.length) {
+      /* 🧭 REFONTE 129 (30/09) : les options vivent dans MON COMPTE, dont l'écran se construit à
+         l'ouverture. Le veilleur l'ouvre donc pour VÉRIFIER POUR DE VRAI (au lieu de supposer que
+         tout va bien) : si le bouton manque même après, c'est une vraie panne et il le dit. */
+      if (d.zone === 'compte' && !window.__comptePeint) { rapport.push(r); return; }   /* écran Mon compte jamais ouvert : rien à vérifier */
       /* un bloc construit par un module (publicité, affiche, jeu, support, langues) n'existe qu'une
          fois ce module lancé : c'est SA fonction qu'on vérifie, pas sa présence immédiate */
       if (d.module) {
@@ -9783,7 +10192,14 @@ function optsAnalyser() {
           : ('la fonction « ' + d.module + ' » ne répond pas');
         rapport.push(r); return;
       }
-      r.etat = 'attention'; r.message = 'le bloc n’est pas présent sur l’accueil (' + (d.cibles || []).join(', ') + ')'; rapport.push(r); return;
+      /* 🧭 REFONTE 129 : le message dit la VÉRITÉ — une option rangée dans Mon compte n'est pas
+         « absente de l'accueil », elle vit ailleurs. Un rapport faux ferait croire au PDG à une
+         panne qui n'existe pas. */
+      r.etat = 'attention';
+      r.message = (d.zone === 'compte')
+        ? ('le bloc n’est pas présent dans Mon compte (' + (d.cibles || []).join(', ') + ')')
+        : ('le bloc n’est pas présent sur l’accueil (' + (d.cibles || []).join(', ') + ')');
+      rapport.push(r); return;
     }
     /* 2. mène-t-il quelque part ? */
     if (d.action && typeof window[d.action] !== 'function') { r.etat = 'panne'; r.message = 'la fonction « ' + d.action + ' » manque'; rapport.push(r); return; }
@@ -9835,6 +10251,9 @@ async function optsReparer(ordreId) {
     if (!document.getElementById('view-jobs')) { try { jobsMonter(); reussies.push('écran « job près de moi » recréé'); } catch (e) { echecs.push('écran job : ' + e.message); } }
     if (!document.getElementById('view-avis')) { try { avisMonter(); reussies.push('écran « avis de recherche » recréé'); } catch (e) { echecs.push('écran avis : ' + e.message); } }
     if (!document.getElementById('view-trav')) { try { travMonter(); reussies.push('écran « je cherche un travailleur » recréé'); } catch (e) { echecs.push('écran travail : ' + e.message); } }
+    /* 🧭 REFONTE 129 : Mon compte est le centre de l'application — la réparation le reconstruit
+       aussi (c'est là que vivent désormais urgence, jeux, job, avis, points, quiz, options…). */
+    if (typeof renderAccount === 'function') { try { renderAccount(); reussies.push('écran « Mon compte » reconstruit'); } catch (e) { echecs.push('Mon compte : ' + e.message); } }
   } catch (e) { }
   /* c. le bouton de chaque option est rebranché (les écouteurs peuvent avoir été perdus) */
   try { window.__optsBranche = false; optsBrancher(); reussies.push('touches rebranchées'); } catch (e) { echecs.push('branchement : ' + e.message); }
@@ -9891,6 +10310,7 @@ window.kleanOnAvisMaj = function () { try { if (document.getElementById('view-av
 
 /* ─────────────── démarrage du veilleur ─────────────── */
 (function optsDemarrage() {
+  optsExpose();   /* l'état (même vide) est lisible dès le départ : aucun outil ne lit « undefined » */
   function premier() {
     optsCharger().then(() => { setTimeout(() => optsRapport(null), 1200); });
     try { optsBrancher(); } catch (e) { }
@@ -9932,7 +10352,7 @@ function empZone2(id, label, placeholder, valeur) {
 }
 /* les 4 portées de recherche, proposées partout où l'on cherche */
 function empPorteesHTML(nom, courant) {
-  const P = [['pres', '📍 Près de moi'], ['ville', '🏙️ Dans ma ville'], ['ci', '🇨🇮 Partout en Côte d’Ivoire'], ['zone', '🗺️ Une autre zone']];
+  const P = [['pres', '📍 Près de moi'], ['ville', '🏙️ Dans ma ville'], ['ci', '🌍 Partout en Côte d’Ivoire'], ['zone', '🗺️ Une autre zone']];
   return '<div class="acc-chips" style="margin-top:9px">' + P.map(p =>
     '<button type="button" class="cat-chip' + ((courant === p[0]) ? ' on' : '') + '" data-' + nom + '="' + p[0] + '" onclick="empPortee(\'' + nom + '\',\'' + p[0] + '\')"><b>' + p[1] + '</b></button>').join('') + '</div>';
 }
@@ -10309,7 +10729,7 @@ function travPeindre(message) {
     + (TRAV.portee === 'pres' ? ' · autour de vous' : TRAV.portee === 'ci' ? ' · partout en Côte d’Ivoire' : ''));
   if (!TRAV.liste.length) {
     l.innerHTML = '<div style="background:var(--card);border:1.5px dashed var(--line);border-radius:16px;padding:16px;color:var(--muted);font-size:14.5px;line-height:1.5">'
-      + (message || 'Personne ne correspond pour l’instant.') + '<br><b>Astuce :</b> touchez « 🇨🇮 Partout en Côte d’Ivoire », ou publiez votre besoin — les personnes disponibles seront prévenues.</div>';
+      + (message || 'Personne ne correspond pour l’instant.') + '<br><b>Astuce :</b> touchez « 🌍 Partout en Côte d’Ivoire », ou publiez votre besoin — les personnes disponibles seront prévenues.</div>';
     return;
   }
   l.innerHTML = TRAV.liste.map(p => '<div style="display:flex;gap:11px;background:var(--card);border:1.5px solid var(--line);border-radius:16px;padding:12px;margin-bottom:10px">'

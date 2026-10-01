@@ -7942,28 +7942,28 @@ const ACCUEIL_OPTIONS_DEF = [
     defaut: { actif: true, visible: true, ordre: 10 }, params: { placeholder: 'Écrivez ce dont vous avez besoin…' } },
   { id: 'tous_services', titre: 'Tous les services', icone: '📚', ou: 'le bouton « Voir tous les services »',
     sous: 'Le catalogue national complet, métiers et prix', defaut: { actif: true, visible: true, ordre: 20 }, params: {} },
-  { id: 'job_pres', titre: 'Je cherche un job près de moi', icone: '🔎', ou: 'la grande option du bas de l’accueil',
+  { id: 'job_pres', titre: 'Je cherche un job près de moi', icone: '🔎', ou: 'la tuile « Je cherche un job » dans 👤 Mon compte (REFONTE 129)',
     sous: 'Trouver du travail ou une mission près de chez soi', defaut: { actif: true, visible: true, ordre: 30 },
     params: { rayonKm: 30, limite: 60, profilsDansLAccueil: true } },
-  { id: 'job_trav', titre: 'Je cherche un travailleur', icone: '🧑‍💼', ou: 'l’option des comptes professionnels',
+  { id: 'job_trav', titre: 'Je cherche un travailleur', icone: '🧑‍💼', ou: 'la tuile « Je cherche un employé » dans 👤 Mon compte',
     sous: 'Trouver une personne qui propose ses compétences', defaut: { actif: true, visible: true, ordre: 35 },
     params: { rayonKm: 60, limite: 80 } },
-  { id: 'avis_recherche', titre: 'Avis de recherche', icone: '📢', ou: 'la grande option du bas de l’accueil',
+  { id: 'avis_recherche', titre: 'Avis de recherche', icone: '📢', ou: 'la tuile « Avis de recherche » dans 👤 Mon compte (REFONTE 129)',
     sous: 'Publier, consulter et partager les avis de recherche', defaut: { actif: true, visible: true, ordre: 40 },
     params: { moderation: 'auto' } },      /* auto = publication immédiate · avant = validation par le PDG avant publication */
-  { id: 'urgence', titre: 'Urgence', icone: '🆘', ou: 'le raccourci « Urgence »',
+  { id: 'urgence', titre: 'Urgence', icone: '🆘', ou: 'le bouton « Urgence » dans 👤 Mon compte',
     sous: 'Alertes et contacts d’urgence', defaut: { actif: true, visible: true, ordre: 50 }, params: {} },
-  { id: 'points', titre: 'Klean Points', icone: '🪙', ou: 'le raccourci « Klean Points »',
+  { id: 'points', titre: 'Klean Points', icone: '🪙', ou: 'le bouton « Klean Points » dans 👤 Mon compte',
     sous: 'Solde de points et récompenses', defaut: { actif: true, visible: true, ordre: 60 }, params: {} },
-  { id: 'quiz', titre: 'Quiz Klean', icone: '🧠', ou: 'le raccourci « Quiz »',
+  { id: 'quiz', titre: 'Quiz Klean', icone: '🧠', ou: 'le bouton « Quiz » dans 👤 Mon compte',
     sous: 'Questions, défi du jour et séries', defaut: { actif: true, visible: true, ordre: 70 }, params: {} },
-  { id: 'jeux', titre: 'Jeux', icone: '🎮', ou: 'le raccourci « Jeux »',
+  { id: 'jeux', titre: 'Jeux', icone: '🎮', ou: 'le bouton « Jeux » dans 👤 Mon compte',
     sous: 'Jeux en direct de KLEAN', defaut: { actif: true, visible: true, ordre: 80 }, params: {} },
-  { id: 'flip', titre: 'Flip Fizz', icone: '🎮', ou: 'le bloc de jeu sur l’accueil',
+  { id: 'flip', titre: 'Flip Fizz', icone: '🎮', ou: 'le bloc du jeu, dans 👤 Mon compte',
     sous: 'Jeu Flip Fizz et parties gratuites', defaut: { actif: true, visible: true, ordre: 90 }, params: {} },
-  { id: 'infos', titre: 'Informations', icone: 'ℹ️', ou: 'le raccourci « Infos »',
+  { id: 'infos', titre: 'Informations', icone: 'ℹ️', ou: 'le bouton « Informations » dans 👤 Mon compte',
     sous: 'Actualités et conseils publiés par KLEAN', defaut: { actif: true, visible: true, ordre: 100 }, params: {} },
-  { id: 'options_client', titre: 'Options & réglages', icone: '⚙️', ou: 'le raccourci « Options »',
+  { id: 'options_client', titre: 'Options & réglages', icone: '⚙️', ou: 'le bouton « Options » dans 👤 Mon compte',
     sous: 'Réglages du client', defaut: { actif: true, visible: true, ordre: 110 }, params: {} },
   { id: 'publicite', titre: 'Publicité de l’accueil', icone: '📣', ou: 'le bloc de publicité',
     sous: 'Affiche publicitaire choisie par le PDG', defaut: { actif: true, visible: true, ordre: 120 }, params: {} },
@@ -7971,21 +7971,24 @@ const ACCUEIL_OPTIONS_DEF = [
     sous: 'Message de KLEAN à tous les utilisateurs', defaut: { actif: true, visible: true, ordre: 130 }, params: {} },
   { id: 'support', titre: 'Support', icone: '💬', ou: 'la bulle « Support »',
     sous: 'Parler à l’équipe KLEAN', defaut: { actif: true, visible: true, ordre: 140 }, params: {} },
-  { id: 'espace_pro', titre: 'Vous êtes professionnel ?', icone: '🧑‍💼', ou: 'le bouton vers l’espace professionnel',
+  { id: 'espace_pro', titre: 'Vous êtes professionnel ?', icone: '🧑‍💼', ou: 'la tuile « Mon compte professionnel » dans 👤 Mon compte',
     sous: 'Recevoir des missions près de chez soi', defaut: { actif: true, visible: true, ordre: 150 }, params: {} },
   { id: 'langues', titre: 'Langues', icone: '🌍', ou: 'la barre de langues de l’accueil',
     sous: 'Changer la langue de l’application', defaut: { actif: true, visible: true, ordre: 160 }, params: {} },
-  { id: 'ecole', titre: 'École & famille', icone: '🏫', ou: 'la grande option « École & famille »',
+  { id: 'ecole', titre: 'École & famille', icone: '🏫', ou: 'le bouton « École & famille » dans 👤 Mon compte',
     sous: 'Le lien entre l’école et les parents : informations, convocations, réunions',
     defaut: { actif: true, visible: true, ordre: 165 },
     params: { parentAuto: false, rappelHeures: 24 } },       /* 🏫 lot 126 : école ↔ famille */
-  { id: 'devenir_pro', titre: 'Devenir professionnel', icone: '🧑‍💼', ou: 'la grande option « Devenir professionnel » de l’accueil',
+  { id: 'devenir_pro', titre: 'Devenir professionnel', icone: '🧑‍💼', ou: 'le bouton « Devenir professionnel (avec mon compte) » dans 👤 Mon compte',
     sous: 'Passer au statut professionnel sur le MÊME compte, après validation par INTER',
     defaut: { actif: true, visible: true, ordre: 170 },
     params: { unSeulCompte: true, autoValidation: false } }  /* 🧑‍💼 lot 126 : un seul compte par personne — jamais de deuxième compte */
 ];
 
-/* Les options du bas de l'accueil, dans l'ordre où elles doivent apparaître (grandes, tactiles) */
+/* Les options de l'accueil, dans l'ordre où elles doivent apparaître.
+   🧭 REFONTE 129 (30/09) : elles sont désormais MONTRÉES dans 👤 Mon compte (le centre de
+   l'application) — seules la recherche, la photo, les 6 services populaires et « voir tous les
+   services » restent sur l'accueil. Les identifiants, les réglages et les écrans sont inchangés. */
 const ACCUEIL_GRANDES = ['job_pres', 'avis_recherche'];
 
 const ACCUEIL_ETATS = ['ok', 'attention', 'panne', 'off', 'inconnu'];
@@ -12341,8 +12344,9 @@ const server = http.createServer(async (req, res) => {
        · anti-502          = le garde-fou est-il réellement branché sur CE processus ? ;
        · vos logos         = empreintes sha256 comparées aux 6 logos d'origine (règle n° 1) ;
        · base de données, options de l'accueil, cache du téléphone.                        */
-const DERNIER_LOT = '126', VERSION_APP = 'v126.0';
+const DERNIER_LOT = '129', VERSION_APP = 'v129.0';
 const MAJ_NOTES = {
+  '129': 'la refonte de l’accueil : 👤 MON COMPTE devient le centre (compte pro, job, avis de recherche, école & famille, Klean Points, Quiz, options) — l’accueil ne garde que la recherche, la photo, les 6 services populaires et « voir tous les services »',
   '126': 'les 22 chapitres : un seul compte client + professionnel, 🏫 ÉCOLE & FAMILLE, vos favoris, l’argent tracé, le tableau de bord réorganisé',
   '125': 'le blocage global d’INTER et les 7 cas d’exception'
 };
