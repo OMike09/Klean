@@ -1,9 +1,9 @@
 {
   "name": "klean-services-ci",
   "version": "2.0.0",
-  "main": "server.js",
+  "main": "start.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node start.js"
   },
   "keywords": [],
   "author": "",
@@ -12,7 +12,8 @@
   "dependencies": {
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
-    "multer": "^2.4.0"
+    "multer": "^2.4.0",
+    "pg": "^8.23.1"
   },
   "engines": {
     "node": ">=18"

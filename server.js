@@ -6,7 +6,8 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
-const { db, hashPassword, getSetting, setSetting } = require('./db');
+const { db, hashPassword, getSetting, setSetting, DB_PATH } = require('./db');
+const persist = require('./persist'); // sauvegarde PostgreSQL (activée si DATABASE_URL est définie)
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,6 +16,17 @@ app.use(express.json({ limit: '2mb' }));
 // Secret de session persistant
 let SECRET = getSetting('auth_secret');
 if (!SECRET) { SECRET = crypto.randomBytes(32).toString('hex'); setSetting('auth_secret', SECRET); }
+
+// Réinitialisation du mot de passe administrateur via variable d'environnement (secours)
+// Sur Render : Environment → ADMIN_PASSWORD = NouveauMotDePasse → redéployer → se connecter → retirer la variable.
+if (process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD.length >= 6) {
+  const adminUser = db.prepare("SELECT * FROM users WHERE role='admin' ORDER BY id LIMIT 1").get();
+  if (adminUser) {
+    const s = crypto.randomBytes(16).toString('hex');
+    db.prepare('UPDATE users SET password_hash=?, salt=? WHERE id=?').run(hashPassword(process.env.ADMIN_PASSWORD, s), s, adminUser.id);
+    console.log('🔑 Mot de passe administrateur réinitialisé depuis la variable ADMIN_PASSWORD.');
+  }
+}
 
 // ---------- UPLOADS ----------
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
@@ -28,6 +40,41 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } });
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
+// Si un fichier manque en local (après redéploiement), on le restaure depuis PostgreSQL
+app.use('/uploads/:name', async (req, res, next) => {
+  if (!persist.enabled()) return res.status(404).end();
+  try {
+    const name = path.basename(req.params.name);
+    const data = await persist.loadFile(name);
+    if (!data) return res.status(404).end();
+    fs.writeFileSync(path.join(UPLOAD_DIR, name), data); // remis en cache local
+    res.sendFile(path.join(UPLOAD_DIR, name));
+  } catch { res.status(404).end(); }
+});
+
+// ---------- SAUVEGARDE AUTOMATIQUE POSTGRESQL ----------
+function dbBytes() {
+  try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { }
+  return fs.readFileSync(DB_PATH);
+}
+let lastChanges = -1;
+async function backupNow(force) {
+  if (!persist.enabled()) return;
+  try {
+    const changes = db.prepare('SELECT total_changes() c').get().c;
+    if (!force && changes === lastChanges) return;
+    await persist.backupDb(dbBytes());
+    lastChanges = changes;
+  } catch (e) { console.error('Sauvegarde PostgreSQL échouée :', e.message); }
+}
+setInterval(() => backupNow(false), 30 * 1000);          // toutes les 30 s si quelque chose a changé
+setInterval(() => backupNow(true), 10 * 60 * 1000);      // sécurité : toutes les 10 min quoi qu'il arrive
+async function gracefulExit(sig) {
+  try { await backupNow(true); console.log('Sauvegarde finale effectuée (' + sig + ').'); } catch { }
+  process.exit(0);
+}
+process.on('SIGTERM', () => gracefulExit('SIGTERM'));
+process.on('SIGINT', () => gracefulExit('SIGINT'));
 
 // ---------- AUTH ----------
 function sign(payload) {
@@ -165,9 +212,14 @@ app.delete('/api/addresses/:id', auth, (req, res) => {
   res.json({ ok: true });
 });
 
-// Upload générique (photos, audio, documents)
-app.post('/api/upload', auth, upload.array('files', 8), (req, res) => {
+// Upload générique (photos, audio, documents) — copié aussi dans PostgreSQL si configuré
+app.post('/api/upload', auth, upload.array('files', 8), async (req, res) => {
   if (!req.files || !req.files.length) return res.status(400).json({ error: 'Aucun fichier reçu.' });
+  if (persist.enabled()) {
+    try {
+      for (const f of req.files) await persist.saveFile(f.filename, fs.readFileSync(f.path));
+    } catch (e) { console.error('Copie PostgreSQL du fichier échouée :', e.message); }
+  }
   res.json({ files: req.files.map(f => '/uploads/' + f.filename) });
 });
 
@@ -1111,6 +1163,7 @@ function cleanupFiles() {
     const fp = path.join(UPLOAD_DIR, f);
     try { if (fs.statSync(fp).mtimeMs < cutoff) { fs.unlinkSync(fp); deleted++; } } catch {}
   }
+  if (persist.enabled()) persist.deleteFilesOlderThan(days).catch(() => { });
   return deleted;
 }
 setInterval(cleanupFiles, 12 * 3600 * 1000);
