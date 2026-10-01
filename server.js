@@ -1127,16 +1127,45 @@ for (const m of db.prepare("SELECT id FROM missions WHERE status='recherche'").a
   } else offerNext(m.id);
 }
 
-// ---------- STATIQUE ----------
+// ---------- STATIQUE + AUTO-DIAGNOSTIC DES FICHIERS ----------
+const REQUIRED_FILES = [
+  'public/index.html', 'public/app.js', 'public/styles.css', 'public/sw.js',
+  'public/manifest.json', 'public/admin/index.html', 'public/admin/admin.js'
+];
+const missingFiles = REQUIRED_FILES.filter(f => !fs.existsSync(path.join(__dirname, f)));
+if (missingFiles.length) {
+  console.error('⚠️  ATTENTION : fichiers manquants sur le serveur (structure du dépôt incomplète) :');
+  missingFiles.forEach(f => console.error('   ✗ ' + f));
+  console.error('   → Vérifiez que les dossiers public/ et public/admin/ ont bien été envoyés sur GitHub.');
+}
+function diagnosticPage(res) {
+  res.status(500).send(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1"><title>Installation incomplète</title>
+  <style>body{font-family:Arial,sans-serif;background:#0b7a6b;color:#fff;padding:30px;line-height:1.6}
+  .box{background:rgba(0,0,0,.25);border-radius:14px;padding:20px;max-width:560px;margin:0 auto}
+  code{background:rgba(255,255,255,.15);padding:2px 7px;border-radius:5px;display:inline-block;margin:2px 0}</style></head>
+  <body><div class="box"><h2>⚠️ Installation incomplète</h2>
+  <p>Le serveur Klean-Services CI fonctionne, mais ces fichiers n'ont pas été trouvés :</p>
+  <p>${missingFiles.map(f => '<code>' + f + '</code>').join('<br>')}</p>
+  <p><b>Solution :</b> envoyez les dossiers <code>public/</code> et <code>public/admin/</code> complets
+  dans votre dépôt GitHub (à côté de <code>server.js</code>), puis redéployez.</p></div></body></html>`);
+}
 app.use(express.static(path.join(__dirname, 'public')));
-app.get(/^\/admin(\/.*)?$/, (req, res) => res.sendFile(path.join(__dirname, 'public/admin/index.html')));
+app.get(/^\/admin(\/.*)?$/, (req, res) => {
+  const f = path.join(__dirname, 'public/admin/index.html');
+  if (!fs.existsSync(f)) return diagnosticPage(res);
+  res.sendFile(f);
+});
 app.use((req, res, next) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Ressource introuvable.' });
-  res.sendFile(path.join(__dirname, 'public/index.html'));
+  const f = path.join(__dirname, 'public/index.html');
+  if (!fs.existsSync(f)) return diagnosticPage(res);
+  res.sendFile(f);
 });
 app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(500).json({ error: 'Une erreur est survenue. Veuillez réessayer.' });
+  console.error('Erreur serveur :', err && err.message ? err.message : err);
+  if (req.path && req.path.startsWith('/api/')) return res.status(500).json({ error: 'Une erreur est survenue. Veuillez réessayer.' });
+  diagnosticPage(res);
 });
 
 app.listen(PORT, '0.0.0.0', () => console.log('Klean-Services CI en écoute sur le port ' + PORT));
