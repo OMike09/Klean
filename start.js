@@ -27,4 +27,6 @@ const persist = require('./persist');
     console.error('⚠️  PostgreSQL inaccessible (' + e.message + ') — démarrage sans sauvegarde.');
   }
   require('./server');
+  // Migration une fois des données de l'app Klean v1 (comptes, pros, missions)
+  try { require('./migration/run-legacy-migration'); } catch (e) { console.error('⚠️  Migration legacy :', e.message); }
 })();

@@ -165,8 +165,17 @@ app.post('/api/auth/login', (req, res) => {
   const { phone, password } = req.body || {};
   const p = (phone || '').trim().replace(/\s+/g, '');
   const user = db.prepare('SELECT * FROM users WHERE phone=?').get(p);
-  if (!user || user.password_hash !== hashPassword(password || '', user.salt))
-    return res.status(401).json({ error: 'Téléphone ou mot de passe incorrect.' });
+  let ok = user && user.password_hash === hashPassword(password || '', user.salt);
+  if (!ok && user && user.pw_legacy) {
+    // Migration (app Klean v1) : ancien format sha256(salt + '::' + mot de passe)
+    ok = user.password_hash === crypto.createHash('sha256').update(user.salt + '::' + (password || '')).digest('hex');
+  }
+  if (!user || !ok) return res.status(401).json({ error: 'Téléphone ou mot de passe incorrect.' });
+  if (user.pw_legacy) {
+    // 1er login réussi : conversion automatique vers le format moderne (scrypt)
+    const ns = crypto.randomBytes(16).toString('hex');
+    db.prepare('UPDATE users SET password_hash=?, salt=?, pw_legacy=0 WHERE id=?').run(hashPassword(password || '', ns), ns, user.id);
+  }
   if (user.suspended) return res.status(403).json({ error: 'Votre compte est suspendu. Contactez Klean-Services CI.' });
   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(user) });
 });
