@@ -5,7 +5,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const multer = require('multer');
+const multer = (()=>{ try{return require('multer')}catch(e){return null}})();
 const { db, hashPassword, getSetting, setSetting, DB_PATH } = require('./db');
 const persist = require('./persist'); // sauvegarde PostgreSQL (activée si DATABASE_URL est définie)
 
@@ -38,7 +38,7 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + '-' + crypto.randomBytes(6).toString('hex') + ext);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } });
+const upload = multer ? multer({ storage: (multer.memoryStorage ? multer.memoryStorage() : storage), limits: { fileSize: 15 * 1024 * 1024 } }) : null;
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
 // Si un fichier manque en local (après redéploiement), on le restaure depuis PostgreSQL
 app.use('/uploads/:name', async (req, res, next) => {
@@ -1162,8 +1162,6 @@ A.post('/files/cleanup', (req, res) => res.json({ deleted: cleanupFiles() }));
 
 
 // ---------- JUSTIFICATIFS PROFESSIONNELS API ----------
-const multer = (()=>{ try{return require('multer')}catch(e){return null}})();
-const upload = multer ? multer({ storage: multer.memoryStorage(), limits:{ fileSize: 8*1024*1024 } }) : null;
 
 // Public: liste des types par service (pour inscription pro)
 app.get('/api/justificatifs/types', (req,res)=>{
