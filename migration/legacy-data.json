@@ -1,0 +1,203 @@
+{
+  "_source": "klean_state (PostgreSQL/Neon) — état de l'app Klean v1 au 2026-09-24",
+  "_genere": "2026-10-02T13:23:50.282Z",
+  "tempProPassword": "Klean!2026",
+  "serviceMap": {
+    "canapes": "Nettoyage de fauteuil",
+    "maison": "Nettoyage de maison",
+    "bricolage": "Bricolage & petits travaux",
+    "cours": "Cours à domicile",
+    "clim": "Climatisation — dépannage & installation",
+    "canal": "Réparation TV & électronique"
+  },
+  "newServices": [
+    {
+      "category": "Climatisation",
+      "icon": "🌬️",
+      "services": [
+        "Climatisation — dépannage & installation"
+      ]
+    },
+    {
+      "category": "Bricolage",
+      "icon": "🛠️",
+      "services": [
+        "Bricolage & petits travaux"
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "name": "Siagbé. Jorcelin",
+      "phone": "0707891735",
+      "salt": "989365da85024f8c47a9aa36",
+      "passHash": "3e81c9035dcfcb1924a95b5a2d1a3bcc759581832fa9dfe8e83ff0327c0446cd",
+      "address": "KOKO (Kounahiri)",
+      "email": null,
+      "createdAt": "2026-09-22T19:58:51.702Z"
+    },
+    {
+      "name": "Ouattara Yerima Jemima",
+      "phone": "0709972011",
+      "salt": "699a2291d3aa05c1ceab63eb",
+      "passHash": "e12049c72cdaaf30bea494b7d85228f0eee0bf57622b6dde5fe4a8fc0cda0477",
+      "address": "Broukro 5e Arrêt, Bouaké",
+      "email": null,
+      "createdAt": "2026-09-23T19:13:00.973Z"
+    },
+    {
+      "name": "Kone Lamine fagnine",
+      "phone": "0707281445",
+      "salt": "0a93188da63d25c5b3ccf848",
+      "passHash": "a83e07f7dd6251794d9c301fa5e250c58ab11993cde7c6cc38edbd7190c59602",
+      "address": "Koko, Kounahiri",
+      "email": "konelamine914@gmail.com",
+      "createdAt": "2026-09-23T20:38:10.893Z"
+    },
+    {
+      "name": "Bamba Mama",
+      "phone": "0759790565",
+      "salt": "11418f3fc6313e3a914e4a15",
+      "passHash": "1c74c33b67f345e9ccda38921a1fbb8b565e66ff2533c4c03c3c865105769283",
+      "address": "Banco, Bouaké",
+      "email": null,
+      "createdAt": "2026-09-23T23:03:59.843Z"
+    }
+  ],
+  "pros": [
+    {
+      "name": "Sory BAMBA",
+      "phone": "0778421784",
+      "address": "Quartier Residentiel",
+      "services": [
+        "Nettoyage de fauteuil"
+      ],
+      "experience": 0,
+      "createdAt": "2026-09-22T20:19:28.432Z",
+      "approvedAt": "2026-09-22T20:19:28.431Z"
+    },
+    {
+      "name": "Marie Oulaï",
+      "phone": "0759606967",
+      "address": "Tropota",
+      "services": [
+        "Nettoyage de maison"
+      ],
+      "experience": 0,
+      "createdAt": "2026-09-22T21:01:42.523Z",
+      "approvedAt": "2026-09-22T21:01:42.523Z"
+    },
+    {
+      "name": "Ballack Yao",
+      "phone": "0101718645",
+      "address": "Au lycee, Kounahiri",
+      "services": [
+        "Bricolage & petits travaux"
+      ],
+      "experience": 0,
+      "createdAt": "2026-09-23T18:54:44.256Z",
+      "approvedAt": "2026-09-23T18:54:44.256Z"
+    },
+    {
+      "name": "Malan Amon",
+      "phone": "0140778007",
+      "address": "Au lycée, Kounahiri",
+      "services": [
+        "Cours à domicile"
+      ],
+      "experience": 0,
+      "createdAt": "2026-09-23T20:04:20.377Z",
+      "approvedAt": "2026-09-23T20:04:20.377Z"
+    },
+    {
+      "name": "Alex Zoan Bi",
+      "phone": "0757388441",
+      "address": "Au lycée, Kounahiri",
+      "services": [
+        "Climatisation — dépannage & installation"
+      ],
+      "experience": 0,
+      "createdAt": "2026-09-23T20:27:26.439Z",
+      "approvedAt": "2026-09-23T20:27:26.439Z"
+    }
+  ],
+  "missions": [
+    {
+      "code": "KN-MUD3TVD12296",
+      "clientPhone": "0707891735",
+      "service": "Réparation TV & électronique",
+      "status": "expired",
+      "description": "Decodeur à installer",
+      "address": "Après l'eglise",
+      "lat": null,
+      "lng": null,
+      "dateSouhaitee": "2026-09-23",
+      "time": "17:00",
+      "createdAt": "2026-09-22T20:06:12.997Z",
+      "note": "Migrée depuis l'app Klean v1 — recherche expirée (aucun professionnel n'a été attribué)."
+    },
+    {
+      "code": "KN-MUEKJB405594",
+      "clientPhone": "0707281445",
+      "service": "Climatisation — dépannage & installation",
+      "status": "annulee",
+      "description": "",
+      "address": "Kounahiri, Béré, Woroba",
+      "lat": 7.799197,
+      "lng": -5.831269,
+      "dateSouhaitee": "2026-09-25",
+      "time": "17:00",
+      "createdAt": "2026-09-23T20:41:39.862Z",
+      "note": "Migrée depuis l'app Klean v1 — mission annulée."
+    }
+  ],
+  "newAppUsers": [
+    {
+      "name": "OUATT Mike",
+      "phone": "0709076130",
+      "address": "Kounahiri",
+      "verified": 0,
+      "createdAt": "2026-10-01 17:53:03"
+    },
+    {
+      "name": "Fatim Yeo",
+      "phone": "0747067346",
+      "address": "Nimbo/Bouaké",
+      "verified": 1,
+      "createdAt": "2026-10-01 21:52:48"
+    },
+    {
+      "name": "Bagnon Élisee",
+      "phone": "0595814132",
+      "address": "Abidjan / cocody",
+      "verified": 0,
+      "createdAt": "2026-10-02 11:52:06"
+    },
+    {
+      "name": "OUATTARA Alama Azaria",
+      "phone": "0718058757",
+      "address": "Abidjan cocody centre",
+      "verified": 0,
+      "createdAt": "2026-10-02 11:53:42"
+    }
+  ],
+  "newAppMissions": [
+    {
+      "code": "KSMUPUUP2L76",
+      "clientPhone": "0709076130",
+      "serviceName": "Menuiserie bois",
+      "status": "sans_pro",
+      "answers": {
+        "30": "Fabrication",
+        "31": "Une table"
+      },
+      "description": "",
+      "address": "Kounahiri",
+      "lat": 7.795852523176982,
+      "lng": -5.8364669455011695,
+      "createdAt": "2026-10-01 18:15:55",
+      "note": "Migrée depuis la nouvelle app (filet de sécurité) — en attente d'un professionnel menuisier."
+    }
+  ],
+  "_filet": "newAppUsers/newAppMissions = filet de sécurité : ne sont recréés QUE si absents (ex. disque Render vidé par un déploiement). S'ils existent déjà, aucun changement (leurs mots de passe d'origine sont conservés)."
+}
