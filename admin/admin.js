@@ -62,6 +62,8 @@ const MENU = [
   ['MISSIONS', [['missions', '🧰 Demandes & missions'], ['payments', '💰 Paiements & commissions']]],
   ['COMMUNICATION', [['ads', '📣 Publicités & infos'], ['broadcast', '📨 Message système']]],
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions'], ['reports', '⚠️ Signalements', 'signalements'], ['urgences', '🚨 Urgences', 'urgences'], ['files', '🗄️ Gestion des fichiers']]],
+  ['METIERS', [['metiers','🏗️ Métiers', 'metiers']]],
+  ['JUSTIFICATIFS', [['justif', '📄 Justificatifs', 'justificatifs'], ['justif-config', '⚙️ Vérification', 'justificatifs_pending']]],
   ['CONTENU', [['avis', '📢 Avis de recherche'], ['jobs', '💼 Je cherche un job'], ['ecole', '🏫 École & famille'], ['games', '🎮 Quiz / Flip Fizz / Kdo']]],
   ['CONFIGURATION', [['settings', '⚙️ Paramètres généraux']]],
 ];
@@ -618,3 +620,6 @@ async function render() {
 window.render = render;
 window.addEventListener('hashchange', () => { VIEW = location.hash.replace('#', '') || 'dashboard'; render(); });
 render();
+
+// fallback routing for justificatifs
+window.addEventListener('hashchange',()=>{ if(location.hash==='#justif') renderJustif(); if(location.hash==='#justif-config') renderJustifConfig(); });
