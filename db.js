@@ -13,6 +13,31 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+// ---------- RÉPARATION DES TABLES HÉRITÉES ----------
+// Les très anciennes versions ont pu créer des tables sous_categories / taches
+// avec des clés étrangères vers des tables obsolètes (metiers, services2).
+// Ces tables sont inutilisables (tout INSERT échoue) : on les reconstruit
+// proprement avant la création du schéma. Si par précaution elles contenaient
+// des données, elles sont conservées sous le nom *_ancien.
+(function repareTablesHeritees() {
+  const A_REPARER = [
+    { table: 'sous_categories', mauvaiseRef: /REFERENCES\s+metiers\s*\(/i },
+    { table: 'taches',          mauvaiseRef: /REFERENCES\s+services2\s*\(/i },
+  ];
+  A_REPARER.forEach(({ table, mauvaiseRef }) => {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table);
+    if (!row || !mauvaiseRef.test(row.sql || '')) return;
+    const n = db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n;
+    if (n > 0) {
+      db.exec(`ALTER TABLE ${table} RENAME TO ${table}_ancien`);
+      console.log(`🔧 Table héritée ${table} (clé étrangère obsolète) renommée en ${table}_ancien (${n} lignes conservées).`);
+    } else {
+      db.exec(`DROP TABLE ${table}`);
+      console.log(`🔧 Table héritée ${table} (clé étrangère obsolète, vide) supprimée : elle sera recréée correctement.`);
+    }
+  });
+})();
+
 // ---------- SCHÉMA ----------
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
