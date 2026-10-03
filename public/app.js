@@ -7,7 +7,10 @@ let TOKEN = localStorage.getItem('ks_token') || null;
 let USER = null;
 let BADGES = { notifications: 0, messages: 0 };
 let SERVICES = null;        // cache catalogue
+let POPULAIRES = [];        // services populaires (accueil)
+let CATALOGUE = null;       // catalogue complet métiers → sous-catégories → services → tâches
 let GAMES = { quiz: false, flipfizz: false, kdo: false };
+let MAINT = { active: false }; // état de maintenance de la plateforme
 let ADS = [];
 let navStack = [];
 let suppressPush = false;
@@ -198,8 +201,9 @@ routes.login = () => {
       <div class="muted">Tous vos services à portée de main</div></div>
     <div class="card">
       <div class="field"><label>Numéro de téléphone</label><input type="tel" id="f-phone" placeholder="Ex : 07 00 00 00 00" autocomplete="tel"></div>
-      <div class="field"><label>Mot de passe</label><input type="password" id="f-pass" placeholder="Votre mot de passe"></div>
+      ${pwField('f-pass', 'Mot de passe', 'Votre mot de passe')}
       <button class="btn" id="b-login">Se connecter</button>
+      <button class="btn ghost" onclick="A.forgot(document.getElementById('f-phone').value)">Mot de passe oublié ?</button>
       <button class="btn ghost mt" onclick="nav('#/register')">Pas encore de compte ? <b>Créer un compte</b></button>
     </div>
   </div>`;
@@ -208,8 +212,9 @@ routes.login = () => {
     try {
       const r = await api('/auth/login', { method: 'POST', body: { phone: document.getElementById('f-phone').value, password: document.getElementById('f-pass').value } });
       TOKEN = r.token; USER = r.user; localStorage.setItem('ks_token', TOKEN);
+      if (USER.font_size) applyFont(USER.font_size);
       connectSSE(); refreshBadges();
-      nav(USER.role === 'admin' ? '#/account' : '#/home');
+      nav(['pdg', 'admin', 'gestionnaire', 'agent'].includes(USER.role) ? '#/account' : '#/home');
     } catch (err) { toast(err.message, 'err'); busy(e.target, false); }
   };
   document.getElementById('f-pass').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('b-login').click(); });
@@ -218,28 +223,39 @@ routes.login = () => {
 routes.register = async () => {
   let rules = { client: '' };
   try { rules = await api('/rules'); } catch { }
+  let villes = [];
+  try { villes = await api('/villes'); } catch { }
   $app.innerHTML = `
   ${header('Créer un compte', { bell: false })}
   <div class="content no-nav">
     <div class="card">
-      <div class="field"><label>Nom complet <span class="req">*</span></label><input type="text" id="f-name" placeholder="Ex : Aya Koné"></div>
+      <div class="field"><label>Nom complet <span class="req">*</span></label><input type="text" id="f-name" placeholder="Ex : John Sery Michael"></div>
       <div class="field"><label>Numéro de téléphone <span class="req">*</span></label><input type="tel" id="f-phone" placeholder="Ex : 07 00 00 00 00"></div>
-      <div class="field"><label>Mot de passe <span class="req">*</span> <span class="muted small">(6 caractères min.)</span></label><input type="password" id="f-pass"></div>
-      <div class="field"><label>Ville / Quartier</label><input type="text" id="f-addr" placeholder="Ex : Bouaké, Air France"></div>
+      ${pwField('f-pass', 'Mot de passe <span class="req">*</span> <span class="muted small">(6 caractères min.)</span>')}
+      <div class="field"><label>Ville <span class="req">*</span></label>
+        <input type="text" id="f-ville" list="villes-ci" placeholder="Tapez pour chercher votre ville…" autocomplete="off">
+        <datalist id="villes-ci">${villes.map(v => `<option value="${esc(v)}">`).join('')}</datalist>
+      </div>
+      <div class="field"><label>Quartier</label><input type="text" id="f-quartier" placeholder="Ex : Air France, Cocody Angré…"></div>
       <div class="sec-title">Règles d'utilisation</div>
       <div class="rules-box">${esc(rules.client || '')}</div>
       <label class="check-line"><input type="checkbox" id="f-accept"> J'ai lu et j'accepte les règles d'utilisation de Klean-Services CI.</label>
       <button class="btn" id="b-reg">Créer mon compte</button>
-      <div class="muted small center mt">Un seul compte suffit : vous pourrez l'utiliser comme client et, si vous le souhaitez, devenir aussi professionnel.</div>
+      <div class="muted small center mt">Un seul compte par numéro de téléphone. Vous pourrez l'utiliser comme client et, si vous le souhaitez, devenir aussi professionnel.</div>
     </div>
   </div>`;
   document.getElementById('b-reg').onclick = async e => {
+    const ville = document.getElementById('f-ville').value.trim();
+    if (ville && villes.length && !villes.some(v => v.toLowerCase() === ville.toLowerCase())) {
+      toast('Choisissez votre ville dans la liste (tapez les premières lettres).', 'err'); return;
+    }
     busy(e.target, true);
     try {
       const r = await api('/auth/register', {
         method: 'POST', body: {
           name: document.getElementById('f-name').value, phone: document.getElementById('f-phone').value,
-          password: document.getElementById('f-pass').value, address: document.getElementById('f-addr').value,
+          password: document.getElementById('f-pass').value,
+          ville, quartier: document.getElementById('f-quartier').value,
           accept_rules: document.getElementById('f-accept').checked
         }
       });
@@ -247,13 +263,24 @@ routes.register = async () => {
       connectSSE(); refreshBadges();
       toast('Bienvenue sur Klean-Services CI !', 'ok');
       nav('#/home');
-    } catch (err) { toast(err.message, 'err'); busy(e.target, false); }
+    } catch (err) {
+      busy(e.target, false);
+      if (err.message === 'Ce numéro est déjà associé à un compte.') {
+        const ph = document.getElementById('f-phone').value;
+        openModal(`<h3>📱 Numéro déjà utilisé</h3>
+          <p>Ce numéro est déjà associé à un compte.</p>
+          <button class="btn" onclick="closeModal();nav('#/login')">Se connecter</button>
+          <button class="btn sec mt" onclick="closeModal();A.forgot('${esc(ph)}')">Réinitialiser mon accès</button>
+          <button class="btn ghost" onclick="closeModal()">Annuler</button>`);
+      } else toast(err.message, 'err');
+    }
   };
 };
 
 /* ---------- Accueil ---------- */
 routes.home = async () => {
   if (!SERVICES) try { SERVICES = await api('/services'); } catch (e) { $app.innerHTML = header('Accueil', { brand: true }) + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home'); return; }
+  if (!POPULAIRES.length) try { POPULAIRES = await api('/services/populaires'); } catch { }
   try { GAMES = await api('/games/config'); } catch { }
   try { ADS = await api('/ads'); } catch { }
   const homeAds = ADS.filter(a => a.placement === 'accueil');
@@ -261,6 +288,10 @@ routes.home = async () => {
   $app.innerHTML = `
   ${header('', { brand: true, back: false })}
   <div class="content">
+    ${MAINT.active && MAINT.scope !== 'F' ? `<div class="card" style="border-left:4px solid #e67e22;background:#fff8f0">
+      <div class="bold">🛠️ Maintenance partielle en cours</div>
+      <div class="small muted">${esc(MAINT.message || 'Certaines fonctions sont temporairement suspendues. Merci de votre patience.')}</div>
+    </div>` : ''}
     <div class="searchbar">
       <input type="text" id="home-q" placeholder="🔎 Que recherchez-vous ?" enterkeyhint="search">
       <button onclick="A.goSearch()" aria-label="Rechercher">🔍</button>
@@ -268,9 +299,14 @@ routes.home = async () => {
     <div class="hint">Ex : « Je cherche un plombier », « Nettoyer mon fauteuil », « Cours d'anglais à domicile »…</div>
     ${homeAds.map(a => `<div class="ad-card"><div class="ad-tag">INFORMATION</div><div class="bold">${esc(a.title || '')}</div><div class="small">${esc(a.content || '')}</div>
       ${a.file && a.type === 'image' ? `<img src="${esc(a.file)}" alt="">` : ''}${a.file && a.type === 'video' ? `<video src="${esc(a.file)}" controls muted></video>` : ''}</div>`).join('')}
-    <div class="sec-title">Services principaux</div>
+    ${POPULAIRES.length ? `<div class="sec-title">Services populaires</div>
     <div class="svc-grid">
-      ${cats.map(c => `<div class="svc-card" onclick="A.openCat(${c.id})"><span class="ic">${esc(c.icon || '🔹')}</span><span class="nm">${esc(c.name)}</span></div>`).join('')}
+      ${POPULAIRES.map(s => `<div class="svc-card" onclick="nav('#/request/${s.id}')"><span class="ic">${esc(s.icon || '🔹')}</span><span class="nm">${esc(s.name)}</span></div>`).join('')}
+    </div>` : ''}
+    <div class="sec-title">Métiers</div>
+    <div class="svc-grid">
+      ${cats.slice(0, 7).map(c => `<div class="svc-card" onclick="A.openCat(${c.id})"><span class="ic">${esc(c.icon || '🔹')}</span><span class="nm">${esc(c.name)}</span></div>`).join('')}
+      <div class="svc-card" onclick="nav('#/services')"><span class="ic">➕</span><span class="nm">Tous les métiers</span></div>
     </div>
     <button class="btn sec mt" onclick="nav('#/services')">Voir tous les services</button>
     ${(GAMES.quiz || GAMES.flipfizz || GAMES.kdo) ? `
@@ -304,18 +340,53 @@ routes.search = async (params) => {
   updateBadges();
 };
 
-/* ---------- Tous les services ---------- */
-routes.services = async () => {
-  if (!SERVICES) SERVICES = await api('/services');
+/* ---------- Tous les services (catalogue complet par métier) ---------- */
+routes.services = async (params) => {
+  try { if (!CATALOGUE) CATALOGUE = await api('/catalogue'); }
+  catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('search'); return; }
+  const openId = parseInt(params || sessionStorage.getItem('ks_cat_open') || 0, 10);
+  const q = (sessionStorage.getItem('ks_cat_q') || '').toLowerCase().trim();
+  const hit = x => (x || '').toLowerCase().includes(q);
+
+  let listHtml;
+  if (q) {
+    // Recherche : liste à plat des services correspondants (nom, sous-catégorie, tâches, métier)
+    const out = [];
+    CATALOGUE.forEach(c => c.sous_categories.forEach(sc => sc.services.forEach(s => {
+      if (hit(s.name) || hit(sc.name) || hit(c.name) || s.taches.some(t => hit(t.name)))
+        out.push({ ...s, icon: c.icon, path: `${c.name} › ${sc.name}` });
+    })));
+    listHtml = out.length
+      ? out.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')"><span class="mi-ic">${esc(s.icon || '🔹')}</span><div><div>${esc(s.name)}</div><div class="muted small">${esc(s.path)}</div></div><span class="mi-arr">›</span></div>`).join('')
+      : emptyState('🔍', 'Aucun service trouvé pour « ' + esc(q) + ' ».');
+  } else {
+    // Accordéon par métier
+    listHtml = CATALOGUE.map(c => `
+      <div class="menu-item" onclick="A.catOpen(${c.id})" style="font-weight:700">
+        <span class="mi-ic">${esc(c.icon || '🔹')}</span>${esc(c.name)}
+        <span class="mi-arr">${openId === c.id ? '▾' : '›'}</span></div>
+      ${openId === c.id ? c.sous_categories.map(sc => `
+        <div class="sec-title" style="margin-left:10px">${esc(sc.name)}</div>
+        ${sc.services.map(s => `<div class="menu-item" style="margin-left:10px" onclick="nav('#/request/${s.id}')">
+          <span class="mi-ic">${esc(c.icon || '🔹')}</span><div><div>${esc(s.name)}</div>
+          ${s.taches.length ? `<div class="muted small">${s.taches.slice(0, 3).map(t => esc(t.name)).join(' · ')}${s.taches.length > 3 ? '…' : ''}</div>` : ''}</div>
+          <span class="mi-arr">›</span></div>`).join('')}`).join('') : ''}`).join('');
+  }
+
   $app.innerHTML = `
   ${header('Tous les services')}
   <div class="content">
-    ${SERVICES.map(c => `
-      <div class="sec-title">${esc(c.icon || '')} ${esc(c.name)}</div>
-      ${c.services.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')"><span class="mi-ic">${esc(c.icon || '🔹')}</span>${esc(s.name)}<span class="mi-arr">›</span></div>`).join('')}
-    `).join('')}
+    <div class="searchbar">
+      <input type="text" id="cat-q" placeholder="🔎 Filtrer : plomberie, coiffure, réparer…" value="${esc(sessionStorage.getItem('ks_cat_q') || '')}" enterkeyhint="search">
+      <button onclick="A.catFilter()" aria-label="Filtrer">🔍</button>
+    </div>
+    ${listHtml}
   </div>${bottomNav('search')}`;
   updateBadges();
+  const inp = document.getElementById('cat-q');
+  inp.addEventListener('input', () => { sessionStorage.setItem('ks_cat_q', inp.value); });
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') A.catFilter(); });
+  if (q) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
 };
 
 /* ---------- Demande de service (formulaire adaptatif) ---------- */
@@ -326,11 +397,17 @@ routes.request = async (serviceId) => {
   try { data = await api('/services/' + serviceId + '/questions'); }
   catch (e) { toast(e.message, 'err'); back(); return; }
   REQ = { photos: [], audio: null, lat: USER.lat, lng: USER.lng, service_id: data.service.id };
+  const taches = data.taches || [];
+  const sug = sessionStorage.getItem('ks_sug_tache') || '';
+  sessionStorage.removeItem('ks_sug_tache');
   $app.innerHTML = `
   ${header(data.service.name)}
   <div class="content">
     <div class="card">
       <div class="muted small mb">Répondez à ces quelques questions pour que le professionnel comprenne bien votre besoin.</div>
+      ${taches.length ? `<div class="field"><label>Que faut-il faire ?</label>
+        <div class="choices" id="r-tache">${taches.map(t => `<button type="button" class="chip ${sug && t.name === sug ? 'on' : ''}" onclick="A.pickChip(this,'${esc(t.name).replace(/'/g, "\\'")}')">${esc(t.name)}</button>`).join('')}
+        <button type="button" class="chip" onclick="A.pickChip(this,'Autre')">Autre / je ne sais pas</button></div></div>` : ''}
       ${data.questions.map(qst => renderQuestion(qst)).join('')}
       <div class="field"><label>Message (facultatif)</label><textarea id="r-desc" placeholder="Autre précision utile…"></textarea></div>
       <div class="field"><label>Photos (facultatif)</label>
@@ -351,6 +428,7 @@ routes.request = async (serviceId) => {
     </div>
   </div>${bottomNav('search')}`;
   updateBadges();
+  if (sug && taches.some(t => t.name === sug)) { const tz = document.getElementById('r-tache'); if (tz) tz.dataset.val = sug; }
   document.getElementById('b-send').onclick = async e => {
     const answers = {};
     let missing = null;
@@ -368,9 +446,12 @@ routes.request = async (serviceId) => {
     if (!addr.trim()) { toast('Indiquez votre localisation (bouton GPS ou saisie manuelle).', 'err'); return; }
     busy(e.target, true, 'Envoi en cours…');
     try {
+      const tz = document.getElementById('r-tache');
       const r = await api('/missions', {
         method: 'POST', body: {
-          service_id: REQ.service_id, answers, description: document.getElementById('r-desc').value,
+          service_id: REQ.service_id, answers,
+          tache: tz && tz.dataset.val && tz.dataset.val !== 'Autre' ? tz.dataset.val : null,
+          description: document.getElementById('r-desc').value,
           address: addr, lat: REQ.lat, lng: REQ.lng,
           urgence: document.getElementById('r-urgent').checked,
           date_souhaitee: document.getElementById('r-date').value || null,
@@ -408,6 +489,7 @@ routes.missions = async () => {
     <div class="card tap" onclick="nav('#/mission/${m.id}')">
       <div class="row"><span class="mi-ic" style="font-size:24px">${esc(m.icon || '📋')}</span>
         <div class="grow"><div class="bold">${esc(m.service)}</div>
+        ${m.tache ? `<div class="small">🛠️ ${esc(m.tache)}</div>` : ''}
         <div class="muted small">${esc(m.address || '')} • ${fmtDate(m.created_at)}</div></div>
         ${statusPill(m.status)}</div>
       ${m.urgence ? '<div class="small" style="color:var(--danger);font-weight:700;margin-top:6px">🔥 Urgent</div>' : ''}
@@ -537,6 +619,7 @@ routes.mission = async (id) => {
       <div class="row"><span style="font-size:26px">${esc(m.icon || '📋')}</span>
         <div class="grow"><div class="bold">${esc(m.service)}</div><div class="muted small">N° ${esc(m.code)} • ${fmtDate(m.created_at)}</div></div>
         ${statusPill(m.status)}</div>
+      ${m.tache ? `<div class="small mt"><b>🛠️ Tâche demandée :</b> ${esc(m.tache)}</div>` : ''}
       ${m.urgence ? '<div class="small mt" style="color:var(--danger);font-weight:700">🔥 Demande urgente</div>' : ''}
       ${m.date_souhaitee ? `<div class="small mt">📅 Souhaité : ${fmtDate(m.date_souhaitee)}</div>` : ''}
       <div class="small mt">📍 ${esc(m.address || '')}</div>
@@ -691,7 +774,7 @@ routes.account = async () => {
         <div class="menu-item" onclick="nav('#/settings')"><span class="mi-ic">⚙️</span>Paramètres<span class="mi-arr">›</span></div>
       </div>
     </div>
-    ${USER.role === 'admin' ? `<a class="menu-item" href="/admin" style="text-decoration:none;color:inherit"><span class="mi-ic">🖥️</span>Tableau de bord administrateur<span class="mi-arr">›</span></a>` : ''}
+    ${['pdg', 'admin', 'gestionnaire', 'agent'].includes(USER.role) ? `<a class="menu-item" href="/admin" style="text-decoration:none;color:inherit"><span class="mi-ic">🖥️</span>Tableau de bord administrateur<span class="mi-arr">›</span></a>` : ''}
     <button class="btn ghost mt" onclick="logout()">Se déconnecter</button>
   </div>${bottomNav('account')}`;
   updateBadges();
@@ -766,6 +849,7 @@ async function renderProDashboard() {
   const upcoming = d.missions.filter(m => ['confirmee', 'acceptee'].includes(m.status));
   $app.innerHTML = `${header('Mon espace professionnel')}
   <div class="content">
+    ${USER.kp_code ? `<div class="card" style="text-align:center;padding:10px"><span class="muted small">Votre code professionnel</span><div class="bold" style="font-size:20px;letter-spacing:2px">${esc(USER.kp_code)}</div></div>` : ''}
     <div class="avail-toggle" onclick="A.toggleAvail(${d.available ? 0 : 1})">
       <div class="dot ${d.available ? 'on' : ''}"></div>
       <div class="grow"><div class="bold">${d.available ? '🟢 Disponible' : '⚪ Indisponible'}</div>
@@ -973,19 +1057,31 @@ routes.urgence = async () => {
 /* ---------- Mes informations / adresses / sécurité / paramètres ---------- */
 routes.infos = async () => {
   if (!USER) { nav('#/login'); return; }
+  let villes = [];
+  try { villes = await api('/villes'); } catch { }
   $app.innerHTML = `${header('Mes informations')}
   <div class="content"><div class="card">
     <div class="center mb">${avatar(USER, 'lg')}<br><button class="btn sec sm mt" onclick="A.pickAvatar()">📷 Changer la photo</button>
     <input type="file" id="file-input" accept="image/*" style="display:none"></div>
-    <div class="field"><label>Nom complet</label><input type="text" id="i-name" value="${esc(USER.name)}"></div>
+    ${USER.profile_incomplete ? '<div class="card" style="border-left:4px solid #e67e22;background:#fff8f0"><div class="small">👋 Votre compte a été créé par notre équipe : complétez vos informations ci-dessous.</div></div>' : ''}
+    <div class="field"><label>Nom complet</label><input type="text" id="i-name" placeholder="Ex : John Sery Michael" value="${esc(USER.name)}"></div>
     <div class="field"><label>Téléphone</label><input type="tel" value="${esc(USER.phone)}" disabled style="background:#f1f5f9"></div>
-    <div class="field"><label>Ville / Quartier</label><input type="text" id="i-addr" value="${esc(USER.address || '')}"></div>
+    <div class="field"><label>E-mail</label><input type="email" id="i-email" placeholder="facultatif" value="${esc(USER.email || '')}"></div>
+    <div class="field"><label>Ville</label>
+      <input type="text" id="i-ville" list="villes-ci" placeholder="Tapez pour chercher votre ville…" autocomplete="off" value="${esc(USER.ville || '')}">
+      <datalist id="villes-ci">${villes.map(v => `<option value="${esc(v)}">`).join('')}</datalist>
+    </div>
+    <div class="field"><label>Quartier</label><input type="text" id="i-quartier" placeholder="Ex : Air France, Cocody Angré…" value="${esc(USER.quartier || '')}"></div>
+    <div class="field"><label>Adresse / précisions</label><input type="text" id="i-addr" value="${esc(USER.address || '')}"></div>
     <button class="btn" id="b-save">Enregistrer</button>
   </div></div>${bottomNav('account')}`;
   document.getElementById('b-save').onclick = async e => {
     busy(e.target, true);
     try {
-      USER = await api('/me', { method: 'PUT', body: { name: document.getElementById('i-name').value, address: document.getElementById('i-addr').value } });
+      USER = await api('/me', { method: 'PUT', body: {
+        name: document.getElementById('i-name').value, email: document.getElementById('i-email').value,
+        ville: document.getElementById('i-ville').value, quartier: document.getElementById('i-quartier').value,
+        address: document.getElementById('i-addr').value } });
       toast('Informations mises à jour ✓', 'ok'); back();
     } catch (err) { toast(err.message, 'err'); busy(e.target, false); }
   };
@@ -1021,8 +1117,8 @@ routes.security = async () => {
   <div class="content">
     <div class="card">
       <div class="bold mb">Changer mon mot de passe</div>
-      <div class="field"><label>Mot de passe actuel</label><input type="password" id="s-cur"></div>
-      <div class="field"><label>Nouveau mot de passe</label><input type="password" id="s-new"></div>
+      ${pwField('s-cur', 'Mot de passe actuel')}
+      ${pwField('s-new', 'Nouveau mot de passe')}
       <button class="btn" id="b-pass">Mettre à jour</button>
     </div>
     <div class="card">
@@ -1051,8 +1147,17 @@ routes.security = async () => {
 routes.settings = () => {
   if (!USER) { nav('#/login'); return; }
   const sound = localStorage.getItem('ks_sound') !== '0';
+  const font = parseInt(USER.font_size || localStorage.getItem('ks_font') || 16, 10);
   $app.innerHTML = `${header('Paramètres')}
   <div class="content">
+    <div class="card">
+      <div class="bold small mb">🔠 Taille du texte</div>
+      <div class="muted small mb">Toute l'application s'adapte proportionnellement, sans débordement.</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${FONT_SIZES.map(s => `<button class="chip ${font === s ? 'on' : ''}" style="font-size:${Math.min(s, 20)}px" onclick="A.setFont(${s})">${s === 16 ? s + ' (normal)' : s}</button>`).join('')}
+      </div>
+      <div class="small muted mt">Aperçu : <span style="font-size:${font}px">Klean-Services CI — tous vos services à portée de main.</span></div>
+    </div>
     <div class="card">
       <div class="switch"><div><div class="bold small">🔊 Son des notifications</div><div class="muted small">Jouer un son à chaque notification</div></div>
       <button class="chip ${sound ? 'on' : ''}" onclick="A.toggleSound(this)">${sound ? 'Activé' : 'Désactivé'}</button></div>
@@ -1165,6 +1270,75 @@ routes.kdo = async () => {
    ============================================================ */
 const A = {
   goSearch() { const v = document.getElementById('home-q').value.trim(); nav('#/search/' + encodeURIComponent(v)); },
+  catOpen(id) {
+    const cur = parseInt(sessionStorage.getItem('ks_cat_open') || 0, 10);
+    sessionStorage.setItem('ks_cat_open', cur === id ? 0 : id);
+    render();
+  },
+  catFilter() { render(); },
+  async maintRetry() { await checkMaintenance(); render(); },
+  eye(id, btn) {
+    const i = document.getElementById(id);
+    i.type = i.type === 'password' ? 'text' : 'password';
+    btn.textContent = i.type === 'password' ? '👁️' : '🙈';
+  },
+  async setFont(px) {
+    const v = applyFont(px);
+    if (USER) { try { await api('/me', { method: 'PUT', body: { font_size: v } }); USER.font_size = v; } catch { } }
+    render();
+  },
+  /* Récupération sécurisée de l'accès (mot de passe oublié) */
+  forgot(phone) {
+    openModal(`<h3>🔑 Récupérer mon accès</h3>
+      <p class="small muted">Indiquez le numéro de téléphone de votre compte. Un code de vérification à 6 chiffres sera généré : notre équipe vous le communique après vérification de votre identité. Votre ancien mot de passe n\u2019est jamais affiché.</p>
+      <div class="field"><label>Numéro de téléphone</label><input type="tel" id="fg-phone" placeholder="Ex : 07 00 00 00 00" value="${esc(phone || '')}"></div>
+      <button class="btn" onclick="A.forgotRequest()">Recevoir mon code</button>
+      <button class="btn ghost" onclick="A.forgotStep2()">J\u2019ai déjà un code</button>
+      <button class="btn ghost" onclick="closeModal()">Annuler</button>`);
+  },
+  async forgotRequest() {
+    const phone = document.getElementById('fg-phone').value.trim();
+    if (!phone) return toast('Indiquez votre numéro de téléphone.', 'err');
+    try {
+      const r = await api('/auth/reset-request', { method: 'POST', body: { phone } });
+      toast(r.message, 'ok');
+      A.forgotStep2(phone);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  forgotStep2(phone) {
+    const p = phone || (document.getElementById('fg-phone') ? document.getElementById('fg-phone').value : '');
+    openModal(`<h3>🔑 Nouveau mot de passe</h3>
+      <p class="small muted">Entrez le code à 6 chiffres qui vous a été communiqué, puis choisissez votre nouveau mot de passe.</p>
+      <div class="field"><label>Numéro de téléphone</label><input type="tel" id="fg2-phone" value="${esc(p || '')}"></div>
+      <div class="field"><label>Code de vérification (6 chiffres)</label><input type="tel" id="fg2-code" maxlength="6" placeholder="______" style="letter-spacing:6px;text-align:center;font-size:20px"></div>
+      ${pwField('fg2-pass', 'Nouveau mot de passe (6 caractères min.)')}
+      ${pwField('fg2-pass2', 'Confirmez le nouveau mot de passe')}
+      <button class="btn" onclick="A.forgotConfirm()">Valider mon nouveau mot de passe</button>
+      <button class="btn ghost" onclick="closeModal()">Annuler</button>`);
+  },
+  async forgotConfirm() {
+    const p1 = document.getElementById('fg2-pass').value, p2 = document.getElementById('fg2-pass2').value;
+    if (p1.length < 6) return toast('Le nouveau mot de passe doit contenir au moins 6 caractères.', 'err');
+    if (p1 !== p2) return toast('Les deux mots de passe ne sont pas identiques.', 'err');
+    try {
+      const r = await api('/auth/reset-confirm', { method: 'POST', body: { phone: document.getElementById('fg2-phone').value, code: document.getElementById('fg2-code').value, password: p1 } });
+      TOKEN = r.token; USER = r.user; localStorage.setItem('ks_token', TOKEN);
+      if (USER.font_size) applyFont(USER.font_size);
+      closeModal(); connectSSE(); refreshBadges();
+      toast('Mot de passe modifié ✓ Vous êtes connecté.', 'ok');
+      nav('#/home');
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async forcePwdSave() {
+    const cur = document.getElementById('fp-cur').value, nv = document.getElementById('fp-new').value, nv2 = document.getElementById('fp-new2').value;
+    if (nv.length < 6) return toast('Le nouveau mot de passe doit contenir au moins 6 caractères.', 'err');
+    if (nv !== nv2) return toast('Les deux mots de passe ne sont pas identiques.', 'err');
+    try {
+      await api('/me/password', { method: 'PUT', body: { current: cur, password: nv } });
+      USER.must_change_password = false;
+      closeModal(); toast('Mot de passe enregistré ✓ Bienvenue !', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
   openCat(catId) {
     const c = SERVICES.find(x => x.id === catId);
     if (!c) return;
@@ -1181,7 +1355,10 @@ const A = {
       const r = await api('/search?q=' + encodeURIComponent(q));
       zone.innerHTML = r.results.length
         ? `<div class="sec-title">Services correspondants</div>` + r.results.map(s =>
-          `<div class="menu-item" onclick="nav('#/request/${s.id}')"><span class="mi-ic">${esc(s.icon || '🔹')}</span><div><div>${esc(s.name)}</div><div class="muted small">${esc(s.category)}</div></div><span class="mi-arr">›</span></div>`).join('')
+          `<div class="menu-item" onclick="${s.tache_suggeree ? `sessionStorage.setItem('ks_sug_tache','${esc(s.tache_suggeree).replace(/'/g, "\\'")}');` : ''}nav('#/request/${s.id}')">
+            <span class="mi-ic">${esc(s.icon || '🔹')}</span>
+            <div><div>${esc(s.name)}</div><div class="muted small">${esc(s.category)}${s.sous_categorie ? ' › ' + esc(s.sous_categorie) : ''}${s.tache_suggeree ? ` — <b>${esc(s.tache_suggeree)}</b>` : ''}</div></div>
+            <span class="mi-arr">›</span></div>`).join('')
         : emptyState('🔍', 'Aucun service trouvé pour « ' + q + ' ».') + `<button class="btn sec" onclick="nav('#/services')">Voir tous les services</button>`;
     } catch (e) { zone.innerHTML = emptyState('📶', e.message); }
   },
@@ -1520,12 +1697,61 @@ window.A = A; window.nav = nav; window.back = back; window.render = render; wind
 /* ============================================================
    ROUTEUR
    ============================================================ */
+// Changement de mot de passe OBLIGATOIRE (après réinitialisation d'accès ou création rapide par l'administration)
+function forcePasswordModal() {
+  openModal(`<h3>🔒 Nouveau mot de passe requis</h3>
+    <p class="small muted">Pour votre sécurité, choisissez maintenant votre nouveau mot de passe personnel.</p>
+    ${pwField('fp-cur', 'Mot de passe actuel (temporaire)')}
+    ${pwField('fp-new', 'Nouveau mot de passe (6 caractères minimum)')}
+    ${pwField('fp-new2', 'Confirmez le nouveau mot de passe')}
+    <button class="btn" onclick="A.forcePwdSave()">Enregistrer mon nouveau mot de passe</button>
+    <button class="btn ghost" onclick="logout()">Se déconnecter</button>`);
+  const bg = document.getElementById('modal');
+  if (bg) bg.onclick = null; // fenêtre non refermable : le changement est obligatoire
+}
+
+/* ---------- Champ mot de passe avec œil 👁 (masqué par défaut) ---------- */
+function pwField(id, label, ph) {
+  return `<div class="field"><label>${label}</label>
+    <div style="position:relative">
+      <input type="password" id="${id}" style="width:100%;padding-right:48px" ${ph ? `placeholder="${ph}"` : ''}>
+      <button type="button" onclick="A.eye('${id}',this)" aria-label="Afficher / masquer le mot de passe"
+        style="position:absolute;right:2px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:19px;padding:8px 10px;cursor:pointer">👁️</button>
+    </div></div>`;
+}
+
+/* ---------- Taille du texte (14–26 px, proportionnelle) ---------- */
+const FONT_SIZES = [14, 16, 18, 20, 22, 24, 26];
+function applyFont(px) {
+  px = parseInt(px, 10);
+  if (!FONT_SIZES.includes(px)) px = 16;
+  document.body.style.zoom = px === 16 ? '' : String(px / 16);
+  localStorage.setItem('ks_font', px);
+  return px;
+}
+
+async function checkMaintenance() {
+  try { MAINT = await api('/maintenance'); } catch { }
+  return MAINT;
+}
+function maintenanceScreen() {
+  $app.innerHTML = `<div class="content" style="display:flex;flex-direction:column;justify-content:center;min-height:80vh;text-align:center">
+    <div style="font-size:64px">🛠️</div>
+    <h2 style="margin:12px 0 8px">Maintenance en cours</h2>
+    <p class="muted">${esc(MAINT.message || 'Klean-Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.')}</p>
+    ${MAINT.until ? `<p class="small muted">Retour prévu : ${esc(MAINT.until.replace('T', ' à '))}</p>` : ''}
+    <button class="btn mt" onclick="A.maintRetry()">Réessayer</button>
+  </div>`;
+}
+
 function render() {
   currentChat = null;
   const h = (location.hash || '#/home').slice(2);
   const [route, ...rest] = h.split('/');
   const param = rest.join('/');
+  if (MAINT.active && MAINT.scope === 'F' && (!USER || USER.role !== 'pdg')) { maintenanceScreen(); return; }
   if (!TOKEN && !['login', 'register'].includes(route)) { location.hash = '#/login'; return; }
+  if (USER && USER.must_change_password) { setTimeout(forcePasswordModal, 50); }
   const fn = routes[route] || routes.home;
   Promise.resolve(fn(param)).catch(e => {
     $app.innerHTML = header('Erreur') + `<div class="content">${emptyState('⚠️', e.message || 'Une erreur est survenue.')}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home');
@@ -1536,9 +1762,13 @@ function render() {
 /* ---------- Démarrage ---------- */
 (async function init() {
   if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('/sw.js'); } catch { } }
+  applyFont(localStorage.getItem('ks_font') || 16);
+  await checkMaintenance();
+  setInterval(async () => { const was = MAINT.active; await checkMaintenance(); if (was !== MAINT.active) render(); }, 60000);
   if (TOKEN) {
     try {
       USER = await api('/me');
+      if (USER.font_size) applyFont(USER.font_size);
       connectSSE(); refreshBadges();
     } catch { TOKEN = null; localStorage.removeItem('ks_token'); }
   }

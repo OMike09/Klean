@@ -5,7 +5,10 @@
 const root = document.getElementById('root');
 let TOKEN = localStorage.getItem('ks_admin_token') || null;
 let STATS = {};
+let ME = null; // compte connecté : { role, perms: [...] }
 let VIEW = location.hash.replace('#', '') || 'dashboard';
+const ROLE_LB = { pdg: '👑 PDG', admin: 'Administrateur', gestionnaire: 'Gestionnaire', agent: 'Agent', user: 'Utilisateur' };
+function can(k) { return ME && (ME.role === 'pdg' || (ME.perms || []).includes(k)); }
 
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function fmtD(s) { if (!s) return ''; const d = new Date(s.replace(' ', 'T') + 'Z'); return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
@@ -39,15 +42,21 @@ function renderLogin() {
     <label class="small muted">Identifiant</label>
     <input type="text" id="l-phone" placeholder="Identifiant administrateur">
     <label class="small muted">Mot de passe</label>
-    <input type="password" id="l-pass">
+    <div style="position:relative">
+      <input type="password" id="l-pass" style="width:100%;padding-right:44px">
+      <button type="button" onclick="var i=document.getElementById('l-pass');i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'👁️':'🙈'"
+        style="position:absolute;right:2px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;padding:6px 10px;cursor:pointer">👁️</button>
+    </div>
     <button class="btn" id="l-btn">Se connecter</button>
   </div></div>`;
   document.getElementById('l-btn').onclick = async e => {
     e.target.disabled = true;
     try {
       const r = await api('/auth/login', { method: 'POST', body: { phone: document.getElementById('l-phone').value, password: document.getElementById('l-pass').value } });
-      if (r.user.role !== 'admin') { toast('Ce compte n\u2019est pas administrateur.', 'err'); e.target.disabled = false; return; }
+      if (!['pdg', 'admin', 'gestionnaire', 'agent'].includes(r.user.role)) { toast('Ce compte ne fait pas partie de l\u2019équipe d\u2019administration.', 'err'); e.target.disabled = false; return; }
       TOKEN = r.token; localStorage.setItem('ks_admin_token', TOKEN);
+      ME = r.user;
+      if (r.user.must_change_password) toast('⚠️ Pensez à changer votre mot de passe temporaire (menu « Mon compte » de l\u2019application).', 'warn');
       render();
     } catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
   };
@@ -55,31 +64,47 @@ function renderLogin() {
 }
 
 /* ---------- Structure ---------- */
+// [vue, libellé, badge compteur, permission requise] — null = visible pour toute l'équipe
 const MENU = [
-  ['TABLEAU DE BORD', [['dashboard', '📊 Vue d\u2019ensemble']]],
-  ['UTILISATEURS', [['users', '👥 Tous les comptes'], ['pros', '✅ Validations pro', 'pros_pending']]],
-  ['SERVICES', [['catalog', '🗂️ Catégories & services'], ['questions', '❓ Questions dynamiques']]],
-  ['MISSIONS', [['missions', '🧰 Demandes & missions'], ['payments', '💰 Paiements & commissions']]],
-  ['COMMUNICATION', [['ads', '📣 Publicités & infos'], ['broadcast', '📨 Message système']]],
-  ['SÉCURITÉ', [['rules', '📜 Règles & conditions'], ['reports', '⚠️ Signalements', 'signalements'], ['urgences', '🚨 Urgences', 'urgences'], ['files', '🗄️ Gestion des fichiers']]],
-  ['CONTENU', [['avis', '📢 Avis de recherche'], ['jobs', '💼 Je cherche un job'], ['ecole', '🏫 École & famille'], ['games', '🎮 Quiz / Flip Fizz / Kdo']]],
-  ['CONFIGURATION', [['settings', '⚙️ Paramètres généraux']]],
+  ['TABLEAU DE BORD', [['dashboard', '📊 Vue d\u2019ensemble', null, null]]],
+  ['UTILISATEURS', [['users', '👥 Tous les comptes', null, 'comptes'], ['pros', '✅ Validations pro', 'pros_pending', 'pros']]],
+  ['SERVICES', [['catalog', '📚 Métiers & catalogue', null, 'catalogue'], ['questions', '❓ Questions dynamiques', null, 'questions']]],
+  ['MISSIONS', [['missions', '🧰 Demandes & missions', null, 'missions'], ['payments', '💰 Paiements & commissions', null, 'paiements']]],
+  ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['broadcast', '📨 Message système', null, 'communication']]],
+  ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
+  ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Je cherche un job', null, 'contenu'], ['ecole', '🏫 École & famille', null, 'contenu'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
+  ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
+  ['CONFIGURATION', [['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
 ];
+function menuVisible(perm) { return !perm || (perm === 'PDG' ? ME && ME.role === 'pdg' : can(perm)); }
 
 function shell(content) {
   root.innerHTML = `
   <div class="layout">
     <div class="side" id="side">
-      <div class="logo">Klean-Services CI<br><span class="small" style="color:#6d9c94;font-weight:600">Administration</span></div>
-      ${MENU.map(([grp, items]) => `<div class="grp">${grp}</div>` + items.map(([id, lb, cnt]) =>
-        `<button class="${VIEW === id ? 'on' : ''}" onclick="go('${id}')">${lb}${cnt && STATS[cnt] ? `<span class="cnt">${STATS[cnt]}</span>` : ''}</button>`).join('')).join('')}
+      <div class="logo">Klean-Services CI<br><span class="small" style="color:#6d9c94;font-weight:600">Administration</span>
+      ${ME ? `<br><span class="small" style="color:#9fc8c0">${esc(ME.name || '')} — ${ROLE_LB[ME.role] || ME.role}</span>` : ''}</div>
+      ${MENU.map(([grp, items]) => {
+        const vis = items.filter(it => menuVisible(it[3]));
+        return vis.length ? `<div class="grp">${grp}</div>` + vis.map(([id, lb, cnt]) =>
+          `<button class="${VIEW === id ? 'on' : ''}" onclick="go('${id}')">${lb}${cnt && STATS[cnt] ? `<span class="cnt">${STATS[cnt]}</span>` : ''}</button>`).join('') : '';
+      }).join('')}
       <div class="grp"></div>
       <button onclick="location.href='/'">📱 Ouvrir l'application</button>
       <button onclick="adminLogout()">🚪 Se déconnecter</button>
     </div>
-    <div class="main">${content}</div>
+    <div class="main">
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+        <input id="gs-q" style="flex:1;max-width:620px;padding:10px 14px;border:1.5px solid #cfe0dd;border-radius:10px;font-size:14px"
+          placeholder="🔎 Rechercher partout : nom, téléphone, e-mail, code KP, service, mission, paiement…" value="${esc(sessionStorage.getItem('adm_gs') || '')}">
+        <button class="btn sm" onclick="A.gsGo()">Rechercher</button>
+      </div>
+      ${content}
+    </div>
   </div>
   <button class="menu-toggle" onclick="document.getElementById('side').classList.toggle('open')">☰</button>`;
+  const gq = document.getElementById('gs-q');
+  if (gq) gq.addEventListener('keydown', e => { if (e.key === 'Enter') A.gsGo(); });
 }
 function go(v) { VIEW = v; location.hash = v; render(); }
 function adminLogout() { TOKEN = null; localStorage.removeItem('ks_admin_token'); renderLogin(); }
@@ -109,23 +134,31 @@ views.dashboard = async () => {
 };
 
 /* ---------- Utilisateurs ---------- */
+function userStatusPill(u) {
+  if (u.blocked) return '<span class="pill bad">🚫 Bloqué</span>';
+  if (u.suspended) return '<span class="pill bad">Suspendu</span>';
+  if (u.disabled_until && u.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' ')) return `<span class="pill warn">⏸ Désactivé jusqu\u2019au ${esc(u.disabled_until.slice(0, 16))}</span>`;
+  if (u.pro_status === 'approved') return '<span class="pill ok">Client • Pro</span>';
+  if (u.pro_status === 'pending') return '<span class="pill warn">Pro en attente</span>';
+  return '<span class="pill info">Client</span>';
+}
 views.users = async () => {
   const f = sessionStorage.getItem('adm_uf') || 'all';
   const list = await api('/admin/users?filter=' + f);
   shell(`<h1>👥 Utilisateurs</h1>
-  <div class="tabs">${[['all', 'Tous'], ['clients', 'Clients'], ['pros', 'Professionnels'], ['pending', 'Pro en attente'], ['suspended', 'Suspendus'], ['verified', 'Vérifiés']]
-    .map(([id, lb]) => `<button class="${f === id ? 'on' : ''}" onclick="sessionStorage.setItem('adm_uf','${id}');render()">${lb}</button>`).join('')}</div>
-  <div class="panel"><table><tr><th>Nom</th><th>Téléphone</th><th>Localisation</th><th>Statut</th><th>Inscrit le</th><th>Actions</th></tr>
+  <div class="tabs">${[['all', 'Tous'], ['clients', 'Clients'], ['pros', 'Professionnels'], ['pending', 'Pro en attente'], ['suspended', 'Suspendus / bloqués'], ['verified', 'Vérifiés'], ['incomplete', 'Profils à compléter']]
+    .map(([id, lb]) => `<button class="${f === id ? 'on' : ''}" onclick="sessionStorage.setItem('adm_uf','${id}');render()">${lb}</button>`).join('')}
+    <button class="btn sm" style="margin-left:auto" onclick="A.userQuickCreate()">＋ Créer rapidement un compte</button></div>
+  <div class="panel"><table><tr><th>Nom</th><th>Téléphone</th><th>Code pro</th><th>Localisation</th><th>Statut</th><th>Inscrit le</th><th>Actions</th></tr>
   ${list.map(u => `<tr>
-    <td><b>${esc(u.name)}</b> ${u.verified ? '✅' : ''}</td><td>${esc(u.phone)}</td><td>${esc(u.address || '—')}</td>
-    <td>${u.suspended ? '<span class="pill bad">Suspendu</span>' : u.pro_status === 'approved' ? '<span class="pill ok">Client • Pro</span>' : u.pro_status === 'pending' ? '<span class="pill warn">Pro en attente</span>' : '<span class="pill info">Client</span>'}</td>
+    <td><b>${esc(u.name)}</b> ${u.verified ? '✅' : ''}${u.profile_incomplete ? ' <span class="pill warn small">profil à compléter</span>' : ''}</td>
+    <td>${esc(u.phone)}${u.email ? `<div class="small muted">${esc(u.email)}</div>` : ''}</td>
+    <td class="small">${u.kp_code ? '<b>' + esc(u.kp_code) + '</b>' : '—'}</td>
+    <td class="small">${esc(u.ville ? u.ville + (u.quartier ? ' / ' + u.quartier : '') : (u.address || '—'))}</td>
+    <td>${userStatusPill(u)}</td>
     <td class="small">${fmtD(u.created_at)}</td>
-    <td>
-      <button class="btn sm sec" onclick="A.userDetail(${u.id})">Détails</button>
-      <button class="btn sm ${u.suspended ? '' : 'warn'}" onclick="A.suspend(${u.id},${u.suspended ? 0 : 1})">${u.suspended ? 'Réactiver' : 'Suspendre'}</button>
-      <button class="btn sm sec" onclick="A.verify(${u.id},${u.verified ? 0 : 1})">${u.verified ? 'Retirer ✓' : 'Vérifier'}</button>
-    </td></tr>`).join('')}
-  ${!list.length ? '<tr><td colspan="6" class="muted">Aucun compte.</td></tr>' : ''}</table></div>`);
+    <td><button class="btn sm sec" onclick="A.userDetail(${u.id})">📋 Fiche</button></td></tr>`).join('')}
+  ${!list.length ? '<tr><td colspan="7" class="muted">Aucun compte.</td></tr>' : ''}</table></div>`);
 };
 
 /* ---------- Validations professionnelles ---------- */
@@ -148,34 +181,226 @@ views.pros = async () => {
     </div></div>`).join('') : '<div class="panel muted">Aucune demande en attente. Les nouvelles demandes apparaîtront ici.</div>'}`);
 };
 
-/* ---------- Catalogue services ---------- */
-views.catalog = async () => {
-  const d = await api('/admin/catalog');
-  shell(`<h1>🗂️ Catégories & services</h1>
-  <div class="panel">
-    <h2 style="margin-top:0">Ajouter</h2>
-    <div class="frow">
-      <div><label>Nouvelle catégorie</label><input id="c-name" placeholder="Nom"></div>
-      <div><label>Icône (émoji)</label><input id="c-icon" style="width:70px" placeholder="🔹"></div>
-      <button class="btn" onclick="A.addCat()">＋ Catégorie</button>
-    </div>
-    <div class="frow">
-      <div><label>Nouveau service</label><input id="s-name" placeholder="Nom du service"></div>
-      <div><label>Catégorie</label><select id="s-cat">${d.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
-      <div style="flex:1;min-width:200px"><label>Mots-clés (recherche intelligente, séparés par des virgules)</label><input id="s-kw" style="width:100%" placeholder="plombier,fuite,robinet…"></div>
-      <button class="btn" onclick="A.addSvc()">＋ Service</button>
-    </div>
+/* ---------- Grande recherche ---------- */
+views.search = async () => {
+  const q = sessionStorage.getItem('adm_gs') || '';
+  const r = q.length >= 2 ? await api('/admin/search?q=' + encodeURIComponent(q)) : { groups: [] };
+  shell(`<h1>🔎 Résultats pour « ${esc(q)} »</h1>
+  ${q.length < 2 ? '<div class="panel muted">Tapez au moins 2 caractères dans la barre de recherche ci-dessus.</div>' : ''}
+  ${r.groups.map(g => `<div class="panel">
+    <b>${esc(g.titre)}</b>
+    ${g.items.map(it => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #eef4f3">
+      <div><div>${esc(it.label)}</div><div class="small muted">${esc(it.sub || '')}</div></div>
+      <button class="btn sm sec" onclick="A.gsOpen('${g.type}',${it.id})">Ouvrir ›</button>
+    </div>`).join('')}
+  </div>`).join('')}
+  ${q.length >= 2 && !r.groups.length ? '<div class="panel muted">Aucun résultat. Essayez un nom, un téléphone, un code KP (ex : KP123456), un code mission ou un service.</div>' : ''}`);
+};
+
+/* ---------- Maintenance / suspension des activités (PDG) ---------- */
+let MAINTD = null;
+views.maintenance = async () => {
+  MAINTD = await api('/admin/maintenance');
+  const { config: m, scopes, fonctions, actif } = MAINTD;
+  shell(`<h1>🛠 Maintenance / suspension des activités</h1>
+  <div class="panel" style="border-left:5px solid ${actif ? '#c0392b' : '#27ae60'}">
+    <b>État actuel : ${actif ? '🔴 MAINTENANCE ACTIVE' : '🟢 Plateforme en fonctionnement normal'}</b>
+    ${actif ? `<div class="small" style="margin-top:6px">
+      Portée : <b>${esc(scopes[m.scope])}</b>${m.scope === 'E' ? '<br>Fonctions suspendues : ' + (m.functions || []).map(f => esc(fonctions[f])).join(', ') : ''}<br>
+      ${m.until ? 'Jusqu\u2019au : <b>' + esc(m.until.replace('T', ' ')) + '</b> (fin automatique)<br>' : 'Durée : indéterminée (jusqu\u2019à désactivation manuelle)<br>'}
+      Justification : ${esc(m.reason || '—')}<br>
+      Activée le ${esc(m.activated_at || '')} par ${esc(m.activated_by || '')}<br>
+      Message affiché aux utilisateurs : « ${esc(m.message || 'Klean-Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.')} »</div>
+      <button class="btn" style="margin-top:12px" onclick="A.maintOff()">🟢 Désactiver la maintenance maintenant</button>` : ''}
   </div>
-  ${d.categories.map(c => `<div class="panel">
-    <h2 style="margin-top:0">${esc(c.icon || '')} ${esc(c.name)} ${c.active ? '' : '<span class="pill off">Inactive</span>'}
-      <button class="btn sm sec" onclick="A.toggleCat(${c.id},${c.active ? 0 : 1})">${c.active ? 'Désactiver' : 'Activer'}</button></h2>
-    <table><tr><th>Service</th><th>Mots-clés</th><th>État</th><th>Actions</th></tr>
-    ${d.services.filter(s => s.category_id === c.id).map(s => `<tr>
-      <td><b>${esc(s.name)}</b></td><td class="small muted">${esc(s.keywords)}</td>
-      <td>${s.active ? '<span class="pill ok">Actif</span>' : '<span class="pill off">Inactif</span>'}</td>
-      <td><button class="btn sm sec" onclick="A.editSvc(${s.id},'${esc(s.name).replace(/'/g, "\\'")}','${esc(s.keywords).replace(/'/g, "\\'")}')">Modifier</button>
-      <button class="btn sm ${s.active ? 'warn' : ''}" onclick="A.toggleSvc(${s.id},${s.active ? 0 : 1})">${s.active ? 'Désactiver' : 'Activer'}</button></td></tr>`).join('')}
-    </table></div>`).join('')}`);
+  <div class="panel">
+    <b>${actif ? 'Modifier la maintenance' : 'Activer une maintenance'}</b>
+    <div class="small muted" style="margin:6px 0 12px">Votre compte PDG reste toujours accessible, quelle que soit la portée choisie. Les administrateurs et gestionnaires restent soumis à vos permissions.</div>
+    <label class="small muted">Portée de la suspension</label>
+    ${Object.entries(scopes).map(([k, lb]) => `<label style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:13.5px">
+      <input type="radio" name="mt-scope" value="${k}" ${(m.scope || 'F') === k ? 'checked' : ''} onchange="document.getElementById('mt-fns').style.display=this.value==='E'?'block':'none'">
+      <b>${k}.</b> ${esc(lb)}</label>`).join('')}
+    <div id="mt-fns" style="display:${(m.scope || 'F') === 'E' ? 'block' : 'none'};margin:8px 0 0 24px;border:1px solid #e3edeb;border-radius:8px;padding:8px">
+      ${Object.entries(fonctions).map(([k, lb]) => `<label style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px">
+        <input type="checkbox" class="mt-fn" value="${k}" ${(m.functions || []).includes(k) ? 'checked' : ''}> ${esc(lb)}</label>`).join('')}
+    </div>
+    <div class="frow" style="margin-top:12px">
+      <div><label class="small muted">Fin automatique (facultatif — vide = jusqu\u2019à désactivation manuelle)</label>
+      <input type="datetime-local" id="mt-until" value="${esc(m.until || '')}"></div>
+    </div>
+    <label class="small muted" style="margin-top:10px;display:block">Justification (obligatoire — enregistrée dans le journal)</label>
+    <input id="mt-reason" style="width:100%;margin-bottom:10px" value="${esc(m.reason || '')}" placeholder="Ex : mise à jour du système de paiement">
+    <label class="small muted">Message affiché aux utilisateurs (facultatif)</label>
+    <input id="mt-msg" style="width:100%;margin-bottom:12px" value="${esc(m.message || '')}" placeholder="Klean-Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.">
+    <button class="btn warn" onclick="A.maintOn()">🔴 ${actif ? 'Mettre à jour la maintenance' : 'Activer la maintenance'}</button>
+  </div>`);
+};
+
+/* ---------- Équipe & permissions (réservé au PDG) ---------- */
+let STAFFD = null; // dernières données /admin/staff
+views.staff = async () => {
+  STAFFD = await api('/admin/staff');
+  const { staff, perm_keys, role_labels } = STAFFD;
+  shell(`<h1>👑 Équipe & permissions</h1>
+  <div class="panel small muted">Hiérarchie : <b>PDG → Administrateurs → Gestionnaires → Agents → Utilisateurs</b>.
+  Vous seul (PDG) pouvez créer des comptes d\u2019équipe, modifier les rôles et activer/désactiver chaque permission.
+  Un membre de l\u2019équipe ne voit dans son tableau de bord que les sections autorisées.</div>
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <b>Membres de l\u2019équipe (${staff.length})</b>
+      <button class="btn sm" onclick="A.staffCreate()">＋ Ajouter un membre</button>
+    </div>
+    <table style="margin-top:10px"><tr><th>Nom</th><th>Identifiant</th><th>Rôle</th><th>Permissions</th><th>État</th><th>Actions</th></tr>
+    ${staff.map(s => `<tr>
+      <td><b>${esc(s.name)}</b></td><td class="small">${esc(s.phone)}</td>
+      <td>${s.role === 'pdg' ? '<b>👑 PDG</b>' : esc(role_labels[s.role] || s.role)}</td>
+      <td class="small">${s.role === 'pdg' ? 'Toutes' : s.perms_effectives.length + ' / ' + Object.keys(perm_keys).length}</td>
+      <td>${s.blocked ? '<span class="pill bad">Bloqué</span>' : s.suspended ? '<span class="pill bad">Suspendu</span>' : '<span class="pill ok">Actif</span>'}</td>
+      <td style="white-space:nowrap">${s.role === 'pdg' ? '<span class="small muted">—</span>' : `
+        <button class="btn sm sec" onclick="A.staffEdit(${s.id})">⚙️ Rôle & permissions</button>
+        <button class="btn sm ${s.suspended ? '' : 'warn'}" onclick="A.staffToggle(${s.id},'suspended',${s.suspended ? 0 : 1})">${s.suspended ? 'Réactiver' : 'Suspendre'}</button>
+        <button class="btn sm sec" onclick="A.staffReset(${s.id})">🔑 Réinitialiser</button>
+        <button class="btn sm warn" onclick="A.staffDel(${s.id})">🗑️</button>`}</td></tr>`).join('')}</table>
+  </div>`);
+};
+
+/* ---------- Journal des actions ---------- */
+views.journal = async () => {
+  const q = sessionStorage.getItem('adm_j_q') || '';
+  const rows = await api('/admin/journal?q=' + encodeURIComponent(q));
+  shell(`<h1>🧾 Journal des actions</h1>
+  <div class="panel small muted">Toutes les actions sensibles de l\u2019équipe sont enregistrées automatiquement : qui, quoi, quand, sur quel compte ou élément, et pour quel motif.</div>
+  <div class="panel">
+    <div class="frow" style="margin-bottom:10px">
+      <div style="flex:1"><input id="j-q" style="width:100%" placeholder="🔎 Rechercher : nom d\u2019admin, action, compte, motif…" value="${esc(q)}"></div>
+      <button class="btn sm" onclick="sessionStorage.setItem('adm_j_q',document.getElementById('j-q').value);render()">Rechercher</button>
+      ${q ? `<button class="btn sm sec" onclick="sessionStorage.setItem('adm_j_q','');render()">✕</button>` : ''}
+    </div>
+    <table><tr><th>Date</th><th>Membre</th><th>Action</th><th>Détails</th><th>Motif</th></tr>
+    ${rows.map(l => `<tr>
+      <td class="small" style="white-space:nowrap">${fmtD(l.created_at)}</td>
+      <td class="small"><b>${esc(l.admin_name)}</b><br>${esc(ROLE_LB[l.admin_role] || l.admin_role)}</td>
+      <td><b>${esc(l.action)}</b>${l.target_id ? `<div class="small muted">${esc(l.target_type || '')} #${l.target_id}${l.target_name ? ' — ' + esc(l.target_name) : ''}</div>` : ''}</td>
+      <td class="small muted" style="max-width:340px;word-break:break-word">${esc(l.details || '')}</td>
+      <td class="small">${esc(l.reason || '—')}</td></tr>`).join('')}
+    ${!rows.length ? '<tr><td colspan="5" class="muted">Aucune action enregistrée' + (q ? ' pour cette recherche' : '') + '.</td></tr>' : ''}</table>
+  </div>`);
+};
+
+/* ---------- Catalogue services ---------- */
+let CATD = null; // données du catalogue (partagées avec les actions A.*)
+views.catalog = async () => {
+  const tab = sessionStorage.getItem('adm_cat_tab') || 'cat';
+  if (tab === 'villes') return views._villes();
+  const d = CATD = await api('/admin/catalog');
+  const q = (sessionStorage.getItem('adm_cat_q') || '').toLowerCase();
+  let sel = parseInt(sessionStorage.getItem('adm_cat_sel') || 0, 10);
+  if (!d.categories.some(c => c.id === sel)) sel = d.categories[0]?.id || 0;
+
+  const nTaches = {}; d.taches.forEach(t => nTaches[t.service_id] = (nTaches[t.service_id] || 0) + 1);
+  const svcRow = (s, path) => `<tr>
+    <td><b>${esc(s.name)}</b>${path ? `<div class="small muted">${esc(path)}</div>` : ''}
+      <div class="small muted">${s.popular ? '⭐ populaire ' : ''}${s.seasonal ? '📅 saisonnier ' : ''}${s.cities.length ? '📍 ' + s.cities.map(esc).join(', ') : ''}</div></td>
+    <td class="small muted" style="max-width:220px">${esc(s.keywords)}</td>
+    <td><button class="btn sm sec" onclick="A.taches(${s.id})">📝 Tâches (${nTaches[s.id] || 0})</button></td>
+    <td>${s.active ? '<span class="pill ok">Actif</span>' : '<span class="pill off">Inactif</span>'}</td>
+    <td style="white-space:nowrap"><button class="btn sm sec" onclick="A.svcForm(${s.id})">Modifier</button>
+      <button class="btn sm ${s.active ? 'warn' : ''}" onclick="A.toggleSvc(${s.id},${s.active ? 0 : 1})">${s.active ? 'Désactiver' : 'Activer'}</button>
+      <button class="btn sm warn" onclick="A.svcDel(${s.id})">🗑️</button></td></tr>`;
+
+  // Recherche : résultats à plat avec leur chemin complet
+  let body;
+  if (q) {
+    const hit = x => x.toLowerCase().includes(q);
+    const results = d.services.filter(s => {
+      const cat = d.categories.find(c => c.id === s.category_id) || {};
+      const sub = d.sous_categories.find(x => x.id === s.sub_id) || {};
+      return hit(s.name) || hit(s.keywords || '') || hit(cat.name || '') || hit(sub.name || '') ||
+        d.taches.some(t => t.service_id === s.id && hit(t.name));
+    });
+    body = `<div class="panel"><h2 style="margin-top:0">🔎 ${results.length} service(s) trouvé(s)</h2>
+      <table><tr><th>Service</th><th>Mots-clés</th><th>Tâches</th><th>État</th><th>Actions</th></tr>
+      ${results.map(s => {
+        const cat = d.categories.find(c => c.id === s.category_id) || {};
+        const sub = d.sous_categories.find(x => x.id === s.sub_id) || {};
+        return svcRow(s, `${cat.icon || ''} ${cat.name || ''} › ${sub.name || ''}`);
+      }).join('')}</table></div>`;
+  } else {
+    const c = d.categories.find(x => x.id === sel);
+    const subs = c ? d.sous_categories.filter(x => x.metier_id === c.id) : [];
+    body = !c ? '' : `<div class="panel">
+      <h2 style="margin-top:0">${esc(c.icon || '')} ${esc(c.name)} ${c.active ? '' : '<span class="pill off">Inactif</span>'}</h2>
+      <div class="frow">
+        <button class="btn sm sec" onclick="A.metForm(${c.id})">✏️ Renommer / icône</button>
+        <button class="btn sm ${c.active ? 'warn' : ''}" onclick="A.toggleCat(${c.id},${c.active ? 0 : 1})">${c.active ? 'Désactiver le métier' : 'Activer le métier'}</button>
+        <button class="btn sm warn" onclick="A.metDel(${c.id})">🗑️ Supprimer</button>
+        <span style="flex:1"></span>
+        <div><label>＋ Nouvelle sous-catégorie</label><input id="sub-name" placeholder="Ex : Installation"></div>
+        <button class="btn" onclick="A.subAdd(${c.id})">Ajouter</button>
+      </div>
+      ${subs.map(sc => `
+        <h2>${esc(sc.name)} ${sc.active ? '' : '<span class="pill off">Inactive</span>'}
+          <button class="btn sm sec" onclick="A.subForm(${sc.id})">✏️</button>
+          <button class="btn sm sec" onclick="A.subToggle(${sc.id},${sc.active ? 0 : 1})">${sc.active ? 'Désactiver' : 'Activer'}</button>
+          <button class="btn sm warn" onclick="A.subDel(${sc.id})">🗑️</button>
+          <button class="btn sm" onclick="A.svcForm(0,${c.id},${sc.id})">＋ Service</button></h2>
+        <table><tr><th>Service</th><th>Mots-clés</th><th>Tâches</th><th>État</th><th>Actions</th></tr>
+        ${d.services.filter(s => s.sub_id === sc.id).map(s => svcRow(s, '')).join('') || '<tr><td colspan="5" class="muted small">Aucun service — ajoutez-en un.</td></tr>'}
+        </table>`).join('') || '<p class="muted">Aucune sous-catégorie. Créez-en une ci-dessus, puis ajoutez des services dedans.</p>'}
+    </div>`;
+  }
+
+  shell(`<h1>📚 Métiers & catalogue</h1>
+  <div class="tabs">
+    <button class="on">🗂️ Catalogue</button>
+    <button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes (${'villes' in STATS ? STATS.villes : '…'})</button>
+  </div>
+  <div class="frow">
+    <div style="flex:1;min-width:220px"><label>🔎 Rechercher dans le catalogue (métier, service, tâche, mot-clé)</label>
+      <input id="cat-q" style="width:100%" value="${esc(sessionStorage.getItem('adm_cat_q') || '')}" placeholder="Ex : fuite, tresses, climatiseur…"
+        oninput="sessionStorage.setItem('adm_cat_q',this.value)" onkeydown="if(event.key==='Enter')render()">
+    </div>
+    <button class="btn sec" onclick="render()">Rechercher</button>
+    ${q ? `<button class="btn sec" onclick="sessionStorage.setItem('adm_cat_q','');render()">✕ Effacer</button>` : ''}
+    <span style="flex:1"></span>
+    <div><label>＋ Nouveau métier</label><input id="c-name" placeholder="Nom du métier"></div>
+    <div><label>Icône</label><input id="c-icon" style="width:64px" placeholder="🔹"></div>
+    <button class="btn" onclick="A.addCat()">Créer</button>
+  </div>
+  ${q ? '' : `<div class="panel" style="padding:10px"><div style="display:flex;gap:6px;flex-wrap:wrap">
+    ${d.categories.map((c, i) => `<span style="display:inline-flex;align-items:center;gap:2px">
+      <button class="btn sm ${c.id === sel ? '' : 'sec'}" style="${c.active ? '' : 'opacity:.5'}" onclick="sessionStorage.setItem('adm_cat_sel',${c.id});render()">${esc(c.icon || '')} ${esc(c.name)}</button>
+      ${c.id === sel ? `<button class="btn sm sec" title="Monter" ${i === 0 ? 'disabled' : ''} onclick="A.metMove(${c.id},${i})">↑</button><button class="btn sm sec" title="Descendre" ${i === d.categories.length - 1 ? 'disabled' : ''} onclick="A.metMove(${c.id},${i},1)">↓</button>` : ''}
+    </span>`).join('')}
+  </div></div>`}
+  ${body}`);
+  const qi = document.getElementById('cat-q');
+  if (q && qi) { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); }
+};
+
+/* ---------- Villes ---------- */
+views._villes = async () => {
+  const list = await api('/admin/villes');
+  const q = (sessionStorage.getItem('adm_v_q') || '').toLowerCase();
+  const show = q ? list.filter(v => v.name.toLowerCase().includes(q)) : list;
+  shell(`<h1>📚 Métiers & catalogue</h1>
+  <div class="tabs">
+    <button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button>
+    <button class="on">🏙️ Villes (${list.length})</button>
+  </div>
+  <div class="frow">
+    <div><label>🔎 Rechercher une ville</label><input value="${esc(sessionStorage.getItem('adm_v_q') || '')}" oninput="sessionStorage.setItem('adm_v_q',this.value)" onkeydown="if(event.key==='Enter')render()"></div>
+    <button class="btn sec" onclick="render()">Rechercher</button>
+    <span style="flex:1"></span>
+    <div><label>＋ Ajouter une ville / localité</label><input id="v-name" placeholder="Nom de la ville"></div>
+    <button class="btn" onclick="A.villeAdd()">Ajouter</button>
+  </div>
+  <div class="panel"><table><tr><th>Ville</th><th>État</th><th>Actions</th></tr>
+  ${show.map(v => `<tr><td><b>${esc(v.name)}</b></td>
+    <td>${v.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
+    <td><button class="btn sm sec" onclick="A.villeToggle(${v.id},${v.active ? 0 : 1})">${v.active ? 'Désactiver' : 'Activer'}</button>
+    <button class="btn sm warn" onclick="A.villeDel(${v.id})">🗑️</button></td></tr>`).join('')}
+  ${!show.length ? '<tr><td colspan="3" class="muted">Aucune ville trouvée.</td></tr>' : ''}</table></div>`);
 };
 
 /* ---------- Questions dynamiques ---------- */
@@ -215,7 +440,7 @@ views.missions = async () => {
     .map(([id, lb]) => `<button class="${f === id ? 'on' : ''}" onclick="sessionStorage.setItem('adm_mf','${id}');render()">${lb}</button>`).join('')}</div>
   <div class="panel"><table><tr><th>N°</th><th>Service</th><th>Client</th><th>Professionnel</th><th>Montant</th><th>Statut</th><th>Date</th><th>Actions</th></tr>
   ${list.map(m => { const [cls, lb] = SL[m.status] || ['off', m.status]; return `<tr>
-    <td class="small">${esc(m.code)}</td><td><b>${esc(m.service_name)}</b>${m.urgence ? ' 🔥' : ''}</td>
+    <td class="small">${esc(m.code)}</td><td><b>${esc(m.service_name)}</b>${m.tache ? `<div class="small muted">🛠️ ${esc(m.tache)}</div>` : ''}${m.urgence ? ' 🔥' : ''}</td>
     <td>${esc(m.client_name)}</td><td>${esc(m.pro_name || '—')}</td>
     <td>${m.amount ? fcfa(m.amount) : '—'}</td><td><span class="pill ${cls}">${lb}</span></td>
     <td class="small">${fmtD(m.created_at)}</td>
@@ -444,6 +669,13 @@ views.settings = async () => {
     <button class="btn" onclick="A.saveMain()">Enregistrer</button>
     <div class="small muted" style="margin-top:8px">Le délai de réponse contrôle le temps laissé à chaque professionnel avant de passer au suivant (ex : 60 s).</div>
   </div>
+  ${ME && ME.role === 'pdg' ? `<div class="panel">
+    <h2 style="margin-top:0">🔠 Taille du texte du tableau de bord <span class="pill info small">réservé PDG</span></h2>
+    <div class="small muted" style="margin-bottom:8px">Taille par défaut appliquée à tout le tableau de bord pour toute l'équipe (14 à 26 px).</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${[14, 16, 18, 20, 22, 24, 26].map(f => `<button class="btn sm ${parseInt(s.admin_font_size || 16, 10) === f ? '' : 'sec'}" onclick="A.toggleSetting('admin_font_size','${f}')">${f}px${f === 16 ? ' (normal)' : ''}</button>`).join('')}
+    </div>
+  </div>` : ''}
   <div class="panel">
     <h2 style="margin-top:0">Urgence</h2>
     <div class="frow"><div style="flex:1"><label>Message d'information affiché dans l'application</label><textarea id="st-urginfo">${esc(s.urgence_info || '')}</textarea></div></div>
@@ -458,19 +690,119 @@ const A = {
   async userDetail(id) {
     try {
       const u = await api('/admin/users/' + id);
-      openModal(`<h3>${esc(u.name)}</h3>
-        <p class="small">📞 ${esc(u.phone)} • 📍 ${esc(u.address || '—')}<br>
+      const tempDis = u.disabled_until && u.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' ');
+      openModal(`<h3>${esc(u.name)} ${u.verified ? '✅' : ''}</h3>
+        <div style="margin-bottom:8px">${userStatusPill(u)} ${u.must_change_password ? '<span class="pill warn">doit changer son mot de passe</span>' : ''} ${u.profile_incomplete ? '<span class="pill warn">profil à compléter</span>' : ''}</div>
+        <p class="small">📞 ${esc(u.phone)} ${u.email ? '• ✉️ ' + esc(u.email) : ''}<br>
+        ${u.kp_code ? `🪪 Code professionnel : <b>${esc(u.kp_code)}</b><br>` : ''}
+        📍 ${esc(u.ville ? u.ville + (u.quartier ? ' / ' + u.quartier : '') : '')} ${esc(u.address || '')}<br>
         Inscrit le ${fmtD(u.created_at)} • ${u.missions} mission(s)<br>
-        Règles acceptées : ${u.rules_accepted_at ? fmtD(u.rules_accepted_at) : 'Non'}<br>
-        Règles pro acceptées : ${u.pro_rules_accepted_at ? fmtD(u.pro_rules_accepted_at) : '—'}</p>
-        ${u.pro ? `<p class="small"><b>Profil pro :</b> ${esc(u.pro.profession)} — ${esc(u.pro.zone)}<br>
-        Disponible : ${u.pro.available ? 'Oui 🟢' : 'Non ⚪'}<br>
+        Règles acceptées : ${u.rules_accepted_at ? fmtD(u.rules_accepted_at) : 'Non'} • Règles pro : ${u.pro_rules_accepted_at ? fmtD(u.pro_rules_accepted_at) : '—'}</p>
+        ${u.pro ? `<p class="small"><b>Profil pro :</b> ${esc(u.pro.profession)} — ${esc(u.pro.zone)} • Disponible : ${u.pro.available ? 'Oui 🟢' : 'Non ⚪'}<br>
         Documents : ${u.pro.documents.length ? u.pro.documents.map(d => `<a href="${esc(d)}" target="_blank">📄</a>`).join(' ') : 'Aucun'}</p>` : ''}
-        <button class="btn" onclick="closeModal()">Fermer</button>`);
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
+          <button class="btn sm sec" onclick="A.userEdit(${u.id})">✏️ Modifier</button>
+          <button class="btn sm ${u.suspended ? '' : 'warn'}" onclick="A.suspend(${u.id},${u.suspended ? 0 : 1})">${u.suspended ? '▶️ Réactiver' : '⏸ Suspendre'}</button>
+          <button class="btn sm ${u.blocked ? '' : 'warn'}" onclick="A.userBlock(${u.id},${u.blocked ? 0 : 1})">${u.blocked ? '🔓 Débloquer' : '🚫 Bloquer'}</button>
+          ${tempDis ? `<button class="btn sm" onclick="A.userDisableTemp(${u.id},true)">▶️ Fin de désactivation</button>` : `<button class="btn sm sec" onclick="A.userDisableTemp(${u.id})">⏱ Désactiver temporairement</button>`}
+          <button class="btn sm sec" onclick="A.verify(${u.id},${u.verified ? 0 : 1})">${u.verified ? 'Retirer ✓' : '✅ Vérifier'}</button>
+          <button class="btn sm sec" onclick="A.userResetAccess(${u.id})">🔑 Réinitialiser l\u2019accès</button>
+          <button class="btn sm sec" onclick="A.userForcePwd(${u.id})">🔒 Forcer un nouveau mot de passe</button>
+          <button class="btn sm warn" onclick="A.userDelete(${u.id})">🗑️ Supprimer</button>
+        </div>
+        <div class="small muted" style="margin:4px 0 6px"><b>Historique des actions de l\u2019administration sur ce compte :</b></div>
+        <div style="max-height:180px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px">
+        ${u.history.length ? u.history.map(h => `<div class="small" style="padding:3px 0;border-bottom:1px solid #f0f5f4">
+          <b>${esc(h.action)}</b> — ${esc(h.admin_name)} (${ROLE_LB[h.admin_role] || h.admin_role}) • ${fmtD(h.created_at)}${h.reason ? `<br>Motif : ${esc(h.reason)}` : ''}</div>`).join('')
+        : '<span class="small muted">Aucune action enregistrée.</span>'}</div>
+        <button class="btn sec" style="margin-top:12px" onclick="closeModal()">Fermer</button>`);
     } catch (e) { toast(e.message, 'err'); }
   },
-  async suspend(id, v) { try { await api(`/admin/users/${id}/suspend`, { method: 'POST', body: { suspended: v } }); toast(v ? 'Compte suspendu.' : 'Compte réactivé.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
-  async verify(id, v) { try { await api(`/admin/users/${id}/verify`, { method: 'POST', body: { verified: v } }); toast('Mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  userQuickCreate() {
+    openModal(`<h3>＋ Créer rapidement un compte</h3>
+      <p class="small muted">Informations minimales. L\u2019utilisateur se connectera avec le mot de passe temporaire, devra en choisir un nouveau et compléter lui-même son profil. Aucune fausse information.</p>
+      <label class="small muted">Nom complet</label><input id="qc-name" style="width:100%;margin-bottom:10px" placeholder="Ex : John Sery Michael">
+      <label class="small muted">Téléphone</label><input id="qc-phone" style="width:100%;margin-bottom:10px" placeholder="Ex : 0700000000">
+      <label class="small muted">E-mail (si disponible)</label><input id="qc-email" style="width:100%;margin-bottom:10px" placeholder="facultatif">
+      <label class="small muted">Type de compte initial</label>
+      <select id="qc-type" style="width:100%;margin-bottom:12px"><option value="client">Client</option><option value="pro">Futur professionnel (devra passer la validation normale)</option></select>
+      <div><button class="btn" onclick="A._userQuickSave()">Créer le compte</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
+  },
+  async _userQuickSave() {
+    try {
+      const r = await api('/admin/users', { method: 'POST', body: { name: document.getElementById('qc-name').value, phone: document.getElementById('qc-phone').value, email: document.getElementById('qc-email').value, type: document.getElementById('qc-type').value } });
+      openModal(`<h3>✅ Compte créé</h3>
+        <p>Communiquez ce mot de passe temporaire à l\u2019utilisateur (il devra en choisir un nouveau à sa première connexion) :</p>
+        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temp_password)}</div>
+        <p class="small muted">Ce mot de passe ne sera plus jamais affiché.</p>
+        <button class="btn" onclick="closeModal();render()">Terminé</button>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async userEdit(id) {
+    const u = await api('/admin/users/' + id);
+    openModal(`<h3>✏️ Modifier le compte</h3>
+      <label class="small muted">Nom</label><input id="ue-name" style="width:100%;margin-bottom:8px" value="${esc(u.name)}">
+      <label class="small muted">Téléphone</label><input id="ue-phone" style="width:100%;margin-bottom:8px" value="${esc(u.phone)}">
+      <label class="small muted">E-mail</label><input id="ue-email" style="width:100%;margin-bottom:8px" value="${esc(u.email || '')}">
+      <div class="frow">
+        <div><label class="small muted">Ville</label><input id="ue-ville" value="${esc(u.ville || '')}"></div>
+        <div><label class="small muted">Quartier</label><input id="ue-quartier" value="${esc(u.quartier || '')}"></div>
+      </div>
+      <label class="small muted">Adresse</label><input id="ue-addr" style="width:100%;margin-bottom:12px" value="${esc(u.address || '')}">
+      <div><button class="btn" onclick="A._userEditSave(${id})">Enregistrer</button> <button class="btn sec" onclick="A.userDetail(${id})">Annuler</button></div>`);
+  },
+  async _userEditSave(id) {
+    try {
+      await api('/admin/users/' + id, { method: 'PUT', body: {
+        name: document.getElementById('ue-name').value, phone: document.getElementById('ue-phone').value,
+        email: document.getElementById('ue-email').value, ville: document.getElementById('ue-ville').value,
+        quartier: document.getElementById('ue-quartier').value, address: document.getElementById('ue-addr').value } });
+      toast('Compte modifié ✓', 'ok'); A.userDetail(id); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async userBlock(id, v) {
+    const reason = v ? prompt('Motif du blocage (enregistré dans le journal) :') : null;
+    if (v && reason === null) return;
+    try { await api(`/admin/users/${id}/block`, { method: 'POST', body: { blocked: v, reason } }); toast(v ? 'Compte bloqué.' : 'Compte débloqué.', 'ok'); A.userDetail(id); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  userDisableTemp(id, clear) {
+    if (clear) return api(`/admin/users/${id}/disable-temp`, { method: 'POST', body: { until: null } }).then(() => { toast('Compte réactivé ✓', 'ok'); A.userDetail(id); render(); }).catch(e => toast(e.message, 'err'));
+    openModal(`<h3>⏱ Désactiver temporairement</h3>
+      <label class="small muted">Jusqu\u2019au</label><input type="datetime-local" id="dt-until" style="width:100%;margin-bottom:8px">
+      <label class="small muted">Motif (journal)</label><input id="dt-reason" style="width:100%;margin-bottom:12px">
+      <div><button class="btn warn" onclick="A._userDisableSave(${id})">Désactiver</button> <button class="btn sec" onclick="A.userDetail(${id})">Annuler</button></div>`);
+  },
+  async _userDisableSave(id) {
+    const until = document.getElementById('dt-until').value;
+    if (!until) return toast('Choisissez une date de fin.', 'err');
+    try { await api(`/admin/users/${id}/disable-temp`, { method: 'POST', body: { until, reason: document.getElementById('dt-reason').value } }); toast('Compte désactivé temporairement.', 'ok'); A.userDetail(id); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async userResetAccess(id) {
+    if (!confirm('Réinitialiser l\u2019accès de ce compte ?\nUn mot de passe temporaire sera généré (l\u2019ancien mot de passe n\u2019est jamais visible).')) return;
+    try {
+      const r = await api(`/admin/users/${id}/reset-access`, { method: 'POST', body: {} });
+      openModal(`<h3>🔑 Accès réinitialisé</h3>
+        <p>Communiquez ce mot de passe temporaire à l\u2019utilisateur :</p>
+        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temp_password)}</div>
+        <p class="small muted">Il devra choisir un nouveau mot de passe à sa prochaine connexion. Ce mot de passe ne sera plus jamais affiché.</p>
+        <button class="btn" onclick="closeModal()">Terminé</button>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async userForcePwd(id) {
+    try { await api(`/admin/users/${id}/force-password`, { method: 'POST', body: {} }); toast('L\u2019utilisateur devra choisir un nouveau mot de passe à sa prochaine connexion.', 'ok'); A.userDetail(id); } catch (e) { toast(e.message, 'err'); }
+  },
+  async userDelete(id) {
+    const reason = prompt('SUPPRESSION DÉFINITIVE — motif (enregistré dans le journal) :');
+    if (reason === null) return;
+    if (!confirm('Confirmer la suppression définitive de ce compte ? Cette action est irréversible.')) return;
+    try { await api('/admin/users/' + id, { method: 'DELETE', body: { reason } }); closeModal(); toast('Compte supprimé.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async suspend(id, v) {
+    const reason = v ? prompt('Motif de la suspension (enregistré dans le journal) :') : null;
+    if (v && reason === null) return;
+    try { await api(`/admin/users/${id}/suspend`, { method: 'POST', body: { suspended: v, reason } }); toast(v ? 'Compte suspendu.' : 'Compte réactivé.', 'ok'); A.userDetail(id); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async verify(id, v) { try { await api(`/admin/users/${id}/verify`, { method: 'POST', body: { verified: v } }); toast('Mis à jour ✓', 'ok'); A.userDetail(id); render(); } catch (e) { toast(e.message, 'err'); } },
   async approvePro(id) { try { await api(`/admin/pros/${id}/approve`, { method: 'POST' }); toast('Professionnel validé ✅ Il a été notifié.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   rejectPro(id) {
     openModal(`<h3>Refuser la demande</h3>
@@ -480,17 +812,286 @@ const A = {
   },
   async _doReject(id) { try { await api(`/admin/pros/${id}/reject`, { method: 'POST', body: { reason: document.getElementById('rej-reason').value } }); closeModal(); toast('Demande refusée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
 
-  async addCat() { try { await api('/admin/categories', { method: 'POST', body: { name: document.getElementById('c-name').value, icon: document.getElementById('c-icon').value } }); toast('Catégorie ajoutée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
-  async toggleCat(id, v) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
-  async addSvc() { try { await api('/admin/services', { method: 'POST', body: { name: document.getElementById('s-name').value, category_id: document.getElementById('s-cat').value, keywords: document.getElementById('s-kw').value } }); toast('Service ajouté ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
-  async toggleSvc(id, v) { try { await api('/admin/services/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
-  editSvc(id, name, kw) {
-    openModal(`<h3>Modifier le service</h3>
-      <label class="small muted">Nom</label><input id="es-name" style="width:100%;margin-bottom:10px" value="${name}">
-      <label class="small muted">Mots-clés (recherche intelligente)</label><input id="es-kw" style="width:100%;margin-bottom:12px" value="${kw}">
-      <button class="btn" onclick="A._saveSvc(${id})">Enregistrer</button>`);
+  async addCat() {
+    const name = document.getElementById('c-name').value.trim();
+    if (!name) return toast('Indiquez le nom du métier.', 'err');
+    try {
+      const r = await api('/admin/categories', { method: 'POST', body: { name, icon: document.getElementById('c-icon').value } });
+      sessionStorage.setItem('adm_cat_sel', r.id); sessionStorage.setItem('adm_cat_q', '');
+      toast('Métier créé ✓', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
   },
-  async _saveSvc(id) { try { await api('/admin/services/' + id, { method: 'PUT', body: { name: document.getElementById('es-name').value, keywords: document.getElementById('es-kw').value } }); closeModal(); toast('Service modifié ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async toggleCat(id, v) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { active: v } }); toast(v ? 'Métier activé ✓' : 'Métier désactivé (invisible dans l\u2019application).', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  metForm(id) {
+    const c = CATD.categories.find(x => x.id === id);
+    openModal(`<h3>Modifier le métier</h3>
+      <label class="small muted">Nom</label><input id="em-name" style="width:100%;margin-bottom:10px" value="${esc(c.name)}">
+      <label class="small muted">Icône (émoji)</label><input id="em-icon" style="width:90px;margin-bottom:12px" value="${esc(c.icon || '')}">
+      <div><button class="btn" onclick="A._metSave(${id})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
+  },
+  async _metSave(id) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { name: document.getElementById('em-name').value, icon: document.getElementById('em-icon').value } }); closeModal(); toast('Métier modifié ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async metDel(id) {
+    if (!confirm('Supprimer ce métier, ses sous-catégories, services et tâches ?\n(Refusé automatiquement si des missions l\u2019utilisent — préférez « Désactiver ».)')) return;
+    try { await api('/admin/categories/' + id, { method: 'DELETE' }); toast('Métier supprimé.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async metMove(id, i, down) {
+    const list = CATD.categories; const j = down ? i + 1 : i - 1;
+    if (j < 0 || j >= list.length) return;
+    try {
+      await api('/admin/categories/' + id, { method: 'PUT', body: { sort: j } });
+      await api('/admin/categories/' + list[j].id, { method: 'PUT', body: { sort: i } });
+      // réécrit tous les rangs proprement
+      const order = list.map(c => c.id); order.splice(i, 1); order.splice(j, 0, id);
+      for (let k = 0; k < order.length; k++) await api('/admin/categories/' + order[k], { method: 'PUT', body: { sort: k } });
+      render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+
+  async subAdd(metierId) {
+    const name = document.getElementById('sub-name').value.trim();
+    if (!name) return toast('Indiquez le nom de la sous-catégorie.', 'err');
+    try { await api('/admin/sous-categories', { method: 'POST', body: { metier_id: metierId, name } }); toast('Sous-catégorie créée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  subForm(id) {
+    const sc = CATD.sous_categories.find(x => x.id === id);
+    openModal(`<h3>Modifier la sous-catégorie</h3>
+      <label class="small muted">Nom</label><input id="esb-name" style="width:100%;margin-bottom:12px" value="${esc(sc.name)}">
+      <div><button class="btn" onclick="A._subSave(${id})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
+  },
+  async _subSave(id) { try { await api('/admin/sous-categories/' + id, { method: 'PUT', body: { name: document.getElementById('esb-name').value } }); closeModal(); toast('Modifiée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async subToggle(id, v) { try { await api('/admin/sous-categories/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async subDel(id) {
+    if (!confirm('Supprimer cette sous-catégorie ? (Refusé si des services y sont rattachés.)')) return;
+    try { await api('/admin/sous-categories/' + id, { method: 'DELETE' }); toast('Supprimée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+
+  // Formulaire service complet (création si id=0, sinon modification)
+  svcForm(id, catId, subId) {
+    const s = id ? CATD.services.find(x => x.id === id) : { name: '', keywords: '', category_id: catId, sub_id: subId, popular: 0, seasonal: 0, cities: [] };
+    const subsOf = cid => CATD.sous_categories.filter(x => x.metier_id === cid);
+    openModal(`<h3>${id ? 'Modifier le service' : 'Nouveau service'}</h3>
+      <label class="small muted">Nom du service</label><input id="es-name" style="width:100%;margin-bottom:10px" value="${esc(s.name)}">
+      <label class="small muted">Mots-clés pour la recherche intelligente (séparés par des virgules)</label>
+      <input id="es-kw" style="width:100%;margin-bottom:10px" value="${esc(s.keywords)}" placeholder="plombier,fuite,robinet…">
+      <div class="frow">
+        <div><label>Métier</label><select id="es-cat" onchange="A._svcSubRefresh()">${CATD.categories.map(c => `<option value="${c.id}" ${c.id === s.category_id ? 'selected' : ''}>${esc(c.icon || '')} ${esc(c.name)}</option>`).join('')}</select></div>
+        <div><label>Sous-catégorie</label><select id="es-sub">${subsOf(s.category_id).map(x => `<option value="${x.id}" ${x.id === s.sub_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+      </div>
+      <div class="frow">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;margin:0"><input type="checkbox" id="es-pop" ${s.popular ? 'checked' : ''}> ⭐ Populaire (affiché sur l'accueil)</label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;margin:0"><input type="checkbox" id="es-sea" ${s.seasonal ? 'checked' : ''}> 📅 Saisonnier</label>
+      </div>
+      <label class="small muted">Villes où ce service est proposé (séparées par des virgules — <b>laisser vide = toutes les villes</b>)</label>
+      <input id="es-cities" style="width:100%;margin-bottom:12px" value="${esc((s.cities || []).join(', '))}" placeholder="Ex : Bouaké, Abidjan">
+      <div><button class="btn" onclick="A._svcSave(${id || 0})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
+  },
+  _svcSubRefresh() {
+    const cid = parseInt(document.getElementById('es-cat').value, 10);
+    document.getElementById('es-sub').innerHTML = CATD.sous_categories.filter(x => x.metier_id === cid)
+      .map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('') || '<option value="">(créez d\u2019abord une sous-catégorie)</option>';
+  },
+  async _svcSave(id) {
+    const body = {
+      name: document.getElementById('es-name').value.trim(),
+      keywords: document.getElementById('es-kw').value,
+      category_id: parseInt(document.getElementById('es-cat').value, 10),
+      sub_id: parseInt(document.getElementById('es-sub').value, 10) || null,
+      popular: document.getElementById('es-pop').checked ? 1 : 0,
+      seasonal: document.getElementById('es-sea').checked ? 1 : 0,
+      cities: document.getElementById('es-cities').value.split(',').map(x => x.trim()).filter(Boolean)
+    };
+    if (!body.name) return toast('Indiquez le nom du service.', 'err');
+    try {
+      if (id) await api('/admin/services/' + id, { method: 'PUT', body });
+      else await api('/admin/services', { method: 'POST', body });
+      closeModal(); toast(id ? 'Service modifié ✓' : 'Service créé ✓', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async toggleSvc(id, v) { try { await api('/admin/services/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async svcDel(id) {
+    if (!confirm('Supprimer ce service et ses tâches ? (Refusé si des missions l\u2019utilisent.)')) return;
+    try { await api('/admin/services/' + id, { method: 'DELETE' }); toast('Service supprimé.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+
+  // Fenêtre de gestion des tâches d'un service
+  async taches(serviceId) {
+    try {
+      CATD = await api('/admin/catalog');
+      const s = CATD.services.find(x => x.id === serviceId);
+      const list = CATD.taches.filter(t => t.service_id === serviceId).sort((a, b) => a.sort - b.sort || a.id - b.id);
+      openModal(`<h3>📝 Tâches — ${esc(s.name)}</h3>
+        <p class="small muted">Ces tâches sont proposées au client quand il choisit ce service. La tâche choisie est transmise au professionnel.</p>
+        <table><tr><th>Tâche</th><th>État</th><th>Actions</th></tr>
+        ${list.map(t => `<tr><td>${esc(t.name)}</td>
+          <td>${t.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
+          <td style="white-space:nowrap"><button class="btn sm sec" onclick="A.tacheEdit(${t.id})">✏️</button>
+          <button class="btn sm sec" onclick="A.tacheToggle(${t.id},${t.active ? 0 : 1},${serviceId})">${t.active ? 'Désactiver' : 'Activer'}</button>
+          <button class="btn sm warn" onclick="A.tacheDel(${t.id},${serviceId})">🗑️</button></td></tr>`).join('')}
+        ${!list.length ? '<tr><td colspan="3" class="muted small">Aucune tâche.</td></tr>' : ''}</table>
+        <div class="frow" style="margin-top:12px">
+          <div style="flex:1"><input id="t-new" style="width:100%" placeholder="Nouvelle tâche (ex : Remplacement d\u2019un robinet)"></div>
+          <button class="btn" onclick="A.tacheAdd(${serviceId})">＋ Ajouter</button>
+        </div>
+        <button class="btn sec" style="margin-top:10px" onclick="closeModal();render()">Fermer</button>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async tacheAdd(serviceId) {
+    const name = document.getElementById('t-new').value.trim();
+    if (!name) return toast('Écrivez le nom de la tâche.', 'err');
+    try { await api('/admin/taches', { method: 'POST', body: { service_id: serviceId, name } }); toast('Tâche ajoutée ✓', 'ok'); A.taches(serviceId); } catch (e) { toast(e.message, 'err'); }
+  },
+  tacheEdit(id) {
+    const t = CATD.taches.find(x => x.id === id);
+    const nv = prompt('Nom de la tâche :', t.name);
+    if (nv === null || !nv.trim()) return;
+    api('/admin/taches/' + id, { method: 'PUT', body: { name: nv.trim() } }).then(() => { toast('Tâche modifiée ✓', 'ok'); A.taches(t.service_id); }).catch(e => toast(e.message, 'err'));
+  },
+  async tacheToggle(id, v, sid) { try { await api('/admin/taches/' + id, { method: 'PUT', body: { active: v } }); A.taches(sid); } catch (e) { toast(e.message, 'err'); } },
+  async tacheDel(id, sid) { if (!confirm('Supprimer cette tâche ?')) return; try { await api('/admin/taches/' + id, { method: 'DELETE' }); A.taches(sid); } catch (e) { toast(e.message, 'err'); } },
+
+  // Grande recherche
+  gsGo() {
+    const v = document.getElementById('gs-q').value.trim();
+    sessionStorage.setItem('adm_gs', v);
+    if (VIEW === 'search') render(); else go('search');
+  },
+  gsOpen(type, id) {
+    if (type === 'user') return A.userDetail(id);
+    if (type === 'staff') return go('staff');
+    if (type === 'metier') { sessionStorage.setItem('adm_cat_tab', 'cat'); sessionStorage.setItem('adm_cat_sel', id); sessionStorage.setItem('adm_cat_q', ''); return go('catalog'); }
+    if (type === 'service') {
+      api('/admin/catalog').then(d => {
+        const s = d.services.find(x => x.id === id);
+        if (s) { sessionStorage.setItem('adm_cat_tab', 'cat'); sessionStorage.setItem('adm_cat_q', s.name); }
+        go('catalog');
+      }).catch(e => toast(e.message, 'err'));
+      return;
+    }
+    if (type === 'tache') return A.taches(id); // id = service_id : ouvre la fenêtre des tâches du service
+    if (type === 'mission' || type === 'paiement') return A.missionOpen(id);
+    if (type === 'journal') { sessionStorage.setItem('adm_j_q', sessionStorage.getItem('adm_gs') || ''); return go('journal'); }
+  },
+  async missionOpen(id) {
+    try {
+      const m = await api('/missions/' + id); // accès admin via la permission « missions »
+      openModal(`<h3>${esc(m.icon || '📋')} ${esc(m.service)} — ${esc(m.code)}</h3>
+        <div style="margin-bottom:8px"><span class="pill info">${esc(m.status)}</span> ${m.urgence ? '<span class="pill bad">🔥 Urgent</span>' : ''}</div>
+        <p class="small">
+        ${m.tache ? `🛠️ Tâche : <b>${esc(m.tache)}</b><br>` : ''}
+        👤 Client : <b>${esc(m.client ? m.client.name : '—')}</b>${m.client && m.client.phone ? ' (' + esc(m.client.phone) + ')' : ''}<br>
+        🧑‍🔧 Professionnel : <b>${m.pro ? esc(m.pro.name) : '—'}</b>${m.pro && m.pro.phone ? ' (' + esc(m.pro.phone) + ')' : ''}<br>
+        📍 ${esc(m.address || '—')}<br>
+        📅 Créée le ${fmtD(m.created_at)}${m.date_souhaitee ? ' • Souhaitée : ' + fmtD(m.date_souhaitee) : ''}<br>
+        ${m.amount ? '💰 Montant : <b>' + m.amount.toLocaleString('fr-FR') + ' F</b><br>' : ''}
+        ${m.description ? 'Message : ' + esc(m.description) + '<br>' : ''}</p>
+        ${m.detail && m.detail.length ? '<p class="small">' + m.detail.map(d => `<b>${esc(d.label)} :</b> ${esc(d.value)}`).join('<br>') + '</p>' : ''}
+        <div class="small muted">Suivi : ${m.events.map(e => esc(e.status)).join(' → ')}</div>
+        <button class="btn sec" style="margin-top:12px" onclick="closeModal()">Fermer</button>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+
+  // Maintenance (PDG)
+  async maintOn() {
+    const scope = (document.querySelector('input[name="mt-scope"]:checked') || {}).value;
+    const functions = [...document.querySelectorAll('.mt-fn:checked')].map(c => c.value);
+    const body = {
+      active: 1, scope, functions,
+      until: document.getElementById('mt-until').value || null,
+      reason: document.getElementById('mt-reason').value,
+      message: document.getElementById('mt-msg').value,
+    };
+    if (!confirm('Activer / mettre à jour la maintenance avec la portée « ' + scope + ' » ?\nLes utilisateurs concernés verront le message de maintenance.')) return;
+    try { await api('/admin/maintenance', { method: 'POST', body }); toast('🔴 Maintenance activée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async maintOff() {
+    if (!confirm('Désactiver la maintenance et rétablir toutes les activités ?')) return;
+    try { await api('/admin/maintenance', { method: 'POST', body: { active: 0 } }); toast('🟢 Maintenance désactivée. Tout fonctionne normalement.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+
+  // Équipe & permissions (PDG)
+  staffCreate() {
+    openModal(`<h3>＋ Ajouter un membre de l\u2019équipe</h3>
+      <label class="small muted">Nom complet</label><input id="st-name" style="width:100%;margin-bottom:8px" placeholder="Ex : John Sery Michael">
+      <label class="small muted">Identifiant de connexion (téléphone)</label><input id="st-phone" style="width:100%;margin-bottom:8px">
+      <label class="small muted">E-mail (facultatif)</label><input id="st-email" style="width:100%;margin-bottom:8px">
+      <label class="small muted">Rôle</label>
+      <select id="st-role" style="width:100%;margin-bottom:12px">
+        <option value="gestionnaire">Gestionnaire / responsable</option>
+        <option value="admin">Administrateur</option>
+        <option value="agent">Agent</option>
+      </select>
+      <p class="small muted">Les permissions par défaut du rôle s\u2019appliquent — vous pourrez les ajuster ensuite, compte par compte.</p>
+      <div><button class="btn" onclick="A._staffSave()">Créer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
+  },
+  async _staffSave() {
+    try {
+      const r = await api('/admin/staff', { method: 'POST', body: { name: document.getElementById('st-name').value, phone: document.getElementById('st-phone').value, email: document.getElementById('st-email').value, role: document.getElementById('st-role').value } });
+      openModal(`<h3>✅ Membre ajouté</h3>
+        <p>Communiquez-lui ce mot de passe temporaire (il devra en choisir un nouveau) :</p>
+        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temp_password)}</div>
+        <p class="small muted">Connexion sur la page /admin avec son identifiant. Ce mot de passe ne sera plus jamais affiché.</p>
+        <button class="btn" onclick="closeModal();render()">Terminé</button>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  staffEdit(id) {
+    const s = STAFFD.staff.find(x => x.id === id);
+    const pk = STAFFD.perm_keys;
+    openModal(`<h3>⚙️ ${esc(s.name)}</h3>
+      <label class="small muted">Rôle</label>
+      <select id="se-role" style="width:100%;margin-bottom:10px">
+        ${[['admin', 'Administrateur'], ['gestionnaire', 'Gestionnaire / responsable'], ['agent', 'Agent'], ['user', 'Rétrograder en simple utilisateur']]
+          .map(([v, lb]) => `<option value="${v}" ${s.role === v ? 'selected' : ''}>${lb}</option>`).join('')}
+      </select>
+      <label class="small muted">Permissions de ce compte</label>
+      <div style="max-height:260px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin-bottom:12px">
+        ${Object.entries(pk).map(([k, lb]) => `<label style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:13.5px">
+          <input type="checkbox" class="se-perm" value="${k}" ${s.perms_effectives.includes(k) ? 'checked' : ''}> ${esc(lb)}</label>`).join('')}
+      </div>
+      <p class="small muted">⚠️ Les fonctions réservées au PDG (gestion de l\u2019équipe, permissions) ne sont jamais accessibles aux autres rôles, quelles que soient les cases cochées.</p>
+      <div><button class="btn" onclick="A._staffEditSave(${id})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
+  },
+  async _staffEditSave(id) {
+    const role = document.getElementById('se-role').value;
+    const perms = {};
+    document.querySelectorAll('.se-perm').forEach(c => { perms[c.value] = c.checked ? 1 : 0; });
+    try {
+      await api('/admin/staff/' + id, { method: 'PUT', body: { role } });
+      if (role !== 'user') await api('/admin/staff/' + id, { method: 'PUT', body: { perms } });
+      closeModal(); toast('Rôle et permissions mis à jour ✓', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async staffToggle(id, field, v) {
+    const reason = v ? prompt('Motif (journal) :') : null;
+    if (v && reason === null) return;
+    try { await api('/admin/staff/' + id, { method: 'PUT', body: { [field]: v, reason } }); toast('Mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async staffReset(id) {
+    if (!confirm('Réinitialiser l\u2019accès de ce membre ? Un mot de passe temporaire sera généré.')) return;
+    try {
+      const r = await api('/admin/staff/' + id + '/reset-access', { method: 'POST', body: {} });
+      openModal(`<h3>🔑 Accès réinitialisé</h3>
+        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temp_password)}</div>
+        <p class="small muted">Il devra choisir un nouveau mot de passe à sa prochaine connexion.</p>
+        <button class="btn" onclick="closeModal()">Terminé</button>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async staffDel(id) {
+    const reason = prompt('Retirer ce membre de l\u2019équipe — motif (journal) :');
+    if (reason === null) return;
+    try {
+      const r = await api('/admin/staff/' + id, { method: 'DELETE', body: { reason } });
+      toast(r.downgraded ? 'Ce compte avait des missions : il a été rétrogradé en simple utilisateur.' : 'Membre supprimé.', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+
+  // Villes
+  async villeAdd() {
+    const name = document.getElementById('v-name').value.trim();
+    if (!name) return toast('Indiquez le nom de la ville.', 'err');
+    try { await api('/admin/villes', { method: 'POST', body: { name } }); toast('Ville ajoutée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async villeToggle(id, v) { try { await api('/admin/villes/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async villeDel(id) { if (!confirm('Supprimer cette ville de la liste ?')) return; try { await api('/admin/villes/' + id, { method: 'DELETE' }); toast('Ville supprimée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
 
   qForm(sid, q) {
     openModal(`<h3>${q ? 'Modifier' : 'Ajouter'} une question</h3>
@@ -611,7 +1212,12 @@ window.A = A;
 /* ---------- Rendu ---------- */
 async function render() {
   if (!TOKEN) { renderLogin(); return; }
-  try { STATS = await api('/admin/stats'); } catch (e) { return; }
+  try {
+    if (!ME) ME = await api('/me');
+    STATS = await api('/admin/stats');
+    const f = parseInt(STATS.admin_font_size || 16, 10); // taille du tableau de bord définie par le PDG
+    document.body.style.zoom = f === 16 ? '' : String(f / 16);
+  } catch (e) { return; }
   const fn = views[VIEW] || views.dashboard;
   try { await fn(); } catch (e) { shell(`<h1>Erreur</h1><div class="panel">${esc(e.message)}<br><button class="btn" style="margin-top:10px" onclick="render()">Réessayer</button></div>`); }
 }
