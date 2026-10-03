@@ -28,5 +28,7 @@ const persist = require('./persist');
   }
   require('./server');
   // Migration une fois des données de l'app Klean v1 (comptes, pros, missions)
+  try { require('./migration/justificatifs_init'); } catch(e){}
+  try { require('./migration/seed-metiers'); } catch(e){}
   try { require('./migration/run-legacy-migration'); } catch (e) { console.error('⚠️  Migration legacy :', e.message); }
 })();
