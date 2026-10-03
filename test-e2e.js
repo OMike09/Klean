@@ -32,7 +32,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   /* ---------- ADMIN ---------- */
   const admin = (await call(null, '/auth/login', 'POST', { phone: 'admin', password: 'Klean@2026' })).data;
-  ok('Connexion administrateur', !!admin.token && admin.user.role === 'admin');
+  ok('Connexion administrateur', !!admin.token && ['admin', 'pdg'].includes(admin.user.role));
   // Délai de dispatch raccourci pour les tests (paramétrable — règle du cahier des charges)
   await call(admin.token, '/admin/settings', 'PUT', { dispatch_wait_seconds: '15', commission_rate: '25' });
 
@@ -171,7 +171,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   /* ---------- TEST 18 : le pro reste aussi client ---------- */
   console.log('\n— TEST 18 : le professionnel reste client avec le même compte');
-  const maison = services.flatMap(c => c.services).find(s => s.name.includes('maison'));
+  const maison = services.flatMap(c => c.services).find(s => s.name.includes('maison') || s.name.includes('Ménage'));
   const qs2 = (await call(pro.token, `/services/${maison.id}/questions`)).data;
   const ans2 = {};
   for (const q of qs2.questions) ans2[q.id] = q.type === 'number' ? 2 : q.type === 'select' ? q.options[0] : q.type === 'bool' ? true : 'Test';
@@ -282,8 +282,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     ['Je cherche un plombier', 'Plomberie'],
     ['Nettoyer mon fauteuil', 'fauteuil'],
     ['Réparer ma télévision', 'TV'],
-    ['Un électricien', 'Électricité'],
-    ['Cours d\u2019anglais à domicile', 'Cours'],
+    ['Un électricien', 'électrique'],
+    ['Cours d\u2019anglais à domicile', 'colaire'],
     ['Un menuisier', 'Menuiserie'],
     ['Je cherche un employé', 'placement'],
   ]) {

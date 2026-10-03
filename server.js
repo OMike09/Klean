@@ -20,7 +20,7 @@ if (!SECRET) { SECRET = crypto.randomBytes(32).toString('hex'); setSetting('auth
 // Réinitialisation du mot de passe administrateur via variable d'environnement (secours)
 // Sur Render : Environment → ADMIN_PASSWORD = NouveauMotDePasse → redéployer → se connecter → retirer la variable.
 if (process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD.length >= 6) {
-  const adminUser = db.prepare("SELECT * FROM users WHERE role='admin' ORDER BY id LIMIT 1").get();
+  const adminUser = db.prepare("SELECT * FROM users WHERE role IN ('pdg','admin') ORDER BY CASE role WHEN 'pdg' THEN 0 ELSE 1 END, id LIMIT 1").get();
   if (adminUser) {
     const s = crypto.randomBytes(16).toString('hex');
     db.prepare('UPDATE users SET password_hash=?, salt=? WHERE id=?').run(hashPassword(process.env.ADMIN_PASSWORD, s), s, adminUser.id);
@@ -100,13 +100,70 @@ function auth(req, res, next) {
   if (!payload) return res.status(401).json({ error: 'Session expirée. Veuillez vous reconnecter.' });
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(payload.id);
   if (!user) return res.status(401).json({ error: 'Compte introuvable.' });
-  if (user.suspended) return res.status(403).json({ error: 'Votre compte est suspendu. Contactez Klean-Services CI.' });
+  if (user.role !== 'pdg') { // le compte PDG reste TOUJOURS accessible
+    if (user.blocked) return res.status(403).json({ error: 'Votre compte est bloqué. Contactez Klean-Services CI.' });
+    if (user.suspended) return res.status(403).json({ error: 'Votre compte est suspendu. Contactez Klean-Services CI.' });
+    if (user.disabled_until && user.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' '))
+      return res.status(403).json({ error: 'Votre compte est temporairement désactivé jusqu\u2019au ' + user.disabled_until.slice(0, 16).replace('T', ' ') + '.' });
+  }
   req.user = user;
   next();
 }
+
+// ---------- HIÉRARCHIE & PERMISSIONS ----------
+// PDG → Administrateurs → Gestionnaires → Agents → Utilisateurs
+const STAFF_ROLES = ['pdg', 'admin', 'gestionnaire', 'agent'];
+const ROLE_LABELS = { pdg: 'PDG', admin: 'Administrateur', gestionnaire: 'Gestionnaire', agent: 'Agent', user: 'Utilisateur' };
+// Clés de permission (sections du tableau de bord). Le PDG a toujours tout.
+const PERM_KEYS = {
+  comptes: 'Gestion des comptes utilisateurs',
+  comptes_suppr: 'Suppression définitive de comptes',
+  pros: 'Validation des professionnels',
+  catalogue: 'Métiers, services, tâches & villes',
+  questions: 'Questions dynamiques',
+  missions: 'Demandes & missions',
+  paiements: 'Paiements & commissions',
+  communication: 'Publicités & messages système',
+  securite: 'Signalements, urgences & fichiers',
+  contenu: 'Avis de recherche, jobs, école, jeux',
+  parametres: 'Paramètres généraux',
+  journal: 'Journal des actions',
+};
+// Valeurs par défaut par rôle (modifiables par le PDG, compte par compte)
+const DEFAULT_PERMS = {
+  pdg: Object.keys(PERM_KEYS),
+  admin: Object.keys(PERM_KEYS).filter(k => k !== 'comptes_suppr'),
+  gestionnaire: ['comptes', 'pros', 'missions', 'contenu'],
+  agent: ['missions'],
+};
+function effectivePerms(u) {
+  if (u.role === 'pdg') return Object.keys(PERM_KEYS);
+  if (!STAFF_ROLES.includes(u.role)) return [];
+  const base = DEFAULT_PERMS[u.role] || [];
+  if (!u.perms) return base;
+  try {
+    const o = JSON.parse(u.perms); // { clé: 0|1 } — remplace la valeur par défaut
+    return Object.keys(PERM_KEYS).filter(k => (k in o ? !!o[k] : base.includes(k)));
+  } catch { return base; }
+}
+function hasPerm(u, key) { return u.role === 'pdg' || effectivePerms(u).includes(key); }
+function isStaff(u) { return STAFF_ROLES.includes(u.role); }
 function admin(req, res, next) {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Accès réservé à l\u2019administration.' });
+  if (!isStaff(req.user)) return res.status(403).json({ error: 'Accès réservé à l\u2019administration.' });
   next();
+}
+function pdgOnly(req, res, next) {
+  if (req.user.role !== 'pdg') return res.status(403).json({ error: 'Action réservée au PDG.' });
+  next();
+}
+
+// ---------- JOURNAL DES ACTIONS SENSIBLES ----------
+function logAction(adminUser, action, opts = {}) {
+  db.prepare(`INSERT INTO admin_log(admin_id, admin_name, admin_role, action, target_type, target_id, target_name, details, reason)
+    VALUES(?,?,?,?,?,?,?,?,?)`)
+    .run(adminUser.id, adminUser.name, adminUser.role, action,
+      opts.target_type || null, opts.target_id || null, opts.target_name || null,
+      opts.details ? String(opts.details).slice(0, 500) : null, opts.reason || null);
 }
 function publicUser(u, withContact = false) {
   if (!u) return null;
@@ -139,23 +196,97 @@ function notify(userId, category, title, body, link) {
   return info.lastInsertRowid;
 }
 function notifyAdmins(category, title, body, link) {
-  db.prepare("SELECT id FROM users WHERE role='admin'").all().forEach(a => notify(a.id, category, title, body, link));
+  db.prepare("SELECT id FROM users WHERE role IN ('pdg','admin','gestionnaire')").all().forEach(a => notify(a.id, category, title, body, link));
 }
 
 // ============================================================
 // AUTHENTIFICATION & COMPTE (compte unique client + pro)
 // ============================================================
+// ============================================================
+// MODE MAINTENANCE / SUSPENSION DES ACTIVITÉS (réservé au PDG)
+// ============================================================
+const MAINT_SCOPES = {
+  A: 'Suspendre toute nouvelle activité (demandes, inscriptions, activités pro, publications, jeux)',
+  B: 'Suspendre uniquement les nouvelles demandes de service',
+  C: 'Suspendre uniquement les inscriptions',
+  D: 'Suspendre uniquement les activités des professionnels',
+  E: 'Suspendre des fonctions précises (à cocher)',
+  F: 'Mettre toute la plateforme en maintenance',
+};
+const MAINT_FONCTIONS = {
+  missions: 'Nouvelles demandes de service',
+  inscriptions: 'Nouvelles inscriptions',
+  pro: 'Activités professionnelles (accepter, démarrer, terminer une mission…)',
+  paiements: 'Confirmation des paiements',
+  messages: 'Messagerie des missions',
+  contenu: 'Publications (avis de recherche, jobs, école & famille)',
+  jeux: 'Jeux (Quiz, Flip Fizz, Kdo)',
+};
+const SCOPE_FUNCS = { A: ['missions', 'inscriptions', 'pro', 'contenu', 'jeux'], B: ['missions'], C: ['inscriptions'], D: ['pro'] };
+const MAINT_ROUTES = [
+  [/^\/api\/auth\/register$/, 'inscriptions'],
+  [/^\/api\/missions$/, 'missions'], // POST = nouvelle demande
+  [/^\/api\/missions\/\d+\/(accept|refuse|confirm|montant|start|complete|relancer|choisir)/, 'pro'],
+  [/^\/api\/pro\//, 'pro'],
+  [/^\/api\/missions\/\d+\/payment\//, 'paiements'],
+  [/^\/api\/missions\/\d+\/messages$/, 'messages'],
+  [/^\/api\/(avis-recherche|jobs|ecole-famille)$/, 'contenu'],
+  [/^\/api\/games\//, 'jeux'],
+];
+function getMaintenance() {
+  try {
+    const m = JSON.parse(getSetting('maintenance', '') || '{}');
+    if (m.active && m.until && m.until.replace('T', ' ').slice(0, 19) < new Date().toISOString().slice(0, 19).replace('T', ' '))
+      return { ...m, expired: true }; // durée écoulée → la maintenance se termine automatiquement
+    return m;
+  } catch { return {}; }
+}
+function maintenanceMessage(m) {
+  return m.message || 'Klean-Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.';
+}
+// État public (l'application affiche le message aux utilisateurs)
+app.get('/api/maintenance', (req, res) => {
+  const m = getMaintenance();
+  const on = m.active && !m.expired;
+  res.json({ active: !!on, scope: on ? m.scope : null, message: on ? maintenanceMessage(m) : null, until: on && m.until ? m.until : null });
+});
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  const m = getMaintenance();
+  if (!m.active || m.expired) return next();
+  // Le compte PDG n'est JAMAIS bloqué
+  const tok = (req.headers.authorization || '').replace('Bearer ', '') || req.query.token;
+  const payload = verifyToken(tok);
+  if (payload) {
+    const u = db.prepare('SELECT role FROM users WHERE id=?').get(payload.id);
+    if (u && u.role === 'pdg') return next();
+  }
+  // Toujours accessibles : connexion, état de maintenance, tableau de bord (les permissions du PDG s'y appliquent)
+  if (req.path === '/api/auth/login' || req.path === '/api/maintenance' || req.path.startsWith('/api/auth/reset-') || req.path.startsWith('/api/admin/')) return next();
+  if (m.scope === 'F') {
+    if (req.method === 'GET' && (req.path === '/api/me' || req.path === '/api/rules')) return next(); // l'app peut se charger et afficher le message
+    return res.status(503).json({ error: maintenanceMessage(m), maintenance: true });
+  }
+  if (req.method === 'GET') return next(); // hors plateforme entière, la consultation reste possible
+  const fns = m.scope === 'E' ? (m.functions || []) : (SCOPE_FUNCS[m.scope] || []);
+  if (MAINT_ROUTES.find(([re, k]) => re.test(req.path) && fns.includes(k)))
+    return res.status(503).json({ error: maintenanceMessage(m), maintenance: true });
+  next();
+});
+
 app.post('/api/auth/register', (req, res) => {
-  const { name, phone, password, address, lat, lng, accept_rules } = req.body || {};
+  const { name, phone, password, address, ville, quartier, lat, lng, accept_rules } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Veuillez indiquer votre nom.' });
   if (!phone || !/^[+0-9 ]{8,20}$/.test(phone.trim())) return res.status(400).json({ error: 'Numéro de téléphone invalide.' });
   if (!password || password.length < 6) return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères.' });
   if (!accept_rules) return res.status(400).json({ error: 'Vous devez accepter les règles d\u2019utilisation.' });
   const p = phone.trim().replace(/\s+/g, '');
-  if (db.prepare('SELECT id FROM users WHERE phone=?').get(p)) return res.status(409).json({ error: 'Un compte existe déjà avec ce numéro. Connectez-vous.' });
+  // UN NUMÉRO = UN COMPTE (règle stricte)
+  if (db.prepare('SELECT id FROM users WHERE phone=?').get(p)) return res.status(409).json({ error: 'Ce numéro est déjà associé à un compte.', duplicate: true });
+  const adr = (address || '').trim() || [ville, quartier].filter(Boolean).join(', ') || null;
   const salt = crypto.randomBytes(16).toString('hex');
-  const info = db.prepare(`INSERT INTO users(name, phone, password_hash, salt, address, lat, lng, rules_accepted_at) VALUES(?,?,?,?,?,?,?,datetime('now'))`)
-    .run(name.trim(), p, hashPassword(password, salt), salt, address || null, lat || null, lng || null);
+  const info = db.prepare(`INSERT INTO users(name, phone, password_hash, salt, address, ville, quartier, lat, lng, rules_accepted_at) VALUES(?,?,?,?,?,?,?,?,?,datetime('now'))`)
+    .run(name.trim(), p, hashPassword(password, salt), salt, adr, (ville || '').trim() || null, (quartier || '').trim() || null, lat || null, lng || null);
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(info.lastInsertRowid);
   notify(user.id, 'compte', 'Bienvenue sur Klean-Services CI 👋', 'Votre compte est créé. Recherchez un service ou devenez professionnel depuis Mon compte.', '#/home');
   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(user) });
@@ -178,7 +309,12 @@ app.post('/api/auth/login', (req, res) => {
   }
   if (!ok)
     return res.status(401).json({ error: 'Téléphone ou mot de passe incorrect.' });
-  if (user.suspended) return res.status(403).json({ error: 'Votre compte est suspendu. Contactez Klean-Services CI.' });
+  if (user.role !== 'pdg') { // le compte PDG reste toujours accessible
+    if (user.blocked) return res.status(403).json({ error: 'Votre compte est bloqué. Contactez Klean-Services CI.' });
+    if (user.suspended) return res.status(403).json({ error: 'Votre compte est suspendu. Contactez Klean-Services CI.' });
+    if (user.disabled_until && user.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' '))
+      return res.status(403).json({ error: 'Votre compte est temporairement désactivé jusqu\u2019au ' + user.disabled_until.slice(0, 16) + '.' });
+  }
   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(user) });
 });
 
@@ -186,19 +322,73 @@ function me(u) {
   const pro = db.prepare('SELECT * FROM pro_profiles WHERE user_id=?').get(u.id);
   const r = db.prepare('SELECT AVG(rating) avg, COUNT(*) n FROM reviews WHERE target_id=?').get(u.id);
   return {
-    id: u.id, name: u.name, phone: u.phone, photo: u.photo, address: u.address, lat: u.lat, lng: u.lng,
+    id: u.id, name: u.name, phone: u.phone, email: u.email, photo: u.photo, address: u.address, lat: u.lat, lng: u.lng,
+    ville: u.ville, quartier: u.quartier, kp_code: u.kp_code || null,
     role: u.role, is_pro: u.is_pro, pro_status: u.pro_status, verified: u.verified,
+    must_change_password: !!u.must_change_password, profile_incomplete: !!u.profile_incomplete, font_size: u.font_size || null,
     rating: r.avg ? Math.round(r.avg * 10) / 10 : null, reviews_count: r.n,
-    pro: pro ? { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents) } : null
+    pro: pro ? { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents) } : null,
+    perms: isStaff(u) ? effectivePerms(u) : undefined
   };
 }
 app.get('/api/me', auth, (req, res) => res.json(me(req.user)));
 
 app.put('/api/me', auth, (req, res) => {
-  const { name, photo, address, lat, lng } = req.body || {};
-  db.prepare('UPDATE users SET name=COALESCE(?,name), photo=COALESCE(?,photo), address=COALESCE(?,address), lat=COALESCE(?,lat), lng=COALESCE(?,lng) WHERE id=?')
-    .run(name || null, photo || null, address || null, lat ?? null, lng ?? null, req.user.id);
+  const { name, photo, address, ville, quartier, email, lat, lng, font_size } = req.body || {};
+  if (font_size !== undefined && font_size !== null) {
+    const f = parseInt(font_size, 10);
+    if (isNaN(f) || f < 14 || f > 26) return res.status(400).json({ error: 'Taille de texte invalide (14 à 26).' });
+  }
+  db.prepare(`UPDATE users SET name=COALESCE(?,name), photo=COALESCE(?,photo), address=COALESCE(?,address),
+    ville=COALESCE(?,ville), quartier=COALESCE(?,quartier), email=COALESCE(?,email),
+    lat=COALESCE(?,lat), lng=COALESCE(?,lng), font_size=COALESCE(?,font_size) WHERE id=?`)
+    .run(name || null, photo || null, address || null, (ville ?? null) || null, (quartier ?? null) || null, (email ?? null) || null,
+      lat ?? null, lng ?? null, font_size ? parseInt(font_size, 10) : null, req.user.id);
+  if (req.user.profile_incomplete && (ville || address)) db.prepare('UPDATE users SET profile_incomplete=0 WHERE id=?').run(req.user.id); // profil complété
   res.json(me(db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id)));
+});
+
+// ============================================================
+// RÉCUPÉRATION SÉCURISÉE DE L'ACCÈS (mot de passe oublié)
+// Un code de vérification à 6 chiffres est généré (haché en base,
+// valable 15 minutes, 5 essais maximum). L'équipe le communique
+// après vérification de l'identité. Aucun mot de passe n'est jamais
+// affiché ni stocké en clair.
+// ============================================================
+app.post('/api/auth/reset-request', (req, res) => {
+  const p = (req.body && req.body.phone || '').trim().replace(/\s+/g, '');
+  const user = db.prepare('SELECT * FROM users WHERE phone=?').get(p);
+  const reponse = { ok: true, message: 'Si un compte existe avec ce numéro, un code de vérification à 6 chiffres a été généré. Notre équipe vous le communique au ' + (p || 'numéro indiqué') + ' après vérification de votre identité. Il est valable 15 minutes.' };
+  if (!user) return res.json(reponse); // réponse identique pour ne pas révéler l'existence d'un compte
+  // Limite : 3 demandes par heure
+  const recentes = db.prepare("SELECT COUNT(*) n FROM reset_codes WHERE user_id=? AND created_at > datetime('now','-1 hour')").get(user.id).n;
+  if (recentes >= 3) return res.status(429).json({ error: 'Trop de demandes. Réessayez dans une heure ou contactez Klean-Services CI.' });
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  db.prepare('UPDATE reset_codes SET used=1 WHERE user_id=? AND used=0').run(user.id); // un seul code actif à la fois
+  db.prepare("INSERT INTO reset_codes(user_id, code_hash, expires_at) VALUES(?,?,datetime('now','+15 minutes'))")
+    .run(user.id, crypto.createHash('sha256').update(code).digest('hex'));
+  notifyAdmins('securite', '🔑 Demande de récupération d\u2019accès',
+    `${user.name} (${user.phone}) a demandé un code de récupération. VÉRIFIEZ SON IDENTITÉ (appelez le numéro du compte) puis communiquez-lui le code : ${code} — valable 15 minutes.`,
+    'admin:users');
+  res.json(reponse);
+});
+app.post('/api/auth/reset-confirm', (req, res) => {
+  const { phone, code, password } = req.body || {};
+  const p = (phone || '').trim().replace(/\s+/g, '');
+  if (!password || password.length < 6) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 6 caractères.' });
+  const user = db.prepare('SELECT * FROM users WHERE phone=?').get(p);
+  const rc = user ? db.prepare("SELECT * FROM reset_codes WHERE user_id=? AND used=0 AND expires_at > datetime('now') ORDER BY id DESC LIMIT 1").get(user.id) : null;
+  if (!rc) return res.status(400).json({ error: 'Code invalide ou expiré. Refaites une demande de récupération.' });
+  if (rc.attempts >= 5) { db.prepare('UPDATE reset_codes SET used=1 WHERE id=?').run(rc.id); return res.status(400).json({ error: 'Trop d\u2019essais. Refaites une demande de récupération.' }); }
+  if (crypto.createHash('sha256').update(String(code || '')).digest('hex') !== rc.code_hash) {
+    db.prepare('UPDATE reset_codes SET attempts=attempts+1 WHERE id=?').run(rc.id);
+    return res.status(400).json({ error: 'Code incorrect (' + (4 - rc.attempts) + ' essai(s) restant(s)).' });
+  }
+  const salt = crypto.randomBytes(16).toString('hex');
+  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, user.id);
+  db.prepare('UPDATE reset_codes SET used=1 WHERE id=?').run(rc.id);
+  notify(user.id, 'compte', '🔑 Mot de passe modifié', 'Votre mot de passe a été modifié grâce au code de vérification. Si ce n\u2019était pas vous, contactez immédiatement Klean-Services CI.', '#/account');
+  res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
 });
 
 app.put('/api/me/password', auth, (req, res) => {
@@ -206,7 +396,7 @@ app.put('/api/me/password', auth, (req, res) => {
   if (req.user.password_hash !== hashPassword(current || '', req.user.salt)) return res.status(400).json({ error: 'Mot de passe actuel incorrect.' });
   if (!password || password.length < 6) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 6 caractères.' });
   const salt = crypto.randomBytes(16).toString('hex');
-  db.prepare('UPDATE users SET password_hash=?, salt=? WHERE id=?').run(hashPassword(password, salt), salt, req.user.id);
+  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, req.user.id);
   res.json({ ok: true });
 });
 
@@ -245,29 +435,76 @@ function normalize(s) {
 }
 app.get('/api/services', (req, res) => {
   const cats = db.prepare('SELECT * FROM service_categories WHERE active=1 ORDER BY sort,id').all();
-  const svcs = db.prepare('SELECT id, category_id, name, sort FROM services WHERE active=1 ORDER BY sort,id').all();
-  res.json(cats.map(c => ({ ...c, services: svcs.filter(s => s.category_id === c.id) })));
+  const svcs = db.prepare('SELECT id, category_id, sub_id, name, sort, popular, seasonal, cities FROM services WHERE active=1 ORDER BY sort,id').all()
+    .filter(s => villeOk(s, req.query.ville));
+  res.json(cats.map(c => ({ ...c, services: svcs.filter(s => s.category_id === c.id) })).filter(c => c.services.length));
+});
+// Un service est-il proposé dans la ville demandée ? ([] = partout)
+function villeOk(s, ville) {
+  if (!ville) return true;
+  const cities = typeof s.cities === 'string' ? JSON.parse(s.cities || '[]') : (s.cities || []);
+  return !cities.length || cities.some(c => normalize(c) === normalize(ville));
+}
+// Catalogue complet : MÉTIERS → SOUS-CATÉGORIES → SERVICES → TÂCHES
+app.get('/api/catalogue', (req, res) => {
+  const cats = db.prepare('SELECT * FROM service_categories WHERE active=1 ORDER BY sort,id').all();
+  const subs = db.prepare('SELECT * FROM sous_categories WHERE active=1 ORDER BY sort,id').all();
+  const svcs = db.prepare('SELECT * FROM services WHERE active=1 ORDER BY sort,id').all().filter(s => villeOk(s, req.query.ville));
+  const tas = db.prepare('SELECT * FROM taches WHERE active=1 ORDER BY sort,id').all();
+  res.json(cats.map(c => ({
+    id: c.id, name: c.name, icon: c.icon,
+    sous_categories: subs.filter(sc => sc.metier_id === c.id).map(sc => ({
+      id: sc.id, name: sc.name,
+      services: svcs.filter(s => s.sub_id === sc.id).map(s => ({
+        id: s.id, name: s.name, popular: s.popular, seasonal: s.seasonal,
+        taches: tas.filter(t => t.service_id === s.id).map(t => ({ id: t.id, name: t.name }))
+      }))
+    })).filter(sc => sc.services.length)
+  })).filter(c => c.sous_categories.length));
+});
+// Services populaires (accueil)
+app.get('/api/services/populaires', (req, res) => {
+  const svcs = db.prepare(`SELECT s.id, s.name, s.cities, c.icon, c.name cat FROM services s
+    JOIN service_categories c ON c.id=s.category_id
+    WHERE s.active=1 AND c.active=1 AND s.popular=1 ORDER BY s.sort,s.id LIMIT 12`).all()
+    .filter(s => villeOk(s, req.query.ville)).map(({ cities, ...s }) => s);
+  res.json(svcs);
+});
+// Villes de Côte d'Ivoire (liste sélectionnable, avec recherche côté application)
+app.get('/api/villes', (req, res) => {
+  res.json(db.prepare('SELECT name FROM villes WHERE active=1 ORDER BY name').all().map(v => v.name));
 });
 app.get('/api/services/:id/questions', (req, res) => {
   const svc = db.prepare('SELECT s.*, c.name cat FROM services s JOIN service_categories c ON c.id=s.category_id WHERE s.id=? AND s.active=1').get(req.params.id);
   if (!svc) return res.status(404).json({ error: 'Service introuvable.' });
   const questions = db.prepare('SELECT * FROM service_questions WHERE service_id=? AND active=1 ORDER BY sort,id').all(svc.id)
     .map(q => ({ ...q, options: JSON.parse(q.options) }));
-  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat }, questions });
+  const taches = db.prepare('SELECT id, name FROM taches WHERE service_id=? AND active=1 ORDER BY sort,id').all(svc.id);
+  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat }, questions, taches });
 });
 const STOPWORDS = new Set(['je', 'cherche', 'un', 'une', 'des', 'le', 'la', 'les', 'de', 'du', 'mon', 'ma', 'mes', 'pour', 'a', 'au', 'en', 'et', 'faire', 'veux', 'voudrais', 'besoin', 'il', 'me', 'faut', 'quelqu', 'qui', 'peut', 'sait']);
 app.get('/api/search', (req, res) => {
   const words = normalize(req.query.q).split(/\s+/).filter(w => w.length > 1 && !STOPWORDS.has(w));
-  const svcs = db.prepare('SELECT s.*, c.name cat, c.icon FROM services s JOIN service_categories c ON c.id=s.category_id WHERE s.active=1 AND c.active=1').all();
+  const svcs = db.prepare(`SELECT s.*, c.name cat, c.icon, sc.name sous_cat FROM services s
+    JOIN service_categories c ON c.id=s.category_id
+    LEFT JOIN sous_categories sc ON sc.id=s.sub_id
+    WHERE s.active=1 AND c.active=1`).all().filter(s => villeOk(s, req.query.ville));
+  const tachesBySvc = {};
+  db.prepare('SELECT service_id, name FROM taches WHERE active=1').all()
+    .forEach(t => { (tachesBySvc[t.service_id] = tachesBySvc[t.service_id] || []).push(t.name); });
   const scored = svcs.map(s => {
-    const hay = normalize(s.name + ' ' + s.cat + ' ' + s.keywords.replace(/,/g, ' '));
+    const tches = tachesBySvc[s.id] || [];
+    const hay = normalize(s.name + ' ' + s.cat + ' ' + (s.sous_cat || '') + ' ' + s.keywords.replace(/,/g, ' ') + ' ' + tches.join(' '));
     const hayWords = hay.split(/\s+/);
     let score = 0;
     for (const w of words) {
       if (hayWords.includes(w)) score += 3;
       else if (hayWords.some(h => h.startsWith(w) || w.startsWith(h) && h.length > 2)) score += 1;
     }
-    return { id: s.id, name: s.name, category: s.cat, icon: s.icon, score };
+    // La tâche qui correspond le mieux à la recherche est proposée au client
+    let tache = null;
+    for (const t of tches) { if (words.some(w => normalize(t).includes(w))) { tache = t; break; } }
+    return { id: s.id, name: s.name, category: s.cat, icon: s.icon, sous_categorie: s.sous_cat, tache_suggeree: tache, score };
   }).filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 10);
   res.json({ results: scored, query: req.query.q || '' });
 });
@@ -425,7 +662,7 @@ function startDispatch(missionId) {
 
 // Créer une demande
 app.post('/api/missions', auth, (req, res) => {
-  const { service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio } = req.body || {};
+  const { service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache } = req.body || {};
   const svc = db.prepare('SELECT * FROM services WHERE id=? AND active=1').get(service_id);
   if (!svc) return res.status(400).json({ error: 'Service invalide.' });
   if (!address || !address.trim()) return res.status(400).json({ error: 'Indiquez votre localisation (GPS ou saisie manuelle).' });
@@ -441,10 +678,10 @@ app.post('/api/missions', auth, (req, res) => {
   if (dup) return res.status(409).json({ error: 'Vous avez déjà une demande en cours pour ce service. Consultez-la dans « Demandes ».', mission_id: dup.id });
 
   const code = 'KS' + Date.now().toString(36).toUpperCase() + Math.floor(Math.random() * 90 + 10);
-  const info = db.prepare(`INSERT INTO missions(code, client_id, service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+  const info = db.prepare(`INSERT INTO missions(code, client_id, service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(code, req.user.id, service_id, JSON.stringify(answers || {}), description || '', address.trim(), lat || null, lng || null,
-         urgence ? 1 : 0, date_souhaitee || null, JSON.stringify(photos || []), audio || null);
+         urgence ? 1 : 0, date_souhaitee || null, JSON.stringify(photos || []), audio || null, tache || null);
   addEvent(info.lastInsertRowid, 'recherche', req.user.id, 'Demande créée');
   startDispatch(info.lastInsertRowid);
   res.json({ id: info.lastInsertRowid, code, status: 'recherche' });
@@ -452,7 +689,7 @@ app.post('/api/missions', auth, (req, res) => {
 
 function missionAccess(mission, user) {
   if (!mission) return null;
-  if (user.role === 'admin') return 'admin';
+  if (isStaff(user) && hasPerm(user, 'missions')) return 'admin';
   if (mission.client_id === user.id) return 'client';
   if (mission.pro_id === user.id) return 'pro';
   const cand = db.prepare("SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=? AND status IN ('offered','accepted')").get(mission.id, user.id);
@@ -485,7 +722,7 @@ function missionFull(mission, role, user) {
   }
   return {
     id: mission.id, code: mission.code, status: mission.status, role,
-    service: svc.name, icon: svc.icon, detail, description: mission.description,
+    service: svc.name, icon: svc.icon, tache: mission.tache || null, detail, description: mission.description,
     address: mission.address, lat: mission.lat, lng: mission.lng,
     urgence: mission.urgence, date_souhaitee: mission.date_souhaitee,
     photos: JSON.parse(mission.photos), audio: mission.audio,
@@ -510,7 +747,7 @@ app.get('/api/missions', auth, (req, res) => {
       JOIN services s ON s.id=m.service_id JOIN service_categories c ON c.id=s.category_id
       WHERE mc.pro_id=? AND mc.status='offered' AND m.status='recherche' ORDER BY mc.offered_at DESC`).all(req.user.id);
   }
-  const strip = m => ({ id: m.id, code: m.code, status: m.status, service: m.service_name, icon: m.icon, address: m.address, urgence: m.urgence, amount: m.amount, created_at: m.created_at, updated_at: m.updated_at });
+  const strip = m => ({ id: m.id, code: m.code, status: m.status, service: m.service_name, icon: m.icon, tache: m.tache || null, address: m.address, urgence: m.urgence, amount: m.amount, created_at: m.created_at, updated_at: m.updated_at });
   res.json({ client: asClient.map(strip), pro: asPro.map(strip), offers: offers.map(strip) });
 });
 
@@ -724,7 +961,7 @@ app.post('/api/signalements', auth, (req, res) => {
 // ============================================================
 function chatAccess(mission, user) {
   const role = missionAccess(mission, user);
-  return role && role !== 'admin' ? role : (user.role === 'admin' ? 'admin' : null);
+  return role && role !== 'admin' ? role : (isStaff(user) && hasPerm(user, 'missions') ? 'admin' : null);
 }
 app.get('/api/missions/:id/messages', auth, (req, res) => {
   const mission = db.prepare('SELECT * FROM missions WHERE id=?').get(req.params.id);
@@ -909,6 +1146,81 @@ app.get('/api/ads', (req, res) => {
 const A = express.Router();
 A.use(auth, admin);
 
+// Chaque section du tableau de bord correspond à une permission (le PDG a toujours tout)
+const PERM_ROUTES = [
+  [/^\/staff/, 'PDG'], // gestion de l'équipe : réservé au PDG
+  [/^\/maintenance/, 'PDG'], // mode maintenance : réservé au PDG
+  [/^\/journal/, 'journal'],
+  [/^\/users\/\d+$/, 'comptes'], [/^\/users/, 'comptes'],
+  [/^\/pros/, 'pros'],
+  [/^\/(catalog|categories|sous-categories|services|taches|villes)/, 'catalogue'],
+  [/^\/questions/, 'questions'],
+  [/^\/missions/, 'missions'],
+  [/^\/payments/, 'paiements'],
+  [/^\/(ads|broadcast)/, 'communication'],
+  [/^\/(signalements|urgences|files|rules)/, 'securite'],
+  [/^\/(avis-recherche|jobs|ecole-famille|quiz|kdo|game-plays)/, 'contenu'],
+  [/^\/settings/, 'parametres'],
+];
+// Libellés lisibles pour le journal automatique
+const ACTION_LABELS = [
+  [/^POST \/users\/\d+\/suspend/, 'Suspension / réactivation de compte'],
+  [/^POST \/users\/\d+\/block/, 'Blocage / déblocage de compte'],
+  [/^POST \/users\/\d+\/disable-temp/, 'Désactivation temporaire de compte'],
+  [/^POST \/users\/\d+\/reset-access/, 'Réinitialisation d\u2019accès'],
+  [/^POST \/users\/\d+\/force-password/, 'Changement de mot de passe forcé'],
+  [/^POST \/users\/\d+\/verify/, 'Vérification de compte'],
+  [/^PUT \/users\/\d+/, 'Modification de compte'],
+  [/^DELETE \/users\/\d+/, 'Suppression de compte'],
+  [/^POST \/users/, 'Création rapide de compte'],
+  [/^POST \/pros\/\d+\/approve/, 'Validation professionnelle'],
+  [/^POST \/pros\/\d+\/reject/, 'Refus professionnel'],
+  [/^(POST|PUT|DELETE) \/categories/, 'Catalogue : métier'],
+  [/^(POST|PUT|DELETE) \/sous-categories/, 'Catalogue : sous-catégorie'],
+  [/^(POST|PUT|DELETE) \/services/, 'Catalogue : service'],
+  [/^(POST|PUT|DELETE) \/taches/, 'Catalogue : tâche'],
+  [/^(POST|PUT|DELETE) \/villes/, 'Catalogue : ville'],
+  [/^(POST|PUT|DELETE) \/questions/, 'Question dynamique'],
+  [/^PUT \/settings/, 'Modification des paramètres'],
+  [/^POST \/broadcast/, 'Message système envoyé'],
+  [/^(POST|PUT|DELETE) \/ads/, 'Publicité / information'],
+  [/^PUT \/rules/, 'Modification des règles'],
+  [/^POST \/staff\/\d+\/reset-access/, 'Équipe : réinitialisation d\u2019accès'],
+  [/^PUT \/staff\/\d+/, 'Équipe : rôle / permissions modifiés'],
+  [/^DELETE \/staff\/\d+/, 'Équipe : compte supprimé'],
+  [/^POST \/staff/, 'Équipe : compte créé'],
+  [/^POST \/maintenance/, '🛠 MODE MAINTENANCE modifié'],
+  [/^POST \/missions\/\d+/, 'Intervention sur une mission'],
+  [/^POST \/payments/, 'Intervention sur un paiement'],
+];
+A.use((req, res, next) => {
+  // L'écran « Questions dynamiques » lit le catalogue : la permission « questions » suffit pour la LECTURE du catalogue
+  const lectureCatalogue = req.method === 'GET' && /^\/catalog/.test(req.path) && (hasPerm(req.user, 'catalogue') || hasPerm(req.user, 'questions'));
+  const rule = lectureCatalogue ? null : PERM_ROUTES.find(([re]) => re.test(req.path));
+  if (rule) {
+    if (rule[1] === 'PDG') { if (req.user.role !== 'pdg') return res.status(403).json({ error: 'Action réservée au PDG.' }); }
+    else if (!hasPerm(req.user, rule[1])) return res.status(403).json({ error: 'Vous n\u2019avez pas la permission « ' + (PERM_KEYS[rule[1]] || rule[1]) + ' ». Contactez le PDG.' });
+  }
+  // Journal automatique de toute action d'écriture réussie
+  if (req.method !== 'GET') {
+    const method = req.method, p = req.path;
+    res.on('finish', () => {
+      if (res.statusCode >= 400) return;
+      const lbl = (ACTION_LABELS.find(([re]) => re.test(method + ' ' + p)) || [null, method + ' ' + p])[1];
+      const body = { ...(req.body || {}) };
+      ['password', 'temp_password', 'current'].forEach(k => delete body[k]);
+      const idm = p.match(/\/(\d+)/);
+      logAction(req.user, lbl, {
+        target_type: p.split('/')[1] || null,
+        target_id: idm ? parseInt(idm[1], 10) : null,
+        details: method + ' ' + p + (Object.keys(body).length ? ' ' + JSON.stringify(body).slice(0, 300) : ''),
+        reason: (req.body && req.body.reason) || null,
+      });
+    });
+  }
+  next();
+});
+
 A.get('/stats', (req, res) => {
   const g = q => db.prepare(q).get().n;
   res.json({
@@ -925,6 +1237,11 @@ A.get('/stats', (req, res) => {
     signalements: g("SELECT COUNT(*) n FROM signalements WHERE status='nouveau'"),
     urgences: g('SELECT COUNT(*) n FROM urgences WHERE handled=0'),
     moderation: g("SELECT COUNT(*) n FROM avis_recherche WHERE status='pending'") + g("SELECT COUNT(*) n FROM jobs WHERE status='pending'"),
+    metiers: g('SELECT COUNT(*) n FROM service_categories WHERE active=1'),
+    services_count: g('SELECT COUNT(*) n FROM services WHERE active=1'),
+    taches: g('SELECT COUNT(*) n FROM taches WHERE active=1'),
+    villes: g('SELECT COUNT(*) n FROM villes WHERE active=1'),
+    admin_font_size: parseInt(getSetting('admin_font_size', '16'), 10),
   });
 });
 
@@ -935,9 +1252,10 @@ A.get('/users', (req, res) => {
   if (f === 'pros') where += " AND pro_status='approved'";
   if (f === 'clients') where += " AND (pro_status IS NULL OR pro_status!='approved')";
   if (f === 'pending') where += " AND pro_status='pending'";
-  if (f === 'suspended') where = "role='user' AND suspended=1";
+  if (f === 'suspended') where = "role='user' AND (suspended=1 OR blocked=1 OR (disabled_until IS NOT NULL AND disabled_until > datetime('now')))";
   if (f === 'verified') where += ' AND verified=1';
-  const rows = db.prepare(`SELECT id, name, phone, address, is_pro, pro_status, suspended, verified, created_at FROM users WHERE ${where} ORDER BY id DESC LIMIT 500`).all();
+  if (f === 'incomplete') where += ' AND profile_incomplete=1';
+  const rows = db.prepare(`SELECT id, name, phone, email, address, ville, quartier, is_pro, pro_status, kp_code, suspended, blocked, disabled_until, must_change_password, profile_incomplete, verified, created_at FROM users WHERE ${where} ORDER BY id DESC LIMIT 500`).all();
   res.json(rows);
 });
 A.get('/users/:id', (req, res) => {
@@ -945,18 +1263,256 @@ A.get('/users/:id', (req, res) => {
   if (!u) return res.status(404).json({ error: 'Utilisateur introuvable.' });
   const pro = db.prepare('SELECT * FROM pro_profiles WHERE user_id=?').get(u.id);
   const missions = db.prepare('SELECT COUNT(*) n FROM missions WHERE client_id=? OR pro_id=?').get(u.id, u.id).n;
-  delete u.password_hash; delete u.salt;
-  res.json({ ...u, pro: pro ? { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents) } : null, missions });
+  const history = db.prepare("SELECT admin_name, admin_role, action, details, reason, created_at FROM admin_log WHERE target_type='users' AND target_id=? ORDER BY id DESC LIMIT 50").all(u.id);
+  delete u.password_hash; delete u.salt; delete u.perms;
+  res.json({ ...u, pro: pro ? { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents) } : null, missions, history });
 });
+
+// Garde-fou : un membre de l'équipe ne peut pas agir sur un compte de l'équipe (sauf le PDG, et jamais sur le PDG)
+function cibleUtilisateur(req, res) {
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!u) { res.status(404).json({ error: 'Utilisateur introuvable.' }); return null; }
+  if (u.role === 'pdg') { res.status(403).json({ error: 'Le compte PDG ne peut pas être modifié ici.' }); return null; }
+  if (STAFF_ROLES.includes(u.role) && req.user.role !== 'pdg') {
+    res.status(403).json({ error: 'Seul le PDG peut agir sur un compte de l\u2019équipe.' }); return null;
+  }
+  return u;
+}
+function motDePasseTemporaire() {
+  return 'KS' + String(Math.floor(100000 + Math.random() * 900000));
+}
+
+// ＋ Créer rapidement un compte (infos minimales — l'utilisateur complètera son profil)
+A.post('/users', (req, res) => {
+  const { name, phone, email, type } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Veuillez indiquer le nom.' });
+  if (!phone || !/^[+0-9 ]{8,20}$/.test(phone.trim())) return res.status(400).json({ error: 'Numéro de téléphone invalide.' });
+  const p = phone.trim().replace(/\s+/g, '');
+  if (db.prepare('SELECT id FROM users WHERE phone=?').get(p)) return res.status(409).json({ error: 'Ce numéro est déjà associé à un compte.' });
+  const temp = motDePasseTemporaire();
+  const salt = crypto.randomBytes(16).toString('hex');
+  const info = db.prepare(`INSERT INTO users(name, phone, email, password_hash, salt, must_change_password, profile_incomplete, created_by)
+    VALUES(?,?,?,?,?,1,1,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(temp, salt), salt, req.user.id);
+  notify(info.lastInsertRowid, 'compte', 'Bienvenue sur Klean-Services CI 👋',
+    'Votre compte a été créé par notre équipe. Connectez-vous, choisissez votre mot de passe et complétez votre profil.' +
+    (type === 'pro' ? ' Pour devenir professionnel, faites votre demande depuis Mon compte (validation normale).' : ''), '#/account');
+  res.json({ id: info.lastInsertRowid, temp_password: temp });
+});
+
+// Modification rapide du compte depuis la fiche
+A.put('/users/:id', (req, res) => {
+  const u = cibleUtilisateur(req, res); if (!u) return;
+  const { name, phone, email, address, ville, quartier } = req.body || {};
+  if (phone) {
+    const p = phone.trim().replace(/\s+/g, '');
+    if (!/^[+0-9]{8,20}$/.test(p)) return res.status(400).json({ error: 'Numéro de téléphone invalide.' });
+    const dup = db.prepare('SELECT id FROM users WHERE phone=? AND id!=?').get(p, u.id);
+    if (dup) return res.status(409).json({ error: 'Ce numéro est déjà associé à un autre compte.' });
+    db.prepare('UPDATE users SET phone=? WHERE id=?').run(p, u.id);
+  }
+  db.prepare(`UPDATE users SET name=COALESCE(?,name), email=COALESCE(?,email), address=COALESCE(?,address),
+    ville=COALESCE(?,ville), quartier=COALESCE(?,quartier) WHERE id=?`)
+    .run(name ?? null, email ?? null, address ?? null, ville ?? null, quartier ?? null, u.id);
+  res.json({ ok: true });
+});
+
 A.post('/users/:id/suspend', (req, res) => {
-  db.prepare('UPDATE users SET suspended=? WHERE id=? AND role=\'user\'').run(req.body.suspended ? 1 : 0, req.params.id);
-  if (!req.body.suspended) notify(parseInt(req.params.id), 'compte', 'Compte réactivé', 'Votre compte a été réactivé par l\u2019administration.', '#/home');
+  const u = cibleUtilisateur(req, res); if (!u) return;
+  db.prepare('UPDATE users SET suspended=? WHERE id=?').run(req.body.suspended ? 1 : 0, u.id);
+  if (!req.body.suspended) notify(u.id, 'compte', 'Compte réactivé', 'Votre compte a été réactivé par l\u2019administration.', '#/home');
+  res.json({ ok: true });
+});
+A.post('/users/:id/block', (req, res) => {
+  const u = cibleUtilisateur(req, res); if (!u) return;
+  db.prepare('UPDATE users SET blocked=? WHERE id=?').run(req.body.blocked ? 1 : 0, u.id);
+  if (!req.body.blocked) notify(u.id, 'compte', 'Compte débloqué', 'Votre compte a été débloqué par l\u2019administration.', '#/home');
+  res.json({ ok: true });
+});
+A.post('/users/:id/disable-temp', (req, res) => {
+  const u = cibleUtilisateur(req, res); if (!u) return;
+  const { until } = req.body || {}; // date/heure ISO, ou null pour réactiver
+  if (until && isNaN(Date.parse(until))) return res.status(400).json({ error: 'Date invalide.' });
+  db.prepare('UPDATE users SET disabled_until=? WHERE id=?').run(until ? until.replace('T', ' ').slice(0, 19) : null, u.id);
+  res.json({ ok: true });
+});
+// Réinitialiser l'accès : nouveau mot de passe temporaire (l'admin ne voit JAMAIS l'ancien mot de passe)
+A.post('/users/:id/reset-access', (req, res) => {
+  const u = cibleUtilisateur(req, res); if (!u) return;
+  const temp = motDePasseTemporaire();
+  const salt = crypto.randomBytes(16).toString('hex');
+  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=1 WHERE id=?').run(hashPassword(temp, salt), salt, u.id);
+  notify(u.id, 'compte', '🔑 Accès réinitialisé', 'Votre accès a été réinitialisé par l\u2019administration. Connectez-vous avec le mot de passe temporaire qui vous a été communiqué, puis choisissez-en un nouveau.', '#/account');
+  res.json({ ok: true, temp_password: temp });
+});
+A.post('/users/:id/force-password', (req, res) => {
+  const u = cibleUtilisateur(req, res); if (!u) return;
+  db.prepare('UPDATE users SET must_change_password=1 WHERE id=?').run(u.id);
+  notify(u.id, 'compte', '🔒 Changement de mot de passe requis', 'Pour votre sécurité, vous devez choisir un nouveau mot de passe à votre prochaine connexion.', '#/account');
+  res.json({ ok: true });
+});
+// Suppression définitive (permission spéciale accordée par le PDG)
+A.delete('/users/:id', (req, res) => {
+  if (!hasPerm(req.user, 'comptes_suppr')) return res.status(403).json({ error: 'La suppression définitive est réservée au PDG (ou à un compte autorisé par lui).' });
+  const u = cibleUtilisateur(req, res); if (!u) return;
+  const nb = db.prepare('SELECT COUNT(*) n FROM missions WHERE client_id=? OR pro_id=?').get(u.id, u.id).n;
+  if (nb) return res.status(409).json({ error: `Ce compte est lié à ${nb} mission(s). Suspendez-le ou bloquez-le plutôt (l\u2019historique doit être conservé).` });
+  db.prepare('DELETE FROM users WHERE id=?').run(u.id);
   res.json({ ok: true });
 });
 A.post('/users/:id/verify', (req, res) => {
   db.prepare('UPDATE users SET verified=? WHERE id=?').run(req.body.verified ? 1 : 0, req.params.id);
   if (req.body.verified) notify(parseInt(req.params.id), 'compte', '✅ Compte vérifié', 'Votre compte a été vérifié par l\u2019administration.', '#/account');
   res.json({ ok: true });
+});
+
+// ============== ÉQUIPE & PERMISSIONS (réservé au PDG) ==============
+A.get('/staff', (req, res) => {
+  const rows = db.prepare("SELECT id, name, phone, email, role, perms, suspended, blocked, created_at FROM users WHERE role IN ('pdg','admin','gestionnaire','agent') ORDER BY CASE role WHEN 'pdg' THEN 0 WHEN 'admin' THEN 1 WHEN 'gestionnaire' THEN 2 ELSE 3 END, id").all();
+  res.json({
+    staff: rows.map(u => ({ ...u, perms_effectives: effectivePerms(u), perms: undefined })),
+    perm_keys: PERM_KEYS, role_labels: ROLE_LABELS, defaults: DEFAULT_PERMS,
+  });
+});
+A.post('/staff', (req, res) => {
+  const { name, phone, email, role } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Veuillez indiquer le nom.' });
+  if (!['admin', 'gestionnaire', 'agent'].includes(role)) return res.status(400).json({ error: 'Rôle invalide (administrateur, gestionnaire ou agent).' });
+  if (!phone || !/^[+0-9 ]{3,20}$/.test(phone.trim())) return res.status(400).json({ error: 'Identifiant / téléphone invalide.' });
+  const p = phone.trim().replace(/\s+/g, '');
+  if (db.prepare('SELECT id FROM users WHERE phone=?').get(p)) return res.status(409).json({ error: 'Ce numéro est déjà associé à un compte.' });
+  const temp = motDePasseTemporaire();
+  const salt = crypto.randomBytes(16).toString('hex');
+  const info = db.prepare(`INSERT INTO users(name, phone, email, password_hash, salt, role, must_change_password, created_by)
+    VALUES(?,?,?,?,?,?,1,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(temp, salt), salt, role, req.user.id);
+  res.json({ id: info.lastInsertRowid, temp_password: temp });
+});
+A.put('/staff/:id', (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!u || !STAFF_ROLES.includes(u.role)) return res.status(404).json({ error: 'Membre introuvable.' });
+  if (u.role === 'pdg') return res.status(403).json({ error: 'Le compte PDG ne peut pas être modifié ici.' });
+  const { role, perms, suspended, blocked, name } = req.body || {};
+  if (role !== undefined) {
+    if (!['admin', 'gestionnaire', 'agent', 'user'].includes(role)) return res.status(400).json({ error: 'Rôle invalide.' });
+    db.prepare('UPDATE users SET role=?, perms=NULL WHERE id=?').run(role, u.id); // retour aux permissions par défaut du nouveau rôle
+  }
+  if (perms !== undefined) db.prepare('UPDATE users SET perms=? WHERE id=?').run(perms ? JSON.stringify(perms) : null, u.id);
+  if (suspended !== undefined) db.prepare('UPDATE users SET suspended=? WHERE id=?').run(suspended ? 1 : 0, u.id);
+  if (blocked !== undefined) db.prepare('UPDATE users SET blocked=? WHERE id=?').run(blocked ? 1 : 0, u.id);
+  if (name !== undefined && name.trim()) db.prepare('UPDATE users SET name=? WHERE id=?').run(name.trim(), u.id);
+  res.json({ ok: true });
+});
+A.post('/staff/:id/reset-access', (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!u || !STAFF_ROLES.includes(u.role)) return res.status(404).json({ error: 'Membre introuvable.' });
+  if (u.role === 'pdg' && u.id !== req.user.id) return res.status(403).json({ error: 'Impossible.' });
+  const temp = motDePasseTemporaire();
+  const salt = crypto.randomBytes(16).toString('hex');
+  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=1 WHERE id=?').run(hashPassword(temp, salt), salt, u.id);
+  res.json({ ok: true, temp_password: temp });
+});
+A.delete('/staff/:id', (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!u || !STAFF_ROLES.includes(u.role)) return res.status(404).json({ error: 'Membre introuvable.' });
+  if (u.role === 'pdg') return res.status(403).json({ error: 'Le compte PDG ne peut pas être supprimé.' });
+  const nb = db.prepare('SELECT COUNT(*) n FROM missions WHERE client_id=? OR pro_id=?').get(u.id, u.id).n;
+  if (nb) { db.prepare("UPDATE users SET role='user', perms=NULL WHERE id=?").run(u.id); return res.json({ ok: true, downgraded: true }); }
+  db.prepare('DELETE FROM users WHERE id=?').run(u.id);
+  res.json({ ok: true });
+});
+
+// ============== MODE MAINTENANCE (réservé au PDG) ==============
+A.get('/maintenance', (req, res) => {
+  const m = getMaintenance();
+  res.json({ config: m, scopes: MAINT_SCOPES, fonctions: MAINT_FONCTIONS, actif: !!(m.active && !m.expired) });
+});
+A.post('/maintenance', (req, res) => {
+  const { active, scope, functions, until, message, reason } = req.body || {};
+  if (!active) {
+    setSetting('maintenance', JSON.stringify({ active: 0 }));
+    return res.json({ ok: true });
+  }
+  if (!MAINT_SCOPES[scope]) return res.status(400).json({ error: 'Choisissez la portée de la maintenance (A à F).' });
+  if (scope === 'E' && (!Array.isArray(functions) || !functions.length)) return res.status(400).json({ error: 'Cochez au moins une fonction à suspendre.' });
+  if (!reason || !reason.trim()) return res.status(400).json({ error: 'Indiquez la justification (enregistrée dans le journal).' });
+  if (until && isNaN(Date.parse(until))) return res.status(400).json({ error: 'Date de fin invalide.' });
+  setSetting('maintenance', JSON.stringify({
+    active: 1, scope, functions: scope === 'E' ? functions.filter(f => MAINT_FONCTIONS[f]) : undefined,
+    until: until || null, message: (message || '').trim() || null, reason: reason.trim(),
+    activated_at: new Date().toISOString().slice(0, 19).replace('T', ' '), activated_by: req.user.name,
+  }));
+  res.json({ ok: true });
+});
+
+// ============== GRANDE RECHERCHE ADMINISTRATEUR ==============
+// Comptes, téléphone, e-mail, code KP, équipe, métiers, services, tâches, missions, paiements, journal…
+A.get('/search', (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (q.length < 2) return res.json({ q, groups: [] });
+  const lq = q.toLowerCase();
+  const like = '%' + q + '%';
+  const num = /^\d+$/.test(q) ? parseInt(q, 10) : null;
+  const groups = [];
+  const add = (type, titre, items) => { if (items.length) groups.push({ type, titre, items }); };
+
+  if (hasPerm(req.user, 'comptes')) {
+    const users = db.prepare(`SELECT id, name, phone, email, kp_code, ville, quartier, pro_status, suspended, blocked FROM users
+      WHERE role='user' AND (name LIKE ? OR phone LIKE ? OR email LIKE ? OR kp_code LIKE ? OR id=?)
+      ORDER BY id DESC LIMIT 10`).all(like, like, like, like, num ?? -1);
+    add('user', '👥 Comptes utilisateurs', users.map(u => ({
+      id: u.id,
+      label: u.name + (u.kp_code ? ' — ' + u.kp_code : ''),
+      sub: u.phone + (u.email ? ' • ' + u.email : '') + (u.ville ? ' • ' + u.ville : '') +
+        (u.pro_status === 'approved' ? ' • Professionnel' : '') + (u.blocked ? ' • 🚫 bloqué' : u.suspended ? ' • suspendu' : ''),
+    })));
+  }
+  if (req.user.role === 'pdg') {
+    const st = db.prepare(`SELECT id, name, phone, role FROM users WHERE role IN ('pdg','admin','gestionnaire','agent') AND (name LIKE ? OR phone LIKE ?) LIMIT 5`).all(like, like);
+    add('staff', '👑 Équipe', st.map(u => ({ id: u.id, label: u.name, sub: u.phone + ' • ' + (ROLE_LABELS[u.role] || u.role) })));
+  }
+  if (hasPerm(req.user, 'catalogue')) {
+    const mets = db.prepare('SELECT id, name, icon FROM service_categories WHERE name LIKE ? LIMIT 6').all(like);
+    add('metier', '🧰 Métiers', mets.map(c => ({ id: c.id, label: (c.icon || '') + ' ' + c.name, sub: 'Catégorie de métier' })));
+    const svcs = db.prepare(`SELECT s.id, s.name, s.active, c.name cat, c.icon FROM services s JOIN service_categories c ON c.id=s.category_id
+      WHERE s.name LIKE ? OR s.keywords LIKE ? LIMIT 8`).all(like, like);
+    add('service', '🛠 Services', svcs.map(s => ({ id: s.id, label: (s.icon || '') + ' ' + s.name, sub: s.cat + (s.active ? '' : ' • désactivé') })));
+    const tas = db.prepare(`SELECT t.id, t.name, t.service_id, s.name svc FROM taches t JOIN services s ON s.id=t.service_id WHERE t.name LIKE ? LIMIT 8`).all(like);
+    add('tache', '📝 Tâches', tas.map(t => ({ id: t.service_id, label: t.name, sub: 'Service : ' + t.svc })));
+  }
+  if (hasPerm(req.user, 'missions')) {
+    const mis = db.prepare(`SELECT m.id, m.code, m.status, m.tache, s.name svc, uc.name client, up.name pro FROM missions m
+      JOIN services s ON s.id=m.service_id JOIN users uc ON uc.id=m.client_id LEFT JOIN users up ON up.id=m.pro_id
+      WHERE m.code LIKE ? OR m.id=? OR m.tache LIKE ? OR s.name LIKE ? OR uc.name LIKE ? OR up.name LIKE ?
+      ORDER BY m.id DESC LIMIT 10`).all(like, num ?? -1, like, like, like, like);
+    add('mission', '🧰 Demandes & missions', mis.map(m => ({
+      id: m.id, label: m.code + ' — ' + m.svc + (m.tache ? ' (' + m.tache + ')' : ''),
+      sub: 'Client : ' + m.client + (m.pro ? ' • Pro : ' + m.pro : '') + ' • ' + m.status,
+    })));
+  }
+  if (hasPerm(req.user, 'paiements')) {
+    const pays = db.prepare(`SELECT p.id, p.amount, p.commission_amount, p.status, p.mission_id, m.code FROM payments p JOIN missions m ON m.id=p.mission_id
+      WHERE m.code LIKE ? OR p.mission_id=? OR p.amount=? ORDER BY p.id DESC LIMIT 8`).all(like, num ?? -1, num ?? -1);
+    add('paiement', '💰 Paiements', pays.map(p => ({
+      id: p.mission_id, label: p.amount.toLocaleString('fr-FR') + ' F — mission ' + p.code,
+      sub: 'Commission : ' + (p.commission_amount || 0).toLocaleString('fr-FR') + ' F • ' + p.status,
+    })));
+  }
+  if (hasPerm(req.user, 'journal')) {
+    const logs = db.prepare(`SELECT id, admin_name, action, created_at FROM admin_log
+      WHERE admin_name LIKE ? OR action LIKE ? OR details LIKE ? OR reason LIKE ? ORDER BY id DESC LIMIT 6`).all(like, like, like, like);
+    add('journal', '🧾 Journal des actions', logs.map(l => ({ id: l.id, label: l.action, sub: l.admin_name + ' • ' + l.created_at })));
+  }
+  res.json({ q, groups });
+});
+
+// ============== JOURNAL DES ACTIONS ==============
+A.get('/journal', (req, res) => {
+  const q = (req.query.q || '').trim().toLowerCase();
+  let rows = db.prepare('SELECT * FROM admin_log ORDER BY id DESC LIMIT 1000').all();
+  if (q) rows = rows.filter(l =>
+    (l.admin_name || '').toLowerCase().includes(q) || (l.action || '').toLowerCase().includes(q) ||
+    (l.target_name || '').toLowerCase().includes(q) || (l.details || '').toLowerCase().includes(q) ||
+    (l.reason || '').toLowerCase().includes(q) || String(l.target_id) === q);
+  res.json(rows.slice(0, 300));
 });
 
 // VALIDATION DES PROFESSIONNELS
@@ -969,7 +1525,14 @@ A.post('/pros/:id/approve', (req, res) => {
   if (!u) return res.status(404).json({ error: 'Demande introuvable.' });
   db.prepare("UPDATE users SET pro_status='approved', is_pro=1, verified=1 WHERE id=?").run(u.id);
   db.prepare("UPDATE pro_profiles SET validated_at=datetime('now') WHERE user_id=?").run(u.id);
-  notify(u.id, 'compte', '🎉 Vous êtes maintenant professionnel !', 'Votre espace professionnel est actif. Vous pouvez recevoir des missions. Votre compte reste aussi un compte client.', '#/pro');
+  // Attribution du code professionnel unique (KP######)
+  let kp = db.prepare('SELECT kp_code FROM users WHERE id=?').get(u.id).kp_code;
+  if (!kp) {
+    do { kp = 'KP' + String(Math.floor(100000 + Math.random() * 900000)); }
+    while (db.prepare('SELECT 1 FROM users WHERE kp_code=?').get(kp));
+    db.prepare('UPDATE users SET kp_code=? WHERE id=?').run(kp, u.id);
+  }
+  notify(u.id, 'compte', '🎉 Vous êtes maintenant professionnel !', `Votre espace professionnel est actif. Votre code professionnel est ${kp}. Vous pouvez recevoir des missions. Votre compte reste aussi un compte client.`, '#/pro');
   push(u.id, 'account', { pro_status: 'approved' });
   res.json({ ok: true });
 });
@@ -986,10 +1549,60 @@ A.post('/pros/:id/reject', (req, res) => {
 // SERVICES / CATÉGORIES / QUESTIONS
 A.get('/catalog', (req, res) => {
   const cats = db.prepare('SELECT * FROM service_categories ORDER BY sort,id').all();
-  const svcs = db.prepare('SELECT * FROM services ORDER BY sort,id').all();
+  const subs = db.prepare('SELECT * FROM sous_categories ORDER BY sort,id').all();
+  const svcs = db.prepare('SELECT * FROM services ORDER BY sort,id').all().map(s => ({ ...s, cities: JSON.parse(s.cities || '[]') }));
+  const tas = db.prepare('SELECT * FROM taches ORDER BY sort,id').all();
   const qs = db.prepare('SELECT * FROM service_questions ORDER BY sort,id').all().map(q => ({ ...q, options: JSON.parse(q.options) }));
-  res.json({ categories: cats, services: svcs, questions: qs });
+  res.json({ categories: cats, sous_categories: subs, services: svcs, taches: tas, questions: qs });
 });
+A.delete('/categories/:id', (req, res) => {
+  const n = db.prepare(`SELECT COUNT(*) n FROM missions m JOIN services s ON s.id=m.service_id WHERE s.category_id=?`).get(req.params.id).n;
+  if (n) return res.status(400).json({ error: `Impossible de supprimer : ${n} mission(s) utilisent ce métier. Désactivez-le plutôt.` });
+  db.prepare('DELETE FROM service_categories WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+// SOUS-CATÉGORIES
+A.post('/sous-categories', (req, res) => {
+  if (!req.body.name || !req.body.metier_id) return res.status(400).json({ error: 'Nom et métier requis.' });
+  const info = db.prepare('INSERT INTO sous_categories(metier_id, name, sort) VALUES(?,?,?)').run(req.body.metier_id, req.body.name, req.body.sort ?? 99);
+  res.json({ id: info.lastInsertRowid });
+});
+A.put('/sous-categories/:id', (req, res) => {
+  db.prepare('UPDATE sous_categories SET name=COALESCE(?,name), metier_id=COALESCE(?,metier_id), active=COALESCE(?,active), sort=COALESCE(?,sort) WHERE id=?')
+    .run(req.body.name || null, req.body.metier_id || null, req.body.active ?? null, req.body.sort ?? null, req.params.id);
+  res.json({ ok: true });
+});
+A.delete('/sous-categories/:id', (req, res) => {
+  const n = db.prepare('SELECT COUNT(*) n FROM services WHERE sub_id=?').get(req.params.id).n;
+  if (n) return res.status(400).json({ error: `Impossible : ${n} service(s) sont rattachés à cette sous-catégorie.` });
+  db.prepare('DELETE FROM sous_categories WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+// TÂCHES
+A.post('/taches', (req, res) => {
+  if (!req.body.name || !req.body.service_id) return res.status(400).json({ error: 'Nom et service requis.' });
+  const info = db.prepare('INSERT INTO taches(service_id, name, sort) VALUES(?,?,?)').run(req.body.service_id, req.body.name, req.body.sort ?? 99);
+  res.json({ id: info.lastInsertRowid });
+});
+A.put('/taches/:id', (req, res) => {
+  db.prepare('UPDATE taches SET name=COALESCE(?,name), active=COALESCE(?,active), sort=COALESCE(?,sort) WHERE id=?')
+    .run(req.body.name || null, req.body.active ?? null, req.body.sort ?? null, req.params.id);
+  res.json({ ok: true });
+});
+A.delete('/taches/:id', (req, res) => { db.prepare('DELETE FROM taches WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+// VILLES
+A.get('/villes', (req, res) => res.json(db.prepare('SELECT * FROM villes ORDER BY name').all()));
+A.post('/villes', (req, res) => {
+  if (!req.body.name) return res.status(400).json({ error: 'Nom requis.' });
+  try { const info = db.prepare('INSERT INTO villes(name) VALUES(?)').run(req.body.name.trim()); res.json({ id: info.lastInsertRowid }); }
+  catch { res.status(400).json({ error: 'Cette ville existe déjà.' }); }
+});
+A.put('/villes/:id', (req, res) => {
+  db.prepare('UPDATE villes SET name=COALESCE(?,name), active=COALESCE(?,active) WHERE id=?')
+    .run(req.body.name || null, req.body.active ?? null, req.params.id);
+  res.json({ ok: true });
+});
+A.delete('/villes/:id', (req, res) => { db.prepare('DELETE FROM villes WHERE id=?').run(req.params.id); res.json({ ok: true }); });
 A.post('/categories', (req, res) => {
   const info = db.prepare('INSERT INTO service_categories(name, icon, sort) VALUES(?,?,?)').run(req.body.name, req.body.icon || '🔹', req.body.sort || 99);
   res.json({ id: info.lastInsertRowid });
@@ -1001,12 +1614,22 @@ A.put('/categories/:id', (req, res) => {
 });
 A.post('/services', (req, res) => {
   if (!req.body.name || !req.body.category_id) return res.status(400).json({ error: 'Nom et catégorie requis.' });
-  const info = db.prepare('INSERT INTO services(category_id, name, keywords, sort) VALUES(?,?,?,?)').run(req.body.category_id, req.body.name, req.body.keywords || '', req.body.sort || 99);
+  const info = db.prepare('INSERT INTO services(category_id, sub_id, name, keywords, sort) VALUES(?,?,?,?,?)')
+    .run(req.body.category_id, req.body.sub_id || null, req.body.name, req.body.keywords || '', req.body.sort || 99);
   res.json({ id: info.lastInsertRowid });
 });
 A.put('/services/:id', (req, res) => {
-  db.prepare('UPDATE services SET name=COALESCE(?,name), keywords=COALESCE(?,keywords), active=COALESCE(?,active), sort=COALESCE(?,sort), category_id=COALESCE(?,category_id) WHERE id=?')
-    .run(req.body.name || null, req.body.keywords ?? null, req.body.active ?? null, req.body.sort ?? null, req.body.category_id || null, req.params.id);
+  db.prepare(`UPDATE services SET name=COALESCE(?,name), keywords=COALESCE(?,keywords), active=COALESCE(?,active), sort=COALESCE(?,sort),
+    category_id=COALESCE(?,category_id), sub_id=COALESCE(?,sub_id), popular=COALESCE(?,popular), seasonal=COALESCE(?,seasonal), cities=COALESCE(?,cities) WHERE id=?`)
+    .run(req.body.name || null, req.body.keywords ?? null, req.body.active ?? null, req.body.sort ?? null,
+      req.body.category_id || null, req.body.sub_id || null, req.body.popular ?? null, req.body.seasonal ?? null,
+      req.body.cities !== undefined ? JSON.stringify(req.body.cities) : null, req.params.id);
+  res.json({ ok: true });
+});
+A.delete('/services/:id', (req, res) => {
+  const n = db.prepare('SELECT COUNT(*) n FROM missions WHERE service_id=?').get(req.params.id).n;
+  if (n) return res.status(400).json({ error: `Impossible de supprimer : ${n} mission(s) utilisent ce service. Désactivez-le plutôt.` });
+  db.prepare('DELETE FROM services WHERE id=?').run(req.params.id);
   res.json({ ok: true });
 });
 A.post('/questions', (req, res) => {
@@ -1060,16 +1683,20 @@ A.get('/payments', (req, res) => {
 // PARAMÈTRES
 A.get('/settings', (req, res) => {
   const keys = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
-    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro'];
+    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size'];
   const out = {};
   keys.forEach(k => out[k] = getSetting(k));
   res.json(out);
 });
 A.put('/settings', (req, res) => {
   const allowed = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
-    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro'];
+    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size'];
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!allowed.includes(k)) continue;
+    if (k === 'admin_font_size') { // taille du tableau de bord : réservée au PDG
+      if (req.user.role !== 'pdg') return res.status(403).json({ error: 'La taille du tableau de bord est définie par le PDG uniquement.' });
+      const f = parseInt(v, 10); if (isNaN(f) || f < 14 || f > 26) return res.status(400).json({ error: 'Taille invalide (14 à 26).' });
+    }
     if (k === 'commission_rate') { const r = parseFloat(v); if (isNaN(r) || r < 0 || r > 100) return res.status(400).json({ error: 'Taux de commission invalide (0 à 100).' }); }
     if (k === 'dispatch_wait_seconds') { const s = parseInt(v, 10); if (isNaN(s) || s < 15 || s > 3600) return res.status(400).json({ error: 'Délai d\u2019attente invalide (15 à 3600 secondes).' }); }
     setSetting(k, v);

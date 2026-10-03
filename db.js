@@ -63,6 +63,29 @@ CREATE TABLE IF NOT EXISTS services (
   active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0
 );
 
+-- Niveau 2 : sous-catégories (entre MÉTIER et SERVICE)
+CREATE TABLE IF NOT EXISTS sous_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  metier_id INTEGER NOT NULL REFERENCES service_categories(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0
+);
+
+-- Niveau 4 : tâches / prestations proposées pour un service
+CREATE TABLE IF NOT EXISTS taches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0
+);
+
+-- Villes et localités de Côte d'Ivoire (gérées depuis le tableau de bord)
+CREATE TABLE IF NOT EXISTS villes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS service_questions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
@@ -448,5 +471,245 @@ function seed() {
   console.log('Base de données initialisée (admin : téléphone "admin" / mot de passe "Klean@2026")');
 }
 seed();
+
+// ============================================================
+// MIGRATIONS DOUCES (s'appliquent aussi aux bases déjà en production,
+// sans jamais toucher aux données existantes)
+// ============================================================
+function ensureColumn(table, column, def) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+}
+function migrate() {
+  ensureColumn('services', 'sub_id', 'INTEGER');                   // lien vers sous_categories
+  ensureColumn('services', 'popular', 'INTEGER NOT NULL DEFAULT 0'); // mis en avant sur l'accueil
+  ensureColumn('services', 'seasonal', 'INTEGER NOT NULL DEFAULT 0');// service saisonnier
+  ensureColumn('services', 'cities', "TEXT NOT NULL DEFAULT '[]'");  // villes où le service est proposé ([]=partout)
+  ensureColumn('missions', 'tache', 'TEXT');                        // tâche précise choisie par le client
+  ensureColumn('users', 'ville', 'TEXT');
+  ensureColumn('users', 'quartier', 'TEXT');
+  // --- Hiérarchie & gestion des comptes (v2 étape 2) ---
+  ensureColumn('users', 'email', 'TEXT');
+  ensureColumn('users', 'kp_code', 'TEXT');                          // code professionnel unique (KP######)
+  ensureColumn('users', 'blocked', 'INTEGER NOT NULL DEFAULT 0');    // blocage total (connexion refusée)
+  ensureColumn('users', 'disabled_until', 'TEXT');                   // désactivation temporaire jusqu'à cette date
+  ensureColumn('users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0'); // changement de mot de passe obligatoire
+  ensureColumn('users', 'perms', 'TEXT');                            // permissions JSON (équipe) — NULL = valeurs par défaut du rôle
+  ensureColumn('users', 'profile_incomplete', 'INTEGER NOT NULL DEFAULT 0');   // compte créé rapidement par un admin
+  ensureColumn('users', 'created_by', 'INTEGER');                    // admin qui a créé le compte (création rapide)
+  ensureColumn('users', 'font_size', 'INTEGER');                     // taille de texte choisie (14–26 px)
+
+  db.exec(`CREATE TABLE IF NOT EXISTS reset_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    used INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_reset_user ON reset_codes(user_id, used);`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS admin_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_id INTEGER NOT NULL,
+    admin_name TEXT NOT NULL,
+    admin_role TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id INTEGER,
+    target_name TEXT,
+    details TEXT,
+    reason TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_log_target ON admin_log(target_type, target_id);
+  CREATE INDEX IF NOT EXISTS idx_log_date ON admin_log(created_at);`);
+
+  // Migration hiérarchie : le plus ancien compte administrateur devient PDG (une seule fois)
+  if (!getSetting('hierarchie_v1')) {
+    const first = db.prepare("SELECT id FROM users WHERE role IN ('admin','pdg') ORDER BY id LIMIT 1").get();
+    if (first) db.prepare("UPDATE users SET role='pdg' WHERE id=?").run(first.id);
+    setSetting('hierarchie_v1', '1');
+  }
+
+  // Codes professionnels KP : attribués aux pros validés qui n'en ont pas encore
+  const sansCode = db.prepare("SELECT id FROM users WHERE pro_status='approved' AND (kp_code IS NULL OR kp_code='')").all();
+  for (const u of sansCode) {
+    let code;
+    do { code = 'KP' + String(Math.floor(100000 + Math.random() * 900000)); }
+    while (db.prepare('SELECT 1 FROM users WHERE kp_code=?').get(code));
+    db.prepare('UPDATE users SET kp_code=? WHERE id=?').run(code, u.id);
+  }
+}
+migrate();
+
+// ============================================================
+// FUSION DE LA GRANDE BASE DES MÉTIERS DE CÔTE D'IVOIRE
+// (ne crée que ce qui n'existe pas déjà ; tout reste modifiable
+//  ensuite depuis le tableau de bord — jamais de doublon)
+// ============================================================
+function normName(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function seedTaxonomie() {
+  if (getSetting('taxonomie_v1')) return;
+  const { METIERS, VILLES } = require('./seed-metiers');
+
+  // Correspondance entre les anciennes catégories et les nouveaux métiers (fusion, pas de doublon)
+  const ALIAS = {
+    'nettoyage': 'Nettoyage & entretien',
+    'menuiserie': 'Menuiserie bois',
+    'reparation': 'Électroménager',
+    'transport': 'Transport & livraison',
+    'cours a domicile': 'Cours & formation',
+  };
+
+  const catByNorm = {};
+  db.prepare('SELECT * FROM service_categories').all().forEach(c => { catByNorm[normName(c.name)] = c; });
+  // Applique les alias : renomme les anciennes catégories vers les nouveaux noms de métiers
+  for (const [oldNorm, newName] of Object.entries(ALIAS)) {
+    const c = catByNorm[oldNorm];
+    if (c && !catByNorm[normName(newName)]) {
+      db.prepare('UPDATE service_categories SET name=? WHERE id=?').run(newName, c.id);
+      delete catByNorm[oldNorm];
+      c.name = newName; catByNorm[normName(newName)] = c;
+    }
+  }
+
+  const insCat = db.prepare('INSERT INTO service_categories(name, icon, sort) VALUES(?,?,?)');
+  const insSub = db.prepare('INSERT INTO sous_categories(metier_id, name, sort) VALUES(?,?,?)');
+  const insSvc = db.prepare('INSERT INTO services(category_id, sub_id, name, keywords, sort) VALUES(?,?,?,?,?)');
+  const insTac = db.prepare('INSERT INTO taches(service_id, name, sort) VALUES(?,?,?)');
+
+  // Fusion des anciens services de production vers la nouvelle structure
+  // (même identifiant conservé → missions, questions et profils pros intacts)
+  const SERVICE_MOVES = {
+    'nettoyage de fauteuil':            { metier: 'Nettoyage & entretien', sous: 'Maison', rename: 'Nettoyage de fauteuils et canapés' },
+    'nettoyage de maison':              { metier: 'Nettoyage & entretien', sous: 'Maison', rename: 'Ménage à domicile' },
+    'nettoyage de bureau':              { metier: 'Nettoyage & entretien', sous: 'Bureaux & commerces', rename: 'Nettoyage de bureaux' },
+    'nettoyage de tapis moquette':      { metier: 'Nettoyage & entretien', sous: 'Maison' },
+    'electricite depannage':            { metier: 'Électricité', sous: 'Dépannage', rename: 'Dépannage électrique' },
+    'menuiserie aluminium vitrerie':    { metier: 'Menuiserie aluminium & vitrerie', sous: 'Aluminium' },
+    'reparation tv electronique':       { metier: 'Téléphones & électronique', sous: 'Réparation' },
+    'reparation telephone ordinateur':  { metier: 'Téléphones & électronique', sous: 'Réparation' },
+    'reparation electromenager':        { metier: 'Électroménager', sous: 'Réparation', rename: 'Réparation d\u2019électroménager' },
+    'cours a domicile':                 { metier: 'Cours & formation', sous: 'Cours à domicile', rename: 'Soutien scolaire' },
+    'transport livraison':              { metier: 'Transport & livraison', sous: 'Transport' },
+    'demenagement':                     { metier: 'Transport & livraison', sous: 'Déménagement' },
+  };
+
+  const tx = db.transaction(() => {
+    let catSort = db.prepare('SELECT COALESCE(MAX(sort),0) m FROM service_categories').get().m;
+
+    // --- Pré-passage : déplacement/renommage des anciens services ---
+    const findOrCreateCat = (name, icon) => {
+      let c = catByNorm[normName(name)];
+      if (!c) { const id = insCat.run(name, icon || '🔹', ++catSort).lastInsertRowid; c = { id, name }; catByNorm[normName(name)] = c; }
+      return c;
+    };
+    const findOrCreateSub = (catId, name) => {
+      let s = db.prepare('SELECT * FROM sous_categories WHERE metier_id=? AND name=?').get(catId, name);
+      if (!s) s = { id: insSub.run(catId, name, 50).lastInsertRowid };
+      return s;
+    };
+    db.prepare('SELECT * FROM services').all().forEach(sv => {
+      const mv = SERVICE_MOVES[normName(sv.name)];
+      if (!mv) return;
+      const cat = findOrCreateCat(mv.metier, null);
+      const sub = findOrCreateSub(cat.id, mv.sous);
+      db.prepare('UPDATE services SET name=?, category_id=?, sub_id=? WHERE id=?')
+        .run(mv.rename || sv.name, cat.id, sub.id, sv.id);
+    });
+    METIERS.forEach(M => {
+      let cat = catByNorm[normName(M.m)];
+      if (!cat) {
+        const id = insCat.run(M.m, M.i, ++catSort).lastInsertRowid;
+        cat = { id, name: M.m };
+        catByNorm[normName(M.m)] = cat;
+      } else if (M.i) {
+        db.prepare('UPDATE service_categories SET icon=COALESCE(icon,?) WHERE id=?').run(M.i, cat.id);
+      }
+      const subByNorm = {};
+      db.prepare('SELECT * FROM sous_categories WHERE metier_id=?').all(cat.id).forEach(s => { subByNorm[normName(s.name)] = s; });
+      const svcByNorm = {};
+      db.prepare('SELECT * FROM services WHERE category_id=?').all(cat.id).forEach(s => { svcByNorm[normName(s.name)] = s; });
+
+      M.sc.forEach((SC, scIdx) => {
+        let sub = subByNorm[normName(SC.n)];
+        if (!sub) { sub = { id: insSub.run(cat.id, SC.n, scIdx).lastInsertRowid }; subByNorm[normName(SC.n)] = sub; }
+        SC.sv.forEach((SV, svIdx) => {
+          let svc = svcByNorm[normName(SV.n)];
+          if (!svc) {
+            svc = { id: insSvc.run(cat.id, sub.id, SV.n, SV.k || '', svIdx).lastInsertRowid };
+            svcByNorm[normName(SV.n)] = svc;
+          } else {
+            // service existant : on le rattache à sa sous-catégorie et on enrichit ses mots-clés
+            db.prepare('UPDATE services SET sub_id=COALESCE(sub_id,?), keywords=CASE WHEN keywords=\'\' THEN ? ELSE keywords END WHERE id=?')
+              .run(sub.id, SV.k || '', svc.id);
+          }
+          const nbT = db.prepare('SELECT COUNT(*) n FROM taches WHERE service_id=?').get(svc.id).n;
+          if (!nbT && SV.t) SV.t.forEach((t, ti) => insTac.run(svc.id, t, ti));
+        });
+      });
+      // Les anciens services du métier sans sous-catégorie → sous-catégorie "Général"
+      const orphelins = db.prepare('SELECT id FROM services WHERE category_id=? AND sub_id IS NULL').all(cat.id);
+      if (orphelins.length) {
+        let gen = subByNorm[normName('Général')];
+        if (!gen) { gen = { id: insSub.run(cat.id, 'Général', 99).lastInsertRowid }; subByNorm[normName('Général')] = gen; }
+        orphelins.forEach(o => db.prepare('UPDATE services SET sub_id=? WHERE id=?').run(gen.id, o.id));
+      }
+    });
+
+    // Toute catégorie restante (hors METIERS, ex. "Canal placement") : sous-catégorie "Général" pour ses services
+    db.prepare('SELECT DISTINCT category_id FROM services WHERE sub_id IS NULL').all().forEach(r => {
+      const gen = db.prepare('SELECT id FROM sous_categories WHERE metier_id=? AND name=?').get(r.category_id, 'Général');
+      const gid = gen ? gen.id : insSub.run(r.category_id, 'Général', 99).lastInsertRowid;
+      db.prepare('UPDATE services SET sub_id=? WHERE category_id=? AND sub_id IS NULL').run(gid, r.category_id);
+    });
+
+    // Villes de Côte d'Ivoire
+    const insVille = db.prepare('INSERT OR IGNORE INTO villes(name, sort) VALUES(?,?)');
+    VILLES.forEach((v, i) => insVille.run(v, i));
+
+    // Quelques services populaires par défaut (modifiable dans le tableau de bord)
+    ['Ménage à domicile', 'Nettoyage de fauteuils et canapés', 'Réparation de fuite', 'Dépannage électrique',
+     'Installation de climatiseur', 'Coiffure femme', 'Soutien scolaire', 'Livraison express']
+      .forEach(n => db.prepare('UPDATE services SET popular=1 WHERE name=?').run(n));
+
+  });
+  tx();
+  setSetting('taxonomie_v1', '1');
+  const st = {
+    metiers: db.prepare('SELECT COUNT(*) n FROM service_categories').get().n,
+    sous: db.prepare('SELECT COUNT(*) n FROM sous_categories').get().n,
+    services: db.prepare('SELECT COUNT(*) n FROM services').get().n,
+    taches: db.prepare('SELECT COUNT(*) n FROM taches').get().n,
+    villes: db.prepare('SELECT COUNT(*) n FROM villes').get().n
+  };
+  console.log(`📚 Catalogue des métiers installé : ${st.metiers} métiers, ${st.sous} sous-catégories, ${st.services} services, ${st.taches} tâches, ${st.villes} villes.`);
+}
+seedTaxonomie();
+
+// Tâches pour les services hérités de l'ancienne base (conservés avec leur id d'origine).
+// Idempotent : ne touche qu'aux services listés qui n'ont encore AUCUNE tâche.
+(function seedLegacyTaches() {
+  const LEGACY_TACHES = {
+    'Nettoyage de tapis & moquette': ['Nettoyage de tapis', 'Nettoyage de moquette', 'Détachage en profondeur', 'Désodorisation'],
+    'Plomberie — dépannage': ['Réparation de fuite d\u2019eau', 'Débouchage de canalisation', 'Réparation WC / chasse d\u2019eau', 'Remplacement de robinet', 'Autre dépannage plomberie'],
+    'Menuiserie bois': ['Fabrication de meuble', 'Réparation de meuble', 'Pose de porte en bois', 'Pose d\u2019étagères', 'Ponçage et vernissage'],
+    'Menuiserie aluminium & vitrerie': ['Fabrication de fenêtre alu', 'Pose de porte alu', 'Remplacement de vitre', 'Pose de miroir', 'Moustiquaires'],
+    'Réparation téléphone & ordinateur': ['Remplacement d\u2019écran', 'Remplacement de batterie', 'Problème de charge', 'Dépannage logiciel', 'Récupération de données'],
+    'Transport & livraison': ['Livraison de colis', 'Transport de personnes', 'Transport de marchandises', 'Course express'],
+    'Canal placement — personnel': ['Ménagère / femme de ménage', 'Nounou / garde d\u2019enfants', 'Gardien', 'Cuisinier(ère)', 'Chauffeur', 'Autre personnel'],
+  };
+  const insTac = db.prepare('INSERT INTO taches(service_id, name, sort) VALUES(?,?,?)');
+  Object.entries(LEGACY_TACHES).forEach(([n, ts]) => {
+    const svc = db.prepare('SELECT id FROM services WHERE name=?').get(n);
+    if (svc && !db.prepare('SELECT COUNT(*) n FROM taches WHERE service_id=?').get(svc.id).n)
+      ts.forEach((t, ti) => insTac.run(svc.id, t, ti));
+  });
+})();
 
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
