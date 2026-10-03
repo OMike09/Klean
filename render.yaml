@@ -5,7 +5,7 @@ services:
     runtime: node
     plan: free
     buildCommand: "npm install"
-    startCommand: "node server.js"
+    startCommand: "node start.js"
     healthCheckPath: /api/health
     envVars:
       # → OBLIGATOIRE pour garder les comptes en cas de redémarrage :
