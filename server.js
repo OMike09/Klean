@@ -5,7 +5,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const multer = (()=>{ try{return require('multer')}catch(e){return null}})();
+const multer = require('multer');
 const { db, hashPassword, getSetting, setSetting, DB_PATH } = require('./db');
 const persist = require('./persist'); // sauvegarde PostgreSQL (activée si DATABASE_URL est définie)
 
@@ -38,7 +38,7 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + '-' + crypto.randomBytes(6).toString('hex') + ext);
   }
 });
-const upload = multer ? multer({ storage: (multer.memoryStorage ? multer.memoryStorage() : storage), limits: { fileSize: 15 * 1024 * 1024 } }) : null;
+const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } });
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
 // Si un fichier manque en local (après redéploiement), on le restaure depuis PostgreSQL
 app.use('/uploads/:name', async (req, res, next) => {
@@ -165,17 +165,19 @@ app.post('/api/auth/login', (req, res) => {
   const { phone, password } = req.body || {};
   const p = (phone || '').trim().replace(/\s+/g, '');
   const user = db.prepare('SELECT * FROM users WHERE phone=?').get(p);
-  let ok = user && user.password_hash === hashPassword(password || '', user.salt);
-  if (!ok && user && user.pw_legacy) {
-    // Migration (app Klean v1) : ancien format sha256(salt + '::' + mot de passe)
-    ok = user.password_hash === crypto.createHash('sha256').update(user.salt + '::' + (password || '')).digest('hex');
+  let ok = !!user && user.password_hash === hashPassword(password || '', user.salt);
+  // Compte importé de l'ancienne application : on accepte aussi l'ANCIEN mot de passe
+  if (!ok && user) {
+    const legacy = db.prepare('SELECT sha256 FROM legacy_passwords WHERE user_id=?').get(user.id);
+    if (legacy && crypto.createHash('sha256').update(password || '').digest('hex') === legacy.sha256) {
+      ok = true; // on migre vers le nouveau chiffrement, puis on supprime l'ancien
+      const salt = crypto.randomBytes(16).toString('hex');
+      db.prepare('UPDATE users SET password_hash=?, salt=? WHERE id=?').run(hashPassword(password, salt), salt, user.id);
+      db.prepare('DELETE FROM legacy_passwords WHERE user_id=?').run(user.id);
+    }
   }
-  if (!user || !ok) return res.status(401).json({ error: 'Téléphone ou mot de passe incorrect.' });
-  if (user.pw_legacy) {
-    // 1er login réussi : conversion automatique vers le format moderne (scrypt)
-    const ns = crypto.randomBytes(16).toString('hex');
-    db.prepare('UPDATE users SET password_hash=?, salt=?, pw_legacy=0 WHERE id=?').run(hashPassword(password || '', ns), ns, user.id);
-  }
+  if (!ok)
+    return res.status(401).json({ error: 'Téléphone ou mot de passe incorrect.' });
   if (user.suspended) return res.status(403).json({ error: 'Votre compte est suspendu. Contactez Klean-Services CI.' });
   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(user) });
 });
@@ -1159,137 +1161,6 @@ A.get('/files', (req, res) => {
   res.json({ files: files.slice(0, 300), total: files.length, total_size: files.reduce((s, f) => s + f.size, 0), retention_days: parseInt(getSetting('file_retention_days', '90'), 10) });
 });
 A.post('/files/cleanup', (req, res) => res.json({ deleted: cleanupFiles() }));
-
-
-// ---------- JUSTIFICATIFS PROFESSIONNELS API ----------
-
-// Public: liste des types par service (pour inscription pro)
-app.get('/api/justificatifs/types', (req,res)=>{
-  const sid = parseInt(req.query.service_id||'0');
-  const dbm = require('./db');
-  if(sid) res.json(dbm.getJustificatifTypesByService(sid));
-  else res.json(dbm.getJustificatifTypes());
-});
-app.get('/api/justificatifs/verification-enabled', (req,res)=>{
-  const dbm=require('./db');
-  res.json({ enabled: dbm.getVerificationEnabled() });
-});
-
-// Pro: upload justificatif (auth requise)
-app.post('/api/justificatifs/upload', (req,res,next)=>{
-  if(!upload) return res.status(500).json({error:'Upload non disponible'});
-  upload.single('file')(req,res,err=>{
-    if(err) return res.status(400).json({error:err.message});
-    next();
-  });
-}, (req,res)=>{
-  const user = getUserFromToken(req);
-  if(!user) return res.status(401).json({error:'Non connecté'});
-  const { service_id, justificatif_type_id } = req.body;
-  if(!req.file) return res.status(400).json({error:'Fichier manquant'});
-  const dbm=require('./db');
-  const ext = (req.file.originalname||'').split('.').pop().toLowerCase();
-  if(!['jpg','jpeg','png','webp','pdf'].includes(ext)) return res.status(400).json({error:'Format non supporté (jpg/png/pdf)'});
-  const sid = parseInt(service_id||'0');
-  const tid = parseInt(justificatif_type_id||'0');
-  // verification active ?
-  if(dbm.getVerificationEnabled() && !tid && !sid) return res.status(400).json({error:'Service requis'});
-  dbm.db.prepare(`INSERT INTO pro_justificatifs(user_id, service_id, justificatif_type_id, file_name, mime, status) VALUES(?,?,?,?,?, 'pending')`)
-    .run(user.id, sid||null, tid||null, req.file.originalname, req.file.mimetype);
-  // aussi stocker le binaire dans ks_files si persist disponible (optionnel)
-  try{
-    const persist=require('./persist');
-    if(persist.enabled()) persist.saveFile('justif_'+Date.now()+'_'+req.file.originalname, req.file.buffer);
-  }catch(e){}
-  res.json({ok:true});
-});
-
-// Admin: config verification
-function needAdmin(req,res,next){
-  const u=getUserFromToken(req);
-  if(!u || u.role!=='admin') return res.status(403).json({error:'Admin requis'});
-  req.admin=u; next();
-}
-app.get('/api/admin/justificatifs/config', needAdmin, (req,res)=>{
-  const dbm=require('./db');
-  res.json({ enabled: dbm.getVerificationEnabled(), types: dbm.getJustificatifTypes() });
-});
-app.post('/api/admin/justificatifs/config', needAdmin, express.json(), (req,res)=>{
-  const dbm=require('./db');
-  const { enabled, types } = req.body||{};
-  if(typeof enabled==='boolean') dbm.setVerificationEnabled(enabled);
-  if(Array.isArray(types)){
-    // Remplace les types (simple) : supprime et recree
-    dbm.db.exec("DELETE FROM justificatif_types");
-    const ins=dbm.db.prepare("INSERT INTO justificatif_types(service_id, category_id, label, required, active) VALUES(?,?,?,?,1)");
-    for(const t of types){
-      ins.run(t.service_id||null, t.category_id||null, (t.label||'').trim().slice(0,120), t.required?1:0);
-    }
-  }
-  res.json({ok:true, enabled: dbm.getVerificationEnabled(), types: dbm.getJustificatifTypes()});
-});
-app.get('/api/admin/justificatifs/pending', needAdmin, (req,res)=>{
-  const rows=require('./db').db.prepare(`
-    SELECT p.*, u.name, u.phone, s.name as service_name
-    FROM pro_justificatifs p
-    JOIN users u ON u.id=p.user_id
-    LEFT JOIN services s ON s.id=p.service_id
-    WHERE p.status='pending' ORDER BY p.created_at DESC
-  `).all();
-  res.json(rows);
-});
-app.post('/api/admin/justificatifs/:id/verify', needAdmin, express.json(), (req,res)=>{
-  const id=parseInt(req.params.id);
-  const { action, reason } = req.body||{};
-  const dbm=require('./db');
-  const row=dbm.db.prepare("SELECT * FROM pro_justificatifs WHERE id=?").get(id);
-  if(!row) return res.status(404).json({error:'Introuvable'});
-  let status='pending';
-  if(action==='accept') status='verified';
-  else if(action==='reject') status='rejected';
-  else if(action==='replace') status='replace';
-  else return res.status(400).json({error:'Action invalide'});
-  dbm.db.prepare("UPDATE pro_justificatifs SET status=?, reason=?, verified_at=CASE WHEN ?='verified' THEN datetime('now') ELSE verified_at END WHERE id=?")
-    .run(status, reason||null, status, id);
-  // Si verified, on peut auto-valider le pro pour ce service
-  if(status==='verified'){
-    // Marquer le service comme verifie dans pro_justificatifs, le front lira ce statut
-  }
-  res.json({ok:true, status});
-});
-app.get('/api/admin/justificatifs/all', needAdmin, (req,res)=>{
-  const rows=require('./db').db.prepare(`
-    SELECT p.*, u.name, u.phone FROM pro_justificatifs p JOIN users u ON u.id=p.user_id ORDER BY p.created_at DESC LIMIT 200
-  `).all();
-  res.json(rows);
-});
-
-// 12 ROUTES MÉTIERS À AJOUTER DANS server.js (avant app.use('/api/admin'))
-// Copier-coller ce bloc
-
-// Helpers
-function isAdmin(req){ const u=getUserFromToken(req); return u && u.role==='admin'; }
-
-// Métiers
-app.get('/api/metiers', (req,res)=>{ const rows=require('./db').db.prepare("SELECT * FROM metiers WHERE active=1 ORDER BY sort, name").all(); res.json(rows); });
-app.get('/api/admin/metiers', (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); res.json(require('./db').db.prepare("SELECT * FROM metiers ORDER BY sort").all()); });
-app.post('/api/admin/metiers', express.json(), (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); const {name,icon,description,sort}=req.body; const r=require('./db').db.prepare("INSERT INTO metiers(name,icon,description,sort) VALUES(?,?,?,?)").run(name.trim(),icon||'',description||'',sort||0); res.json({id:r.lastInsertRowid}); });
-app.put('/api/admin/metiers/:id', express.json(), (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); const {name,icon,description,active,sort}=req.body; require('./db').db.prepare("UPDATE metiers SET name=?,icon=?,description=?,active=?,sort=? WHERE id=?").run(name,icon,description,active?1:0,sort,req.params.id); res.json({ok:true}); });
-app.delete('/api/admin/metiers/:id', (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); require('./db').db.prepare("DELETE FROM metiers WHERE id=?").run(req.params.id); res.json({ok:true}); });
-
-// Sous-catégories
-app.get('/api/admin/sous-categories', (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); const mid=req.query.metier_id; let q="SELECT * FROM sous_categories"; if(mid) q+=" WHERE metier_id="+parseInt(mid); q+=" ORDER BY sort"; res.json(require('./db').db.prepare(q).all()); });
-app.post('/api/admin/sous-categories', express.json(), (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); const {metier_id,name,sort}=req.body; const r=require('./db').db.prepare("INSERT INTO sous_categories(metier_id,name,sort) VALUES(?,?,?)").run(metier_id,name.trim(),sort||0); res.json({id:r.lastInsertRowid}); });
-app.put('/api/admin/sous-categories/:id', express.json(), (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); const {name,active,sort}=req.body; require('./db').db.prepare("UPDATE sous_categories SET name=?,active=?,sort=? WHERE id=?").run(name,active?1:0,sort,req.params.id); res.json({ok:true}); });
-
-// Services2
-app.get('/api/admin/services2', (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); res.json(require('./db').db.prepare("SELECT * FROM services2 ORDER BY sort").all()); });
-app.post('/api/admin/services2', express.json(), (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); const {sous_categorie_id,metier_id,name,description,populaire,saisonnier,villes,sort}=req.body; const r=require('./db').db.prepare("INSERT INTO services2(sous_categorie_id,metier_id,name,description,populaire,saisonnier,villes,sort) VALUES(?,?,?,?,?,?,?,?)").run(sous_categorie_id||null,metier_id||null,name.trim(),description||'',populaire?1:0,saisonnier||'',JSON.stringify(villes||[]),sort||0); res.json({id:r.lastInsertRowid}); });
-
-// Tâches
-app.get('/api/admin/taches', (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); const sid=req.query.service_id; let q="SELECT * FROM taches"; if(sid) q+=" WHERE service_id="+parseInt(sid); res.json(require('./db').db.prepare(q).all()); });
-app.post('/api/admin/taches', express.json(), (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); const {service_id,name,description,sort}=req.body; const r=require('./db').db.prepare("INSERT INTO taches(service_id,name,description,sort) VALUES(?,?,?,?)").run(service_id,name.trim(),description||'',sort||0); res.json({id:r.lastInsertRowid}); });
-app.put('/api/admin/taches/:id', express.json(), (req,res)=>{ if(!isAdmin(req)) return res.status(403).json({error:'Admin'}); const {name,description,active,sort}=req.body; require('./db').db.prepare("UPDATE taches SET name=?,description=?,active=?,sort=? WHERE id=?").run(name,description,active?1:0,sort,req.params.id); res.json({ok:true}); });
 
 app.use('/api/admin', A);
 

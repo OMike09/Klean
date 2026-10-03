@@ -51,78 +51,6 @@ CREATE TABLE IF NOT EXISTS pro_profiles (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- JUSTIFICATIFS PROFESSIONNELS (par métier)
-CREATE TABLE IF NOT EXISTS justificatif_types (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  service_id INTEGER,
-  category_id INTEGER,
-  label TEXT NOT NULL,
-  required INTEGER NOT NULL DEFAULT 1,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS pro_justificatifs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  service_id INTEGER,
-  justificatif_type_id INTEGER REFERENCES justificatif_types(id) ON DELETE SET NULL,
-  file_name TEXT,
-  mime TEXT,
-  status TEXT NOT NULL DEFAULT 'pending', -- pending | verified | rejected | replace
-  reason TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  verified_at TEXT
-);
-
--- Parametre global verification
-INSERT OR IGNORE INTO settings(key, value) VALUES('verification_enabled', '0');
--- 1. Métiers
-CREATE TABLE IF NOT EXISTS metiers (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,
-  icon TEXT, description TEXT,
-  active INTEGER DEFAULT 1,
-  sort INTEGER DEFAULT 0,
-  created_at TEXT DEFAULT (datetime('now'))
-);
--- 2. Sous-catégories
-CREATE TABLE IF NOT EXISTS sous_categories (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  metier_id INTEGER NOT NULL REFERENCES metiers(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  active INTEGER DEFAULT 1,
-  sort INTEGER DEFAULT 0,
-  UNIQUE(metier_id, name)
-);
--- 3. Services (lié à sous-catégorie)
-CREATE TABLE IF NOT EXISTS services2 (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  sous_categorie_id INTEGER REFERENCES sous_categories(id) ON DELETE CASCADE,
-  metier_id INTEGER REFERENCES metiers(id),
-  name TEXT NOT NULL,
-  description TEXT,
-  populaire INTEGER DEFAULT 0,
-  saisonnier TEXT, -- ex: "pluie", "fête"
-  villes TEXT DEFAULT '[]', -- JSON []
-  active INTEGER DEFAULT 1,
-  sort INTEGER DEFAULT 0
-);
--- 4. Tâches / Prestations
-CREATE TABLE IF NOT EXISTS taches (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  service_id INTEGER NOT NULL REFERENCES services2(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  active INTEGER DEFAULT 1,
-  sort INTEGER DEFAULT 0
-);
--- Index recherche
-CREATE INDEX IF NOT EXISTS idx_metiers_name ON metiers(name);
-CREATE INDEX IF NOT EXISTS idx_sous_cat_name ON sous_categories(name);
-
-
-
 CREATE TABLE IF NOT EXISTS service_categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL, icon TEXT, active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0
@@ -190,6 +118,11 @@ CREATE TABLE IF NOT EXISTS messages (
   content TEXT, file TEXT,
   read INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS legacy_passwords (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  sha256 TEXT NOT NULL                        -- ancien mot de passe (ancienne application)
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
@@ -516,11 +449,4 @@ function seed() {
 }
 seed();
 
-
-// ---------- JUSTIFICATIFS HELPERS ----------
-function getVerificationEnabled(){ const r=db.prepare("SELECT value FROM settings WHERE key='verification_enabled'").get(); return r && r.value==='1'; }
-function setVerificationEnabled(v){ db.prepare("INSERT INTO settings(key,value) VALUES('verification_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(v?'1':'0'); }
-function getJustificatifTypes(){ return db.prepare("SELECT * FROM justificatif_types WHERE active=1 ORDER BY service_id, id").all(); }
-function getJustificatifTypesByService(sid){ return db.prepare("SELECT * FROM justificatif_types WHERE service_id=? AND active=1").all(sid); }
-
-module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH, getVerificationEnabled, setVerificationEnabled, getJustificatifTypes, getJustificatifTypesByService };
+module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

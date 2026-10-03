@@ -68,4 +68,6 @@ async function deleteFilesOlderThan(days) {
   return r.rowCount;
 }
 
-module.exports = { init, enabled, restoreDb, backupDb, saveFile, loadFile, deleteFilesOlderThan };
+async function query(sql, params) { return pool.query(sql, params); }
+
+module.exports = { init, enabled, restoreDb, backupDb, saveFile, loadFile, deleteFilesOlderThan, query };

@@ -26,9 +26,8 @@ const persist = require('./persist');
   } catch (e) {
     console.error('⚠️  PostgreSQL inaccessible (' + e.message + ') — démarrage sans sauvegarde.');
   }
+  // Récupération (une seule fois) des comptes de l'ANCIENNE application (table klean_state)
+  try { await require('./import-ancien').run(persist); }
+  catch (e) { console.error('Import ancien impossible :', e.message); }
   require('./server');
-  // Migration une fois des données de l'app Klean v1 (comptes, pros, missions)
-  try { require('./migration/justificatifs_init'); } catch(e){}
-  try { require('./migration/seed-metiers'); } catch(e){}
-  try { require('./migration/run-legacy-migration'); } catch (e) { console.error('⚠️  Migration legacy :', e.message); }
 })();
