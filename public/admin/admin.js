@@ -164,11 +164,21 @@ views.users = async () => {
 /* ---------- Validations professionnelles ---------- */
 views.pros = async () => {
   const list = await api('/admin/pros/pending');
+  let cond = null;
+  try { cond = await api('/admin/settings'); } catch { } // visible seulement avec la permission « paramètres »
   shell(`<h1>✅ Validations professionnelles</h1>
+  ${cond ? `<div class="panel">
+    <b>⚙️ Conditions de validation</b>
+    <div class="small muted" style="margin:4px 0 8px">Exiger un document justificatif pour pouvoir envoyer une demande professionnelle. Modifiable à tout moment.</div>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><input type="checkbox" ${cond.pro_doc_particulier === '1' ? 'checked' : ''} onchange="A.proCond('pro_doc_particulier', this.checked)"> 👤 Document obligatoire pour les comptes <b>Particulier</b></label>
+    <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${cond.pro_doc_entreprise === '1' ? 'checked' : ''} onchange="A.proCond('pro_doc_entreprise', this.checked)"> 🏢 Document obligatoire pour les comptes <b>Entreprise</b> (registre, pièce du responsable…)</label>
+  </div>` : ''}
   ${list.length ? list.map(p => `<div class="panel">
     <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div>
-        <b style="font-size:16px">${esc(p.name)}</b> — ${esc(p.profession)}<br>
+        <b style="font-size:16px">${esc(p.name)}</b> — ${esc(p.profession)}
+        <span class="pill ${p.pro_type === 'entreprise' ? 'warn' : 'ok'}" style="margin-left:6px">${p.pro_type === 'entreprise' ? '🏢 Entreprise' : '👤 Particulier'}</span><br>
+        ${p.pro_type === 'entreprise' ? `<span class="small"><b>Entreprise :</b> ${esc(p.company_name || '—')} • <b>RCCM :</b> ${esc(p.company_rccm || '—')} • <b>Équipe :</b> ${esc(p.company_size || '—')}</span><br>` : ''}
         <span class="small muted">📞 ${esc(p.phone)} • 📍 ${esc(p.address || '—')} • Demande du ${fmtD(p.created_at)}</span><br>
         <span class="small"><b>Zone :</b> ${esc(p.zone)} • <b>Expérience :</b> ${esc(p.experience || '—')}</span><br>
         <span class="small"><b>Description :</b> ${esc(p.description || '—')}</span><br>
@@ -301,6 +311,7 @@ views.catalog = async () => {
   const nTaches = {}; d.taches.forEach(t => nTaches[t.service_id] = (nTaches[t.service_id] || 0) + 1);
   const svcRow = (s, path) => `<tr>
     <td><b>${esc(s.name)}</b>${path ? `<div class="small muted">${esc(path)}</div>` : ''}
+      <div class="small" style="color:#111;font-weight:700">${s.price_show && s.price_from ? esc(s.price_prefix || 'Dès') + ' ' + Number(s.price_from).toLocaleString('fr-FR') + ' FCFA' : '<span class="muted" style="font-weight:400">prix masqué</span>'}</div>
       <div class="small muted">${s.popular ? '⭐ populaire ' : ''}${s.seasonal ? '📅 saisonnier ' : ''}${s.cities.length ? '📍 ' + s.cities.map(esc).join(', ') : ''}</div></td>
     <td class="small muted" style="max-width:220px">${esc(s.keywords)}</td>
     <td><button class="btn sm sec" onclick="A.taches(${s.id})">📝 Tâches (${nTaches[s.id] || 0})</button></td>
@@ -397,7 +408,7 @@ views._populaires = async () => {
     <table><tr><th style="width:52px">Ordre</th><th>Service</th><th>Catégorie</th><th>État</th><th>Actions</th></tr>
     ${pops.map((s, i) => { const c = catOf(s); return `<tr>
       <td><b>${i + 1}</b></td>
-      <td><b>${esc(s.name)}</b></td>
+      <td><b>${esc(s.name)}</b><div class="small" style="color:#111;font-weight:700">${s.price_show && s.price_from ? esc(s.price_prefix || 'Dès') + ' ' + Number(s.price_from).toLocaleString('fr-FR') + ' FCFA' : ''}</div></td>
       <td>${esc((c.icon || '') + ' ' + (c.name || ''))}</td>
       <td>${s.active ? '<span class="pill ok">Actif</span>' : '<span class="pill off">Inactif</span>'}</td>
       <td style="white-space:nowrap">
@@ -729,7 +740,8 @@ const A = {
         📍 ${esc(u.ville ? u.ville + (u.quartier ? ' / ' + u.quartier : '') : '')} ${esc(u.address || '')}<br>
         Inscrit le ${fmtD(u.created_at)} • ${u.missions} mission(s)<br>
         Règles acceptées : ${u.rules_accepted_at ? fmtD(u.rules_accepted_at) : 'Non'} • Règles pro : ${u.pro_rules_accepted_at ? fmtD(u.pro_rules_accepted_at) : '—'}</p>
-        ${u.pro ? `<p class="small"><b>Profil pro :</b> ${esc(u.pro.profession)} — ${esc(u.pro.zone)} • Disponible : ${u.pro.available ? 'Oui 🟢' : 'Non ⚪'}<br>
+        ${u.pro ? `<p class="small"><b>Profil pro :</b> ${u.pro.pro_type === 'entreprise' ? '🏢 Entreprise' : '👤 Particulier'} • ${esc(u.pro.profession)} — ${esc(u.pro.zone)} • Disponible : ${u.pro.available ? 'Oui 🟢' : 'Non ⚪'}<br>
+        ${u.pro.pro_type === 'entreprise' ? `Entreprise : <b>${esc(u.pro.company_name || '—')}</b> • RCCM : ${esc(u.pro.company_rccm || '—')} • Équipe : ${esc(u.pro.company_size || '—')}<br>` : ''}
         Documents : ${u.pro.documents.length ? u.pro.documents.map(d => `<a href="${esc(d)}" target="_blank">📄</a>`).join(' ') : 'Aucun'}</p>` : ''}
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
           <button class="btn sm sec" onclick="A.userEdit(${u.id})">✏️ Modifier</button>
@@ -834,6 +846,10 @@ const A = {
     try { await api(`/admin/users/${id}/suspend`, { method: 'POST', body: { suspended: v, reason } }); toast(v ? 'Compte suspendu.' : 'Compte réactivé.', 'ok'); A.userDetail(id); render(); } catch (e) { toast(e.message, 'err'); }
   },
   async verify(id, v) { try { await api(`/admin/users/${id}/verify`, { method: 'POST', body: { verified: v } }); toast('Mis à jour ✓', 'ok'); A.userDetail(id); render(); } catch (e) { toast(e.message, 'err'); } },
+  async proCond(key, on) {
+    try { await api('/admin/settings', { method: 'PUT', body: { [key]: on ? '1' : '0' } }); toast('Condition mise à jour ✓', 'ok'); }
+    catch (e) { toast(e.message, 'err'); render(); }
+  },
   async approvePro(id) { try { await api(`/admin/pros/${id}/approve`, { method: 'POST' }); toast('Professionnel validé ✅ Il a été notifié.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   rejectPro(id) {
     openModal(`<h3>Refuser la demande</h3>
@@ -899,6 +915,15 @@ const A = {
       <div class="frow">
         <div style="flex:1"><label>Catégorie</label><select id="es-cat" style="width:100%">${CATD.categories.map(c => `<option value="${c.id}" ${c.id === s.category_id ? 'selected' : ''}>${esc(c.icon || '')} ${esc(c.name)}</option>`).join('')}</select></div>
       </div>
+      <div class="frow" style="align-items:flex-end">
+        <div><label>💰 Prix de départ indicatif (FCFA)</label><input type="number" id="es-prix" min="0" step="500" style="width:130px" value="${s.price_from ?? ''}" placeholder="Ex : 10000"></div>
+        <div><label>Texte affiché</label><select id="es-prix-pre">
+          <option value="Dès" ${(s.price_prefix || 'Dès') === 'Dès' ? 'selected' : ''}>Dès</option>
+          <option value="À partir de" ${s.price_prefix === 'À partir de' ? 'selected' : ''}>À partir de</option>
+        </select></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;margin:0 0 8px"><input type="checkbox" id="es-prix-show" ${s.price_show === 0 ? '' : 'checked'}> Afficher le prix aux clients</label>
+      </div>
+      <div class="small muted" style="margin-bottom:10px">Prix de départ indicatif, jamais définitif : le montant final de la prestation dépend de la demande du client et de la proposition du professionnel.</div>
       <div class="frow">
         <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;margin:0"><input type="checkbox" id="es-pop" ${s.popular ? 'checked' : ''}> ⭐ Populaire (affiché sur l'accueil)</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;margin:0"><input type="checkbox" id="es-sea" ${s.seasonal ? 'checked' : ''}> 📅 Saisonnier</label>
@@ -914,6 +939,9 @@ const A = {
       category_id: parseInt(document.getElementById('es-cat').value, 10),
       popular: document.getElementById('es-pop').checked ? 1 : 0,
       seasonal: document.getElementById('es-sea').checked ? 1 : 0,
+      price_from: parseInt(document.getElementById('es-prix').value, 10) || 0,
+      price_prefix: document.getElementById('es-prix-pre').value,
+      price_show: document.getElementById('es-prix-show').checked ? 1 : 0,
       cities: document.getElementById('es-cities').value.split(',').map(x => x.trim()).filter(Boolean)
     };
     if (!body.name) return toast('Indiquez le nom du service.', 'err');

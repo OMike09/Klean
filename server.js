@@ -435,7 +435,7 @@ function normalize(s) {
 }
 app.get('/api/services', (req, res) => {
   const cats = db.prepare('SELECT * FROM service_categories WHERE active=1 ORDER BY sort,id').all();
-  const svcs = db.prepare('SELECT id, category_id, sub_id, name, sort, popular, seasonal, cities FROM services WHERE active=1 ORDER BY sort,id').all()
+  const svcs = db.prepare('SELECT id, category_id, sub_id, name, sort, popular, seasonal, cities, price_from, price_prefix, price_show FROM services WHERE active=1 ORDER BY sort,id').all()
     .filter(s => villeOk(s, req.query.ville));
   res.json(cats.map(c => ({ ...c, services: svcs.filter(s => s.category_id === c.id) })).filter(c => c.services.length));
 });
@@ -454,6 +454,7 @@ app.get('/api/catalogue', (req, res) => {
     id: c.id, name: c.name, icon: c.icon,
     services: svcs.filter(s => s.category_id === c.id).map(s => ({
       id: s.id, name: s.name, popular: s.popular, seasonal: s.seasonal,
+      price_from: s.price_from, price_prefix: s.price_prefix, price_show: s.price_show,
       taches: tas.filter(t => t.service_id === s.id).map(t => ({ id: t.id, name: t.name }))
     }))
   })).filter(c => c.services.length));
@@ -461,7 +462,7 @@ app.get('/api/catalogue', (req, res) => {
 // Services populaires (accueil) — sélection de la même liste de services,
 // dans l'ordre choisi par l'administration (popular_sort)
 app.get('/api/services/populaires', (req, res) => {
-  const svcs = db.prepare(`SELECT s.id, s.name, s.cities, c.icon, c.name cat FROM services s
+  const svcs = db.prepare(`SELECT s.id, s.name, s.cities, s.price_from, s.price_prefix, s.price_show, c.icon, c.name cat FROM services s
     JOIN service_categories c ON c.id=s.category_id
     WHERE s.active=1 AND c.active=1 AND s.popular=1
     ORDER BY CASE WHEN s.popular_sort IS NULL THEN 1 ELSE 0 END, s.popular_sort, s.sort, s.id LIMIT 12`).all()
@@ -478,7 +479,7 @@ app.get('/api/services/:id/questions', (req, res) => {
   const questions = db.prepare('SELECT * FROM service_questions WHERE service_id=? AND active=1 ORDER BY sort,id').all(svc.id)
     .map(q => ({ ...q, options: JSON.parse(q.options) }));
   const taches = db.prepare('SELECT id, name FROM taches WHERE service_id=? AND active=1 ORDER BY sort,id').all(svc.id);
-  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat }, questions, taches });
+  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat, price_from: svc.price_from, price_prefix: svc.price_prefix, price_show: svc.price_show }, questions, taches });
 });
 const STOPWORDS = new Set(['je', 'cherche', 'un', 'une', 'des', 'le', 'la', 'les', 'de', 'du', 'mon', 'ma', 'mes', 'pour', 'a', 'au', 'en', 'et', 'faire', 'veux', 'voudrais', 'besoin', 'il', 'me', 'faut', 'quelqu', 'qui', 'peut', 'sait']);
 app.get('/api/search', (req, res) => {
@@ -502,7 +503,7 @@ app.get('/api/search', (req, res) => {
     // La tâche qui correspond le mieux à la recherche est proposée au client
     let tache = null;
     for (const t of tches) { if (words.some(w => normalize(t).includes(w))) { tache = t; break; } }
-    return { id: s.id, name: s.name, category: s.cat, icon: s.icon, sous_categorie: s.sous_cat, tache_suggeree: tache, score };
+    return { id: s.id, name: s.name, category: s.cat, icon: s.icon, price_from: s.price_from, price_prefix: s.price_prefix, price_show: s.price_show, tache_suggeree: tache, score };
   }).filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 10);
   res.json({ results: scored, query: req.query.q || '' });
 });
@@ -512,19 +513,30 @@ app.get('/api/search', (req, res) => {
 // ============================================================
 app.post('/api/pro/apply', auth, (req, res) => {
   const { profession, description, experience, zone, services, documents, accept_rules } = req.body || {};
+  const proType = req.body.pro_type === 'entreprise' ? 'entreprise' : 'particulier';
   if (req.user.pro_status === 'approved') return res.status(400).json({ error: 'Vous êtes déjà professionnel.' });
   if (req.user.pro_status === 'pending') return res.status(400).json({ error: 'Votre demande est déjà en cours de validation.' });
-  if (!profession || !profession.trim()) return res.status(400).json({ error: 'Indiquez votre profession.' });
+  if (!profession || !profession.trim()) return res.status(400).json({ error: proType === 'entreprise' ? 'Indiquez le domaine d\u2019activité de l\u2019entreprise.' : 'Indiquez votre profession.' });
   if (!Array.isArray(services) || !services.length) return res.status(400).json({ error: 'Sélectionnez au moins un service proposé.' });
   if (!zone || !zone.trim()) return res.status(400).json({ error: 'Indiquez votre zone d\u2019intervention.' });
   if (!accept_rules) return res.status(400).json({ error: 'Vous devez accepter les règles professionnelles.' });
-  db.prepare(`INSERT INTO pro_profiles(user_id, profession, description, experience, zone, services, documents)
-              VALUES(?,?,?,?,?,?,?)
+  const companyName = (req.body.company_name || '').trim();
+  if (proType === 'entreprise' && !companyName) return res.status(400).json({ error: 'Indiquez le nom de votre entreprise.' });
+  // Condition de validation activable depuis le tableau de bord : justificatif requis selon le type de compte
+  if (getSetting('pro_doc_' + proType) === '1' && !(Array.isArray(documents) && documents.length))
+    return res.status(400).json({ error: proType === 'entreprise'
+      ? 'Un document justificatif est requis pour un compte Entreprise (registre de commerce, pièce du responsable…).'
+      : 'Un document justificatif est requis (CNI, attestation…).' });
+  db.prepare(`INSERT INTO pro_profiles(user_id, profession, description, experience, zone, services, documents, pro_type, company_name, company_rccm, company_size)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(user_id) DO UPDATE SET profession=excluded.profession, description=excluded.description,
-                experience=excluded.experience, zone=excluded.zone, services=excluded.services, documents=excluded.documents, rejected_reason=NULL`)
-    .run(req.user.id, profession.trim(), description || '', experience || '', zone.trim(), JSON.stringify(services), JSON.stringify(documents || []));
+                experience=excluded.experience, zone=excluded.zone, services=excluded.services, documents=excluded.documents,
+                pro_type=excluded.pro_type, company_name=excluded.company_name, company_rccm=excluded.company_rccm,
+                company_size=excluded.company_size, rejected_reason=NULL`)
+    .run(req.user.id, profession.trim(), description || '', experience || '', zone.trim(), JSON.stringify(services), JSON.stringify(documents || []),
+      proType, companyName || null, (req.body.company_rccm || '').trim() || null, (req.body.company_size || '').trim() || null);
   db.prepare(`UPDATE users SET pro_status='pending', pro_rules_accepted_at=datetime('now') WHERE id=?`).run(req.user.id);
-  notifyAdmins('compte', 'Nouvelle demande professionnelle', `${req.user.name} souhaite devenir professionnel (${profession}).`, 'admin:pros');
+  notifyAdmins('compte', 'Nouvelle demande professionnelle', `${req.user.name} souhaite devenir professionnel (${proType === 'entreprise' ? '🏢 Entreprise « ' + companyName + ' » — ' : '👤 Particulier — '}${profession}).`, 'admin:pros');
   notify(req.user.id, 'compte', 'Demande envoyée ✅', 'Votre demande professionnelle est en cours de validation par l\u2019administration.', '#/pro');
   res.json({ ok: true, pro_status: 'pending' });
 });
@@ -537,12 +549,14 @@ app.put('/api/pro/availability', auth, (req, res) => {
 
 app.put('/api/pro/profile', auth, (req, res) => {
   if (!db.prepare('SELECT 1 FROM pro_profiles WHERE user_id=?').get(req.user.id)) return res.status(404).json({ error: 'Profil professionnel introuvable.' });
-  const { profession, description, experience, zone, services, documents } = req.body || {};
+  const { profession, description, experience, zone, services, documents, company_name, company_rccm, company_size } = req.body || {};
   db.prepare(`UPDATE pro_profiles SET profession=COALESCE(?,profession), description=COALESCE(?,description),
               experience=COALESCE(?,experience), zone=COALESCE(?,zone),
-              services=COALESCE(?,services), documents=COALESCE(?,documents) WHERE user_id=?`)
+              services=COALESCE(?,services), documents=COALESCE(?,documents),
+              company_name=COALESCE(?,company_name), company_rccm=COALESCE(?,company_rccm), company_size=COALESCE(?,company_size) WHERE user_id=?`)
     .run(profession || null, description ?? null, experience ?? null, zone || null,
-         services ? JSON.stringify(services) : null, documents ? JSON.stringify(documents) : null, req.user.id);
+         services ? JSON.stringify(services) : null, documents ? JSON.stringify(documents) : null,
+         company_name ?? null, company_rccm ?? null, company_size ?? null, req.user.id);
   res.json(me(db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id)));
 });
 
@@ -1612,16 +1626,19 @@ A.put('/categories/:id', (req, res) => {
 });
 A.post('/services', (req, res) => {
   if (!req.body.name || !req.body.category_id) return res.status(400).json({ error: 'Nom et catégorie requis.' });
-  const info = db.prepare('INSERT INTO services(category_id, sub_id, name, keywords, sort) VALUES(?,?,?,?,?)')
-    .run(req.body.category_id, req.body.sub_id || null, req.body.name, req.body.keywords || '', req.body.sort || 99);
+  const info = db.prepare('INSERT INTO services(category_id, sub_id, name, keywords, sort, price_from, price_prefix, price_show) VALUES(?,?,?,?,?,?,?,?)')
+    .run(req.body.category_id, req.body.sub_id || null, req.body.name, req.body.keywords || '', req.body.sort || 99,
+      req.body.price_from ?? null, req.body.price_prefix || 'Dès', req.body.price_show ?? 1);
   res.json({ id: info.lastInsertRowid });
 });
 A.put('/services/:id', (req, res) => {
   db.prepare(`UPDATE services SET name=COALESCE(?,name), keywords=COALESCE(?,keywords), active=COALESCE(?,active), sort=COALESCE(?,sort),
-    category_id=COALESCE(?,category_id), sub_id=COALESCE(?,sub_id), popular=COALESCE(?,popular), seasonal=COALESCE(?,seasonal), cities=COALESCE(?,cities) WHERE id=?`)
+    category_id=COALESCE(?,category_id), sub_id=COALESCE(?,sub_id), popular=COALESCE(?,popular), seasonal=COALESCE(?,seasonal), cities=COALESCE(?,cities),
+    price_from=COALESCE(?,price_from), price_prefix=COALESCE(?,price_prefix), price_show=COALESCE(?,price_show) WHERE id=?`)
     .run(req.body.name || null, req.body.keywords ?? null, req.body.active ?? null, req.body.sort ?? null,
       req.body.category_id || null, req.body.sub_id || null, req.body.popular ?? null, req.body.seasonal ?? null,
-      req.body.cities !== undefined ? JSON.stringify(req.body.cities) : null, req.params.id);
+      req.body.cities !== undefined ? JSON.stringify(req.body.cities) : null,
+      req.body.price_from ?? null, req.body.price_prefix || null, req.body.price_show ?? null, req.params.id);
   // Cohérence de l'ordre des populaires : ajout → en fin de liste ; retrait → ordre effacé
   if (req.body.popular === 1) {
     const s = db.prepare('SELECT popular_sort FROM services WHERE id=?').get(req.params.id);
@@ -1702,14 +1719,16 @@ A.get('/payments', (req, res) => {
 // PARAMÈTRES
 A.get('/settings', (req, res) => {
   const keys = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
-    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size'];
+    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
+    'pro_doc_particulier', 'pro_doc_entreprise'];
   const out = {};
   keys.forEach(k => out[k] = getSetting(k));
   res.json(out);
 });
 A.put('/settings', (req, res) => {
   const allowed = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
-    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size'];
+    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
+    'pro_doc_particulier', 'pro_doc_entreprise'];
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!allowed.includes(k)) continue;
     if (k === 'admin_font_size') { // taille du tableau de bord : réservée au PDG

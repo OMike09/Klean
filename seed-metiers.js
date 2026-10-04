@@ -279,4 +279,79 @@ const VILLES = [
 'Abobo','Adjamé','Attécoubé','Cocody','Koumassi','Marcory','Plateau','Port-Bouët','Treichville','Yopougon'
 ];
 
-module.exports = { METIERS, VILLES };
+// Localités supplémentaires (sous-préfectures et bourgs — liste évolutive,
+// complétable depuis le tableau de bord)
+const VILLES_PLUS = [
+'Adaou','Affery','Agou','Assouindé','Assuéfry','Attiégouakro','Bédiala','Bianouan','Bodokro','Bonon',
+'Boniérédougou','Botro','Céchi','Diabo','Diawala','Dikodougou','Djébonoua','Ettrokro','Facobly','Fronan',
+'Gbon','Gonaté','Goulia','Grand-Béréby','Guiembé','Hiré','Kaniasso','Kasséré','Kolia','Kongasso',
+'Kononfla','Kossou','Kouibly','Kounahiri','Krindjabo','Languibonou','Logoualé','Maféré','M\u2019Bengué','Napié',
+'N\u2019Douci','Niellé','Noé','Pacobo','Rubino','Samatiguila','Sangouiné','Satama-Sokoro','Satama-Sokoura','Sémien',
+'Sifié','Singrobo','Sipilou','Sirasso','Taabo','Tabagne','Tiémélékro','Tienko','Worofla','Yakassé-Attobrou',
+'Zagné','Zaranou','Zikisso'
+];
+
+// ============================================================
+// PRIX INDICATIFS DE DÉPART (FCFA) — établis à partir de tarifs réellement
+// pratiqués en Côte d'Ivoire (plateformes et prestataires ivoiriens, 2025-2026 :
+// dépannage plomberie 10 000-25 000, entretien climatiseur 10 000-25 000,
+// ménage ponctuel dès 3 000/h, tresses dès 10 000, etc.).
+// Ce sont des PRIX DE DÉPART INDICATIFS, jamais des prix définitifs.
+// Entièrement modifiables service par service dans le tableau de bord.
+// Clé = nom du service (sera normalisé) ; valeur = prix de départ en FCFA.
+const PRIX_SERVICES = {
+  // Nettoyage & entretien
+  'Ménage à domicile': 5000, 'Nettoyage de fauteuils et canapés': 15000, 'Nettoyage de matelas': 10000,
+  'Repassage': 3000, 'Lessive / blanchisserie': 3000, 'Nettoyage de bureaux': 25000,
+  'Nettoyage de commerces': 25000, 'Nettoyage de fin de chantier': 40000, 'Nettoyage de vitres': 10000,
+  'Désinfection & désinsectisation': 20000, 'Vidange de fosse septique': 35000, 'Entretien de piscine': 25000,
+  'Nettoyage de tapis & moquette': 10000,
+  // Plomberie
+  'Installation sanitaire': 25000, 'Installation de tuyauterie': 25000, 'Réparation de fuite': 10000,
+  'Débouchage': 15000, 'Dépannage chauffe-eau': 15000, 'Plomberie — dépannage': 10000,
+  // Électricité
+  'Installation électrique': 25000, 'Compteur & branchement': 15000, 'Dépannage électrique': 10000,
+  'Installation solaire': 50000, 'Électricité — dépannage': 10000,
+  // Climatisation & froid
+  'Installation de climatiseur': 20000, 'Entretien & recharge': 10000, 'Dépannage climatiseur': 15000,
+  'Réparation réfrigérateur & congélateur': 15000,
+  // Bâtiment
+  'Construction': 100000, 'Rénovation': 75000, 'Crépissage & enduits': 50000, 'Chape & bétonnage': 50000,
+  'Peinture intérieure': 35000, 'Peinture extérieure': 50000, 'Décoration d\u2019intérieur': 30000,
+  'Fabrication de meubles': 35000, 'Réparation de meubles': 10000, 'Portes & fenêtres bois': 25000,
+  'Charpente & coffrage': 50000, 'Fenêtres & baies alu': 35000, 'Portes & façades alu': 40000,
+  'Vitrerie': 15000, 'Portails & grilles': 50000, 'Soudure diverse': 10000,
+  'Pose de carrelage': 40000, 'Autres revêtements': 25000, 'Faux plafonds & staff': 40000,
+  'Menuiserie bois': 20000, 'Menuiserie aluminium & vitrerie': 25000,
+  'Plans & conception': 75000, 'Suivi de chantier': 50000, 'Topographie & géomètre': 50000,
+  // Dépannages & technique
+  'Réparation d\u2019électroménager': 10000, 'Réparation d\u2019ordinateur': 10000,
+  'Maintenance pour entreprises': 50000, 'Réparation TV & électronique': 10000,
+  'Réparation téléphone & ordinateur': 5000, 'Réparation de téléphone': 5000,
+  // Transport & livraison
+  'Livraison express': 1500, 'Transport & livraison': 2000, 'Déménagement': 50000,
+  // Beauté
+  'Coiffure femme': 5000, 'Coiffure homme': 1500, 'Tresses & braids': 10000,
+  'Maquillage': 10000, 'Manucure & pédicure': 5000, 'Soins esthétiques': 10000,
+  // Cours & services
+  'Soutien scolaire': 15000, 'Cours à domicile': 15000, 'Cours d\u2019anglais à domicile': 15000,
+  'Canal placement — personnel': 40000,
+};
+// Prix de départ par défaut d'une catégorie (si le service n'est pas listé ci-dessus)
+const PRIX_CATEGORIES = {
+  'Nettoyage & entretien': 5000, 'Plomberie': 10000, 'Électricité': 10000, 'Climatisation & froid': 10000,
+  'Maçonnerie & construction': 50000, 'Peinture & décoration': 30000, 'Menuiserie bois': 20000,
+  'Menuiserie aluminium & vitrerie': 25000, 'Métallerie & soudure': 15000, 'Carrelage & revêtements': 30000,
+  'Plâtrerie & faux plafonds': 35000, 'Architecture & études': 50000, 'Électroménager': 10000,
+  'Informatique': 10000, 'Téléphones & électronique': 5000, 'Réseaux & internet': 15000,
+  'Mécanique automobile': 15000, 'Moto & engins 2 roues': 5000, 'Lavage auto & moto': 2000,
+  'Transport & livraison': 2000, 'Jardinage & espaces verts': 10000, 'Agriculture & élevage': 15000,
+  'Couture & mode': 5000, 'Coiffure & beauté': 5000, 'Photo & vidéo': 25000, 'Événementiel': 50000,
+  'Cuisine & traiteur': 25000, 'Cours & formation': 10000, 'Rédaction & traduction': 10000,
+  'Administratif & comptabilité': 15000, 'Marketing & communication': 25000, 'Sécurité & gardiennage': 50000,
+  'Aide à la personne': 40000, 'Animaux': 5000, 'Services funéraires': 50000, 'Commerce & vente': 10000,
+  'Artisanat & réparations diverses': 5000, 'Services aux entreprises': 50000,
+};
+const PRIX_DEFAUT = 5000;
+
+module.exports = { METIERS, VILLES: VILLES.concat(VILLES_PLUS), PRIX_SERVICES, PRIX_CATEGORIES, PRIX_DEFAUT };

@@ -792,4 +792,46 @@ ensureColumn('services', 'popular_sort', 'INTEGER');
   setSetting('services_v3', '1');
 })();
 
+// ============================================================
+// PRIX INDICATIFS DE DÉPART (v1) + COMPLÉMENT DE VILLES (v2)
+// ============================================================
+ensureColumn('services', 'price_from', 'INTEGER');                      // prix de départ indicatif (FCFA)
+ensureColumn('services', 'price_prefix', "TEXT NOT NULL DEFAULT 'Dès'"); // « Dès » / « À partir de »
+ensureColumn('services', 'price_show', 'INTEGER NOT NULL DEFAULT 1');    // affichage activable/désactivable
+(function seedPrixIndicatifs() {
+  if (getSetting('prix_v1')) return;
+  const { PRIX_SERVICES, PRIX_CATEGORIES, PRIX_DEFAUT } = require('./seed-metiers');
+  const bySvc = {}; Object.entries(PRIX_SERVICES).forEach(([n, p]) => bySvc[normName(n)] = p);
+  const byCat = {}; Object.entries(PRIX_CATEGORIES).forEach(([n, p]) => byCat[normName(n)] = p);
+  const tx = db.transaction(() => {
+    db.prepare(`SELECT s.id, s.name, c.name cat FROM services s JOIN service_categories c ON c.id=s.category_id
+                WHERE s.price_from IS NULL`).all().forEach(s => {
+      const prix = bySvc[normName(s.name)] ?? byCat[normName(s.cat)] ?? PRIX_DEFAUT;
+      db.prepare('UPDATE services SET price_from=? WHERE id=?').run(prix, s.id);
+    });
+  });
+  tx();
+  setSetting('prix_v1', '1');
+  console.log('💰 Prix indicatifs de départ installés (modifiables dans le tableau de bord).');
+})();
+(function seedVillesV2() {
+  if (getSetting('villes_v2')) return;
+  const { VILLES } = require('./seed-metiers');
+  const ins = db.prepare('INSERT OR IGNORE INTO villes(name, sort) VALUES(?,?)');
+  const tx = db.transaction(() => VILLES.forEach((v, i) => ins.run(v, i)));
+  tx();
+  setSetting('villes_v2', '1');
+})();
+
+// ============================================================
+// COMPTE PROFESSIONNEL : PARTICULIER OU ENTREPRISE (É2)
+// ============================================================
+ensureColumn('pro_profiles', 'pro_type', "TEXT NOT NULL DEFAULT 'particulier'"); // particulier | entreprise
+ensureColumn('pro_profiles', 'company_name', 'TEXT');   // nom de l'entreprise
+ensureColumn('pro_profiles', 'company_rccm', 'TEXT');   // registre (RCCM) ou équivalent
+ensureColumn('pro_profiles', 'company_size', 'TEXT');   // taille de l'équipe
+// Conditions de validation activables/désactivables par l'administration
+if (getSetting('pro_doc_particulier') === null) setSetting('pro_doc_particulier', '0');
+if (getSetting('pro_doc_entreprise') === null) setSetting('pro_doc_entreprise', '1');
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

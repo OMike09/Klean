@@ -233,8 +233,7 @@ routes.register = async () => {
       <div class="field"><label>Numéro de téléphone <span class="req">*</span></label><input type="tel" id="f-phone" placeholder="Ex : 07 00 00 00 00"></div>
       ${pwField('f-pass', 'Mot de passe <span class="req">*</span> <span class="muted small">(6 caractères min.)</span>')}
       <div class="field"><label>Ville <span class="req">*</span></label>
-        <input type="text" id="f-ville" list="villes-ci" placeholder="Tapez pour chercher votre ville…" autocomplete="off">
-        <datalist id="villes-ci">${villes.map(v => `<option value="${esc(v)}">`).join('')}</datalist>
+        <input type="text" id="f-ville" placeholder="👆 Choisir ma ville" readonly style="cursor:pointer;background:#fff" onclick="A.villePick('f-ville')">
       </div>
       <div class="field"><label>Quartier</label><input type="text" id="f-quartier" placeholder="Ex : Air France, Cocody Angré…"></div>
       <div class="sec-title">Règles d'utilisation</div>
@@ -277,6 +276,13 @@ routes.register = async () => {
   };
 };
 
+/* Prix indicatif de départ d'un service (toujours modifiable dans le tableau
+   de bord ; jamais un prix définitif). Affiché en noir sous le service. */
+function prixHtml(s, small) {
+  if (!s || !s.price_show || !s.price_from) return '';
+  return `<div class="svc-prix" style="color:#111;font-weight:700;font-size:${small ? '12px' : '13px'};margin-top:2px">${esc(s.price_prefix || 'Dès')} ${Number(s.price_from).toLocaleString('fr-FR')} FCFA</div>`;
+}
+
 /* Choix des services d'un professionnel : mêmes catégories et services que
    partout ailleurs. Un professionnel peut sélectionner plusieurs catégories. */
 function proServiceChips(selectedIds) {
@@ -294,23 +300,37 @@ routes.home = async () => {
   try { ADS = await api('/ads'); } catch { }
   const homeAds = ADS.filter(a => a.placement === 'accueil');
   const cats = SERVICES;
+  const topZone = [];
+  if (MAINT.active && MAINT.scope !== 'F') topZone.push(`<div style="border-left:3px solid #e67e22;background:#fff8f0">
+      <div class="bold small">🛠️ Maintenance partielle</div>
+      <div class="small muted" style="white-space:normal">${esc(MAINT.message || 'Certaines fonctions sont temporairement suspendues.')}</div></div>`);
+  homeAds.forEach(a => topZone.push(`<div>
+      <div class="ad-tag">${a.title && /urgen/i.test(a.title) ? '🚨 URGENT' : 'ℹ️ INFORMATION'}</div>
+      <div class="bold small">${esc(a.title || '')}</div><div class="small muted" style="white-space:normal">${esc(a.content || '')}</div>
+      ${a.file && a.type === 'image' ? `<img src="${esc(a.file)}" alt="" style="max-height:52px;border-radius:6px;margin-top:4px">` : ''}
+      ${a.file && a.type === 'video' ? `<video src="${esc(a.file)}" controls muted style="max-height:60px;border-radius:6px;margin-top:4px"></video>` : ''}</div>`));
+  if (GAMES.quiz) topZone.push(`<div onclick="nav('#/quiz')" style="cursor:pointer;text-align:center">
+      <div class="ad-tag">🎮 JEU</div><div class="bold small">🧠 Quiz — jouez maintenant !</div></div>`);
+  if (GAMES.flipfizz) topZone.push(`<div onclick="nav('#/flip')" style="cursor:pointer;text-align:center">
+      <div class="ad-tag">🎮 JEU</div><div class="bold small">🎲 Flip Fizz</div></div>`);
+  if (GAMES.kdo) topZone.push(`<div onclick="nav('#/kdo')" style="cursor:pointer;text-align:center">
+      <div class="ad-tag">🎮 JEU</div><div class="bold small">🎁 Kdo</div></div>`);
   $app.innerHTML = `
   ${header('', { brand: true, back: false })}
-  <div class="content">
-    ${MAINT.active && MAINT.scope !== 'F' ? `<div class="card" style="border-left:4px solid #e67e22;background:#fff8f0">
-      <div class="bold">🛠️ Maintenance partielle en cours</div>
-      <div class="small muted">${esc(MAINT.message || 'Certaines fonctions sont temporairement suspendues. Merci de votre patience.')}</div>
-    </div>` : ''}
-    <div class="searchbar">
-      <input type="text" id="home-q" placeholder="🔎 Que recherchez-vous ?" enterkeyhint="search">
-      <button onclick="A.goSearch()" aria-label="Rechercher">🔍</button>
+  <div class="content" style="padding-top:0">
+    <div id="home-fixe" style="position:sticky;top:57px;z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
+      ${topZone.length ? `<div style="display:flex;gap:8px;overflow-x:auto;padding:0 2px 6px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">
+        ${topZone.map(c => `<div style="flex:0 0 ${topZone.length > 1 ? '84%' : '100%'};scroll-snap-align:start;background:#fff;border:1px solid #e8e8ef;border-radius:12px;padding:8px 10px;max-height:118px;overflow:hidden">${c}</div>`).join('')}
+      </div>` : ''}
+      <div class="searchbar" style="margin:0 2px">
+        <input type="text" id="home-q" placeholder="🔎 Que recherchez-vous ?" enterkeyhint="search">
+        <button onclick="A.goSearch()" aria-label="Rechercher">🔍</button>
+      </div>
     </div>
     <div class="hint">Ex : « Je cherche un plombier », « Nettoyer mon fauteuil », « Cours d'anglais à domicile »…</div>
-    ${homeAds.map(a => `<div class="ad-card"><div class="ad-tag">INFORMATION</div><div class="bold">${esc(a.title || '')}</div><div class="small">${esc(a.content || '')}</div>
-      ${a.file && a.type === 'image' ? `<img src="${esc(a.file)}" alt="">` : ''}${a.file && a.type === 'video' ? `<video src="${esc(a.file)}" controls muted></video>` : ''}</div>`).join('')}
     ${POPULAIRES.length ? `<div class="sec-title">Services populaires</div>
     <div class="svc-grid">
-      ${POPULAIRES.map(s => `<div class="svc-card" onclick="nav('#/request/${s.id}')"><span class="ic">${esc(s.icon || '🔹')}</span><span class="nm">${esc(s.name)}</span></div>`).join('')}
+      ${POPULAIRES.map(s => `<div class="svc-card" onclick="nav('#/request/${s.id}')"><span class="ic">${esc(s.icon || '🔹')}</span><span class="nm">${esc(s.name)}</span>${prixHtml(s, true)}</div>`).join('')}
     </div>` : ''}
     <div class="sec-title">Tous les services</div>
     <div class="svc-grid">
@@ -318,13 +338,6 @@ routes.home = async () => {
       <div class="svc-card" onclick="nav('#/services')"><span class="ic">📋</span><span class="nm">Voir tout</span></div>
     </div>
     <button class="btn sec mt" onclick="nav('#/services')">Voir tous les services</button>
-    ${(GAMES.quiz || GAMES.flipfizz || GAMES.kdo) ? `
-      <div class="sec-title">Divertissement</div>
-      <div class="svc-grid">
-        ${GAMES.quiz ? `<div class="svc-card" onclick="nav('#/quiz')"><span class="ic">🧠</span><span class="nm">Quiz</span></div>` : ''}
-        ${GAMES.flipfizz ? `<div class="svc-card" onclick="nav('#/flip')"><span class="ic">🎲</span><span class="nm">Flip Fizz</span></div>` : ''}
-        ${GAMES.kdo ? `<div class="svc-card" onclick="nav('#/kdo')"><span class="ic">🎁</span><span class="nm">Kdo</span></div>` : ''}
-      </div>` : ''}
   </div>${bottomNav('home')}`;
   updateBadges();
   const q = document.getElementById('home-q');
@@ -353,31 +366,45 @@ routes.search = async (params) => {
 routes.services = async (params) => {
   try { if (!CATALOGUE) CATALOGUE = await api('/catalogue'); }
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('search'); return; }
-  const openId = parseInt(params || sessionStorage.getItem('ks_cat_open') || 0, 10);
+  const catId = parseInt(params || 0, 10);
   const q = (sessionStorage.getItem('ks_cat_q') || '').toLowerCase().trim();
   const hit = x => (x || '').toLowerCase().includes(q);
 
+  // --- Niveau 2 : UNE catégorie → ses services (avec bouton Retour) ---
+  if (catId) {
+    const c = CATALOGUE.find(x => x.id === catId);
+    if (!c) { nav('#/services'); return; }
+    $app.innerHTML = `
+    ${header(((c.icon || '') + ' ' + c.name).trim())}
+    <div class="content">
+      <div class="hint">Choisissez le service dont vous avez besoin — vous préciserez votre demande à l'étape suivante.</div>
+      ${c.services.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')">
+        <span class="mi-ic">${esc(c.icon || '🔹')}</span><div><div>${esc(s.name)}</div>
+        ${prixHtml(s)}
+        ${s.taches.length ? `<div class="muted small">${s.taches.slice(0, 3).map(t => esc(t.name)).join(' · ')}${s.taches.length > 3 ? '…' : ''}</div>` : ''}</div>
+        <span class="mi-arr">›</span></div>`).join('') || emptyState('📋', 'Aucun service dans cette catégorie pour le moment.')}
+    </div>${bottomNav('search')}`;
+    updateBadges();
+    return;
+  }
+
+  // --- Niveau 1 : liste des catégories (ou résultats du filtre) ---
   let listHtml;
   if (q) {
-    // Recherche : liste à plat des services correspondants (nom, catégorie, tâches)
     const out = [];
     CATALOGUE.forEach(c => c.services.forEach(s => {
       if (hit(s.name) || hit(c.name) || s.taches.some(t => hit(t.name)))
         out.push({ ...s, icon: c.icon, path: c.name });
     }));
     listHtml = out.length
-      ? out.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')"><span class="mi-ic">${esc(s.icon || '🔹')}</span><div><div>${esc(s.name)}</div><div class="muted small">${esc(s.path)}</div></div><span class="mi-arr">›</span></div>`).join('')
+      ? out.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')"><span class="mi-ic">${esc(s.icon || '🔹')}</span><div><div>${esc(s.name)}</div>${prixHtml(s)}<div class="muted small">${esc(s.path)}</div></div><span class="mi-arr">›</span></div>`).join('')
       : emptyState('🔍', 'Aucun service trouvé pour « ' + esc(q) + ' ».');
   } else {
-    // Accordéon : une catégorie → ses services
     listHtml = CATALOGUE.map(c => `
-      <div class="menu-item" onclick="A.catOpen(${c.id})" style="font-weight:700">
-        <span class="mi-ic">${esc(c.icon || '🔹')}</span>${esc(c.name)}
-        <span class="mi-arr">${openId === c.id ? '▾' : '›'}</span></div>
-      ${openId === c.id ? c.services.map(s => `<div class="menu-item" style="margin-left:10px" onclick="nav('#/request/${s.id}')">
-          <span class="mi-ic">${esc(c.icon || '🔹')}</span><div><div>${esc(s.name)}</div>
-          ${s.taches.length ? `<div class="muted small">${s.taches.slice(0, 3).map(t => esc(t.name)).join(' · ')}${s.taches.length > 3 ? '…' : ''}</div>` : ''}</div>
-          <span class="mi-arr">›</span></div>`).join('') : ''}`).join('');
+      <div class="menu-item" onclick="nav('#/services/${c.id}')">
+        <span class="mi-ic">${esc(c.icon || '🔹')}</span><div><div style="font-weight:700">${esc(c.name)}</div>
+        <div class="muted small">${c.services.length} service${c.services.length > 1 ? 's' : ''}</div></div>
+        <span class="mi-arr">›</span></div>`).join('');
   }
 
   $app.innerHTML = `
@@ -411,6 +438,10 @@ routes.request = async (serviceId) => {
   ${header(data.service.name)}
   <div class="content">
     <div class="card">
+      ${data.service.price_show && data.service.price_from ? `<div style="margin-bottom:8px">
+        <span style="color:#111;font-weight:800;font-size:15px">${esc(data.service.price_prefix || 'Dès')} ${Number(data.service.price_from).toLocaleString('fr-FR')} FCFA</span>
+        <div class="muted small">Prix de départ indicatif — le montant final dépend de votre demande (quantité, difficulté, déplacement…) et sera proposé par le professionnel.</div>
+      </div>` : ''}
       <div class="muted small mb">Répondez à ces quelques questions pour que le professionnel comprenne bien votre besoin.</div>
       ${taches.length ? `<div class="field"><label>Que faut-il faire ?</label>
         <div class="choices" id="r-tache">${taches.map(t => `<button type="button" class="chip ${sug && t.name === sug ? 'on' : ''}" onclick="A.pickChip(this,'${esc(t.name).replace(/'/g, "\\'")}')">${esc(t.name)}</button>`).join('')}
@@ -807,13 +838,46 @@ routes.pro = async () => {
   let rules = { pro: '' };
   try { rules = await api('/rules'); } catch { }
   const rejected = USER.pro_status === 'rejected';
+
+  // --- Étape 1 : choisir le type de compte professionnel ---
+  const proType = sessionStorage.getItem('ks_pro_type') || (USER.pro && USER.pro.pro_type) || '';
+  if (proType !== 'particulier' && proType !== 'entreprise') {
+    $app.innerHTML = `${header('Devenir professionnel')}
+    <div class="content">
+      ${rejected ? `<div class="status-banner bad">Votre précédente demande a été refusée${USER.pro && USER.pro.rejected_reason ? ' : ' + esc(USER.pro.rejected_reason) : ''}. Vous pouvez compléter et renvoyer votre dossier.</div>` : ''}
+      <div class="hint">Quel type de compte professionnel souhaitez-vous ouvrir ?</div>
+      <div class="card" style="cursor:pointer" onclick="sessionStorage.setItem('ks_pro_type','particulier');render()">
+        <div class="bold" style="font-size:17px">👤 PARTICULIER</div>
+        <div class="muted small" style="margin-top:4px">Petits dépannages, interventions ponctuelles, petits travaux, services à domicile, prestations individuelles.</div>
+        <div class="bold small" style="color:var(--p,#0b7a6b);margin-top:6px">Choisir ›</div>
+      </div>
+      <div class="card" style="cursor:pointer" onclick="sessionStorage.setItem('ks_pro_type','entreprise');render()">
+        <div class="bold" style="font-size:17px">🏢 ENTREPRISE</div>
+        <div class="muted small" style="margin-top:4px">Grandes prestations, chantiers, marchés importants, interventions pour entreprises, équipes de plusieurs personnes.</div>
+        <div class="bold small" style="color:var(--p,#0b7a6b);margin-top:6px">Choisir ›</div>
+      </div>
+    </div>${bottomNav('account')}`;
+    updateBadges();
+    return;
+  }
+  const estEnt = proType === 'entreprise';
+
   $app.innerHTML = `${header('Devenir professionnel')}
   <div class="content">
     ${rejected ? `<div class="status-banner bad">Votre précédente demande a été refusée${USER.pro && USER.pro.rejected_reason ? ' : ' + esc(USER.pro.rejected_reason) : ''}. Vous pouvez compléter et renvoyer votre dossier.</div>` : ''}
     <div class="card">
-      <div class="bold mb">Avec un seul compte, proposez aussi vos services 💼</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px" class="mb">
+        <div class="bold">${estEnt ? '🏢 Compte Entreprise' : '👤 Compte Particulier'}</div>
+        <button class="btn sec sm" onclick="sessionStorage.removeItem('ks_pro_type');render()">Changer de type</button>
+      </div>
       <div class="muted small mb">Conditions : informations exactes, respect des règles professionnelles, validation par l'administration. Votre compte restera aussi un compte client.</div>
-      <div class="field"><label>Votre profession <span class="req">*</span></label><input type="text" id="p-prof" placeholder="Ex : Plombier, Électricien, Agent d'entretien…" value="${esc(USER.pro ? USER.pro.profession : '')}"></div>
+      ${estEnt ? `
+      <div class="field"><label>Nom de l'entreprise <span class="req">*</span></label><input type="text" id="p-cname" placeholder="Ex : Klean BTP Sarl" value="${esc(USER.pro && USER.pro.company_name || '')}"></div>
+      <div class="field"><label>Registre de commerce (RCCM) — si disponible</label><input type="text" id="p-rccm" placeholder="Ex : CI-ABJ-2024-B-12345" value="${esc(USER.pro && USER.pro.company_rccm || '')}"></div>
+      <div class="field"><label>Taille de l'équipe</label><select id="p-csize">
+        ${['','2 à 5 personnes','6 à 10 personnes','11 à 50 personnes','Plus de 50 personnes'].map(v => `<option value="${esc(v)}" ${USER.pro && USER.pro.company_size === v ? 'selected' : ''}>${v || 'Choisir…'}</option>`).join('')}
+      </select></div>` : ''}
+      <div class="field"><label>${estEnt ? "Domaine d'activité de l'entreprise" : 'Votre profession'} <span class="req">*</span></label><input type="text" id="p-prof" placeholder="${estEnt ? 'Ex : Bâtiment, nettoyage industriel, événementiel…' : "Ex : Plombier, Électricien, Agent d'entretien…"}" value="${esc(USER.pro ? USER.pro.profession : '')}"></div>
       <div class="field"><label>Services que vous proposez <span class="req">*</span></label>
         <div class="choices" id="p-services">
           ${proServiceChips(USER.pro ? USER.pro.services : [])}
@@ -821,7 +885,7 @@ routes.pro = async () => {
       <div class="field"><label>Zone d'intervention <span class="req">*</span></label><input type="text" id="p-zone" placeholder="Ex : Bouaké et environs" value="${esc(USER.pro ? USER.pro.zone : '')}"></div>
       <div class="field"><label>Expérience</label><input type="text" id="p-exp" placeholder="Ex : 5 ans d'expérience" value="${esc(USER.pro ? USER.pro.experience : '')}"></div>
       <div class="field"><label>Description</label><textarea id="p-desc" placeholder="Présentez-vous en quelques lignes…">${esc(USER.pro ? USER.pro.description : '')}</textarea></div>
-      <div class="field"><label>Documents (CNI, diplômes… — facultatif mais recommandé)</label>
+      <div class="field"><label>${estEnt ? 'Documents (registre de commerce, pièce du responsable, références…)' : 'Documents (CNI, diplômes…)'} — recommandés, parfois obligatoires</label>
         <div class="photo-strip" id="p-docs"><button class="ph-add" onclick="A.pickPhotos('p-docs')">＋</button></div>
         <input type="file" id="file-input" accept="image/*,.pdf" multiple style="display:none">
       </div>
@@ -841,9 +905,14 @@ routes.pro = async () => {
           profession: document.getElementById('p-prof').value, services,
           zone: document.getElementById('p-zone').value, experience: document.getElementById('p-exp').value,
           description: document.getElementById('p-desc').value, documents: REQ.photos,
-          accept_rules: document.getElementById('p-accept').checked
+          accept_rules: document.getElementById('p-accept').checked,
+          pro_type: proType,
+          company_name: document.getElementById('p-cname') ? document.getElementById('p-cname').value : '',
+          company_rccm: document.getElementById('p-rccm') ? document.getElementById('p-rccm').value : '',
+          company_size: document.getElementById('p-csize') ? document.getElementById('p-csize').value : ''
         }
       });
+      sessionStorage.removeItem('ks_pro_type');
       toast('Demande envoyée ! L\u2019administration va la valider.', 'ok');
       render();
     } catch (err) { toast(err.message, 'err'); busy(e.target, false); }
@@ -891,9 +960,17 @@ routes['pro-edit'] = async () => {
   if (!USER || USER.pro_status !== 'approved') { nav('#/pro'); return; }
   if (!SERVICES) SERVICES = await api('/services');
   const p = USER.pro;
+  const estEnt = p.pro_type === 'entreprise';
   $app.innerHTML = `${header('Mon profil professionnel')}
   <div class="content"><div class="card">
-    <div class="field"><label>Profession</label><input type="text" id="p-prof" value="${esc(p.profession)}"></div>
+    <div class="bold mb">${estEnt ? '🏢 Compte Entreprise' : '👤 Compte Particulier'}</div>
+    ${estEnt ? `
+    <div class="field"><label>Nom de l'entreprise</label><input type="text" id="p-cname" value="${esc(p.company_name || '')}"></div>
+    <div class="field"><label>Registre de commerce (RCCM)</label><input type="text" id="p-rccm" value="${esc(p.company_rccm || '')}"></div>
+    <div class="field"><label>Taille de l'équipe</label><select id="p-csize">
+      ${['','2 à 5 personnes','6 à 10 personnes','11 à 50 personnes','Plus de 50 personnes'].map(v => `<option value="${esc(v)}" ${p.company_size === v ? 'selected' : ''}>${v || 'Choisir…'}</option>`).join('')}
+    </select></div>` : ''}
+    <div class="field"><label>${estEnt ? "Domaine d'activité" : 'Profession'}</label><input type="text" id="p-prof" value="${esc(p.profession)}"></div>
     <div class="field"><label>Mes services</label><div class="choices" id="p-services">
       ${proServiceChips(p.services)}</div></div>
     <div class="field"><label>Zone d'intervention</label><input type="text" id="p-zone" value="${esc(p.zone)}"></div>
@@ -909,7 +986,10 @@ routes['pro-edit'] = async () => {
           profession: document.getElementById('p-prof').value,
           services: [...document.querySelectorAll('#p-services .chip.on')].map(c => parseInt(c.dataset.sid, 10)),
           zone: document.getElementById('p-zone').value, experience: document.getElementById('p-exp').value,
-          description: document.getElementById('p-desc').value
+          description: document.getElementById('p-desc').value,
+          company_name: document.getElementById('p-cname') ? document.getElementById('p-cname').value : null,
+          company_rccm: document.getElementById('p-rccm') ? document.getElementById('p-rccm').value : null,
+          company_size: document.getElementById('p-csize') ? document.getElementById('p-csize').value : null
         }
       });
       toast('Profil mis à jour ✓', 'ok'); back();
@@ -1075,8 +1155,7 @@ routes.infos = async () => {
     <div class="field"><label>Téléphone</label><input type="tel" value="${esc(USER.phone)}" disabled style="background:#f1f5f9"></div>
     <div class="field"><label>E-mail</label><input type="email" id="i-email" placeholder="facultatif" value="${esc(USER.email || '')}"></div>
     <div class="field"><label>Ville</label>
-      <input type="text" id="i-ville" list="villes-ci" placeholder="Tapez pour chercher votre ville…" autocomplete="off" value="${esc(USER.ville || '')}">
-      <datalist id="villes-ci">${villes.map(v => `<option value="${esc(v)}">`).join('')}</datalist>
+      <input type="text" id="i-ville" placeholder="👆 Choisir ma ville" readonly style="cursor:pointer;background:#fff" value="${esc(USER.ville || '')}" onclick="A.villePick('i-ville')">
     </div>
     <div class="field"><label>Quartier</label><input type="text" id="i-quartier" placeholder="Ex : Air France, Cocody Angré…" value="${esc(USER.quartier || '')}"></div>
     <div class="field"><label>Adresse / précisions</label><input type="text" id="i-addr" value="${esc(USER.address || '')}"></div>
@@ -1283,6 +1362,33 @@ const A = {
     render();
   },
   catFilter() { render(); },
+  /* Fenêtre de sélection de ville : liste complète des villes et localités
+     de Côte d'Ivoire (gérée dans le tableau de bord) + recherche. */
+  async villePick(inputId) {
+    let villes = [];
+    try { villes = await api('/villes'); } catch { toast('Liste des villes indisponible. Vérifiez votre connexion.', 'err'); return; }
+    if (!villes.length) { toast('Aucune ville disponible pour le moment.', 'err'); return; }
+    const lignes = vs => vs.map(v => `<div class="menu-item" onclick="A._villeSet('${inputId}','${esc(v).replace(/'/g, "\\'")}')"><span class="mi-ic">🏙️</span>${esc(v)}<span class="mi-arr">›</span></div>`).join('');
+    openModal(`<h3>🏙️ Choisir ma ville</h3>
+      <div class="searchbar" style="margin-bottom:8px">
+        <input type="text" id="ville-q" placeholder="🔎 Rechercher une ville : Boua…" autocomplete="off">
+      </div>
+      <div id="ville-liste" style="max-height:52vh;overflow-y:auto">${lignes(villes)}</div>`);
+    const inp = document.getElementById('ville-q');
+    const zone = document.getElementById('ville-liste');
+    const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    inp.addEventListener('input', () => {
+      const q = norm(inp.value.trim());
+      const vs = q ? villes.filter(v => norm(v).includes(q)) : villes;
+      zone.innerHTML = vs.length ? lignes(vs) : '<div class="hint">Aucune ville trouvée. Contactez-nous si votre localité manque.</div>';
+    });
+    inp.focus();
+  },
+  _villeSet(inputId, v) {
+    const i = document.getElementById(inputId);
+    if (i) i.value = v;
+    closeModal();
+  },
   async maintRetry() { await checkMaintenance(); render(); },
   eye(id, btn) {
     const i = document.getElementById(id);
@@ -1350,8 +1456,8 @@ const A = {
     const c = SERVICES.find(x => x.id === catId);
     if (!c) return;
     if (c.services.length === 1) { nav('#/request/' + c.services[0].id); return; }
-    openModal(`<h3>${esc(c.icon || '')} ${esc(c.name)}</h3>
-      ${c.services.map(s => `<div class="menu-item" onclick="closeModal();nav('#/request/${s.id}')"><span class="mi-ic">${esc(c.icon || '🔹')}</span>${esc(s.name)}<span class="mi-arr">›</span></div>`).join('')}`);
+    sessionStorage.setItem('ks_cat_q', '');
+    nav('#/services/' + catId);
   },
   async doSearch() {
     const q = document.getElementById('s-q').value.trim();
@@ -1364,7 +1470,7 @@ const A = {
         ? `<div class="sec-title">Services correspondants</div>` + r.results.map(s =>
           `<div class="menu-item" onclick="${s.tache_suggeree ? `sessionStorage.setItem('ks_sug_tache','${esc(s.tache_suggeree).replace(/'/g, "\\'")}');` : ''}nav('#/request/${s.id}')">
             <span class="mi-ic">${esc(s.icon || '🔹')}</span>
-            <div><div>${esc(s.name)}</div><div class="muted small">${esc(s.category)}${s.tache_suggeree ? ` — <b>${esc(s.tache_suggeree)}</b>` : ''}</div></div>
+            <div><div>${esc(s.name)}</div>${prixHtml(s)}<div class="muted small">${esc(s.category)}${s.tache_suggeree ? ` — <b>${esc(s.tache_suggeree)}</b>` : ''}</div></div>
             <span class="mi-arr">›</span></div>`).join('')
         : emptyState('🔍', 'Aucun service trouvé pour « ' + q + ' ».') + `<button class="btn sec" onclick="nav('#/services')">Voir tous les services</button>`;
     } catch (e) { zone.innerHTML = emptyState('📶', e.message); }
