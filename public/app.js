@@ -301,7 +301,10 @@ function adCardHtml(a) {
       ? `<img src="${esc(a.file)}" alt="" style="display:block;width:100%;max-height:120px;border-radius:8px;margin-top:6px;object-fit:cover">`
       : '';
   return `<div>
-      <div class="ad-tag">${a.title && /urgen/i.test(a.title) ? '🚨 URGENT' : a.type === 'video' ? '📣 PUBLICITÉ' : 'ℹ️ INFORMATION'}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="ad-tag">${a.title && /urgen/i.test(a.title) ? '🚨 URGENT' : a.type === 'video' ? '📣 PUBLICITÉ' : 'ℹ️ INFORMATION'}</span>
+        <span class="small muted">👁️ ${Number(a.views || 0).toLocaleString('fr-FR')}</span>
+      </div>
       ${a.title ? `<div class="bold small">${esc(a.title)}</div>` : ''}
       ${a.content ? `<div class="small muted" style="white-space:normal">${esc(a.content)}</div>` : ''}
       ${media}</div>`;
@@ -328,12 +331,16 @@ routes.home = async () => {
       <div class="bold small">🛠️ Maintenance partielle</div>
       <div class="small muted" style="white-space:normal">${esc(MAINT.message || 'Certaines fonctions sont temporairement suspendues.')}</div></div>`);
   homeAds.forEach(a => topZone.push(adCardHtml(a)));
+  const gv = k => Number((GAMES.views && GAMES.views[k]) || 0).toLocaleString('fr-FR');
   if (GAMES.quiz) topZone.push(`<div onclick="nav('#/quiz')" style="cursor:pointer;text-align:center">
-      <div class="ad-tag">🎮 JEU</div><div class="bold small">🧠 Quiz — jouez maintenant !</div></div>`);
+      <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🧠 QUIZ</span><span class="small muted">👁️ ${gv('quiz')}</span></div>
+      <div class="bold small">🧠 Quiz — jouez maintenant !</div></div>`);
   if (GAMES.flipfizz) topZone.push(`<div onclick="nav('#/flip')" style="cursor:pointer;text-align:center">
-      <div class="ad-tag">🎮 JEU</div><div class="bold small">🎲 Flip Fizz</div></div>`);
+      <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🎮 JEU</span><span class="small muted">👁️ ${gv('flipfizz')}</span></div>
+      <div class="bold small">🎲 Flip Fizz</div></div>`);
   if (GAMES.kdo) topZone.push(`<div onclick="nav('#/kdo')" style="cursor:pointer;text-align:center">
-      <div class="ad-tag">🎮 JEU</div><div class="bold small">🎁 Kdo</div></div>`);
+      <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🎮 JEU</span><span class="small muted">👁️ ${gv('kdo')}</span></div>
+      <div class="bold small">🎁 Kdo</div></div>`);
   $app.innerHTML = `
   ${header('', { brand: true, back: false })}
   <div class="content" style="padding-top:0">
@@ -357,6 +364,12 @@ routes.home = async () => {
     <button class="btn sec mt" onclick="nav('#/services')">Voir tous les services</button>
   </div>${bottomNav('home')}`;
   updateBadges();
+  // comptage des vues (pub/infos/urgences + jeux affichés)
+  const vues = homeAds.map(a => 'ad:' + a.id);
+  if (GAMES.quiz) vues.push('game:quiz');
+  if (GAMES.flipfizz) vues.push('game:flipfizz');
+  if (GAMES.kdo) vues.push('game:kdo');
+  if (vues.length) api('/vues', { method: 'POST', body: { keys: vues } }).catch(() => { });
   const q = document.getElementById('home-q');
   q.addEventListener('keydown', e => { if (e.key === 'Enter') A.goSearch(); });
 };
@@ -384,7 +397,9 @@ routes.services = async (params) => {
   try { if (!CATALOGUE) CATALOGUE = await api('/catalogue'); }
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('search'); return; }
   if (!ADS.length) try { ADS = await api('/ads'); } catch { }
-  const bandePub = adsBandHtml(ADS.filter(a => a.placement === 'services').map(adCardHtml));
+  const pubsServices = ADS.filter(a => a.placement === 'services');
+  const bandePub = adsBandHtml(pubsServices.map(adCardHtml));
+  if (pubsServices.length) api('/vues', { method: 'POST', body: { keys: pubsServices.map(a => 'ad:' + a.id) } }).catch(() => { });
   const catId = parseInt(params || 0, 10);
   const q = (sessionStorage.getItem('ks_cat_q') || '').toLowerCase().trim();
   const hit = x => (x || '').toLowerCase().includes(q);
@@ -1345,23 +1360,10 @@ routes.quiz = async () => {
   }
 
   // ----- Session en cours -----
-  if (!p) { // écran de participation
-    $app.innerHTML = `${header('Quiz')}<div class="content"><div class="card center">
-      <div style="font-size:48px">🧠</div>
-      <div class="bold" style="font-size:19px">${esc(s.title)}</div>
-      <div class="small muted" style="margin:10px 0">
-        📋 ${s.nb_questions} question(s) à choix multiples (A, B, C, D)<br>
-        ⏱️ ${s.time_per_q} secondes par question — fermeture automatique à 0<br>
-        ${s.elimination ? '⚠️ Élimination immédiate à la première mauvaise réponse<br>' : ''}
-        🏆 ${s.nb_winners} gagnant(s) à la clé
-      </div>
-      <button class="btn" id="b-join">🚀 Participer</button>
-      <button class="btn sec mt" onclick="back()">Plus tard</button></div></div>${bottomNav('home')}`;
-    document.getElementById('b-join').onclick = async e => {
-      busy(e.target, true);
-      try { await api(`/games/concours/${s.id}/rejoindre`, { method: 'POST' }); routes.quiz(); }
-      catch (err) { toast(err.message, 'err'); busy(e.target, false); }
-    };
+  if (!p) { // participation automatique : le quiz s'affiche directement, le décompte démarre
+    try { await api(`/games/concours/${s.id}/rejoindre`, { method: 'POST' }); }
+    catch (err) { toast(err.message, 'err'); back(); return; }
+    quizQuestion(s);
     return;
   }
   if (p.status === 'elimine') {
@@ -1388,14 +1390,15 @@ async function quizQuestion(s) {
   try { q = await api(`/games/concours/${s.id}/question`); } catch (e) { toast(e.message, 'err'); routes.quiz(); return; }
   if (q.done) { routes.quiz(); return; }
   const letters = ['A', 'B', 'C', 'D'];
-  $app.innerHTML = `${header('Quiz — question ' + (q.index + 1) + '/' + q.total)}
+  $app.innerHTML = `${header('🧠 Quiz — question ' + (q.index + 1) + '/' + q.total)}
   <div class="content">
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span class="small muted">Question ${q.index + 1} / ${q.total}</span>
-        <span id="qz-timer" class="bold" style="font-size:22px;color:#16a34a">⏱️ ${Math.ceil(q.remaining_ms / 1000)}s</span>
+      <div class="small muted center" style="margin-bottom:4px">🧠 « ${esc(s.title)} » • Question ${q.index + 1} / ${q.total}${s.elimination ? ' • ⚠️ élimination directe' : ''}</div>
+      <div class="center" style="margin-bottom:4px">
+        <span id="qz-timer" style="font-size:40px;font-weight:800;color:#16a34a;line-height:1">${Math.ceil(q.remaining_ms / 1000)}</span>
+        <span class="small muted"> seconde(s)</span>
       </div>
-      <div style="height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;margin-bottom:12px">
+      <div style="height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin-bottom:12px">
         <div id="qz-bar" style="height:100%;background:#16a34a;width:100%;transition:width 1s linear"></div></div>
       <div class="bold mb" style="font-size:17px">${esc(q.question.question)}</div>
       ${q.question.options.map((o, j) => `<button type="button" class="qz-opt" data-j="${j}" onclick="A.quizRepondre(${s.id},${j})"
@@ -1410,9 +1413,9 @@ async function quizQuestion(s) {
     const left = Math.max(0, deadline - Date.now());
     const el = document.getElementById('qz-timer'), bar = document.getElementById('qz-bar');
     if (!el) { quizStopTimer(); return; }
-    el.textContent = '⏱️ ' + Math.ceil(left / 1000) + 's';
+    el.textContent = Math.ceil(left / 1000);
     if (left <= 5000) el.style.color = '#dc2626';
-    if (bar) bar.style.width = (left / (q.time_per_q * 1000) * 100) + '%';
+    if (bar) { bar.style.width = (left / (q.time_per_q * 1000) * 100) + '%'; if (left <= 5000) bar.style.background = '#dc2626'; }
     if (left <= 0) { quizStopTimer(); A.quizRepondre(s.id, -1); } // fermeture automatique à 0
   }, 250);
 }

@@ -1108,7 +1108,9 @@ app.post('/api/urgence', auth, (req, res) => {
 // JEUX (isolés du parcours principal, configurables)
 // ============================================================
 app.get('/api/games/config', (req, res) => {
-  res.json({ quiz: getSetting('quiz_enabled') === '1', flipfizz: getSetting('flipfizz_enabled') === '1', kdo: getSetting('kdo_enabled') === '1' });
+  const gv = k => (db.prepare('SELECT n FROM view_counts WHERE key=?').get('game:' + k) || {}).n || 0;
+  res.json({ quiz: getSetting('quiz_enabled') === '1', flipfizz: getSetting('flipfizz_enabled') === '1', kdo: getSetting('kdo_enabled') === '1',
+    views: { quiz: gv('quiz'), flipfizz: gv('flipfizz'), kdo: gv('kdo') } });
 });
 app.get('/api/games/quiz', auth, (req, res) => {
   if (getSetting('quiz_enabled') !== '1') return res.status(403).json({ error: 'Le quiz est désactivé.' });
@@ -1280,9 +1282,19 @@ app.post('/api/games/kdo', auth, (req, res) => {
   res.json({ ok: true, reward: row.reward });
 });
 
-// Publicités actives (côté application)
+// Publicités actives (côté application), avec leur nombre de vues
 app.get('/api/ads', (req, res) => {
-  res.json(db.prepare("SELECT id, type, title, content, file, placement, duration FROM ads WHERE active=1 ORDER BY sort, id").all());
+  res.json(db.prepare(`SELECT a.id, a.type, a.title, a.content, a.file, a.placement, a.duration, COALESCE(v.n, 0) AS views
+    FROM ads a LEFT JOIN view_counts v ON v.key = 'ad:' || a.id
+    WHERE a.active=1 ORDER BY a.sort, a.id`).all());
+});
+
+// Comptage des vues (pub, infos, urgences, jeux) — fonctionne aussi sans compte
+const bumpView = db.prepare('INSERT INTO view_counts(key, n) VALUES(?, 1) ON CONFLICT(key) DO UPDATE SET n = n + 1');
+app.post('/api/vues', (req, res) => {
+  const keys = Array.isArray(req.body.keys) ? req.body.keys.slice(0, 20) : [];
+  keys.forEach(k => { if (typeof k === 'string' && /^(ad:\d+|game:(quiz|flipfizz|kdo))$/.test(k)) bumpView.run(k); });
+  res.json({ ok: true });
 });
 
 // ============================================================
@@ -1876,7 +1888,12 @@ A.put('/settings', (req, res) => {
 });
 
 // COMMUNICATION : publicités + message système
-A.get('/ads', (req, res) => res.json(db.prepare('SELECT * FROM ads ORDER BY sort, id DESC').all()));
+A.get('/ads', (req, res) => res.json(db.prepare(`SELECT a.*, COALESCE(v.n, 0) AS views
+  FROM ads a LEFT JOIN view_counts v ON v.key = 'ad:' || a.id ORDER BY a.sort, a.id DESC`).all()));
+A.get('/game-plays/vues', (req, res) => {
+  const gv = k => (db.prepare('SELECT n FROM view_counts WHERE key=?').get(k) || {}).n || 0;
+  res.json({ quiz: gv('game:quiz'), flipfizz: gv('game:flipfizz'), kdo: gv('game:kdo') });
+});
 A.post('/ads', (req, res) => {
   const { type, title, content, file, placement, duration, active } = req.body || {};
   const info = db.prepare('INSERT INTO ads(type, title, content, file, placement, duration, active) VALUES(?,?,?,?,?,?,?)')

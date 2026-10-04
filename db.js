@@ -280,6 +280,11 @@ CREATE TABLE IF NOT EXISTS game_plays (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS view_counts (
+  key TEXT PRIMARY KEY,                       -- ad:<id> | game:quiz | game:flipfizz | game:kdo
+  n INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS quiz_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,

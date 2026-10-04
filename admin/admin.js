@@ -531,13 +531,13 @@ views.ads = async () => {
     </div>
     <div class="small muted">Les images/vidéos trop lourdes sont limitées à 15 Mo. Les publicités s'affichent sans bloquer l'utilisation de l'application.</div>
   </div>
-  <div class="panel"><table><tr><th>Type</th><th>Titre</th><th>Contenu</th><th>Emplacement</th><th>État</th><th>Actions</th></tr>
+  <div class="panel"><table><tr><th>Type</th><th>Titre</th><th>Contenu</th><th>Emplacement</th><th>👁️ Vues</th><th>État</th><th>Actions</th></tr>
   ${list.map(a => `<tr><td>${a.type}</td><td><b>${esc(a.title || '')}</b></td>
     <td class="small">${esc((a.content || '').slice(0, 60))} ${a.file ? `<a href="${esc(a.file)}" target="_blank">📎</a>` : ''}</td>
-    <td>${a.placement}</td><td>${a.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
+    <td>${a.placement}</td><td><b>${Number(a.views || 0).toLocaleString('fr-FR')}</b></td><td>${a.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
     <td><button class="btn sm sec" onclick="A.toggleAd(${a.id},${a.active ? 0 : 1})">${a.active ? 'Désactiver' : 'Activer'}</button>
     <button class="btn sm warn" onclick="A.delAd(${a.id})">🗑️</button></td></tr>`).join('')}
-  ${!list.length ? '<tr><td colspan="6" class="muted">Aucune publicité.</td></tr>' : ''}</table></div>`);
+  ${!list.length ? '<tr><td colspan="7" class="muted">Aucune publicité.</td></tr>' : ''}</table></div>`);
 };
 
 /* ---------- Message système ---------- */
@@ -659,6 +659,8 @@ views.games = async () => {
   const kdo = await api('/admin/kdo');
   const plays = await api('/admin/game-plays');
   const sessions = await api('/admin/quiz-sessions');
+  let gvues = { quiz: 0, flipfizz: 0, kdo: 0 };
+  try { gvues = await api('/admin/game-plays/vues'); } catch { }
   const enCours = sessions.find(x => x.status === 'en_cours');
   const stLbl = { brouillon: '<span class="pill">Brouillon</span>', en_cours: '<span class="pill warn">🔴 EN COURS</span>', terminee: '<span class="pill ok">Terminée</span>' };
   shell(`<h1>🎮 Quiz / Flip Fizz / Kdo</h1>
@@ -668,6 +670,7 @@ views.games = async () => {
       ${[['quiz_enabled', '🧠 Quiz'], ['flipfizz_enabled', '🎲 Flip Fizz'], ['kdo_enabled', '🎁 Kdo']].map(([k, lb]) =>
         `<button class="btn ${s[k] === '1' ? '' : 'sec'}" onclick="A.toggleSetting('${k}',${s[k] === '1' ? "'0'" : "'1'"})">${lb} : ${s[k] === '1' ? 'Activé ✅' : 'Désactivé'}</button>`).join('')}
     </div>
+    <div class="small muted" style="margin-top:8px">👁️ Vues sur l'accueil — 🧠 Quiz : <b>${Number(gvues.quiz || 0).toLocaleString('fr-FR')}</b> • 🎲 Flip Fizz : <b>${Number(gvues.flipfizz || 0).toLocaleString('fr-FR')}</b> • 🎁 Kdo : <b>${Number(gvues.kdo || 0).toLocaleString('fr-FR')}</b></div>
     <div class="frow" style="margin-top:10px;align-items:center">
       <label style="margin:0"><b>👥 Qui peut jouer au quiz :</b></label>
       <select onchange="A.toggleSetting('quiz_audience', this.value)">
