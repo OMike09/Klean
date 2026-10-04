@@ -280,7 +280,7 @@ routes.register = async () => {
    de bord ; jamais un prix définitif). Affiché en noir sous le service. */
 function prixHtml(s, small) {
   if (!s || !s.price_show || !s.price_from) return '';
-  return `<div class="svc-prix" style="color:#111;font-weight:700;font-size:${small ? '12px' : '13px'};margin-top:2px">${esc(s.price_prefix || 'Dès')} ${Number(s.price_from).toLocaleString('fr-FR')} FCFA</div>`;
+  return `<div class="svc-prix" style="color:#dc2626;font-weight:700;font-size:${small ? '12px' : '13px'};margin-top:2px">${esc(s.price_prefix || 'Dès')} ${Number(s.price_from).toLocaleString('fr-FR')} FCFA</div>`;
 }
 
 /* Choix des services d'un professionnel : mêmes catégories et services que
@@ -292,23 +292,42 @@ function proServiceChips(selectedIds) {
     ${c.services.map(s => `<button type="button" class="chip ${sel.includes(s.id) ? 'on' : ''}" data-sid="${s.id}" onclick="this.classList.toggle('on')">${esc(s.name)}</button>`).join('')}`).join('');
 }
 
+/* Carte publicité / info : la vidéo s'affiche en grand et démarre automatiquement (muette) */
+function adCardHtml(a) {
+  const media = a.file && a.type === 'video'
+    ? `<video src="${esc(a.file)}" autoplay muted loop playsinline controls preload="metadata"
+         style="display:block;width:100%;max-height:150px;border-radius:8px;margin-top:6px;background:#000;object-fit:contain"></video>`
+    : a.file && a.type === 'image'
+      ? `<img src="${esc(a.file)}" alt="" style="display:block;width:100%;max-height:120px;border-radius:8px;margin-top:6px;object-fit:cover">`
+      : '';
+  return `<div>
+      <div class="ad-tag">${a.title && /urgen/i.test(a.title) ? '🚨 URGENT' : a.type === 'video' ? '📣 PUBLICITÉ' : 'ℹ️ INFORMATION'}</div>
+      ${a.title ? `<div class="bold small">${esc(a.title)}</div>` : ''}
+      ${a.content ? `<div class="small muted" style="white-space:normal">${esc(a.content)}</div>` : ''}
+      ${media}</div>`;
+}
+/* Bande pub/info affichée en haut des écrans d'accueil et de services */
+function adsBandHtml(list) {
+  if (!list.length) return '';
+  const aVideo = list.some(c => c.includes('<video'));
+  return `<div style="display:flex;gap:8px;overflow-x:auto;padding:0 2px 6px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">
+    ${list.map(c => `<div style="flex:0 0 ${list.length > 1 ? '84%' : '100%'};scroll-snap-align:start;background:#fff;border:1px solid #e8e8ef;border-radius:12px;padding:8px 10px;${aVideo ? '' : 'max-height:118px;overflow:hidden'}">${c}</div>`).join('')}
+  </div>`;
+}
+
 /* ---------- Accueil ---------- */
 routes.home = async () => {
   if (!SERVICES) try { SERVICES = await api('/services'); } catch (e) { $app.innerHTML = header('Accueil', { brand: true }) + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home'); return; }
   if (!POPULAIRES.length) try { POPULAIRES = await api('/services/populaires'); } catch { }
   try { GAMES = await api('/games/config'); } catch { }
   try { ADS = await api('/ads'); } catch { }
-  const homeAds = ADS.filter(a => a.placement === 'accueil');
+  const homeAds = ADS; // toutes les publicités actives sortent sur l'écran d'accueil
   const cats = SERVICES;
   const topZone = [];
   if (MAINT.active && MAINT.scope !== 'F') topZone.push(`<div style="border-left:3px solid #e67e22;background:#fff8f0">
       <div class="bold small">🛠️ Maintenance partielle</div>
       <div class="small muted" style="white-space:normal">${esc(MAINT.message || 'Certaines fonctions sont temporairement suspendues.')}</div></div>`);
-  homeAds.forEach(a => topZone.push(`<div>
-      <div class="ad-tag">${a.title && /urgen/i.test(a.title) ? '🚨 URGENT' : 'ℹ️ INFORMATION'}</div>
-      <div class="bold small">${esc(a.title || '')}</div><div class="small muted" style="white-space:normal">${esc(a.content || '')}</div>
-      ${a.file && a.type === 'image' ? `<img src="${esc(a.file)}" alt="" style="max-height:52px;border-radius:6px;margin-top:4px">` : ''}
-      ${a.file && a.type === 'video' ? `<video src="${esc(a.file)}" controls muted style="max-height:60px;border-radius:6px;margin-top:4px"></video>` : ''}</div>`));
+  homeAds.forEach(a => topZone.push(adCardHtml(a)));
   if (GAMES.quiz) topZone.push(`<div onclick="nav('#/quiz')" style="cursor:pointer;text-align:center">
       <div class="ad-tag">🎮 JEU</div><div class="bold small">🧠 Quiz — jouez maintenant !</div></div>`);
   if (GAMES.flipfizz) topZone.push(`<div onclick="nav('#/flip')" style="cursor:pointer;text-align:center">
@@ -319,9 +338,7 @@ routes.home = async () => {
   ${header('', { brand: true, back: false })}
   <div class="content" style="padding-top:0">
     <div id="home-fixe" style="position:sticky;top:57px;z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
-      ${topZone.length ? `<div style="display:flex;gap:8px;overflow-x:auto;padding:0 2px 6px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">
-        ${topZone.map(c => `<div style="flex:0 0 ${topZone.length > 1 ? '84%' : '100%'};scroll-snap-align:start;background:#fff;border:1px solid #e8e8ef;border-radius:12px;padding:8px 10px;max-height:118px;overflow:hidden">${c}</div>`).join('')}
-      </div>` : ''}
+      ${adsBandHtml(topZone)}
       <div class="searchbar" style="margin:0 2px">
         <input type="text" id="home-q" placeholder="🔎 Que recherchez-vous ?" enterkeyhint="search">
         <button onclick="A.goSearch()" aria-label="Rechercher">🔍</button>
@@ -366,6 +383,8 @@ routes.search = async (params) => {
 routes.services = async (params) => {
   try { if (!CATALOGUE) CATALOGUE = await api('/catalogue'); }
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('search'); return; }
+  if (!ADS.length) try { ADS = await api('/ads'); } catch { }
+  const bandePub = adsBandHtml(ADS.filter(a => a.placement === 'services').map(adCardHtml));
   const catId = parseInt(params || 0, 10);
   const q = (sessionStorage.getItem('ks_cat_q') || '').toLowerCase().trim();
   const hit = x => (x || '').toLowerCase().includes(q);
@@ -377,6 +396,7 @@ routes.services = async (params) => {
     $app.innerHTML = `
     ${header(((c.icon || '') + ' ' + c.name).trim())}
     <div class="content">
+      ${bandePub}
       <div class="hint">Choisissez le service dont vous avez besoin — vous préciserez votre demande à l'étape suivante.</div>
       ${c.services.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')">
         <span class="mi-ic">${esc(c.icon || '🔹')}</span><div><div>${esc(s.name)}</div>
@@ -410,6 +430,7 @@ routes.services = async (params) => {
   $app.innerHTML = `
   ${header('Tous les services')}
   <div class="content">
+    ${bandePub}
     <div class="searchbar">
       <input type="text" id="cat-q" placeholder="🔎 Filtrer : plomberie, coiffure, réparer…" value="${esc(sessionStorage.getItem('ks_cat_q') || '')}" enterkeyhint="search">
       <button onclick="A.catFilter()" aria-label="Filtrer">🔍</button>
@@ -439,7 +460,7 @@ routes.request = async (serviceId) => {
   <div class="content">
     <div class="card">
       ${data.service.price_show && data.service.price_from ? `<div style="margin-bottom:8px">
-        <span style="color:#111;font-weight:800;font-size:15px">${esc(data.service.price_prefix || 'Dès')} ${Number(data.service.price_from).toLocaleString('fr-FR')} FCFA</span>
+        <span style="color:#dc2626;font-weight:800;font-size:15px">${esc(data.service.price_prefix || 'Dès')} ${Number(data.service.price_from).toLocaleString('fr-FR')} FCFA</span>
         <div class="muted small">Prix de départ indicatif — le montant final dépend de votre demande (quantité, difficulté, déplacement…) et sera proposé par le professionnel.</div>
       </div>` : ''}
       <div class="muted small mb">Répondez à ces quelques questions pour que le professionnel comprenne bien votre besoin.</div>
@@ -1289,8 +1310,152 @@ routes.payments = async () => {
 };
 
 /* ---------- Jeux ---------- */
+let QUIZ_TIMER = null;
+function quizStopTimer() { if (QUIZ_TIMER) { clearInterval(QUIZ_TIMER); QUIZ_TIMER = null; } }
+
 routes.quiz = async () => {
   if (!USER) { nav('#/login'); return; }
+  quizStopTimer();
+  let etat;
+  try { etat = await api('/games/concours'); } catch (e) { toast(e.message, 'err'); back(); return; }
+  if (!etat.enabled) { toast('Le quiz est désactivé.', 'err'); back(); return; }
+
+  // Pas de concours : quiz d'entraînement classique
+  if (!etat.session) { await quizClassique(); return; }
+  const s = etat.session, p = etat.participant;
+
+  // Public non autorisé
+  if (!etat.allowed && !p) {
+    $app.innerHTML = `${header('Quiz')}<div class="content"><div class="card center">
+      <div style="font-size:44px">🔒</div><div class="bold mb">Ce quiz est réservé aux clients.</div>
+      <button class="btn sec" onclick="back()">Retour</button></div></div>${bottomNav('home')}`;
+    return;
+  }
+
+  // ----- Session terminée : résultats -----
+  if (s.status === 'terminee') {
+    if (etat.est_gagnant) { quizEcranGagnant(s, p, etat.messages || []); return; }
+    $app.innerHTML = `${header('Quiz — résultats')}<div class="content"><div class="card center">
+      <div style="font-size:44px">${p && p.status === 'elimine' ? '❌' : '🙂'}</div>
+      <div class="bold mb">Le quiz « ${esc(s.title)} » est terminé.</div>
+      <div class="small muted mb">${p && p.status === 'elimine' ? 'Vous avez été éliminé(e) en cours de partie.' : `Votre score : ${p ? p.score : 0} bonne(s) réponse(s).`}</div>
+      <div class="small muted mb">${s.winners_designated ? 'Les gagnants ont été désignés. Merci d\u2019avoir participé !' : 'Les gagnants seront annoncés par l\u2019administration.'}</div>
+      <button class="btn sec" onclick="back()">Retour</button></div></div>${bottomNav('home')}`;
+    return;
+  }
+
+  // ----- Session en cours -----
+  if (!p) { // écran de participation
+    $app.innerHTML = `${header('Quiz')}<div class="content"><div class="card center">
+      <div style="font-size:48px">🧠</div>
+      <div class="bold" style="font-size:19px">${esc(s.title)}</div>
+      <div class="small muted" style="margin:10px 0">
+        📋 ${s.nb_questions} question(s) à choix multiples (A, B, C, D)<br>
+        ⏱️ ${s.time_per_q} secondes par question — fermeture automatique à 0<br>
+        ${s.elimination ? '⚠️ Élimination immédiate à la première mauvaise réponse<br>' : ''}
+        🏆 ${s.nb_winners} gagnant(s) à la clé
+      </div>
+      <button class="btn" id="b-join">🚀 Participer</button>
+      <button class="btn sec mt" onclick="back()">Plus tard</button></div></div>${bottomNav('home')}`;
+    document.getElementById('b-join').onclick = async e => {
+      busy(e.target, true);
+      try { await api(`/games/concours/${s.id}/rejoindre`, { method: 'POST' }); routes.quiz(); }
+      catch (err) { toast(err.message, 'err'); busy(e.target, false); }
+    };
+    return;
+  }
+  if (p.status === 'elimine') {
+    $app.innerHTML = `${header('Quiz')}<div class="content"><div class="card center">
+      <div style="font-size:44px">❌</div><div class="bold mb">Vous avez été éliminé(e).</div>
+      <div class="small muted mb">Score : ${p.score} bonne(s) réponse(s). Merci d\u2019avoir participé — restez à l\u2019affût du prochain quiz !</div>
+      <button class="btn sec" onclick="back()">Retour</button></div></div>${bottomNav('home')}`;
+    return;
+  }
+  if (p.status !== 'en_lice') { // finaliste : réponses enregistrées
+    $app.innerHTML = `${header('Quiz')}<div class="content"><div class="card center">
+      <div style="font-size:44px">✅</div><div class="bold mb">Vos réponses sont enregistrées !</div>
+      <div class="small muted mb">Score : ${p.score} / ${s.nb_questions}. Les résultats seront annoncés à la fin du quiz. Vous recevrez une notification si vous gagnez 🤞</div>
+      <button class="btn sec" onclick="back()">Retour</button></div></div>${bottomNav('home')}`;
+    return;
+  }
+  quizQuestion(s); // en lice : question en cours
+};
+
+// Affiche la question en cours avec décompte visible et fermeture automatique à 0
+async function quizQuestion(s) {
+  quizStopTimer();
+  let q;
+  try { q = await api(`/games/concours/${s.id}/question`); } catch (e) { toast(e.message, 'err'); routes.quiz(); return; }
+  if (q.done) { routes.quiz(); return; }
+  const letters = ['A', 'B', 'C', 'D'];
+  $app.innerHTML = `${header('Quiz — question ' + (q.index + 1) + '/' + q.total)}
+  <div class="content">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span class="small muted">Question ${q.index + 1} / ${q.total}</span>
+        <span id="qz-timer" class="bold" style="font-size:22px;color:#16a34a">⏱️ ${Math.ceil(q.remaining_ms / 1000)}s</span>
+      </div>
+      <div style="height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;margin-bottom:12px">
+        <div id="qz-bar" style="height:100%;background:#16a34a;width:100%;transition:width 1s linear"></div></div>
+      <div class="bold mb" style="font-size:17px">${esc(q.question.question)}</div>
+      ${q.question.options.map((o, j) => `<button type="button" class="qz-opt" data-j="${j}" onclick="A.quizRepondre(${s.id},${j})"
+        style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:#fff;border:2px solid #e5e7eb;border-radius:12px;padding:12px;margin-bottom:8px;font-size:15px;cursor:pointer">
+        <span style="flex:0 0 28px;height:28px;border-radius:50%;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-weight:700">${letters[j]}</span>
+        <span>${esc(o)}</span></button>`).join('')}
+      <div class="small muted center">Une seule réponse possible — elle est enregistrée immédiatement.</div>
+    </div></div>${bottomNav('home')}`;
+  const deadline = Date.now() + q.remaining_ms;
+  window._qzLock = false;
+  QUIZ_TIMER = setInterval(() => {
+    const left = Math.max(0, deadline - Date.now());
+    const el = document.getElementById('qz-timer'), bar = document.getElementById('qz-bar');
+    if (!el) { quizStopTimer(); return; }
+    el.textContent = '⏱️ ' + Math.ceil(left / 1000) + 's';
+    if (left <= 5000) el.style.color = '#dc2626';
+    if (bar) bar.style.width = (left / (q.time_per_q * 1000) * 100) + '%';
+    if (left <= 0) { quizStopTimer(); A.quizRepondre(s.id, -1); } // fermeture automatique à 0
+  }, 250);
+}
+
+// Écran gagnant : animation légère 🎉🏆 (visible uniquement par le gagnant) + bulle de contact + photo
+function quizEcranGagnant(s, p, messages) {
+  const confetti = Array.from({ length: 14 }, (_, i) =>
+    `<span style="position:absolute;top:-30px;left:${(i * 7.3) % 100}%;font-size:${14 + (i % 3) * 6}px;animation:qzfall ${2.5 + (i % 5) * 0.6}s linear ${(i % 7) * 0.4}s 3">${['🎉', '🎊', '🏆', '⭐'][i % 4]}</span>`).join('');
+  const demandePhoto = p.photo_asked && !p.photo_consent;
+  $app.innerHTML = `<style>@keyframes qzfall{to{transform:translateY(80vh) rotate(260deg);opacity:0}}</style>
+  ${header('Quiz — 🏆')}
+  <div class="content" style="position:relative;overflow:hidden">${confetti}
+    <div class="card center">
+      <div style="font-size:54px">🏆</div>
+      <div class="bold" style="font-size:20px;color:#16a34a">Félicitations, vous avez gagné !</div>
+      <div class="small muted mb">Quiz « ${esc(s.title)} » — score : ${p.score} bonne(s) réponse(s)</div>
+    </div>
+    ${demandePhoto ? `<div class="card">
+      <div class="bold mb">📸 Demande de l'administration</div>
+      <div class="small mb">Acceptez-vous que votre photo de gagnant(e) soit publiée ? Rien ne sera publié sans votre accord, et votre choix est définitif.</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" style="flex:1" onclick="A.quizPhoto(${s.id},'accepte')">✅ J'accepte</button>
+        <button class="btn sec" style="flex:1" onclick="A.quizPhoto(${s.id},'refuse')">❌ Je refuse</button>
+      </div></div>` : ''}
+    ${p.photo_consent ? `<div class="card small">${p.photo_consent === 'accepte' ? '📸 Vous avez accepté la publication de votre photo ✅' : '📸 Vous avez refusé la publication de votre photo — votre choix est respecté ❌'}</div>` : ''}
+    <div class="card">
+      <div class="bold mb">💬 Contacter l'administration</div>
+      <div id="qz-msgs" style="max-height:220px;overflow-y:auto;margin-bottom:10px">
+        ${messages.length ? messages.map(m => `<div style="display:flex;justify-content:${m.from_admin ? 'flex-start' : 'flex-end'};margin-bottom:6px">
+          <div style="max-width:80%;padding:8px 12px;border-radius:14px;font-size:14px;background:${m.from_admin ? '#f3f4f6' : '#dcfce7'}">
+            ${m.from_admin ? '<span class="small muted">Administration</span><br>' : ''}${esc(m.body)}</div></div>`).join('')
+      : '<div class="small muted center">Écrivez à l\u2019administration pour organiser la remise de votre gain.</div>'}
+      </div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="qz-msg" placeholder="Votre message…" style="flex:1" maxlength="1000">
+        <button class="btn" onclick="A.quizEnvoyer(${s.id})">Envoyer</button>
+      </div></div>
+    <button class="btn sec" onclick="back()">Retour</button>
+  </div>${bottomNav('home')}`;
+  const box = document.getElementById('qz-msgs'); if (box) box.scrollTop = box.scrollHeight;
+}
+
+async function quizClassique() {
   let qs;
   try { qs = await api('/games/quiz'); } catch (e) { toast(e.message, 'err'); back(); return; }
   let answers = {};
@@ -1804,6 +1969,30 @@ const A = {
   },
   delAddr(id) { api('/addresses/' + id, { method: 'DELETE' }).then(() => { toast('Adresse supprimée.', 'ok'); render(); }).catch(e => toast(e.message, 'err')); },
   quizPick(el, qid, j) { A.pickChip(el, String(j)); window._quizAnswers[qid] = j; },
+  async quizRepondre(sid, j) {
+    if (window._qzLock) return; // une seule sélection
+    window._qzLock = true;
+    quizStopTimer();
+    document.querySelectorAll('.qz-opt').forEach(b => {
+      b.disabled = true; b.style.opacity = '0.55';
+      if (parseInt(b.dataset.j, 10) === j) { b.style.opacity = '1'; b.style.borderColor = '#16a34a'; b.style.background = '#f0fdf4'; }
+    });
+    try {
+      await api(`/games/concours/${sid}/repondre`, { method: 'POST', body: { answer: j } });
+      setTimeout(() => routes.quiz(), 450);
+    } catch (e) { toast(e.message, 'err'); routes.quiz(); }
+  },
+  async quizPhoto(sid, decision) {
+    if (decision === 'refuse' && !confirm('Confirmer le refus ? La demande ne vous sera plus jamais renvoyée.')) return;
+    try { await api(`/games/concours/${sid}/photo`, { method: 'POST', body: { decision } }); toast('Votre choix a été enregistré ✓', 'ok'); routes.quiz(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async quizEnvoyer(sid) {
+    const inp = document.getElementById('qz-msg');
+    if (!inp || !inp.value.trim()) return;
+    try { await api(`/games/concours/${sid}/message`, { method: 'POST', body: { body: inp.value.trim() } }); routes.quiz(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
 };
 window.A = A; window.nav = nav; window.back = back; window.render = render; window.closeModal = closeModal; window.logout = logout; window.REQ = REQ;
 

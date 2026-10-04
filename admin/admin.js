@@ -658,18 +658,58 @@ views.games = async () => {
   const quiz = await api('/admin/quiz');
   const kdo = await api('/admin/kdo');
   const plays = await api('/admin/game-plays');
+  const sessions = await api('/admin/quiz-sessions');
+  const enCours = sessions.find(x => x.status === 'en_cours');
+  const stLbl = { brouillon: '<span class="pill">Brouillon</span>', en_cours: '<span class="pill warn">🔴 EN COURS</span>', terminee: '<span class="pill ok">Terminée</span>' };
   shell(`<h1>🎮 Quiz / Flip Fizz / Kdo</h1>
   <div class="panel">
     <h2 style="margin-top:0">Activation (visibles sur l'accueil uniquement si activés)</h2>
     <div class="frow">
       ${[['quiz_enabled', '🧠 Quiz'], ['flipfizz_enabled', '🎲 Flip Fizz'], ['kdo_enabled', '🎁 Kdo']].map(([k, lb]) =>
         `<button class="btn ${s[k] === '1' ? '' : 'sec'}" onclick="A.toggleSetting('${k}',${s[k] === '1' ? "'0'" : "'1'"})">${lb} : ${s[k] === '1' ? 'Activé ✅' : 'Désactivé'}</button>`).join('')}
+    </div>
+    <div class="frow" style="margin-top:10px;align-items:center">
+      <label style="margin:0"><b>👥 Qui peut jouer au quiz :</b></label>
+      <select onchange="A.toggleSetting('quiz_audience', this.value)">
+        ${[['tous', 'Tout le monde'], ['clients', 'Clients uniquement'], ['clients_pros', 'Clients et professionnels']].map(([v, lb]) =>
+          `<option value="${v}" ${(s.quiz_audience || 'tous') === v ? 'selected' : ''}>${lb}</option>`).join('')}
+      </select>
+      <span class="small muted">La désactivation totale se fait avec le bouton 🧠 Quiz ci-dessus.</span>
     </div></div>
-  <div class="panel"><h2 style="margin-top:0">Questions du quiz</h2>
-    <div class="frow">
-      <div style="flex:1"><label>Question</label><input id="qz-q" style="width:100%"></div>
-      <div><label>Options (séparées par ;)</label><input id="qz-opts" placeholder="Option A;Option B;Option C"></div>
-      <div><label>N° bonne réponse (1,2,3…)</label><input type="number" id="qz-ans" value="1" style="width:80px"></div>
+
+  <div class="panel"><h2 style="margin-top:0">🏆 Quiz concours (sessions animées)</h2>
+    <div class="small muted" style="margin-bottom:10px">Créez une session, lancez-la, puis arrêtez-la pour désigner les gagnants. Les questions sont tirées au hasard parmi les questions actives ci-dessous au moment du lancement.</div>
+    <div class="frow" style="align-items:flex-end;flex-wrap:wrap">
+      <div><label>Titre</label><input id="qs-title" placeholder="Quiz du samedi"></div>
+      <div><label>Nb questions</label><input type="number" id="qs-nbq" value="5" min="1" max="50" style="width:80px"></div>
+      <div><label>Temps / question</label><select id="qs-time">
+        ${[10, 15, 20, 30, 60].map(t => `<option value="${t}" ${t === 20 ? 'selected' : ''}>${t} s</option>`).join('')}
+        <option value="autre">Personnalisé…</option></select></div>
+      <div><label>Nb gagnants</label><input type="number" id="qs-nbw" value="1" min="1" max="100" style="width:80px"></div>
+      <div><label>Désignation</label><select id="qs-mode">
+        <option value="auto">Automatique (meilleurs scores)</option>
+        <option value="admin">Par l'administration (parmi les finalistes)</option></select></div>
+      <div><label style="display:flex;align-items:center;gap:6px;margin-top:18px"><input type="checkbox" id="qs-elim"> Élimination automatique</label></div>
+      <button class="btn" onclick="A.quizSessionAdd()">＋ Créer</button>
+    </div>
+    <table style="margin-top:10px"><tr><th>Titre</th><th>Statut</th><th>Réglages</th><th>Participants</th><th>Actions</th></tr>
+    ${sessions.map(x => `<tr><td><b>${esc(x.title)}</b><br><span class="small muted">${fmtD(x.created_at)}</span></td>
+      <td>${stLbl[x.status] || esc(x.status)}</td>
+      <td class="small">${x.nb_questions} questions • ${x.time_per_q}s/question<br>${x.elimination ? '⚠️ Élimination auto • ' : ''}${x.nb_winners} gagnant(s) • désignation ${x.winner_mode === 'auto' ? 'auto' : 'admin'}</td>
+      <td>${x.participants}${x.gagnants ? ` <span class="pill ok">🏆 ${x.gagnants}</span>` : ''}</td>
+      <td>
+        ${x.status === 'brouillon' ? `<button class="btn sm" onclick="A.quizLancer(${x.id})" ${enCours ? 'disabled title="Un quiz est déjà en cours"' : ''}>🚀 Lancer</button>
+          <button class="btn sm warn" onclick="A.quizSessionDel(${x.id})">🗑️</button>` : ''}
+        ${x.status === 'en_cours' ? `<button class="btn sm warn" onclick="A.quizArreter(${x.id})">⏹️ Arrêter</button>` : ''}
+        ${x.status !== 'brouillon' ? `<button class="btn sm sec" onclick="A.quizSessionDetail(${x.id})">📋 Détails</button>` : ''}
+      </td></tr>`).join('')}
+    ${!sessions.length ? '<tr><td colspan="5" class="muted">Aucune session. Créez votre premier quiz concours ci-dessus.</td></tr>' : ''}</table></div>
+
+  <div class="panel"><h2 style="margin-top:0">Questions du quiz (QCM — 4 réponses A, B, C, D)</h2>
+    <div class="frow" style="flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:1;min-width:220px"><label>Question</label><input id="qz-q" style="width:100%"></div>
+      ${['A', 'B', 'C', 'D'].map((L, i) => `<div><label>Réponse ${L}</label><input id="qz-opt${i}" style="width:130px"></div>`).join('')}
+      <div><label>Bonne réponse</label><select id="qz-ans">${['A', 'B', 'C', 'D'].map((L, i) => `<option value="${i}">${L}</option>`).join('')}</select></div>
       <button class="btn" onclick="A.addQuiz()">＋</button>
     </div>
     <table><tr><th>Question</th><th>Options</th><th>Réponse</th><th></th></tr>
@@ -1215,15 +1255,99 @@ const A = {
   async toggleSetting(k, v) { try { await api('/admin/settings', { method: 'PUT', body: { [k]: v } }); toast('Paramètre mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async addQuiz() {
     try {
+      const options = [0, 1, 2, 3].map(i => document.getElementById('qz-opt' + i).value.trim());
+      if (options.some(o => !o)) { toast('Remplissez les 4 réponses A, B, C et D.', 'err'); return; }
       await api('/admin/quiz', {
         method: 'POST', body: {
           question: document.getElementById('qz-q').value,
-          options: document.getElementById('qz-opts').value.split(';').map(s => s.trim()).filter(Boolean),
-          answer: (parseInt(document.getElementById('qz-ans').value, 10) || 1) - 1
+          options, answer: parseInt(document.getElementById('qz-ans').value, 10) || 0
         }
       });
       toast('Question ajoutée ✓', 'ok'); render();
     } catch (e) { toast(e.message, 'err'); }
+  },
+  async quizSessionAdd() {
+    try {
+      let time = document.getElementById('qs-time').value;
+      if (time === 'autre') {
+        time = prompt('Temps par question (en secondes, entre 5 et 600) :', '45');
+        if (time === null) return;
+      }
+      await api('/admin/quiz-sessions', {
+        method: 'POST', body: {
+          title: document.getElementById('qs-title').value,
+          nb_questions: document.getElementById('qs-nbq').value,
+          time_per_q: time,
+          nb_winners: document.getElementById('qs-nbw').value,
+          winner_mode: document.getElementById('qs-mode').value,
+          elimination: document.getElementById('qs-elim').checked
+        }
+      });
+      toast('Session créée ✓', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async quizLancer(id) {
+    if (!confirm('Lancer ce quiz maintenant ? Les questions seront figées et les joueurs pourront participer.')) return;
+    try { await api(`/admin/quiz-sessions/${id}/lancer`, { method: 'POST' }); toast('Quiz lancé 🚀', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async quizArreter(id) {
+    if (!confirm('Arrêter ce quiz ? Les participants encore en lice deviendront finalistes et les gagnants seront désignés (mode automatique) ou à désigner par vous.')) return;
+    try { await api(`/admin/quiz-sessions/${id}/arreter`, { method: 'POST' }); toast('Quiz arrêté ⏹️', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async quizSessionDel(id) {
+    if (!confirm('Supprimer ce brouillon ?')) return;
+    try { await api('/admin/quiz-sessions/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async quizSessionDetail(id) {
+    try {
+      const d = await api('/admin/quiz-sessions/' + id);
+      const pst = { en_lice: '<span class="pill">En lice</span>', elimine: '<span class="pill warn">❌ Éliminé</span>', finaliste: '<span class="pill">Finaliste</span>', gagnant: '<span class="pill ok">🏆 Gagnant</span>' };
+      const peutDesigner = d.status === 'terminee';
+      openModal(`<h3>📋 ${esc(d.title)} — ${d.status === 'en_cours' ? '🔴 en cours' : d.status === 'terminee' ? 'terminée' : 'brouillon'}</h3>
+      <div class="small muted">${d.nb_questions} questions • ${d.time_per_q}s/question • ${d.elimination ? 'élimination auto • ' : ''}${d.nb_winners} gagnant(s) • désignation ${d.winner_mode === 'auto' ? 'automatique' : 'par l\u2019administration'}</div>
+      <h4>Participants (${d.participants.length})</h4>
+      <div style="max-height:220px;overflow-y:auto">
+      <table><tr>${peutDesigner && d.winner_mode === 'admin' ? '<th></th>' : ''}<th>Nom</th><th>Statut</th><th>Score</th><th>Photo</th><th></th></tr>
+      ${d.participants.map(p => `<tr>
+        ${peutDesigner && d.winner_mode === 'admin' ? `<td>${['finaliste', 'gagnant'].includes(p.status) ? `<input type="checkbox" class="qz-win" value="${p.user_id}" ${p.status === 'gagnant' ? 'checked' : ''}>` : ''}</td>` : ''}
+        <td>${esc(p.name)}<br><span class="small muted">${esc(p.phone)} • ${esc(p.ville || '')}</span></td>
+        <td>${pst[p.status] || esc(p.status)}</td>
+        <td>${p.score} <span class="small muted">(${Math.round(p.total_ms / 1000)}s)</span></td>
+        <td class="small">${p.photo_consent === 'accepte' ? '✅ Accepté' : p.photo_consent === 'refuse' ? '❌ Refusé' : p.photo_asked ? '⏳ Demandé' : '—'}</td>
+        <td>${p.status === 'gagnant' ? `<button class="btn sm sec" onclick="A.quizMsg(${d.id},${p.user_id},'${esc(p.name).replace(/'/g, '')}')">💬</button>
+          ${!p.photo_consent && !p.photo_asked ? `<button class="btn sm sec" onclick="A.quizPhotoAsk(${d.id},${p.user_id})">📸</button>` : ''}` : ''}</td></tr>`).join('')}
+      ${!d.participants.length ? '<tr><td colspan="6" class="muted">Aucun participant.</td></tr>' : ''}</table></div>
+      ${peutDesigner && d.winner_mode === 'admin' ? `<button class="btn mt" onclick="A.quizDesigner(${d.id})">🏆 Désigner les gagnant(s) coché(s) (max ${d.nb_winners})</button>` : ''}
+      <h4>Questions et taux de réussite</h4>
+      <div style="max-height:160px;overflow-y:auto"><table><tr><th>Question</th><th>Bonne réponse</th><th>Réussite</th></tr>
+      ${d.questions.map(q => `<tr><td class="small">${esc(q.question)}</td><td class="small"><b>${'ABCD'[q.answer] || ''}</b> — ${esc(q.options[q.answer] || '')}</td>
+        <td class="small">${q.reponses ? q.bonnes + '/' + q.reponses : '—'}</td></tr>`).join('')}</table></div>
+      ${d.messages.length ? `<h4>💬 Messages des gagnants</h4>
+      <div style="max-height:160px;overflow-y:auto">${d.messages.map(m => `<div class="small" style="margin-bottom:4px">
+        <b>${m.from_admin ? 'Administration → ' + esc(m.name) : esc(m.name)}</b> <span class="muted">${fmtD(m.created_at)}</span><br>${esc(m.body)}</div>`).join('')}</div>` : ''}
+      <button class="btn sec mt" onclick="closeModal()">Fermer</button>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async quizDesigner(id) {
+    const ids = [...document.querySelectorAll('.qz-win:checked')].map(c => parseInt(c.value, 10));
+    if (!ids.length) { toast('Cochez au moins un finaliste.', 'err'); return; }
+    try {
+      await api(`/admin/quiz-sessions/${id}/gagnants`, { method: 'POST', body: { user_ids: ids } });
+      toast('Gagnant(s) désigné(s) 🏆 — ils ont été notifiés.', 'ok'); closeModal(); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async quizMsg(id, uid, name) {
+    const body = prompt(`Message pour ${name} :`);
+    if (!body || !body.trim()) return;
+    try { await api(`/admin/quiz-sessions/${id}/message`, { method: 'POST', body: { user_id: uid, body: body.trim() } }); toast('Message envoyé ✓', 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async quizPhotoAsk(id, uid) {
+    if (!confirm('Envoyer la demande de photo à ce gagnant ? Il pourra accepter ou refuser (un refus est définitif).')) return;
+    try { await api(`/admin/quiz-sessions/${id}/demander-photo`, { method: 'POST', body: { user_id: uid } }); toast('Demande envoyée 📸', 'ok'); A.quizSessionDetail(id); }
+    catch (e) { toast(e.message, 'err'); }
   },
   async delQuiz(id) { try { await api('/admin/quiz/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
   async addKdo() { try { await api('/admin/kdo', { method: 'POST', body: { code: document.getElementById('kdo-code').value, reward: document.getElementById('kdo-reward').value } }); toast('Code ajouté ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },

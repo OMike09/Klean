@@ -280,6 +280,57 @@ CREATE TABLE IF NOT EXISTS game_plays (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS quiz_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'brouillon',   -- brouillon | en_cours | terminee
+  nb_questions INTEGER NOT NULL DEFAULT 5,
+  time_per_q INTEGER NOT NULL DEFAULT 20,     -- secondes par question
+  elimination INTEGER NOT NULL DEFAULT 0,     -- 1 = élimination automatique progressive
+  nb_winners INTEGER NOT NULL DEFAULT 1,
+  winner_mode TEXT NOT NULL DEFAULT 'auto',   -- auto | admin
+  qids TEXT,                                  -- JSON des ids de questions figés au lancement
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  started_at TEXT, ended_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS quiz_participants (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES quiz_sessions(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'en_lice',     -- en_lice | elimine | finaliste | gagnant
+  score INTEGER NOT NULL DEFAULT 0,
+  total_ms INTEGER NOT NULL DEFAULT 0,
+  current_q INTEGER NOT NULL DEFAULT 0,
+  q_started_at INTEGER,                       -- epoch ms du début de la question en cours
+  photo_asked INTEGER NOT NULL DEFAULT 0,
+  photo_consent TEXT,                         -- NULL | accepte | refuse
+  photo_consent_at TEXT,
+  finished_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(session_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS quiz_answers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES quiz_sessions(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  question_id INTEGER NOT NULL REFERENCES quiz_questions(id),
+  answer INTEGER NOT NULL,                    -- 0..3 ou -1 (temps écoulé)
+  correct INTEGER NOT NULL DEFAULT 0,
+  ms INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS quiz_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES quiz_sessions(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  from_admin INTEGER NOT NULL DEFAULT 0,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS kdo_codes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   code TEXT NOT NULL UNIQUE, reward TEXT NOT NULL,
@@ -832,6 +883,8 @@ ensureColumn('pro_profiles', 'company_rccm', 'TEXT');   // registre (RCCM) ou é
 ensureColumn('pro_profiles', 'company_size', 'TEXT');   // taille de l'équipe
 // Conditions de validation activables/désactivables par l'administration
 if (getSetting('pro_doc_particulier') === null) setSetting('pro_doc_particulier', '0');
+// Quiz concours : public autorisé (tous | clients | clients_pros)
+if (getSetting('quiz_audience') === null) setSetting('quiz_audience', 'tous');
 if (getSetting('pro_doc_entreprise') === null) setSetting('pro_doc_entreprise', '1');
 
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
