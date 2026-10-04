@@ -445,28 +445,26 @@ function villeOk(s, ville) {
   const cities = typeof s.cities === 'string' ? JSON.parse(s.cities || '[]') : (s.cities || []);
   return !cities.length || cities.some(c => normalize(c) === normalize(ville));
 }
-// Catalogue complet : MÉTIERS → SOUS-CATÉGORIES → SERVICES → TÂCHES
+// Catalogue complet : CATÉGORIES → SERVICES (avec leurs tâches)
 app.get('/api/catalogue', (req, res) => {
   const cats = db.prepare('SELECT * FROM service_categories WHERE active=1 ORDER BY sort,id').all();
-  const subs = db.prepare('SELECT * FROM sous_categories WHERE active=1 ORDER BY sort,id').all();
   const svcs = db.prepare('SELECT * FROM services WHERE active=1 ORDER BY sort,id').all().filter(s => villeOk(s, req.query.ville));
   const tas = db.prepare('SELECT * FROM taches WHERE active=1 ORDER BY sort,id').all();
   res.json(cats.map(c => ({
     id: c.id, name: c.name, icon: c.icon,
-    sous_categories: subs.filter(sc => sc.metier_id === c.id).map(sc => ({
-      id: sc.id, name: sc.name,
-      services: svcs.filter(s => s.sub_id === sc.id).map(s => ({
-        id: s.id, name: s.name, popular: s.popular, seasonal: s.seasonal,
-        taches: tas.filter(t => t.service_id === s.id).map(t => ({ id: t.id, name: t.name }))
-      }))
-    })).filter(sc => sc.services.length)
-  })).filter(c => c.sous_categories.length));
+    services: svcs.filter(s => s.category_id === c.id).map(s => ({
+      id: s.id, name: s.name, popular: s.popular, seasonal: s.seasonal,
+      taches: tas.filter(t => t.service_id === s.id).map(t => ({ id: t.id, name: t.name }))
+    }))
+  })).filter(c => c.services.length));
 });
-// Services populaires (accueil)
+// Services populaires (accueil) — sélection de la même liste de services,
+// dans l'ordre choisi par l'administration (popular_sort)
 app.get('/api/services/populaires', (req, res) => {
   const svcs = db.prepare(`SELECT s.id, s.name, s.cities, c.icon, c.name cat FROM services s
     JOIN service_categories c ON c.id=s.category_id
-    WHERE s.active=1 AND c.active=1 AND s.popular=1 ORDER BY s.sort,s.id LIMIT 12`).all()
+    WHERE s.active=1 AND c.active=1 AND s.popular=1
+    ORDER BY CASE WHEN s.popular_sort IS NULL THEN 1 ELSE 0 END, s.popular_sort, s.sort, s.id LIMIT 12`).all()
     .filter(s => villeOk(s, req.query.ville)).map(({ cities, ...s }) => s);
   res.json(svcs);
 });
@@ -1471,7 +1469,7 @@ A.get('/search', (req, res) => {
   }
   if (hasPerm(req.user, 'catalogue')) {
     const mets = db.prepare('SELECT id, name, icon FROM service_categories WHERE name LIKE ? LIMIT 6').all(like);
-    add('metier', '🧰 Métiers', mets.map(c => ({ id: c.id, label: (c.icon || '') + ' ' + c.name, sub: 'Catégorie de métier' })));
+    add('metier', '🗂️ Catégories de services', mets.map(c => ({ id: c.id, label: (c.icon || '') + ' ' + c.name, sub: 'Catégorie' })));
     const svcs = db.prepare(`SELECT s.id, s.name, s.active, c.name cat, c.icon FROM services s JOIN service_categories c ON c.id=s.category_id
       WHERE s.name LIKE ? OR s.keywords LIKE ? LIMIT 8`).all(like, like);
     add('service', '🛠 Services', svcs.map(s => ({ id: s.id, label: (s.icon || '') + ' ' + s.name, sub: s.cat + (s.active ? '' : ' • désactivé') })));
@@ -1624,6 +1622,27 @@ A.put('/services/:id', (req, res) => {
     .run(req.body.name || null, req.body.keywords ?? null, req.body.active ?? null, req.body.sort ?? null,
       req.body.category_id || null, req.body.sub_id || null, req.body.popular ?? null, req.body.seasonal ?? null,
       req.body.cities !== undefined ? JSON.stringify(req.body.cities) : null, req.params.id);
+  // Cohérence de l'ordre des populaires : ajout → en fin de liste ; retrait → ordre effacé
+  if (req.body.popular === 1) {
+    const s = db.prepare('SELECT popular_sort FROM services WHERE id=?').get(req.params.id);
+    if (s && s.popular_sort == null) {
+      const max = db.prepare('SELECT COALESCE(MAX(popular_sort),0) m FROM services WHERE popular=1').get().m;
+      db.prepare('UPDATE services SET popular_sort=? WHERE id=?').run(max + 1, req.params.id);
+    }
+  } else if (req.body.popular === 0) {
+    db.prepare('UPDATE services SET popular_sort=NULL WHERE id=?').run(req.params.id);
+  }
+  res.json({ ok: true });
+});
+// Ordre des services populaires (affichage de l'accueil) — liste complète d'ids dans l'ordre voulu
+A.put('/services-populaires/ordre', (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Boolean) : null;
+  if (!ids) return res.status(400).json({ error: 'Liste d\u2019ids requise.' });
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE services SET popular=0, popular_sort=NULL WHERE popular=1').run();
+    ids.forEach((id, i) => db.prepare('UPDATE services SET popular=1, popular_sort=? WHERE id=?').run(i + 1, id));
+  });
+  tx();
   res.json({ ok: true });
 });
 A.delete('/services/:id', (req, res) => {

@@ -277,6 +277,15 @@ routes.register = async () => {
   };
 };
 
+/* Choix des services d'un professionnel : mêmes catégories et services que
+   partout ailleurs. Un professionnel peut sélectionner plusieurs catégories. */
+function proServiceChips(selectedIds) {
+  const sel = selectedIds || [];
+  return SERVICES.filter(c => c.services.length).map(c => `
+    <div class="small" style="width:100%;font-weight:700;margin:8px 0 2px">${esc(c.icon || '🔹')} ${esc(c.name)}</div>
+    ${c.services.map(s => `<button type="button" class="chip ${sel.includes(s.id) ? 'on' : ''}" data-sid="${s.id}" onclick="this.classList.toggle('on')">${esc(s.name)}</button>`).join('')}`).join('');
+}
+
 /* ---------- Accueil ---------- */
 routes.home = async () => {
   if (!SERVICES) try { SERVICES = await api('/services'); } catch (e) { $app.innerHTML = header('Accueil', { brand: true }) + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home'); return; }
@@ -303,10 +312,10 @@ routes.home = async () => {
     <div class="svc-grid">
       ${POPULAIRES.map(s => `<div class="svc-card" onclick="nav('#/request/${s.id}')"><span class="ic">${esc(s.icon || '🔹')}</span><span class="nm">${esc(s.name)}</span></div>`).join('')}
     </div>` : ''}
-    <div class="sec-title">Métiers</div>
+    <div class="sec-title">Tous les services</div>
     <div class="svc-grid">
       ${cats.slice(0, 7).map(c => `<div class="svc-card" onclick="A.openCat(${c.id})"><span class="ic">${esc(c.icon || '🔹')}</span><span class="nm">${esc(c.name)}</span></div>`).join('')}
-      <div class="svc-card" onclick="nav('#/services')"><span class="ic">➕</span><span class="nm">Tous les métiers</span></div>
+      <div class="svc-card" onclick="nav('#/services')"><span class="ic">📋</span><span class="nm">Voir tout</span></div>
     </div>
     <button class="btn sec mt" onclick="nav('#/services')">Voir tous les services</button>
     ${(GAMES.quiz || GAMES.flipfizz || GAMES.kdo) ? `
@@ -340,7 +349,7 @@ routes.search = async (params) => {
   updateBadges();
 };
 
-/* ---------- Tous les services (catalogue complet par métier) ---------- */
+/* ---------- Tous les services (liste complète : CATÉGORIE → SERVICES) ---------- */
 routes.services = async (params) => {
   try { if (!CATALOGUE) CATALOGUE = await api('/catalogue'); }
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('search'); return; }
@@ -350,27 +359,25 @@ routes.services = async (params) => {
 
   let listHtml;
   if (q) {
-    // Recherche : liste à plat des services correspondants (nom, sous-catégorie, tâches, métier)
+    // Recherche : liste à plat des services correspondants (nom, catégorie, tâches)
     const out = [];
-    CATALOGUE.forEach(c => c.sous_categories.forEach(sc => sc.services.forEach(s => {
-      if (hit(s.name) || hit(sc.name) || hit(c.name) || s.taches.some(t => hit(t.name)))
-        out.push({ ...s, icon: c.icon, path: `${c.name} › ${sc.name}` });
-    })));
+    CATALOGUE.forEach(c => c.services.forEach(s => {
+      if (hit(s.name) || hit(c.name) || s.taches.some(t => hit(t.name)))
+        out.push({ ...s, icon: c.icon, path: c.name });
+    }));
     listHtml = out.length
       ? out.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')"><span class="mi-ic">${esc(s.icon || '🔹')}</span><div><div>${esc(s.name)}</div><div class="muted small">${esc(s.path)}</div></div><span class="mi-arr">›</span></div>`).join('')
       : emptyState('🔍', 'Aucun service trouvé pour « ' + esc(q) + ' ».');
   } else {
-    // Accordéon par métier
+    // Accordéon : une catégorie → ses services
     listHtml = CATALOGUE.map(c => `
       <div class="menu-item" onclick="A.catOpen(${c.id})" style="font-weight:700">
         <span class="mi-ic">${esc(c.icon || '🔹')}</span>${esc(c.name)}
         <span class="mi-arr">${openId === c.id ? '▾' : '›'}</span></div>
-      ${openId === c.id ? c.sous_categories.map(sc => `
-        <div class="sec-title" style="margin-left:10px">${esc(sc.name)}</div>
-        ${sc.services.map(s => `<div class="menu-item" style="margin-left:10px" onclick="nav('#/request/${s.id}')">
+      ${openId === c.id ? c.services.map(s => `<div class="menu-item" style="margin-left:10px" onclick="nav('#/request/${s.id}')">
           <span class="mi-ic">${esc(c.icon || '🔹')}</span><div><div>${esc(s.name)}</div>
           ${s.taches.length ? `<div class="muted small">${s.taches.slice(0, 3).map(t => esc(t.name)).join(' · ')}${s.taches.length > 3 ? '…' : ''}</div>` : ''}</div>
-          <span class="mi-arr">›</span></div>`).join('')}`).join('') : ''}`).join('');
+          <span class="mi-arr">›</span></div>`).join('') : ''}`).join('');
   }
 
   $app.innerHTML = `
@@ -809,7 +816,7 @@ routes.pro = async () => {
       <div class="field"><label>Votre profession <span class="req">*</span></label><input type="text" id="p-prof" placeholder="Ex : Plombier, Électricien, Agent d'entretien…" value="${esc(USER.pro ? USER.pro.profession : '')}"></div>
       <div class="field"><label>Services que vous proposez <span class="req">*</span></label>
         <div class="choices" id="p-services">
-          ${SERVICES.flatMap(c => c.services).map(s => `<button type="button" class="chip ${USER.pro && USER.pro.services.includes(s.id) ? 'on' : ''}" data-sid="${s.id}" onclick="this.classList.toggle('on')">${esc(s.name)}</button>`).join('')}
+          ${proServiceChips(USER.pro ? USER.pro.services : [])}
         </div></div>
       <div class="field"><label>Zone d'intervention <span class="req">*</span></label><input type="text" id="p-zone" placeholder="Ex : Bouaké et environs" value="${esc(USER.pro ? USER.pro.zone : '')}"></div>
       <div class="field"><label>Expérience</label><input type="text" id="p-exp" placeholder="Ex : 5 ans d'expérience" value="${esc(USER.pro ? USER.pro.experience : '')}"></div>
@@ -888,7 +895,7 @@ routes['pro-edit'] = async () => {
   <div class="content"><div class="card">
     <div class="field"><label>Profession</label><input type="text" id="p-prof" value="${esc(p.profession)}"></div>
     <div class="field"><label>Mes services</label><div class="choices" id="p-services">
-      ${SERVICES.flatMap(c => c.services).map(s => `<button type="button" class="chip ${p.services.includes(s.id) ? 'on' : ''}" data-sid="${s.id}" onclick="this.classList.toggle('on')">${esc(s.name)}</button>`).join('')}</div></div>
+      ${proServiceChips(p.services)}</div></div>
     <div class="field"><label>Zone d'intervention</label><input type="text" id="p-zone" value="${esc(p.zone)}"></div>
     <div class="field"><label>Expérience</label><input type="text" id="p-exp" value="${esc(p.experience || '')}"></div>
     <div class="field"><label>Description</label><textarea id="p-desc">${esc(p.description || '')}</textarea></div>
@@ -1357,7 +1364,7 @@ const A = {
         ? `<div class="sec-title">Services correspondants</div>` + r.results.map(s =>
           `<div class="menu-item" onclick="${s.tache_suggeree ? `sessionStorage.setItem('ks_sug_tache','${esc(s.tache_suggeree).replace(/'/g, "\\'")}');` : ''}nav('#/request/${s.id}')">
             <span class="mi-ic">${esc(s.icon || '🔹')}</span>
-            <div><div>${esc(s.name)}</div><div class="muted small">${esc(s.category)}${s.sous_categorie ? ' › ' + esc(s.sous_categorie) : ''}${s.tache_suggeree ? ` — <b>${esc(s.tache_suggeree)}</b>` : ''}</div></div>
+            <div><div>${esc(s.name)}</div><div class="muted small">${esc(s.category)}${s.tache_suggeree ? ` — <b>${esc(s.tache_suggeree)}</b>` : ''}</div></div>
             <span class="mi-arr">›</span></div>`).join('')
         : emptyState('🔍', 'Aucun service trouvé pour « ' + q + ' ».') + `<button class="btn sec" onclick="nav('#/services')">Voir tous les services</button>`;
     } catch (e) { zone.innerHTML = emptyState('📶', e.message); }

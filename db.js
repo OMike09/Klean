@@ -737,4 +737,59 @@ seedTaxonomie();
   });
 })();
 
+// ============================================================
+// RÉORGANISATION DES SERVICES (v3) — one-shot
+// 1. Un même service ne doit exister qu'une seule fois (dédoublonnage par
+//    nom, en conservant le service le plus utilisé ; missions, questions,
+//    tâches et profils professionnels sont re-rattachés, rien n'est perdu).
+// 2. Ordre d'affichage des services populaires (popular_sort), géré depuis
+//    le tableau de bord.
+// ============================================================
+ensureColumn('services', 'popular_sort', 'INTEGER');
+(function reorganisationServicesV3() {
+  if (getSetting('services_v3')) return;
+  const tx = db.transaction(() => {
+    // --- 1. Dédoublonnage par nom normalisé ---
+    const groups = {};
+    db.prepare('SELECT id, name FROM services ORDER BY id').all()
+      .forEach(s => { const k = normName(s.name); (groups[k] = groups[k] || []).push(s); });
+    let fusions = 0;
+    Object.values(groups).filter(g => g.length > 1).forEach(g => {
+      // On garde le service le plus utilisé (missions), sinon le plus ancien
+      const nMiss = id => db.prepare('SELECT COUNT(*) n FROM missions WHERE service_id=?').get(id).n;
+      g.sort((a, b) => nMiss(b.id) - nMiss(a.id) || a.id - b.id);
+      const keep = g[0];
+      g.slice(1).forEach(dup => {
+        db.prepare('UPDATE missions SET service_id=? WHERE service_id=?').run(keep.id, dup.id);
+        db.prepare('UPDATE service_questions SET service_id=? WHERE service_id=?').run(keep.id, dup.id);
+        // Tâches : on déplace celles qui n'existent pas déjà sous le service conservé
+        const keptTaches = new Set(db.prepare('SELECT name FROM taches WHERE service_id=?').all(keep.id).map(t => normName(t.name)));
+        db.prepare('SELECT id, name FROM taches WHERE service_id=?').all(dup.id).forEach(t => {
+          if (keptTaches.has(normName(t.name))) db.prepare('DELETE FROM taches WHERE id=?').run(t.id);
+          else { db.prepare('UPDATE taches SET service_id=? WHERE id=?').run(keep.id, t.id); keptTaches.add(normName(t.name)); }
+        });
+        // Profils professionnels : remplacement de l'id du doublon par celui conservé
+        db.prepare('SELECT user_id, services FROM pro_profiles').all().forEach(p => {
+          let ids; try { ids = JSON.parse(p.services || '[]'); } catch { ids = []; }
+          if (ids.includes(dup.id)) {
+            ids = [...new Set(ids.map(x => x === dup.id ? keep.id : x))];
+            db.prepare('UPDATE pro_profiles SET services=? WHERE user_id=?').run(JSON.stringify(ids), p.user_id);
+          }
+        });
+        // Le doublon hérite du statut populaire s'il l'avait
+        const d = db.prepare('SELECT popular FROM services WHERE id=?').get(dup.id);
+        if (d && d.popular) db.prepare('UPDATE services SET popular=1 WHERE id=?').run(keep.id);
+        db.prepare('DELETE FROM services WHERE id=?').run(dup.id);
+        fusions++;
+      });
+    });
+    // --- 2. Ordre initial des services populaires ---
+    db.prepare('SELECT id FROM services WHERE popular=1 ORDER BY sort, id').all()
+      .forEach((s, i) => db.prepare('UPDATE services SET popular_sort=? WHERE id=?').run(i + 1, s.id));
+    if (fusions) console.log(`🧹 Réorganisation des services : ${fusions} doublon(s) fusionné(s) sans perte de données.`);
+  });
+  tx();
+  setSetting('services_v3', '1');
+})();
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

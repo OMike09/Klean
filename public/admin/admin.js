@@ -68,7 +68,7 @@ function renderLogin() {
 const MENU = [
   ['TABLEAU DE BORD', [['dashboard', '📊 Vue d\u2019ensemble', null, null]]],
   ['UTILISATEURS', [['users', '👥 Tous les comptes', null, 'comptes'], ['pros', '✅ Validations pro', 'pros_pending', 'pros']]],
-  ['SERVICES', [['catalog', '📚 Métiers & catalogue', null, 'catalogue'], ['questions', '❓ Questions dynamiques', null, 'questions']]],
+  ['SERVICES', [['catalog', '🗂️ Services & catégories', null, 'catalogue'], ['questions', '❓ Questions dynamiques', null, 'questions']]],
   ['MISSIONS', [['missions', '🧰 Demandes & missions', null, 'missions'], ['payments', '💰 Paiements & commissions', null, 'paiements']]],
   ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['broadcast', '📨 Message système', null, 'communication']]],
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
@@ -292,6 +292,7 @@ let CATD = null; // données du catalogue (partagées avec les actions A.*)
 views.catalog = async () => {
   const tab = sessionStorage.getItem('adm_cat_tab') || 'cat';
   if (tab === 'villes') return views._villes();
+  if (tab === 'pop') return views._populaires();
   const d = CATD = await api('/admin/catalog');
   const q = (sessionStorage.getItem('adm_cat_q') || '').toLowerCase();
   let sel = parseInt(sessionStorage.getItem('adm_cat_sel') || 0, 10);
@@ -314,56 +315,47 @@ views.catalog = async () => {
     const hit = x => x.toLowerCase().includes(q);
     const results = d.services.filter(s => {
       const cat = d.categories.find(c => c.id === s.category_id) || {};
-      const sub = d.sous_categories.find(x => x.id === s.sub_id) || {};
-      return hit(s.name) || hit(s.keywords || '') || hit(cat.name || '') || hit(sub.name || '') ||
+      return hit(s.name) || hit(s.keywords || '') || hit(cat.name || '') ||
         d.taches.some(t => t.service_id === s.id && hit(t.name));
     });
     body = `<div class="panel"><h2 style="margin-top:0">🔎 ${results.length} service(s) trouvé(s)</h2>
       <table><tr><th>Service</th><th>Mots-clés</th><th>Tâches</th><th>État</th><th>Actions</th></tr>
       ${results.map(s => {
         const cat = d.categories.find(c => c.id === s.category_id) || {};
-        const sub = d.sous_categories.find(x => x.id === s.sub_id) || {};
-        return svcRow(s, `${cat.icon || ''} ${cat.name || ''} › ${sub.name || ''}`);
+        return svcRow(s, `${cat.icon || ''} ${cat.name || ''}`);
       }).join('')}</table></div>`;
   } else {
     const c = d.categories.find(x => x.id === sel);
-    const subs = c ? d.sous_categories.filter(x => x.metier_id === c.id) : [];
     body = !c ? '' : `<div class="panel">
-      <h2 style="margin-top:0">${esc(c.icon || '')} ${esc(c.name)} ${c.active ? '' : '<span class="pill off">Inactif</span>'}</h2>
+      <h2 style="margin-top:0">${esc(c.icon || '')} ${esc(c.name)} ${c.active ? '' : '<span class="pill off">Inactive</span>'}</h2>
       <div class="frow">
         <button class="btn sm sec" onclick="A.metForm(${c.id})">✏️ Renommer / icône</button>
-        <button class="btn sm ${c.active ? 'warn' : ''}" onclick="A.toggleCat(${c.id},${c.active ? 0 : 1})">${c.active ? 'Désactiver le métier' : 'Activer le métier'}</button>
+        <button class="btn sm ${c.active ? 'warn' : ''}" onclick="A.toggleCat(${c.id},${c.active ? 0 : 1})">${c.active ? 'Désactiver la catégorie' : 'Activer la catégorie'}</button>
         <button class="btn sm warn" onclick="A.metDel(${c.id})">🗑️ Supprimer</button>
         <span style="flex:1"></span>
-        <div><label>＋ Nouvelle sous-catégorie</label><input id="sub-name" placeholder="Ex : Installation"></div>
-        <button class="btn" onclick="A.subAdd(${c.id})">Ajouter</button>
+        <button class="btn" onclick="A.svcForm(0,${c.id})">＋ Nouveau service</button>
       </div>
-      ${subs.map(sc => `
-        <h2>${esc(sc.name)} ${sc.active ? '' : '<span class="pill off">Inactive</span>'}
-          <button class="btn sm sec" onclick="A.subForm(${sc.id})">✏️</button>
-          <button class="btn sm sec" onclick="A.subToggle(${sc.id},${sc.active ? 0 : 1})">${sc.active ? 'Désactiver' : 'Activer'}</button>
-          <button class="btn sm warn" onclick="A.subDel(${sc.id})">🗑️</button>
-          <button class="btn sm" onclick="A.svcForm(0,${c.id},${sc.id})">＋ Service</button></h2>
-        <table><tr><th>Service</th><th>Mots-clés</th><th>Tâches</th><th>État</th><th>Actions</th></tr>
-        ${d.services.filter(s => s.sub_id === sc.id).map(s => svcRow(s, '')).join('') || '<tr><td colspan="5" class="muted small">Aucun service — ajoutez-en un.</td></tr>'}
-        </table>`).join('') || '<p class="muted">Aucune sous-catégorie. Créez-en une ci-dessus, puis ajoutez des services dedans.</p>'}
+      <table><tr><th>Service</th><th>Mots-clés</th><th>Tâches</th><th>État</th><th>Actions</th></tr>
+      ${d.services.filter(s => s.category_id === c.id).map(s => svcRow(s, '')).join('') || '<tr><td colspan="5" class="muted small">Aucun service — ajoutez-en un.</td></tr>'}
+      </table>
     </div>`;
   }
 
-  shell(`<h1>📚 Métiers & catalogue</h1>
+  shell(`<h1>🗂️ Services & catégories</h1>
   <div class="tabs">
     <button class="on">🗂️ Catalogue</button>
+    <button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Services populaires</button>
     <button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes (${'villes' in STATS ? STATS.villes : '…'})</button>
   </div>
   <div class="frow">
-    <div style="flex:1;min-width:220px"><label>🔎 Rechercher dans le catalogue (métier, service, tâche, mot-clé)</label>
+    <div style="flex:1;min-width:220px"><label>🔎 Rechercher dans le catalogue (catégorie, service, tâche, mot-clé)</label>
       <input id="cat-q" style="width:100%" value="${esc(sessionStorage.getItem('adm_cat_q') || '')}" placeholder="Ex : fuite, tresses, climatiseur…"
         oninput="sessionStorage.setItem('adm_cat_q',this.value)" onkeydown="if(event.key==='Enter')render()">
     </div>
     <button class="btn sec" onclick="render()">Rechercher</button>
     ${q ? `<button class="btn sec" onclick="sessionStorage.setItem('adm_cat_q','');render()">✕ Effacer</button>` : ''}
     <span style="flex:1"></span>
-    <div><label>＋ Nouveau métier</label><input id="c-name" placeholder="Nom du métier"></div>
+    <div><label>＋ Nouvelle catégorie</label><input id="c-name" placeholder="Nom de la catégorie"></div>
     <div><label>Icône</label><input id="c-icon" style="width:64px" placeholder="🔹"></div>
     <button class="btn" onclick="A.addCat()">Créer</button>
   </div>
@@ -378,14 +370,53 @@ views.catalog = async () => {
   if (q && qi) { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); }
 };
 
+/* ---------- Services populaires (sélection et ordre de l'accueil) ---------- */
+views._populaires = async () => {
+  const d = CATD = await api('/admin/catalog');
+  const pops = d.services.filter(s => s.popular)
+    .sort((a, b) => (a.popular_sort ?? 999) - (b.popular_sort ?? 999) || a.sort - b.sort || a.id - b.id);
+  const catOf = s => d.categories.find(c => c.id === s.category_id) || {};
+  const options = d.categories.map(c => {
+    const svcs = d.services.filter(s => s.category_id === c.id && !s.popular && s.active);
+    return svcs.length ? `<optgroup label="${esc((c.icon || '') + ' ' + c.name)}">${svcs.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup>` : '';
+  }).join('');
+  shell(`<h1>🗂️ Services & catégories</h1>
+  <div class="tabs">
+    <button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button>
+    <button class="on">⭐ Services populaires</button>
+    <button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes (${'villes' in STATS ? STATS.villes : '…'})</button>
+  </div>
+  <div class="panel">
+    <p class="small muted">Les services populaires apparaissent en haut de l'accueil de l'application, dans l'ordre ci-dessous.
+    Ce sont les mêmes services que dans le catalogue — une sélection, jamais des doublons. Tout changement est visible immédiatement sur l'accueil.</p>
+    <div class="frow">
+      <div style="min-width:280px"><label>＋ Ajouter un service aux populaires</label>
+        <select id="pop-add" style="width:100%">${options || '<option value="">(tous les services actifs sont déjà populaires)</option>'}</select></div>
+      <button class="btn" onclick="A.popAdd()">Ajouter</button>
+    </div>
+    <table><tr><th style="width:52px">Ordre</th><th>Service</th><th>Catégorie</th><th>État</th><th>Actions</th></tr>
+    ${pops.map((s, i) => { const c = catOf(s); return `<tr>
+      <td><b>${i + 1}</b></td>
+      <td><b>${esc(s.name)}</b></td>
+      <td>${esc((c.icon || '') + ' ' + (c.name || ''))}</td>
+      <td>${s.active ? '<span class="pill ok">Actif</span>' : '<span class="pill off">Inactif</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm sec" title="Monter" ${i === 0 ? 'disabled' : ''} onclick="A.popMove(${s.id},-1)">↑</button>
+        <button class="btn sm sec" title="Descendre" ${i === pops.length - 1 ? 'disabled' : ''} onclick="A.popMove(${s.id},1)">↓</button>
+        <button class="btn sm warn" onclick="A.popRemove(${s.id})">✕ Retirer</button></td></tr>`; }).join('') || '<tr><td colspan="5" class="muted small">Aucun service populaire — ajoutez-en un ci-dessus.</td></tr>'}
+    </table>
+  </div>`);
+};
+
 /* ---------- Villes ---------- */
 views._villes = async () => {
   const list = await api('/admin/villes');
   const q = (sessionStorage.getItem('adm_v_q') || '').toLowerCase();
   const show = q ? list.filter(v => v.name.toLowerCase().includes(q)) : list;
-  shell(`<h1>📚 Métiers & catalogue</h1>
+  shell(`<h1>🗂️ Services & catégories</h1>
   <div class="tabs">
     <button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button>
+    <button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Services populaires</button>
     <button class="on">🏙️ Villes (${list.length})</button>
   </div>
   <div class="frow">
@@ -814,14 +845,14 @@ const A = {
 
   async addCat() {
     const name = document.getElementById('c-name').value.trim();
-    if (!name) return toast('Indiquez le nom du métier.', 'err');
+    if (!name) return toast('Indiquez le nom de la catégorie.', 'err');
     try {
       const r = await api('/admin/categories', { method: 'POST', body: { name, icon: document.getElementById('c-icon').value } });
       sessionStorage.setItem('adm_cat_sel', r.id); sessionStorage.setItem('adm_cat_q', '');
-      toast('Métier créé ✓', 'ok'); render();
+      toast('Catégorie créée ✓', 'ok'); render();
     } catch (e) { toast(e.message, 'err'); }
   },
-  async toggleCat(id, v) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { active: v } }); toast(v ? 'Métier activé ✓' : 'Métier désactivé (invisible dans l\u2019application).', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async toggleCat(id, v) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { active: v } }); toast(v ? 'Catégorie activée ✓' : 'Catégorie désactivée (invisible dans l\u2019application).', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   metForm(id) {
     const c = CATD.categories.find(x => x.id === id);
     openModal(`<h3>Modifier le métier</h3>
@@ -829,10 +860,10 @@ const A = {
       <label class="small muted">Icône (émoji)</label><input id="em-icon" style="width:90px;margin-bottom:12px" value="${esc(c.icon || '')}">
       <div><button class="btn" onclick="A._metSave(${id})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
   },
-  async _metSave(id) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { name: document.getElementById('em-name').value, icon: document.getElementById('em-icon').value } }); closeModal(); toast('Métier modifié ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async _metSave(id) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { name: document.getElementById('em-name').value, icon: document.getElementById('em-icon').value } }); closeModal(); toast('Catégorie modifiée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async metDel(id) {
-    if (!confirm('Supprimer ce métier, ses sous-catégories, services et tâches ?\n(Refusé automatiquement si des missions l\u2019utilisent — préférez « Désactiver ».)')) return;
-    try { await api('/admin/categories/' + id, { method: 'DELETE' }); toast('Métier supprimé.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+    if (!confirm('Supprimer cette catégorie, ses services et leurs tâches ?\n(Refusé automatiquement si des missions l\u2019utilisent — préférez « Désactiver ».)')) return;
+    try { await api('/admin/categories/' + id, { method: 'DELETE' }); toast('Catégorie supprimée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
   },
   async metMove(id, i, down) {
     const list = CATD.categories; const j = down ? i + 1 : i - 1;
@@ -847,35 +878,26 @@ const A = {
     } catch (e) { toast(e.message, 'err'); }
   },
 
-  async subAdd(metierId) {
-    const name = document.getElementById('sub-name').value.trim();
-    if (!name) return toast('Indiquez le nom de la sous-catégorie.', 'err');
-    try { await api('/admin/sous-categories', { method: 'POST', body: { metier_id: metierId, name } }); toast('Sous-catégorie créée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  // Ordre et sélection des services populaires (accueil)
+  _popIds() {
+    return CATD.services.filter(s => s.popular)
+      .sort((a, b) => (a.popular_sort ?? 999) - (b.popular_sort ?? 999) || a.sort - b.sort || a.id - b.id)
+      .map(s => s.id);
   },
-  subForm(id) {
-    const sc = CATD.sous_categories.find(x => x.id === id);
-    openModal(`<h3>Modifier la sous-catégorie</h3>
-      <label class="small muted">Nom</label><input id="esb-name" style="width:100%;margin-bottom:12px" value="${esc(sc.name)}">
-      <div><button class="btn" onclick="A._subSave(${id})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
-  },
-  async _subSave(id) { try { await api('/admin/sous-categories/' + id, { method: 'PUT', body: { name: document.getElementById('esb-name').value } }); closeModal(); toast('Modifiée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
-  async subToggle(id, v) { try { await api('/admin/sous-categories/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
-  async subDel(id) {
-    if (!confirm('Supprimer cette sous-catégorie ? (Refusé si des services y sont rattachés.)')) return;
-    try { await api('/admin/sous-categories/' + id, { method: 'DELETE' }); toast('Supprimée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
-  },
+  async _popSave(ids) { try { await api('/admin/services-populaires/ordre', { method: 'PUT', body: { ids } }); toast('Services populaires mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  popMove(id, dir) { const ids = A._popIds(); const i = ids.indexOf(id), j = i + dir; if (i < 0 || j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; A._popSave(ids); },
+  popRemove(id) { A._popSave(A._popIds().filter(x => x !== id)); },
+  popAdd() { const v = parseInt((document.getElementById('pop-add') || {}).value, 10); if (!v) return toast('Choisissez un service.', 'err'); const ids = A._popIds(); if (!ids.includes(v)) ids.push(v); A._popSave(ids); },
 
   // Formulaire service complet (création si id=0, sinon modification)
-  svcForm(id, catId, subId) {
-    const s = id ? CATD.services.find(x => x.id === id) : { name: '', keywords: '', category_id: catId, sub_id: subId, popular: 0, seasonal: 0, cities: [] };
-    const subsOf = cid => CATD.sous_categories.filter(x => x.metier_id === cid);
+  svcForm(id, catId) {
+    const s = id ? CATD.services.find(x => x.id === id) : { name: '', keywords: '', category_id: catId, popular: 0, seasonal: 0, cities: [] };
     openModal(`<h3>${id ? 'Modifier le service' : 'Nouveau service'}</h3>
       <label class="small muted">Nom du service</label><input id="es-name" style="width:100%;margin-bottom:10px" value="${esc(s.name)}">
       <label class="small muted">Mots-clés pour la recherche intelligente (séparés par des virgules)</label>
       <input id="es-kw" style="width:100%;margin-bottom:10px" value="${esc(s.keywords)}" placeholder="plombier,fuite,robinet…">
       <div class="frow">
-        <div><label>Métier</label><select id="es-cat" onchange="A._svcSubRefresh()">${CATD.categories.map(c => `<option value="${c.id}" ${c.id === s.category_id ? 'selected' : ''}>${esc(c.icon || '')} ${esc(c.name)}</option>`).join('')}</select></div>
-        <div><label>Sous-catégorie</label><select id="es-sub">${subsOf(s.category_id).map(x => `<option value="${x.id}" ${x.id === s.sub_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+        <div style="flex:1"><label>Catégorie</label><select id="es-cat" style="width:100%">${CATD.categories.map(c => `<option value="${c.id}" ${c.id === s.category_id ? 'selected' : ''}>${esc(c.icon || '')} ${esc(c.name)}</option>`).join('')}</select></div>
       </div>
       <div class="frow">
         <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;margin:0"><input type="checkbox" id="es-pop" ${s.popular ? 'checked' : ''}> ⭐ Populaire (affiché sur l'accueil)</label>
@@ -885,17 +907,11 @@ const A = {
       <input id="es-cities" style="width:100%;margin-bottom:12px" value="${esc((s.cities || []).join(', '))}" placeholder="Ex : Bouaké, Abidjan">
       <div><button class="btn" onclick="A._svcSave(${id || 0})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
   },
-  _svcSubRefresh() {
-    const cid = parseInt(document.getElementById('es-cat').value, 10);
-    document.getElementById('es-sub').innerHTML = CATD.sous_categories.filter(x => x.metier_id === cid)
-      .map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('') || '<option value="">(créez d\u2019abord une sous-catégorie)</option>';
-  },
   async _svcSave(id) {
     const body = {
       name: document.getElementById('es-name').value.trim(),
       keywords: document.getElementById('es-kw').value,
       category_id: parseInt(document.getElementById('es-cat').value, 10),
-      sub_id: parseInt(document.getElementById('es-sub').value, 10) || null,
       popular: document.getElementById('es-pop').checked ? 1 : 0,
       seasonal: document.getElementById('es-sea').checked ? 1 : 0,
       cities: document.getElementById('es-cities').value.split(',').map(x => x.trim()).filter(Boolean)
