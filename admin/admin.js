@@ -523,9 +523,43 @@ views.payments = async () => {
 /* ---------- Publicités ---------- */
 views.ads = async () => {
   const list = await api('/admin/ads');
+  const s = await api('/admin/settings');
+  const annonces = await api('/admin/annonces');
+  const vitesses = { '30': 'Lente', '60': 'Normale', '120': 'Rapide' };
   shell(`<h1>📣 Publicités & informations</h1>
   <div class="panel">
-    <h2 style="margin-top:0">Publier</h2>
+    <h2 style="margin-top:0">📺 Bandeau d'annonces défilantes (bas de l'accueil, style bandeau info TV)</h2>
+    <div class="frow" style="align-items:center">
+      <button class="btn ${s.bandeau_enabled === '1' ? '' : 'sec'}" onclick="A.toggleSetting('bandeau_enabled','${s.bandeau_enabled === '1' ? '0' : '1'}')">Bandeau : ${s.bandeau_enabled === '1' ? 'Activé ✅' : 'Désactivé'}</button>
+      <label style="margin:0"><b>Vitesse :</b></label>
+      <select onchange="A.bandeauVitesse(this.value)">
+        ${Object.entries(vitesses).map(([v, lb]) => `<option value="${v}" ${s.bandeau_speed === v ? 'selected' : ''}>${lb} (${v} px/s)</option>`).join('')}
+        <option value="autre" ${!vitesses[s.bandeau_speed] ? 'selected' : ''}>Personnalisée${!vitesses[s.bandeau_speed] ? ' (' + esc(s.bandeau_speed || '60') + ' px/s)' : '…'}</option>
+      </select>
+      <span class="small muted">Les annonces tournent en boucle sans temps mort, pause au survol/toucher.</span>
+    </div>
+    <div class="frow" style="align-items:flex-end;flex-wrap:wrap;margin-top:8px">
+      <div><label>Icône</label><input id="an-icon" value="📢" style="width:60px"></div>
+      <div><label>Titre</label><input id="an-title" placeholder="PROMO"></div>
+      <div style="flex:1;min-width:200px"><label>Contenu</label><input id="an-content" style="width:100%" placeholder="−20% sur le grand ménage ce week-end !"></div>
+      <div><label>Couleur</label><input type="color" id="an-color" value="#ffffff" style="width:50px;height:34px;padding:2px"></div>
+      <div><label>Lien (optionnel)</label><input id="an-link" placeholder="#/services ou https://…" style="width:150px"></div>
+      <button class="btn" onclick="A.annAdd()">＋</button>
+    </div>
+    <table style="margin-top:10px"><tr><th>Ordre</th><th>Annonce</th><th>Lien</th><th>État</th><th>Actions</th></tr>
+    ${annonces.map((a, i) => `<tr>
+      <td><button class="btn sm sec" ${i === 0 ? 'disabled' : ''} onclick="A.annMove(${a.id},-1)">↑</button>
+        <button class="btn sm sec" ${i === annonces.length - 1 ? 'disabled' : ''} onclick="A.annMove(${a.id},1)">↓</button></td>
+      <td><span style="background:#0b1320;color:${esc(a.color)};padding:3px 10px;border-radius:6px">${esc(a.icon)} <b>${esc(a.title)}</b> ${esc(a.content)}</span></td>
+      <td class="small">${a.link ? esc(a.link) : '—'}</td>
+      <td>${a.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
+      <td><button class="btn sm sec" onclick="A.annToggle(${a.id},${a.active ? 0 : 1})">${a.active ? 'Désactiver' : 'Activer'}</button>
+        <button class="btn sm sec" onclick="A.annEdit(${a.id})">✏️</button>
+        <button class="btn sm warn" onclick="A.annDel(${a.id})">🗑️</button></td></tr>`).join('')}
+    ${!annonces.length ? '<tr><td colspan="5" class="muted">Aucune annonce. Ajoutez-en une ci-dessus : elle défilera en bas de l\u2019accueil.</td></tr>' : ''}</table>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Publier (zone du haut de l'accueil)</h2>
     <div class="frow">
       <div><label>Type</label><select id="ad-type"><option value="texte">Texte</option><option value="image">Image</option><option value="video">Vidéo</option></select></div>
       <div><label>Titre</label><input id="ad-title"></div>
@@ -715,7 +749,8 @@ views.games = async () => {
         ${x.status === 'brouillon' ? `<button class="btn sm" onclick="A.quizLancer(${x.id})" ${enCours ? 'disabled title="Un quiz est déjà en cours"' : ''}>🚀 Lancer</button>
           <button class="btn sm warn" onclick="A.quizSessionDel(${x.id})">🗑️</button>` : ''}
         ${x.status === 'en_cours' ? `<button class="btn sm warn" onclick="A.quizArreter(${x.id})">⏹️ Arrêter</button>` : ''}
-        ${x.status === 'terminee' ? `<button class="btn sm" onclick="A.quizRejouer(${x.id})">🔄 Rejouer</button>` : ''}
+        ${x.status === 'terminee' ? `<button class="btn sm" onclick="A.quizRejouer(${x.id})">🔄 Rejouer</button>
+          <button class="btn sm warn" onclick="A.quizSessionDel(${x.id})">🗑️</button>` : ''}
         ${x.status !== 'brouillon' ? `<button class="btn sm sec" onclick="A.quizSessionDetail(${x.id})">📋 Détails</button>` : ''}
       </td></tr>`).join('')}
     ${!sessions.length ? '<tr><td colspan="5" class="muted">Aucune session. Créez votre premier quiz concours ci-dessus.</td></tr>' : ''}</table></div>
@@ -1251,6 +1286,64 @@ const A = {
       toast('Publicité publiée ✓', 'ok'); render();
     } catch (e) { toast(e.message, 'err'); }
   },
+  async bandeauVitesse(v) {
+    if (v === 'autre') {
+      v = prompt('Vitesse personnalisée en pixels/seconde (10 à 400) :', '60');
+      if (v === null) return;
+    }
+    try { await api('/admin/settings', { method: 'PUT', body: { bandeau_speed: String(parseInt(v, 10) || 60) } }); toast('Vitesse mise à jour ✓', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async annAdd() {
+    try {
+      await api('/admin/annonces', {
+        method: 'POST', body: {
+          icon: document.getElementById('an-icon').value, title: document.getElementById('an-title').value,
+          content: document.getElementById('an-content').value, color: document.getElementById('an-color').value,
+          link: document.getElementById('an-link').value
+        }
+      });
+      toast('Annonce ajoutée ✓ — elle défile déjà sur l\u2019accueil.', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async annToggle(id, v) { try { await api('/admin/annonces/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async annDel(id) { if (!confirm('Supprimer cette annonce ?')) return; try { await api('/admin/annonces/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async annMove(id, dir) {
+    try {
+      const list = await api('/admin/annonces');
+      const i = list.findIndex(a => a.id === id), j = i + dir;
+      if (i < 0 || j < 0 || j >= list.length) return;
+      await api('/admin/annonces/' + list[i].id, { method: 'PUT', body: { sort: list[j].sort } });
+      await api('/admin/annonces/' + list[j].id, { method: 'PUT', body: { sort: list[i].sort } });
+      render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async annEdit(id) {
+    try {
+      const a = (await api('/admin/annonces')).find(x => x.id === id);
+      if (!a) return;
+      openModal(`<h3>✏️ Modifier l'annonce</h3>
+        <div class="frow"><div><label>Icône</label><input id="ae-icon" value="${esc(a.icon)}" style="width:60px"></div>
+        <div style="flex:1"><label>Titre</label><input id="ae-title" value="${esc(a.title)}" style="width:100%"></div></div>
+        <div><label>Contenu</label><input id="ae-content" value="${esc(a.content)}" style="width:100%"></div>
+        <div class="frow" style="margin-top:6px"><div><label>Couleur</label><input type="color" id="ae-color" value="${esc(a.color)}" style="width:50px;height:34px;padding:2px"></div>
+        <div style="flex:1"><label>Lien (optionnel)</label><input id="ae-link" value="${esc(a.link || '')}" style="width:100%"></div></div>
+        <div style="margin-top:10px"><button class="btn" onclick="A._annSave(${a.id})">Enregistrer</button>
+        <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async _annSave(id) {
+    try {
+      await api('/admin/annonces/' + id, {
+        method: 'PUT', body: {
+          icon: document.getElementById('ae-icon').value, title: document.getElementById('ae-title').value,
+          content: document.getElementById('ae-content').value, color: document.getElementById('ae-color').value,
+          link: document.getElementById('ae-link').value
+        }
+      });
+      toast('Annonce modifiée ✓', 'ok'); closeModal(); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
   async toggleAd(id, v) { try { await api('/admin/ads/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
   async delAd(id) { if (!confirm('Supprimer cette publicité ?')) return; try { await api('/admin/ads/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
   async broadcast() {
@@ -1323,7 +1416,7 @@ const A = {
     catch (e) { toast(e.message, 'err'); }
   },
   async quizSessionDel(id) {
-    if (!confirm('Supprimer ce brouillon ?')) return;
+    if (!confirm('Supprimer ce quiz ? Les réponses, participants et messages liés seront définitivement effacés.')) return;
     try { await api('/admin/quiz-sessions/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); }
   },
   async quizSessionDetail(id) {

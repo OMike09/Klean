@@ -1370,6 +1370,15 @@ app.get('/api/ads', (req, res) => {
     FROM ads a WHERE a.active=1 ORDER BY a.sort, a.id`).all());
 });
 
+// Bandeau d'annonces défilantes (bas de l'accueil) — visible aussi sans compte
+app.get('/api/annonces', (req, res) => {
+  res.json({
+    enabled: getSetting('bandeau_enabled') === '1',
+    speed: Math.max(10, Math.min(400, parseInt(getSetting('bandeau_speed') || '60', 10) || 60)),
+    items: db.prepare('SELECT id, title, content, icon, color, link FROM annonces WHERE active=1 ORDER BY sort, id').all()
+  });
+});
+
 // Comptage des vues (pub, infos, urgences, jeux) — chaque compte ne compte qu'UNE fois par élément
 const seeView = db.prepare('INSERT OR IGNORE INTO view_seen(key, user_id) VALUES(?, ?)');
 app.post('/api/vues', auth, (req, res) => {
@@ -1395,7 +1404,7 @@ const PERM_ROUTES = [
   [/^\/questions/, 'questions'],
   [/^\/missions/, 'missions'],
   [/^\/payments/, 'paiements'],
-  [/^\/(ads|broadcast)/, 'communication'],
+  [/^\/(ads|broadcast|annonces)/, 'communication'],
   [/^\/(signalements|urgences|files|rules)/, 'securite'],
   [/^\/(avis-recherche|jobs|ecole-famille|quiz|kdo|game-plays|quiz-sessions)/, 'contenu'],
   [/^\/settings/, 'parametres'],
@@ -1946,7 +1955,7 @@ A.get('/payments', (req, res) => {
 // PARAMÈTRES
 A.get('/settings', (req, res) => {
   const keys = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
-    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
+    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
     'pro_doc_particulier', 'pro_doc_entreprise'];
   const out = {};
   keys.forEach(k => out[k] = getSetting(k));
@@ -1954,7 +1963,7 @@ A.get('/settings', (req, res) => {
 });
 A.put('/settings', (req, res) => {
   const allowed = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
-    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
+    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
     'pro_doc_particulier', 'pro_doc_entreprise'];
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!allowed.includes(k)) continue;
@@ -1990,6 +1999,24 @@ A.put('/ads/:id', (req, res) => {
   res.json({ ok: true });
 });
 A.delete('/ads/:id', (req, res) => { db.prepare('DELETE FROM ads WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+// ----- Bandeau d'annonces défilantes -----
+A.get('/annonces', (req, res) => res.json(db.prepare('SELECT * FROM annonces ORDER BY sort, id').all()));
+A.post('/annonces', (req, res) => {
+  const { title, content, icon, color, link } = req.body || {};
+  if (!(title || '').trim() && !(content || '').trim()) return res.status(400).json({ error: 'Écrivez au moins un titre ou un contenu.' });
+  const info = db.prepare('INSERT INTO annonces(title, content, icon, color, link) VALUES(?,?,?,?,?)')
+    .run((title || '').trim(), (content || '').trim(), (icon || '📢').trim() || '📢', (color || '#ffffff').trim() || '#ffffff', (link || '').trim() || null);
+  db.prepare('UPDATE annonces SET sort=? WHERE id=?').run(info.lastInsertRowid, info.lastInsertRowid); // ordre stable
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+A.put('/annonces/:id', (req, res) => {
+  const { title, content, icon, color, link, active, sort } = req.body || {};
+  db.prepare(`UPDATE annonces SET title=COALESCE(?,title), content=COALESCE(?,content), icon=COALESCE(?,icon),
+    color=COALESCE(?,color), link=COALESCE(?,link), active=COALESCE(?,active), sort=COALESCE(?,sort) WHERE id=?`)
+    .run(title ?? null, content ?? null, icon ?? null, color ?? null, link ?? null, active ?? null, sort ?? null, req.params.id);
+  res.json({ ok: true });
+});
+A.delete('/annonces/:id', (req, res) => { db.prepare('DELETE FROM annonces WHERE id=?').run(req.params.id); res.json({ ok: true }); });
 A.post('/broadcast', (req, res) => {
   const { title, body } = req.body || {};
   if (!title) return res.status(400).json({ error: 'Titre requis.' });
@@ -2084,7 +2111,10 @@ A.put('/quiz-sessions/:id', (req, res) => {
 A.delete('/quiz-sessions/:id', (req, res) => {
   const s = db.prepare('SELECT * FROM quiz_sessions WHERE id=?').get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Session introuvable.' });
-  if (s.status !== 'brouillon') return res.status(400).json({ error: 'Seul un brouillon peut être supprimé (l\u2019historique est conservé).' });
+  if (s.status === 'en_cours') return res.status(400).json({ error: 'Arrêtez d\u2019abord ce quiz avant de le supprimer.' });
+  db.prepare('DELETE FROM quiz_answers WHERE session_id=?').run(s.id);
+  db.prepare('DELETE FROM quiz_participants WHERE session_id=?').run(s.id);
+  db.prepare('DELETE FROM quiz_messages WHERE session_id=?').run(s.id);
   db.prepare('DELETE FROM quiz_sessions WHERE id=?').run(s.id);
   res.json({ ok: true });
 });

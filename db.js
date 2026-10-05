@@ -280,6 +280,18 @@ CREATE TABLE IF NOT EXISTS game_plays (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS annonces (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  icon TEXT NOT NULL DEFAULT '📢',
+  color TEXT NOT NULL DEFAULT '#ffffff',
+  link TEXT,
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS view_counts (
   key TEXT PRIMARY KEY,                       -- ad:<id> | game:quiz | game:flipfizz | game:kdo
   n INTEGER NOT NULL DEFAULT 0
@@ -901,6 +913,9 @@ ensureColumn('pro_profiles', 'company_size', 'TEXT');   // taille de l'équipe
 if (getSetting('pro_doc_particulier') === null) setSetting('pro_doc_particulier', '0');
 // Quiz concours : public autorisé (tous | clients | clients_pros)
 if (getSetting('quiz_audience') === null) setSetting('quiz_audience', 'tous');
+// Bandeau d'annonces défilantes en bas de l'accueil
+if (getSetting('bandeau_enabled') === null) setSetting('bandeau_enabled', '1');
+if (getSetting('bandeau_speed') === null) setSetting('bandeau_speed', '60'); // pixels/seconde
 if (getSetting('pro_doc_entreprise') === null) setSetting('pro_doc_entreprise', '1');
 
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

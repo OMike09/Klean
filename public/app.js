@@ -363,9 +363,11 @@ routes.home = async () => {
       <div class="svc-card" onclick="nav('#/services')"><span class="ic">📋</span><span class="nm">Voir tout</span></div>
     </div>
     <button class="btn sec mt" onclick="nav('#/services')">Voir tous les services</button>
-  </div>${bottomNav('home')}`;
+    <div id="bandeau-espace"></div>
+  </div><div id="bandeau-host"></div>${bottomNav('home')}`;
   updateBadges();
   quizLiveMount(); // le quiz actif s'affiche automatiquement, sans aucun clic
+  bandeauMount();  // bandeau d'annonces défilantes en bas de l'accueil
   // comptage des vues (pub/infos/urgences + jeux affichés)
   const vues = homeAds.map(a => 'ad:' + a.id);
   if (GAMES.quiz) vues.push('game:quiz');
@@ -1326,6 +1328,34 @@ routes.payments = async () => {
   </div>${bottomNav('account')}`;
 };
 
+/* ---------- Bandeau d'annonces défilantes (bas de l'accueil) ---------- */
+async function bandeauMount() {
+  const host = document.getElementById('bandeau-host');
+  if (!host) return;
+  let b;
+  try { b = await api('/annonces'); } catch { return; }
+  const espace = document.getElementById('bandeau-espace');
+  if (!b.enabled || !b.items.length) { host.innerHTML = ''; if (espace) espace.style.height = '0'; return; }
+  const item = a => `<span ${a.link ? `data-link="${esc(a.link)}" onclick="A.bandeauGo(this.dataset.link)"` : ''}
+    style="display:inline-flex;align-items:center;gap:7px;padding:0 20px;cursor:${a.link ? 'pointer' : 'default'};color:${esc(a.color || '#ffffff')}">
+    <span>${esc(a.icon || '📢')}</span><b>${esc(a.title || '')}</b><span style="opacity:.92">${esc(a.content || '')}</span>
+    <span style="opacity:.35;padding-left:20px">◆</span></span>`;
+  const bloc = b.items.map(item).join('');
+  host.innerHTML = `
+  <style>@keyframes ksdefile{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  #bandeau-int:hover,#bandeau-int:active{animation-play-state:paused}</style>
+  <div style="position:fixed;bottom:calc(57px + var(--safe-b, 0px));left:50%;transform:translateX(-50%);width:100%;max-width:560px;z-index:49;background:#0b1320;border-top:2px solid #16a34a;overflow:hidden;height:34px;display:flex;align-items:center">
+    <div id="bandeau-int" style="display:inline-flex;white-space:nowrap;will-change:transform;font-size:13.5px;color:#fff">${bloc}${bloc}${bloc}${bloc}</div>
+  </div>`;
+  if (espace) espace.style.height = '42px'; // le bandeau ne masque jamais le contenu
+  requestAnimationFrame(() => {
+    const int = document.getElementById('bandeau-int');
+    if (!int) return;
+    const demiLargeur = int.scrollWidth / 2;
+    int.style.animation = `ksdefile ${Math.max(6, demiLargeur / b.speed)}s linear infinite`; // vitesse en pixels/seconde, fluide
+  });
+}
+
 /* ---------- Quiz synchronisé sur l'accueil ---------- */
 let QL_TIMER = null, QL_ETAT = null, QL_TICK = 0;
 function qlStop() { if (QL_TIMER) { clearInterval(QL_TIMER); QL_TIMER = null; } }
@@ -2087,6 +2117,11 @@ const A = {
   },
   delAddr(id) { api('/addresses/' + id, { method: 'DELETE' }).then(() => { toast('Adresse supprimée.', 'ok'); render(); }).catch(e => toast(e.message, 'err')); },
   quizPick(el, qid, j) { A.pickChip(el, String(j)); window._quizAnswers[qid] = j; },
+  bandeauGo(link) {
+    if (!link) return;
+    if (link.startsWith('#')) nav(link);
+    else window.open(link, '_blank', 'noopener');
+  },
   async qlRepondre(sid, index, j) {
     if (window._qlLock) return; // une seule sélection
     window._qlLock = true;
