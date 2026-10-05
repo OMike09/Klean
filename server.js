@@ -1108,7 +1108,7 @@ app.post('/api/urgence', auth, (req, res) => {
 // JEUX (isolés du parcours principal, configurables)
 // ============================================================
 app.get('/api/games/config', (req, res) => {
-  const gv = k => (db.prepare('SELECT n FROM view_counts WHERE key=?').get('game:' + k) || {}).n || 0;
+  const gv = k => db.prepare('SELECT COUNT(*) n FROM view_seen WHERE key=?').get('game:' + k).n;
   res.json({ quiz: getSetting('quiz_enabled') === '1', flipfizz: getSetting('flipfizz_enabled') === '1', kdo: getSetting('kdo_enabled') === '1',
     views: { quiz: gv('quiz'), flipfizz: gv('flipfizz'), kdo: gv('kdo') } });
 });
@@ -1282,18 +1282,18 @@ app.post('/api/games/kdo', auth, (req, res) => {
   res.json({ ok: true, reward: row.reward });
 });
 
-// Publicités actives (côté application), avec leur nombre de vues
+// Publicités actives (côté application), avec leur nombre de vues (1 vue par compte maximum)
 app.get('/api/ads', (req, res) => {
-  res.json(db.prepare(`SELECT a.id, a.type, a.title, a.content, a.file, a.placement, a.duration, COALESCE(v.n, 0) AS views
-    FROM ads a LEFT JOIN view_counts v ON v.key = 'ad:' || a.id
-    WHERE a.active=1 ORDER BY a.sort, a.id`).all());
+  res.json(db.prepare(`SELECT a.id, a.type, a.title, a.content, a.file, a.placement, a.duration,
+    (SELECT COUNT(*) FROM view_seen v WHERE v.key = 'ad:' || a.id) AS views
+    FROM ads a WHERE a.active=1 ORDER BY a.sort, a.id`).all());
 });
 
-// Comptage des vues (pub, infos, urgences, jeux) — fonctionne aussi sans compte
-const bumpView = db.prepare('INSERT INTO view_counts(key, n) VALUES(?, 1) ON CONFLICT(key) DO UPDATE SET n = n + 1');
-app.post('/api/vues', (req, res) => {
+// Comptage des vues (pub, infos, urgences, jeux) — chaque compte ne compte qu'UNE fois par élément
+const seeView = db.prepare('INSERT OR IGNORE INTO view_seen(key, user_id) VALUES(?, ?)');
+app.post('/api/vues', auth, (req, res) => {
   const keys = Array.isArray(req.body.keys) ? req.body.keys.slice(0, 20) : [];
-  keys.forEach(k => { if (typeof k === 'string' && /^(ad:\d+|game:(quiz|flipfizz|kdo))$/.test(k)) bumpView.run(k); });
+  keys.forEach(k => { if (typeof k === 'string' && /^(ad:\d+|game:(quiz|flipfizz|kdo))$/.test(k)) seeView.run(k, req.user.id); });
   res.json({ ok: true });
 });
 
@@ -1412,7 +1412,8 @@ A.get('/users', (req, res) => {
   if (f === 'suspended') where = "role='user' AND (suspended=1 OR blocked=1 OR (disabled_until IS NOT NULL AND disabled_until > datetime('now')))";
   if (f === 'verified') where += ' AND verified=1';
   if (f === 'incomplete') where += ' AND profile_incomplete=1';
-  const rows = db.prepare(`SELECT id, name, phone, email, address, ville, quartier, is_pro, pro_status, kp_code, suspended, blocked, disabled_until, must_change_password, profile_incomplete, verified, created_at FROM users WHERE ${where} ORDER BY id DESC LIMIT 500`).all();
+  const sort = req.query.sort === 'nom' ? 'name COLLATE NOCASE ASC' : 'id DESC'; // alphabétique ou date d'inscription (récents d'abord)
+  const rows = db.prepare(`SELECT id, name, phone, email, address, ville, quartier, is_pro, pro_status, kp_code, suspended, blocked, disabled_until, must_change_password, profile_incomplete, verified, created_at FROM users WHERE ${where} ORDER BY ${sort} LIMIT 500`).all();
   res.json(rows);
 });
 A.get('/users/:id', (req, res) => {
@@ -1888,10 +1889,11 @@ A.put('/settings', (req, res) => {
 });
 
 // COMMUNICATION : publicités + message système
-A.get('/ads', (req, res) => res.json(db.prepare(`SELECT a.*, COALESCE(v.n, 0) AS views
-  FROM ads a LEFT JOIN view_counts v ON v.key = 'ad:' || a.id ORDER BY a.sort, a.id DESC`).all()));
+A.get('/ads', (req, res) => res.json(db.prepare(`SELECT a.*,
+  (SELECT COUNT(*) FROM view_seen v WHERE v.key = 'ad:' || a.id) AS views
+  FROM ads a ORDER BY a.sort, a.id DESC`).all()));
 A.get('/game-plays/vues', (req, res) => {
-  const gv = k => (db.prepare('SELECT n FROM view_counts WHERE key=?').get(k) || {}).n || 0;
+  const gv = k => db.prepare('SELECT COUNT(*) n FROM view_seen WHERE key=?').get(k).n;
   res.json({ quiz: gv('game:quiz'), flipfizz: gv('game:flipfizz'), kdo: gv('game:kdo') });
 });
 A.post('/ads', (req, res) => {

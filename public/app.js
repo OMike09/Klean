@@ -369,7 +369,7 @@ routes.home = async () => {
   if (GAMES.quiz) vues.push('game:quiz');
   if (GAMES.flipfizz) vues.push('game:flipfizz');
   if (GAMES.kdo) vues.push('game:kdo');
-  if (vues.length) api('/vues', { method: 'POST', body: { keys: vues } }).catch(() => { });
+  if (vues.length && USER) api('/vues', { method: 'POST', body: { keys: vues } }).catch(() => { });
   const q = document.getElementById('home-q');
   q.addEventListener('keydown', e => { if (e.key === 'Enter') A.goSearch(); });
 };
@@ -399,7 +399,7 @@ routes.services = async (params) => {
   if (!ADS.length) try { ADS = await api('/ads'); } catch { }
   const pubsServices = ADS.filter(a => a.placement === 'services');
   const bandePub = adsBandHtml(pubsServices.map(adCardHtml));
-  if (pubsServices.length) api('/vues', { method: 'POST', body: { keys: pubsServices.map(a => 'ad:' + a.id) } }).catch(() => { });
+  if (pubsServices.length && USER) api('/vues', { method: 'POST', body: { keys: pubsServices.map(a => 'ad:' + a.id) } }).catch(() => { });
   const catId = parseInt(params || 0, 10);
   const q = (sessionStorage.getItem('ks_cat_q') || '').toLowerCase().trim();
   const hit = x => (x || '').toLowerCase().includes(q);
@@ -1461,24 +1461,44 @@ function quizEcranGagnant(s, p, messages) {
 async function quizClassique() {
   let qs;
   try { qs = await api('/games/quiz'); } catch (e) { toast(e.message, 'err'); back(); return; }
-  let answers = {};
-  window._quizAnswers = answers;
-  $app.innerHTML = `${header('Quiz')}
-  <div class="content">
-    ${qs.map((q, i) => `<div class="card"><div class="bold mb">${i + 1}. ${esc(q.question)}</div>
-      <div class="choices" data-qid="${q.id}">${q.options.map((o, j) => `<button type="button" class="chip" onclick="A.quizPick(this,${q.id},${j})">${esc(o)}</button>`).join('')}</div></div>`).join('')}
-    <button class="btn" id="b-quiz">Valider mes réponses</button>
-  </div>${bottomNav('home')}`;
-  document.getElementById('b-quiz').onclick = async e => {
-    busy(e.target, true);
-    try {
-      const r = await api('/games/quiz', { method: 'POST', body: { answers: window._quizAnswers } });
-      openModal(`<h3>Résultat</h3><div class="center" style="font-size:40px">${r.score === r.total ? '🏆' : r.score > r.total / 2 ? '🎉' : '🙂'}</div>
-      <div class="center bold" style="font-size:22px">${r.score} / ${r.total}</div>
-      <button class="btn mt" onclick="closeModal();back()">Fermer</button>`);
-    } catch (err) { toast(err.message, 'err'); }
-    busy(e.target, false);
+  if (!qs.length) {
+    $app.innerHTML = `${header('🧠 Quiz')}<div class="content">${emptyState('🧠', 'Aucune question de quiz pour le moment. Revenez bientôt !')}</div>${bottomNav('home')}`;
+    return;
+  }
+  const letters = ['A', 'B', 'C', 'D'];
+  const answers = {};
+  let idx = 0;
+  const montrer = () => {
+    const q = qs[idx];
+    $app.innerHTML = `${header('🧠 Quiz — question ' + (idx + 1) + '/' + qs.length)}
+    <div class="content"><div class="card">
+      <div class="small muted center" style="margin-bottom:8px">🧠 Quiz • Question ${idx + 1} / ${qs.length}</div>
+      <div class="bold mb" style="font-size:17px">${esc(q.question)}</div>
+      ${q.options.slice(0, 4).map((o, j) => `<button type="button" class="qz-opt" data-j="${j}"
+        style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:#fff;border:2px solid #e5e7eb;border-radius:12px;padding:12px;margin-bottom:8px;font-size:15px;cursor:pointer">
+        <span style="flex:0 0 28px;height:28px;border-radius:50%;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-weight:700">${letters[j]}</span>
+        <span>${esc(o)}</span></button>`).join('')}
+      <div class="small muted center">Touchez une réponse pour passer à la suivante.</div>
+    </div></div>${bottomNav('home')}`;
+    let verrou = false;
+    document.querySelectorAll('.qz-opt').forEach(b => b.onclick = () => {
+      if (verrou) return;
+      verrou = true;
+      answers[q.id] = parseInt(b.dataset.j, 10);
+      b.style.borderColor = '#16a34a'; b.style.background = '#f0fdf4';
+      setTimeout(async () => {
+        idx++;
+        if (idx < qs.length) { montrer(); return; }
+        try {
+          const r = await api('/games/quiz', { method: 'POST', body: { answers } });
+          openModal(`<h3>Résultat</h3><div class="center" style="font-size:40px">${r.score === r.total ? '🏆' : r.score > r.total / 2 ? '🎉' : '🙂'}</div>
+          <div class="center bold" style="font-size:22px">${r.score} / ${r.total}</div>
+          <button class="btn mt" onclick="closeModal();back()">Fermer</button>`);
+        } catch (err) { toast(err.message, 'err'); back(); }
+      }, 350);
+    });
   };
+  montrer();
 };
 routes.flip = async () => {
   if (!USER) { nav('#/login'); return; }

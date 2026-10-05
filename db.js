@@ -285,6 +285,13 @@ CREATE TABLE IF NOT EXISTS view_counts (
   n INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS view_seen (
+  key TEXT NOT NULL,                          -- ad:<id> | game:quiz | game:flipfizz | game:kdo
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (key, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS quiz_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,

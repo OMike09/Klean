@@ -144,11 +144,19 @@ function userStatusPill(u) {
 }
 views.users = async () => {
   const f = sessionStorage.getItem('adm_uf') || 'all';
-  const list = await api('/admin/users?filter=' + f);
+  const tri = sessionStorage.getItem('adm_us') || 'date';
+  const list = await api('/admin/users?filter=' + f + '&sort=' + tri);
   shell(`<h1>👥 Utilisateurs</h1>
   <div class="tabs">${[['all', 'Tous'], ['clients', 'Clients'], ['pros', 'Professionnels'], ['pending', 'Pro en attente'], ['suspended', 'Suspendus / bloqués'], ['verified', 'Vérifiés'], ['incomplete', 'Profils à compléter']]
     .map(([id, lb]) => `<button class="${f === id ? 'on' : ''}" onclick="sessionStorage.setItem('adm_uf','${id}');render()">${lb}</button>`).join('')}
-    <button class="btn sm" style="margin-left:auto" onclick="A.userQuickCreate()">＋ Créer rapidement un compte</button></div>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+      <label class="small muted" style="margin:0">Classer :</label>
+      <select onchange="sessionStorage.setItem('adm_us', this.value);render()">
+        <option value="date" ${tri === 'date' ? 'selected' : ''}>📅 Date d'inscription (récents d'abord)</option>
+        <option value="nom" ${tri === 'nom' ? 'selected' : ''}>🔤 Ordre alphabétique (A → Z)</option>
+      </select>
+      <button class="btn sm" onclick="A.userQuickCreate()">＋ Créer rapidement un compte</button>
+    </span></div>
   <div class="panel"><table><tr><th>Nom</th><th>Téléphone</th><th>Code pro</th><th>Localisation</th><th>Statut</th><th>Inscrit le</th><th>Actions</th></tr>
   ${list.map(u => `<tr>
     <td><b>${esc(u.name)}</b> ${u.verified ? '✅' : ''}${u.profile_incomplete ? ' <span class="pill warn small">profil à compléter</span>' : ''}</td>
