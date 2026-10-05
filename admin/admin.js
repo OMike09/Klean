@@ -682,7 +682,7 @@ views.games = async () => {
     <div class="frow" style="margin-top:10px;align-items:center">
       <label style="margin:0"><b>👥 Qui peut jouer au quiz :</b></label>
       <select onchange="A.toggleSetting('quiz_audience', this.value)">
-        ${[['tous', 'Tout le monde'], ['clients', 'Clients uniquement'], ['clients_pros', 'Clients et professionnels']].map(([v, lb]) =>
+        ${[['tous', 'Tout le monde (tous les comptes)'], ['clients', 'Clients uniquement'], ['clients_pros', 'Clients et professionnels'], ['clients_servis', 'Clients ayant déjà bénéficié d\u2019un service']].map(([v, lb]) =>
           `<option value="${v}" ${(s.quiz_audience || 'tous') === v ? 'selected' : ''}>${lb}</option>`).join('')}
       </select>
       <span class="small muted">La désactivation totale se fait avec le bouton 🧠 Quiz ci-dessus.</span>

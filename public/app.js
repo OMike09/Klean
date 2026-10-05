@@ -1341,8 +1341,11 @@ routes.quiz = async () => {
 
   // Public non autorisé
   if (!etat.allowed && !p) {
+    const motif = etat.audience === 'clients_servis'
+      ? 'Ce quiz est réservé aux clients ayant déjà bénéficié d\u2019un service sur Klean-Services. Commandez votre premier service pour pouvoir participer !'
+      : 'Ce quiz est réservé aux clients.';
     $app.innerHTML = `${header('Quiz')}<div class="content"><div class="card center">
-      <div style="font-size:44px">🔒</div><div class="bold mb">Ce quiz est réservé aux clients.</div>
+      <div style="font-size:44px">🔒</div><div class="bold mb">${motif}</div>
       <button class="btn sec" onclick="back()">Retour</button></div></div>${bottomNav('home')}`;
     return;
   }

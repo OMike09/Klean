@@ -1133,6 +1133,8 @@ app.post('/api/games/quiz', auth, (req, res) => {
 function quizAudienceOk(user) {
   const aud = getSetting('quiz_audience') || 'tous';
   if (aud === 'clients') return user.pro_status !== 'approved';
+  if (aud === 'clients_servis') // réservé aux clients ayant déjà bénéficié d'un service (mission terminée ou payée)
+    return db.prepare("SELECT COUNT(*) n FROM missions WHERE client_id=? AND status IN ('terminee','payee')").get(user.id).n > 0;
   return true; // 'tous' et 'clients_pros' : tout compte connecté
 }
 function quizParticipant(sid, uid) {
@@ -1161,6 +1163,7 @@ function quizRecord(s, p, answer, elapsedMs) {
 // État du concours pour l'utilisateur connecté
 app.get('/api/games/concours', auth, (req, res) => {
   if (getSetting('quiz_enabled') !== '1') return res.json({ enabled: false });
+  const audience = getSetting('quiz_audience') || 'tous';
   const allowed = quizAudienceOk(req.user);
   let s = db.prepare("SELECT * FROM quiz_sessions WHERE status='en_cours' ORDER BY id DESC LIMIT 1").get();
   let p = null;
@@ -1171,10 +1174,10 @@ app.get('/api/games/concours', auth, (req, res) => {
                     WHERE s.status='terminee' AND pp.user_id=? ORDER BY s.id DESC LIMIT 1`).get(req.user.id);
     if (s) p = quizParticipant(s.id, req.user.id);
   }
-  if (!s) return res.json({ enabled: true, allowed, session: null });
+  if (!s) return res.json({ enabled: true, allowed, audience, session: null });
   const winnersDone = db.prepare("SELECT COUNT(*) n FROM quiz_participants WHERE session_id=? AND status='gagnant'").get(s.id).n > 0;
   const out = {
-    enabled: true, allowed,
+    enabled: true, allowed, audience,
     session: {
       id: s.id, title: s.title, status: s.status, nb_questions: JSON.parse(s.qids || '[]').length || s.nb_questions,
       time_per_q: s.time_per_q, elimination: !!s.elimination, nb_winners: s.nb_winners, winners_designated: winnersDone
@@ -1189,7 +1192,9 @@ app.get('/api/games/concours', auth, (req, res) => {
 
 app.post('/api/games/concours/:id/rejoindre', auth, (req, res) => {
   if (getSetting('quiz_enabled') !== '1') return res.status(403).json({ error: 'Le quiz est désactivé.' });
-  if (!quizAudienceOk(req.user)) return res.status(403).json({ error: 'Ce quiz est réservé aux clients.' });
+  if (!quizAudienceOk(req.user)) return res.status(403).json({ error: (getSetting('quiz_audience') === 'clients_servis')
+    ? 'Ce quiz est réservé aux clients ayant déjà bénéficié d\u2019un service sur Klean-Services.'
+    : 'Ce quiz est réservé aux clients.' });
   const s = db.prepare("SELECT * FROM quiz_sessions WHERE id=? AND status='en_cours'").get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Ce quiz n\u2019est pas (ou plus) en cours.' });
   if (quizParticipant(s.id, req.user.id)) return res.status(400).json({ error: 'Vous participez déjà à ce quiz.' });
