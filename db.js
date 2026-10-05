@@ -890,6 +890,10 @@ ensureColumn('services', 'price_show', 'INTEGER NOT NULL DEFAULT 1');    // affi
 // COMPTE PROFESSIONNEL : PARTICULIER OU ENTREPRISE (É2)
 // ============================================================
 ensureColumn('pro_profiles', 'pro_type', "TEXT NOT NULL DEFAULT 'particulier'"); // particulier | entreprise
+// Quiz synchronisé : intervalle entre deux quiz + top départ précis + une seule réponse par compte
+ensureColumn('quiz_sessions', 'interval_s', 'INTEGER NOT NULL DEFAULT 30');
+ensureColumn('quiz_sessions', 'started_ms', 'INTEGER');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_quiz_answers_once ON quiz_answers(session_id, user_id, question_id)');
 ensureColumn('pro_profiles', 'company_name', 'TEXT');   // nom de l'entreprise
 ensureColumn('pro_profiles', 'company_rccm', 'TEXT');   // registre (RCCM) ou équivalent
 ensureColumn('pro_profiles', 'company_size', 'TEXT');   // taille de l'équipe

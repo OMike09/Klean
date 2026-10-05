@@ -1160,12 +1160,69 @@ function quizRecord(s, p, answer, elapsedMs) {
   return db.prepare('SELECT * FROM quiz_participants WHERE id=?').get(p.id);
 }
 
+// ----- Série synchronisée : la phase se calcule à partir de l'heure de lancement -----
+function quizTimeline(s) {
+  const n = JSON.parse(s.qids || '[]').length;
+  const startMs = s.started_ms || Date.parse(String(s.started_at || '').replace(' ', 'T') + 'Z') || Date.now();
+  const q = s.time_per_q * 1000, pause = (s.interval_s == null ? 30 : s.interval_s) * 1000, C = q + pause;
+  const el = Date.now() - startMs;
+  const endMs = (n - 1) * C + q; // fermeture de la dernière question (pas de pause après)
+  if (!n || el >= endMs) return { over: true, n };
+  const i = Math.floor(el / C), t = el % C;
+  if (t < q) return { over: false, n, phase: 'question', index: i, remaining_ms: q - t, qStartMs: startMs + i * C };
+  return { over: false, n, phase: 'pause', index: i, next_in_ms: C - t };
+}
+// Finalisation automatique (une seule fois) quand la série est finie
+function quizFinalize(s) {
+  const r = db.prepare("UPDATE quiz_sessions SET status='terminee', ended_at=datetime('now') WHERE id=? AND status='en_cours'").run(s.id);
+  if (!r.changes) return;
+  const n = JSON.parse(s.qids || '[]').length;
+  const okCount = db.prepare('SELECT COUNT(*) n FROM quiz_answers WHERE session_id=? AND user_id=? AND correct=1');
+  db.prepare('SELECT * FROM quiz_participants WHERE session_id=?').all(s.id).forEach(p => {
+    const good = okCount.get(s.id, p.user_id).n;
+    const finaliste = s.elimination ? good === n : true; // progression : finaliste = sans faute
+    db.prepare("UPDATE quiz_participants SET status=?, score=?, finished_at=COALESCE(finished_at, datetime('now')) WHERE id=?")
+      .run(finaliste ? 'finaliste' : 'elimine', good, p.id);
+  });
+  if (s.winner_mode === 'auto') {
+    db.prepare(`SELECT user_id FROM quiz_participants WHERE session_id=? AND status='finaliste'
+      ORDER BY score DESC, total_ms ASC, id ASC LIMIT ?`).all(s.id, s.nb_winners).forEach(w => {
+      db.prepare("UPDATE quiz_participants SET status='gagnant' WHERE session_id=? AND user_id=?").run(s.id, w.user_id);
+      notify(w.user_id, 'contenu', '🏆 Félicitations, vous avez gagné !', `Vous êtes gagnant(e) du quiz « ${s.title} » ! Ouvrez le quiz pour contacter l\u2019administration.`, '#/quiz');
+    });
+  }
+}
+// État en direct pour un utilisateur : question active, verrou, spectateur, révélation en pause
+function quizLiveFor(s, userId) {
+  const tl = quizTimeline(s);
+  if (tl.over) return null;
+  const qids = JSON.parse(s.qids || '[]');
+  const getAns = qi => db.prepare('SELECT answer, correct FROM quiz_answers WHERE session_id=? AND user_id=? AND question_id=?').get(s.id, userId, qids[qi]);
+  const mine = getAns(tl.index);
+  const prev = tl.index > 0 ? getAns(tl.index - 1) : null;
+  const okPrev = tl.index === 0 || !s.elimination || !!(prev && prev.correct === 1);
+  const base = { phase: tl.phase, index: tl.index, total: tl.n, time_per_q: s.time_per_q, interval_s: s.interval_s };
+  if (tl.phase === 'question') {
+    const q = db.prepare('SELECT id, question, options FROM quiz_questions WHERE id=?').get(qids[tl.index]);
+    return { ...base, remaining_ms: tl.remaining_ms,
+      question: q ? { id: q.id, question: q.question, options: JSON.parse(q.options).slice(0, 4) } : null,
+      answered: !!mine, my_answer: mine ? mine.answer : null,
+      can_answer: !mine && okPrev, spectator: !mine && !okPrev };
+  }
+  const q = db.prepare('SELECT question, options, answer FROM quiz_questions WHERE id=?').get(qids[tl.index]);
+  return { ...base, next_in_ms: tl.next_in_ms, next_index: tl.index + 1, last_question: tl.index + 1 >= tl.n,
+    reveal: q ? { question: q.question, options: JSON.parse(q.options).slice(0, 4), correct: q.answer,
+      my_answer: mine ? mine.answer : null, my_correct: !!(mine && mine.correct === 1) } : null,
+    spectator_next: s.elimination ? !(mine && mine.correct === 1) : false };
+}
+
 // État du concours pour l'utilisateur connecté
 app.get('/api/games/concours', auth, (req, res) => {
   if (getSetting('quiz_enabled') !== '1') return res.json({ enabled: false });
   const audience = getSetting('quiz_audience') || 'tous';
   const allowed = quizAudienceOk(req.user);
   let s = db.prepare("SELECT * FROM quiz_sessions WHERE status='en_cours' ORDER BY id DESC LIMIT 1").get();
+  if (s && quizTimeline(s).over) { quizFinalize(s); s = null; } // série finie -> finalisation auto
   let p = null;
   if (s) p = quizParticipant(s.id, req.user.id);
   else {
@@ -1180,11 +1237,12 @@ app.get('/api/games/concours', auth, (req, res) => {
     enabled: true, allowed, audience,
     session: {
       id: s.id, title: s.title, status: s.status, nb_questions: JSON.parse(s.qids || '[]').length || s.nb_questions,
-      time_per_q: s.time_per_q, elimination: !!s.elimination, nb_winners: s.nb_winners, winners_designated: winnersDone
+      time_per_q: s.time_per_q, interval_s: s.interval_s, elimination: !!s.elimination, nb_winners: s.nb_winners, winners_designated: winnersDone
     },
     participant: p ? { status: p.status, score: p.score, current_q: p.current_q, photo_asked: !!p.photo_asked, photo_consent: p.photo_consent } : null,
     est_gagnant: !!(p && p.status === 'gagnant')
   };
+  if (s.status === 'en_cours' && allowed) out.live = quizLiveFor(s, req.user.id); // question active, verrou, spectateur…
   if (out.est_gagnant) // bulle de contact gagnant ↔ administration
     out.messages = db.prepare('SELECT from_admin, body, created_at FROM quiz_messages WHERE session_id=? AND user_id=? ORDER BY id').all(s.id, req.user.id);
   res.json(out);
@@ -1227,20 +1285,38 @@ app.get('/api/games/concours/:id/question', auth, (req, res) => {
   });
 });
 
-// Réponse (une seule sélection, enregistrée immédiatement)
+// Réponse : UNE seule par compte et par quiz, acceptée uniquement pendant la fenêtre de la question
 app.post('/api/games/concours/:id/repondre', auth, (req, res) => {
+  if (getSetting('quiz_enabled') !== '1') return res.status(403).json({ error: 'Le quiz est désactivé.' });
+  if (!quizAudienceOk(req.user)) return res.status(403).json({ error: 'Ce quiz ne vous est pas ouvert.' });
   const s = db.prepare("SELECT * FROM quiz_sessions WHERE id=? AND status='en_cours'").get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Ce quiz n\u2019est pas (ou plus) en cours.' });
-  let p = quizParticipant(s.id, req.user.id);
-  if (!p) return res.status(400).json({ error: 'Rejoignez d\u2019abord le quiz.' });
-  if (p.status !== 'en_lice') return res.status(400).json({ error: 'Votre participation est terminée.' });
-  const limitMs = s.time_per_q * 1000;
-  const elapsed = p.q_started_at ? Date.now() - p.q_started_at : 0;
-  let answer = parseInt(req.body.answer, 10);
-  if (!Number.isInteger(answer) || answer < 0 || answer > 3) answer = -1;
-  if (elapsed > limitMs + 2000) answer = -1; // trop tard : compté comme temps écoulé
-  p = quizRecord(s, p, answer, elapsed);
-  res.json({ status: p.status, score: p.score, done: p.status !== 'en_lice', next: p.status === 'en_lice' });
+  const tl = quizTimeline(s);
+  if (tl.over) { quizFinalize(s); return res.status(400).json({ error: 'Cette série de quiz est terminée.' }); }
+  if (tl.phase !== 'question') return res.status(400).json({ error: 'Patientez : le prochain quiz arrive (décompte à l\u2019écran).' });
+  const index = parseInt(req.body.index, 10);
+  if (index !== tl.index) return res.status(400).json({ error: 'Cette question est fermée.' });
+  const answer = parseInt(req.body.answer, 10);
+  if (!Number.isInteger(answer) || answer < 0 || answer > 3) return res.status(400).json({ error: 'Choisissez une réponse (A, B, C ou D).' });
+  const qids = JSON.parse(s.qids || '[]'), qid = qids[index];
+  if (db.prepare('SELECT id FROM quiz_answers WHERE session_id=? AND user_id=? AND question_id=?').get(s.id, req.user.id, qid))
+    return res.status(400).json({ error: 'Votre réponse est déjà enregistrée et verrouillée.' });
+  if (s.elimination && index > 0) { // progression conditionnelle -> sinon spectateur
+    const prev = db.prepare('SELECT correct FROM quiz_answers WHERE session_id=? AND user_id=? AND question_id=?').get(s.id, req.user.id, qids[index - 1]);
+    if (!prev || prev.correct !== 1)
+      return res.status(403).json({ error: 'Mode spectateur : seuls ceux qui ont trouvé la bonne réponse précédente peuvent continuer à répondre.' });
+  }
+  const q = db.prepare('SELECT answer FROM quiz_questions WHERE id=?').get(qid);
+  const correct = q && q.answer === answer ? 1 : 0;
+  const ms = Math.max(0, Math.min(Date.now() - tl.qStartMs, s.time_per_q * 1000));
+  db.prepare('INSERT OR IGNORE INTO quiz_participants(session_id, user_id) VALUES(?,?)').run(s.id, req.user.id);
+  try {
+    db.prepare('INSERT INTO quiz_answers(session_id, user_id, question_id, answer, correct, ms) VALUES(?,?,?,?,?,?)')
+      .run(s.id, req.user.id, qid, answer, correct, ms);
+  } catch { return res.status(400).json({ error: 'Votre réponse est déjà enregistrée et verrouillée.' }); }
+  db.prepare('UPDATE quiz_participants SET score=score+?, total_ms=total_ms+?, current_q=? WHERE session_id=? AND user_id=?')
+    .run(correct, ms, index + 1, s.id, req.user.id);
+  res.json({ ok: true, locked: true });
 });
 
 // Consentement photo du gagnant : ✅ j'accepte / ❌ je refuse (jamais redemandé après un refus)
@@ -1983,14 +2059,16 @@ function quizSessionBody(b) {
   if (!Number.isInteger(nbQ) || nbQ < 1 || nbQ > 50) return { error: 'Nombre de questions invalide (1 à 50).' };
   if (!Number.isInteger(time) || time < 5 || time > 600) return { error: 'Temps par question invalide (5 à 600 secondes).' };
   if (!Number.isInteger(nbW) || nbW < 1 || nbW > 100) return { error: 'Nombre de gagnants invalide (1 à 100).' };
-  return { title, nb_questions: nbQ, time_per_q: time, nb_winners: nbW,
+  const inter = parseInt(b.interval_s == null ? 30 : b.interval_s, 10);
+  if (!Number.isInteger(inter) || inter < 3 || inter > 600) return { error: 'Intervalle entre deux quiz invalide (3 à 600 secondes).' };
+  return { title, nb_questions: nbQ, time_per_q: time, nb_winners: nbW, interval_s: inter,
     elimination: b.elimination ? 1 : 0, winner_mode: b.winner_mode === 'admin' ? 'admin' : 'auto' };
 }
 A.post('/quiz-sessions', (req, res) => {
   const v = quizSessionBody(req.body || {});
   if (v.error) return res.status(400).json({ error: v.error });
-  const info = db.prepare(`INSERT INTO quiz_sessions(title, nb_questions, time_per_q, elimination, nb_winners, winner_mode)
-    VALUES(?,?,?,?,?,?)`).run(v.title, v.nb_questions, v.time_per_q, v.elimination, v.nb_winners, v.winner_mode);
+  const info = db.prepare(`INSERT INTO quiz_sessions(title, nb_questions, time_per_q, elimination, nb_winners, winner_mode, interval_s)
+    VALUES(?,?,?,?,?,?,?)`).run(v.title, v.nb_questions, v.time_per_q, v.elimination, v.nb_winners, v.winner_mode, v.interval_s);
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 A.put('/quiz-sessions/:id', (req, res) => {
@@ -1999,8 +2077,8 @@ A.put('/quiz-sessions/:id', (req, res) => {
   if (s.status !== 'brouillon') return res.status(400).json({ error: 'Seul un brouillon peut être modifié.' });
   const v = quizSessionBody(req.body || {});
   if (v.error) return res.status(400).json({ error: v.error });
-  db.prepare('UPDATE quiz_sessions SET title=?, nb_questions=?, time_per_q=?, elimination=?, nb_winners=?, winner_mode=? WHERE id=?')
-    .run(v.title, v.nb_questions, v.time_per_q, v.elimination, v.nb_winners, v.winner_mode, s.id);
+  db.prepare('UPDATE quiz_sessions SET title=?, nb_questions=?, time_per_q=?, elimination=?, nb_winners=?, winner_mode=?, interval_s=? WHERE id=?')
+    .run(v.title, v.nb_questions, v.time_per_q, v.elimination, v.nb_winners, v.winner_mode, v.interval_s, s.id);
   res.json({ ok: true });
 });
 A.delete('/quiz-sessions/:id', (req, res) => {
@@ -2020,7 +2098,20 @@ A.post('/quiz-sessions/:id/lancer', (req, res) => {
   const qids = db.prepare('SELECT id FROM quiz_questions WHERE active=1 ORDER BY RANDOM() LIMIT ?').all(s.nb_questions).map(q => q.id);
   if (qids.length < s.nb_questions)
     return res.status(400).json({ error: `Pas assez de questions actives (${qids.length} disponibles, ${s.nb_questions} demandées). Ajoutez des questions.` });
-  db.prepare("UPDATE quiz_sessions SET status='en_cours', qids=?, started_at=datetime('now') WHERE id=?").run(JSON.stringify(qids), s.id);
+  db.prepare("UPDATE quiz_sessions SET status='en_cours', qids=?, started_at=datetime('now'), started_ms=? WHERE id=?").run(JSON.stringify(qids), Date.now(), s.id);
+  res.json({ ok: true });
+});
+// Rejouer / Reprendre : réinitialise les réponses et les statuts, et relance la même série
+A.post('/quiz-sessions/:id/rejouer', (req, res) => {
+  const s = db.prepare('SELECT * FROM quiz_sessions WHERE id=?').get(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Session introuvable.' });
+  if (s.status === 'brouillon') return res.status(400).json({ error: 'Lancez d\u2019abord cette session.' });
+  if (db.prepare("SELECT COUNT(*) n FROM quiz_sessions WHERE status='en_cours' AND id!=?").get(s.id).n)
+    return res.status(400).json({ error: 'Un autre quiz est déjà en cours. Arrêtez-le d\u2019abord.' });
+  if (getSetting('quiz_enabled') !== '1') return res.status(400).json({ error: 'Activez d\u2019abord le quiz (bouton Activation ci-dessus).' });
+  db.prepare('DELETE FROM quiz_answers WHERE session_id=?').run(s.id);
+  db.prepare('DELETE FROM quiz_participants WHERE session_id=?').run(s.id);
+  db.prepare("UPDATE quiz_sessions SET status='en_cours', started_at=datetime('now'), started_ms=?, ended_at=NULL WHERE id=?").run(Date.now(), s.id);
   res.json({ ok: true });
 });
 A.post('/quiz-sessions/:id/arreter', (req, res) => {

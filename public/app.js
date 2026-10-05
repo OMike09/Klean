@@ -351,6 +351,7 @@ routes.home = async () => {
         <button onclick="A.goSearch()" aria-label="Rechercher">🔍</button>
       </div>
     </div>
+    <div id="quiz-live"></div>
     <div class="hint">Ex : « Je cherche un plombier », « Nettoyer mon fauteuil », « Cours d'anglais à domicile »…</div>
     ${POPULAIRES.length ? `<div class="sec-title">Services populaires</div>
     <div class="svc-grid">
@@ -364,6 +365,7 @@ routes.home = async () => {
     <button class="btn sec mt" onclick="nav('#/services')">Voir tous les services</button>
   </div>${bottomNav('home')}`;
   updateBadges();
+  quizLiveMount(); // le quiz actif s'affiche automatiquement, sans aucun clic
   // comptage des vues (pub/infos/urgences + jeux affichés)
   const vues = homeAds.map(a => 'ad:' + a.id);
   if (GAMES.quiz) vues.push('game:quiz');
@@ -1324,6 +1326,93 @@ routes.payments = async () => {
   </div>${bottomNav('account')}`;
 };
 
+/* ---------- Quiz synchronisé sur l'accueil ---------- */
+let QL_TIMER = null, QL_ETAT = null, QL_TICK = 0;
+function qlStop() { if (QL_TIMER) { clearInterval(QL_TIMER); QL_TIMER = null; } }
+async function quizLiveMount() {
+  qlStop();
+  if (!document.getElementById('quiz-live') || !USER || !GAMES.quiz) return;
+  await qlSync();
+  QL_TICK = 0;
+  QL_TIMER = setInterval(() => {
+    if (!document.getElementById('quiz-live')) { qlStop(); return; } // on a quitté l'accueil
+    QL_TICK++;
+    const live = QL_ETAT && QL_ETAT.live;
+    if (live) { // décompte local seconde par seconde
+      if (live.phase === 'question') { live.remaining_ms -= 1000; if (live.remaining_ms <= 300) { qlSync(); return; } }
+      else { live.next_in_ms -= 1000; if (live.next_in_ms <= 300) { qlSync(); return; } }
+    }
+    if (QL_TICK % 5 === 0) { qlSync(); return; } // re-synchronisation serveur toutes les 5 s
+    qlRender();
+  }, 1000);
+}
+async function qlSync() {
+  try { QL_ETAT = await api('/games/concours'); } catch { QL_ETAT = null; }
+  qlRender();
+}
+function qlRender() {
+  const box = document.getElementById('quiz-live');
+  if (!box) return;
+  const e = QL_ETAT;
+  if (!e || !e.enabled || !e.session || !e.allowed) { box.innerHTML = ''; return; }
+  const s = e.session;
+  const carte = inner => `<div class="card" style="border:2px solid #16a34a;margin-top:8px">${inner}</div>`;
+  if (s.status === 'terminee') {
+    if (!e.participant) { box.innerHTML = ''; return; }
+    box.innerHTML = carte(`<div class="center">🏁 <b>Quiz « ${esc(s.title)} » terminé.</b><br>
+      <button class="btn sec mt" onclick="nav('#/quiz')">Voir mes résultats ${e.est_gagnant ? '🏆' : ''}</button></div>`);
+    return;
+  }
+  const live = e.live;
+  if (!live) { box.innerHTML = ''; return; }
+  const letters = ['A', 'B', 'C', 'D'];
+  if (live.phase === 'question') {
+    const secs = Math.max(0, Math.ceil(live.remaining_ms / 1000));
+    const etatTxt = live.answered
+      ? '<div class="small center bold" style="color:#16a34a">✅ Réponse envoyée — verrouillée. Résultat à la fin du décompte.</div>'
+      : live.spectator
+        ? '<div class="small center bold" style="color:#6b7280">👁️ Mode spectateur — vous ne pouvez plus répondre, mais vous suivez tout.</div>'
+        : '<div class="small muted center">Une seule réponse possible — elle sera verrouillée.</div>';
+    box.innerHTML = carte(`
+      <div class="small muted center">🧠 QUIZ EN DIRECT • « ${esc(s.title)} » • Question ${live.index + 1} / ${live.total}</div>
+      <div class="center" style="margin:2px 0">
+        <span style="font-size:38px;font-weight:800;line-height:1;color:${secs <= 5 ? '#dc2626' : '#16a34a'}">${secs}</span>
+        <span class="small muted"> seconde(s)</span></div>
+      <div style="height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin-bottom:10px">
+        <div style="height:100%;background:${secs <= 5 ? '#dc2626' : '#16a34a'};width:${Math.min(100, live.remaining_ms / (live.time_per_q * 10))}%"></div></div>
+      <div class="bold mb" style="font-size:16px">${esc(live.question ? live.question.question : '')}</div>
+      ${(live.question ? live.question.options : []).map((o, j) => {
+        const choisi = live.answered && live.my_answer === j;
+        const inactif = live.answered || live.spectator;
+        return `<button type="button" ${inactif ? 'disabled' : ''} onclick="A.qlRepondre(${s.id},${live.index},${j})"
+          style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:${choisi ? '#f0fdf4' : '#fff'};
+          border:2px solid ${choisi ? '#16a34a' : '#e5e7eb'};border-radius:12px;padding:11px;margin-bottom:7px;font-size:15px;
+          ${inactif ? 'opacity:' + (choisi ? '1' : '0.55') + ';cursor:default' : 'cursor:pointer'}">
+          <span style="flex:0 0 26px;height:26px;border-radius:50%;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-weight:700">${letters[j]}</span>
+          <span>${esc(o)}</span>${choisi ? '<span style="margin-left:auto">🔒</span>' : ''}</button>`;
+      }).join('')}
+      ${etatTxt}`);
+    return;
+  }
+  // Pause : révélation du résultat + décompte avant le prochain quiz
+  const secs = Math.max(0, Math.ceil(live.next_in_ms / 1000));
+  const r = live.reveal || {};
+  const maRep = r.my_answer == null
+    ? '<span style="color:#6b7280">Vous n\u2019avez pas répondu à ce quiz.</span>'
+    : r.my_correct
+      ? `<span style="color:#16a34a">Votre réponse : <b>${letters[r.my_answer]}</b> — ✅ bonne réponse !</span>`
+      : `<span style="color:#dc2626">Votre réponse : <b>${letters[r.my_answer]}</b> — ❌ mauvaise réponse.</span>`;
+  box.innerHTML = carte(`
+    <div class="small muted center">🧠 QUIZ EN DIRECT • « ${esc(s.title)} » • Résultat du quiz ${live.index + 1} / ${live.total}</div>
+    <div class="small mb" style="margin-top:6px">${esc(r.question || '')}</div>
+    <div class="bold small mb" style="color:#16a34a">✔️ Bonne réponse : ${letters[r.correct] || ''} — ${esc((r.options || [])[r.correct] || '')}</div>
+    <div class="small mb">${maRep}</div>
+    ${live.spectator_next ? '<div class="small bold" style="color:#6b7280">👁️ Vous suivez la suite en mode spectateur (seuls les bons répondants continuent).</div>' : '<div class="small bold" style="color:#16a34a">🎯 Vous continuez ! Préparez-vous…</div>'}
+    <div class="center" style="margin-top:8px">⏳ Prochain quiz dans
+      <span style="font-size:30px;font-weight:800;color:#2563eb"> ${secs}</span>
+      <span class="small muted"> seconde(s)</span></div>`);
+}
+
 /* ---------- Jeux ---------- */
 let QUIZ_TIMER = null;
 function quizStopTimer() { if (QUIZ_TIMER) { clearInterval(QUIZ_TIMER); QUIZ_TIMER = null; } }
@@ -1349,6 +1438,9 @@ routes.quiz = async () => {
       <button class="btn sec" onclick="back()">Retour</button></div></div>${bottomNav('home')}`;
     return;
   }
+
+  // ----- Série en cours : la question s'affiche automatiquement sur l'accueil -----
+  if (s.status === 'en_cours') { nav('#/home'); return; }
 
   // ----- Session terminée : résultats -----
   if (s.status === 'terminee') {
@@ -1995,6 +2087,14 @@ const A = {
   },
   delAddr(id) { api('/addresses/' + id, { method: 'DELETE' }).then(() => { toast('Adresse supprimée.', 'ok'); render(); }).catch(e => toast(e.message, 'err')); },
   quizPick(el, qid, j) { A.pickChip(el, String(j)); window._quizAnswers[qid] = j; },
+  async qlRepondre(sid, index, j) {
+    if (window._qlLock) return; // une seule sélection
+    window._qlLock = true;
+    try { await api(`/games/concours/${sid}/repondre`, { method: 'POST', body: { index, answer: j } }); }
+    catch (e) { toast(e.message, 'err'); }
+    window._qlLock = false;
+    qlSync();
+  },
   async quizRepondre(sid, j) {
     if (window._qzLock) return; // une seule sélection
     window._qzLock = true;

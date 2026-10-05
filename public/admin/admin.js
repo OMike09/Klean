@@ -696,22 +696,26 @@ views.games = async () => {
       <div><label>Temps / question</label><select id="qs-time">
         ${[10, 15, 20, 30, 60].map(t => `<option value="${t}" ${t === 20 ? 'selected' : ''}>${t} s</option>`).join('')}
         <option value="autre">Personnalisé…</option></select></div>
+      <div><label>Intervalle entre 2 quiz</label><select id="qs-inter">
+        ${[10, 15, 30, 60, 120].map(t => `<option value="${t}" ${t === 30 ? 'selected' : ''}>${t} s</option>`).join('')}
+        <option value="autre">Personnalisé…</option></select></div>
       <div><label>Nb gagnants</label><input type="number" id="qs-nbw" value="1" min="1" max="100" style="width:80px"></div>
       <div><label>Désignation</label><select id="qs-mode">
         <option value="auto">Automatique (meilleurs scores)</option>
         <option value="admin">Par l'administration (parmi les finalistes)</option></select></div>
-      <div><label style="display:flex;align-items:center;gap:6px;margin-top:18px"><input type="checkbox" id="qs-elim"> Élimination automatique</label></div>
+      <div><label style="display:flex;align-items:center;gap:6px;margin-top:18px" title="Seuls ceux qui trouvent la bonne réponse continuent ; les autres passent en mode spectateur"><input type="checkbox" id="qs-elim" checked> Progression : seuls les bons répondants continuent</label></div>
       <button class="btn" onclick="A.quizSessionAdd()">＋ Créer</button>
     </div>
     <table style="margin-top:10px"><tr><th>Titre</th><th>Statut</th><th>Réglages</th><th>Participants</th><th>Actions</th></tr>
     ${sessions.map(x => `<tr><td><b>${esc(x.title)}</b><br><span class="small muted">${fmtD(x.created_at)}</span></td>
       <td>${stLbl[x.status] || esc(x.status)}</td>
-      <td class="small">${x.nb_questions} questions • ${x.time_per_q}s/question<br>${x.elimination ? '⚠️ Élimination auto • ' : ''}${x.nb_winners} gagnant(s) • désignation ${x.winner_mode === 'auto' ? 'auto' : 'admin'}</td>
+      <td class="small">${x.nb_questions} questions • ${x.time_per_q}s/question • pause ${x.interval_s == null ? 30 : x.interval_s}s<br>${x.elimination ? '👁️ Progression (spectateurs) • ' : ''}${x.nb_winners} gagnant(s) • désignation ${x.winner_mode === 'auto' ? 'auto' : 'admin'}</td>
       <td>${x.participants}${x.gagnants ? ` <span class="pill ok">🏆 ${x.gagnants}</span>` : ''}</td>
       <td>
         ${x.status === 'brouillon' ? `<button class="btn sm" onclick="A.quizLancer(${x.id})" ${enCours ? 'disabled title="Un quiz est déjà en cours"' : ''}>🚀 Lancer</button>
           <button class="btn sm warn" onclick="A.quizSessionDel(${x.id})">🗑️</button>` : ''}
         ${x.status === 'en_cours' ? `<button class="btn sm warn" onclick="A.quizArreter(${x.id})">⏹️ Arrêter</button>` : ''}
+        ${x.status === 'terminee' ? `<button class="btn sm" onclick="A.quizRejouer(${x.id})">🔄 Rejouer</button>` : ''}
         ${x.status !== 'brouillon' ? `<button class="btn sm sec" onclick="A.quizSessionDetail(${x.id})">📋 Détails</button>` : ''}
       </td></tr>`).join('')}
     ${!sessions.length ? '<tr><td colspan="5" class="muted">Aucune session. Créez votre premier quiz concours ci-dessus.</td></tr>' : ''}</table></div>
@@ -1284,11 +1288,17 @@ const A = {
         time = prompt('Temps par question (en secondes, entre 5 et 600) :', '45');
         if (time === null) return;
       }
+      let inter = document.getElementById('qs-inter').value;
+      if (inter === 'autre') {
+        inter = prompt('Intervalle entre deux quiz (en secondes, entre 3 et 600) :', '30');
+        if (inter === null) return;
+      }
       await api('/admin/quiz-sessions', {
         method: 'POST', body: {
           title: document.getElementById('qs-title').value,
           nb_questions: document.getElementById('qs-nbq').value,
           time_per_q: time,
+          interval_s: inter,
           nb_winners: document.getElementById('qs-nbw').value,
           winner_mode: document.getElementById('qs-mode').value,
           elimination: document.getElementById('qs-elim').checked
@@ -1305,6 +1315,11 @@ const A = {
   async quizArreter(id) {
     if (!confirm('Arrêter ce quiz ? Les participants encore en lice deviendront finalistes et les gagnants seront désignés (mode automatique) ou à désigner par vous.')) return;
     try { await api(`/admin/quiz-sessions/${id}/arreter`, { method: 'POST' }); toast('Quiz arrêté ⏹️', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async quizRejouer(id) {
+    if (!confirm('Rejouer cette série ? Les réponses et les statuts des participants seront réinitialisés, et la série redémarrera immédiatement pour tout le monde. (Les messages des anciens gagnants sont conservés dans les détails.)')) return;
+    try { await api(`/admin/quiz-sessions/${id}/rejouer`, { method: 'POST' }); toast('Série relancée 🔄 — la question 1 s\u2019affiche sur les accueils.', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); }
   },
   async quizSessionDel(id) {
