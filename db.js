@@ -282,6 +282,8 @@ CREATE TABLE IF NOT EXISTS game_plays (
 
 CREATE TABLE IF NOT EXISTS annonces (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL DEFAULT 'info',          -- pub | info | urgence
+  theme TEXT NOT NULL DEFAULT '',             -- sujet affiché entre parenthèses : Sport, Éducation…
   title TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL DEFAULT '',
   icon TEXT NOT NULL DEFAULT '📢',
@@ -290,6 +292,83 @@ CREATE TABLE IF NOT EXISTS annonces (
   sort INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS commission_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL DEFAULT '',
+  pro_type TEXT,                              -- particulier | entreprise | NULL = tous
+  category_id INTEGER,                        -- service_categories.id | NULL = toutes
+  ville TEXT,                                 -- NULL = toutes les zones
+  rate REAL NOT NULL,                         -- % de commission
+  priority INTEGER NOT NULL DEFAULT 0,        -- la règle la plus prioritaire gagne
+  date_debut TEXT, date_fin TEXT,             -- campagne / période (optionnel)
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS mission_price_changes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mission_id INTEGER NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+  pro_id INTEGER NOT NULL, client_id INTEGER NOT NULL,
+  old_amount INTEGER NOT NULL, new_amount INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'en_attente',  -- en_attente | accepte | refuse
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  decided_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS visibility_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  price INTEGER NOT NULL,
+  duration_days INTEGER NOT NULL DEFAULT 30,
+  level INTEGER NOT NULL DEFAULT 1,           -- poids de mise en avant (1 à 3)
+  avantages TEXT NOT NULL DEFAULT '',
+  cible TEXT NOT NULL DEFAULT 'tous',         -- tous | particulier | entreprise
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS visibility_subs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  plan_id INTEGER, plan_name TEXT NOT NULL, price INTEGER NOT NULL,
+  level INTEGER NOT NULL DEFAULT 1,
+  duration_days INTEGER NOT NULL DEFAULT 30,
+  status TEXT NOT NULL DEFAULT 'attente_paiement', -- attente_paiement | active | expiree | annulee
+  start_at TEXT, end_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ad_campaigns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  type TEXT NOT NULL DEFAULT 'texte',         -- texte | image | video
+  title TEXT NOT NULL, content TEXT, file TEXT, link TEXT,
+  placement TEXT NOT NULL DEFAULT 'accueil',  -- accueil | services
+  zone TEXT,                                  -- ville ciblée, NULL = partout
+  budget INTEGER NOT NULL DEFAULT 0,
+  duration_days INTEGER NOT NULL DEFAULT 7,
+  priorite TEXT NOT NULL DEFAULT 'standard',  -- standard | prioritaire | premium
+  status TEXT NOT NULL DEFAULT 'attente_paiement',
+  -- brouillon | attente_paiement | paiement_confirme | attente_validation | validee (file d'attente) | active | suspendue | refusee | expiree
+  note_admin TEXT,
+  start_at TEXT, end_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  kind TEXT NOT NULL,                         -- commission | publicite | visibilite | avis_recherche | emploi | remboursement
+  ref_id INTEGER,                             -- id dans la table d'origine (payment, campagne, abonnement, avis, job)
+  label TEXT NOT NULL DEFAULT '',
+  amount INTEGER NOT NULL,
+  method TEXT, ville TEXT, categorie TEXT,
+  status TEXT NOT NULL DEFAULT 'en_attente',  -- en_attente | confirme | echoue | rembourse
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  confirmed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS view_counts (
@@ -913,7 +992,47 @@ ensureColumn('pro_profiles', 'company_size', 'TEXT');   // taille de l'équipe
 if (getSetting('pro_doc_particulier') === null) setSetting('pro_doc_particulier', '0');
 // Quiz concours : public autorisé (tous | clients | clients_pros)
 if (getSetting('quiz_audience') === null) setSetting('quiz_audience', 'tous');
+// ----- Modèle économique (commission, visibilité, campagnes pub, avis, emploi) -----
+ensureColumn('avis_recherche', 'formule', "TEXT NOT NULL DEFAULT 'normal'"); // normal | avant | urgent
+ensureColumn('avis_recherche', 'expire_at', 'TEXT');
+ensureColumn('avis_recherche', 'paid', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('jobs', 'boost', "TEXT NOT NULL DEFAULT 'normal'");             // normal | avant | prioritaire
+ensureColumn('jobs', 'boost_until', 'TEXT');
+const ECO_DEFAULTS = {
+  commission_enabled: '1',               // commission obligatoire quand la prestation passe par Klean-Services
+  visibilite_enabled: '1',               // visibilité payante FACULTATIVE (désactivable)
+  pub_campagnes_enabled: '1',            // campagnes publicitaires des annonceurs
+  pub_max_actives: '10',                 // emplacements simultanés (file d'attente au-delà)
+  pub_budgets: '5000,10000,25000,50000', // budgets proposés (montant personnalisé toujours possible)
+  pub_niveaux: JSON.stringify([
+    { code: 'standard', label: 'Standard', poids: 1, min_budget: 0, actif: 1 },
+    { code: 'prioritaire', label: 'Prioritaire', poids: 2, min_budget: 25000, actif: 1 },
+    { code: 'premium', label: 'Premium', poids: 3, min_budget: 50000, actif: 1 }
+  ]),
+  avis_prix_normal: '0',                 // avis de recherche normal : gratuit par défaut
+  avis_prix_avant: '1000',
+  avis_prix_urgent: '2000',
+  avis_avant_enabled: '1',
+  avis_urgent_enabled: '1',
+  avis_duree_jours: '30',                // expiration automatique
+  emploi_boost_enabled: '1',             // mise en avant facultative des profils emploi
+  emploi_prix_avant: '1000',
+  emploi_prix_prioritaire: '2000',
+  emploi_boost_duree_jours: '30',
+  pays: 'CI', devise: 'FCFA'             // préparé pour l'international (paramétrable)
+};
+for (const [k, v] of Object.entries(ECO_DEFAULTS)) if (getSetting(k) === null) setSetting(k, v);
+// Formules de visibilité de départ (prix/durée/avantages modifiables ou supprimables dans le tableau de bord)
+if (!db.prepare('SELECT 1 FROM visibility_plans LIMIT 1').get()) {
+  const insP = db.prepare('INSERT INTO visibility_plans(name, price, duration_days, level, avantages, cible) VALUES(?,?,?,?,?,?)');
+  insP.run('Visibilité Plus', 2500, 30, 1, 'Profil mis en avant dans les recherches, badge « Mis en avant »', 'tous');
+  insP.run('Visibilité Pro', 5000, 30, 2, 'Meilleure position, badge « Mis en avant », priorité sur les missions à égalité', 'tous');
+  insP.run('Visibilité Entreprise', 10000, 30, 3, 'Position maximale, badge « Mis en avant », priorité renforcée', 'entreprise');
+}
+
 // Bandeau d'annonces défilantes en bas de l'accueil
+ensureColumn('annonces', 'type', "TEXT NOT NULL DEFAULT 'info'");   // pub | info | urgence
+ensureColumn('annonces', 'theme', "TEXT NOT NULL DEFAULT ''");      // sujet entre parenthèses
 if (getSetting('bandeau_enabled') === null) setSetting('bandeau_enabled', '1');
 if (getSetting('bandeau_speed') === null) setSetting('bandeau_speed', '60'); // pixels/seconde
 if (getSetting('pro_doc_entreprise') === null) setSetting('pro_doc_entreprise', '1');

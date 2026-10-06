@@ -69,12 +69,12 @@ const MENU = [
   ['TABLEAU DE BORD', [['dashboard', '📊 Vue d\u2019ensemble', null, null]]],
   ['UTILISATEURS', [['users', '👥 Tous les comptes', null, 'comptes'], ['pros', '✅ Validations pro', 'pros_pending', 'pros']]],
   ['SERVICES', [['catalog', '🗂️ Services & catégories', null, 'catalogue'], ['questions', '❓ Questions dynamiques', null, 'questions']]],
-  ['MISSIONS', [['missions', '🧰 Demandes & missions', null, 'missions'], ['payments', '💰 Paiements & commissions', null, 'paiements']]],
+  ['MISSIONS', [['missions', '🧰 Demandes & missions', null, 'missions'], ['payments', '💰 Paiements & commissions', null, 'paiements'], ['finances', '📈 Finances & revenus', null, 'paiements']]],
   ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['broadcast', '📨 Message système', null, 'communication']]],
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
   ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Je cherche un job', null, 'contenu'], ['ecole', '🏫 École & famille', null, 'contenu'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
   ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
-  ['CONFIGURATION', [['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
+  ['CONFIGURATION', [['commerce', '💰 Paramètres commerciaux', null, 'parametres'], ['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
 ];
 function menuVisible(perm) { return !perm || (perm === 'PDG' ? ME && ME.role === 'pdg' : can(perm)); }
 
@@ -520,43 +520,239 @@ views.payments = async () => {
   ${!list.length ? '<tr><td colspan="9" class="muted">Aucun paiement.</td></tr>' : ''}</table></div>`);
 };
 
+/* ---------- 💰 Paramètres commerciaux (tout le modèle économique, sans toucher au code) ---------- */
+views.commerce = async () => {
+  const s = await api('/admin/settings');
+  const com = await api('/admin/commissions');
+  const plans = await api('/admin/visibilite/plans');
+  let cats = [];
+  try { cats = (await api('/admin/catalog')).categories; } catch { }
+  let niveaux = [];
+  try { niveaux = JSON.parse(s.pub_niveaux || '[]'); } catch { }
+  const onoff = (k, lb) => `<button class="btn sm ${s[k] === '1' ? '' : 'sec'}" onclick="A.toggleSetting('${k}','${s[k] === '1' ? '0' : '1'}')">${lb} : ${s[k] === '1' ? '🟢 ACTIVÉE' : '🔴 DÉSACTIVÉE'}</button>`;
+  const num = (k, label, w = 110) => `<div><label>${label}</label><input type="number" id="cm-${k}" value="${esc(s[k] || '')}" style="width:${w}px" onchange="A.cmNum('${k}')"></div>`;
+  shell(`<h1>💰 Paramètres commerciaux</h1>
+  <div class="small muted" style="margin-bottom:10px">Modèle Klean-Services : <b>prestation → commission obligatoire</b> • <b>visibilité → paiement facultatif</b> • <b>publicité → campagne payante</b> • <b>avis de recherche → gratuit ou payant selon vos réglages</b> • <b>recherche d'emploi → gratuite + mise en avant facultative</b>. Toute modification est journalisée (qui, ancienne et nouvelle valeur).</div>
+
+  <div class="panel"><h2 style="margin-top:0">A. 💰 Commission sur les prestations</h2>
+    <div class="frow" style="align-items:flex-end">
+      ${onoff('commission_enabled', 'Commission')}
+      <div><label>Taux général (%)</label><input type="number" id="cm-commission_rate" value="${esc(s.commission_rate || '25')}" min="0" max="100" style="width:90px" onchange="A.cmNum('commission_rate')"></div>
+      <span class="small muted">Exemple à ${esc(s.commission_rate || '25')} % : prestation 40 000 → commission ${Math.round(40000 * parseFloat(s.commission_rate || '25') / 100).toLocaleString('fr-FR')} F, part pro ${(40000 - Math.round(40000 * parseFloat(s.commission_rate || '25') / 100)).toLocaleString('fr-FR')} F. Calcul toujours effectué côté serveur : impossible à contourner.</span>
+    </div>
+    <h3 class="small" style="margin:12px 0 4px">Règles particulières (la plus prioritaire gagne ; sans règle → taux général)</h3>
+    <div class="frow" style="align-items:flex-end;flex-wrap:wrap">
+      <div><label>Libellé</label><input id="cr-label" placeholder="Ex : promo entreprises" style="width:140px"></div>
+      <div><label>Type de pro</label><select id="cr-protype"><option value="">Tous</option><option value="particulier">Particulier</option><option value="entreprise">Entreprise</option></select></div>
+      <div><label>Catégorie</label><select id="cr-cat"><option value="">Toutes</option>${cats.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+      <div><label>Ville / zone</label><input id="cr-ville" placeholder="Toutes" style="width:110px"></div>
+      <div><label>Taux (%)</label><input type="number" id="cr-rate" min="0" max="100" style="width:70px"></div>
+      <div><label>Priorité</label><input type="number" id="cr-prio" value="1" style="width:60px"></div>
+      <div><label>Du (campagne)</label><input type="date" id="cr-debut"></div>
+      <div><label>Au</label><input type="date" id="cr-fin"></div>
+      <button class="btn" onclick="A.crAdd()">＋</button>
+    </div>
+    <table style="margin-top:8px"><tr><th>Libellé</th><th>Type pro</th><th>Catégorie</th><th>Zone</th><th>Taux</th><th>Priorité</th><th>Période</th><th>État</th><th></th></tr>
+    ${com.rules.map(r => `<tr><td>${esc(r.label || '—')}</td><td>${r.pro_type || 'Tous'}</td><td>${esc(r.category_name || 'Toutes')}</td><td>${esc(r.ville || 'Toutes')}</td>
+      <td><b>${r.rate} %</b></td><td>${r.priority}</td><td class="small">${r.date_debut || '—'} → ${r.date_fin || '—'}</td>
+      <td>${r.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
+      <td><button class="btn sm sec" onclick="A.crToggle(${r.id},${r.active ? 0 : 1})">${r.active ? 'Désactiver' : 'Activer'}</button>
+      <button class="btn sm warn" onclick="A.crDel(${r.id})">🗑️</button></td></tr>`).join('')}
+    ${!com.rules.length ? '<tr><td colspan="9" class="muted">Aucune règle particulière : le taux général s\u2019applique partout.</td></tr>' : ''}</table>
+  </div>
+
+  <div class="panel"><h2 style="margin-top:0">B. ⭐ Visibilité professionnelle (toujours facultative)</h2>
+    <div class="frow">${onoff('visibilite_enabled', 'Visibilité payante')}
+    <span class="small muted">Désactivée : plus aucune offre proposée, les profils restent complets et gratuits, l'historique est conservé.</span></div>
+    <div class="frow" style="align-items:flex-end;flex-wrap:wrap;margin-top:8px">
+      <div><label>Nom</label><input id="vp-name" placeholder="Visibilité Plus" style="width:140px"></div>
+      <div><label>Prix (FCFA)</label><input type="number" id="vp-price" style="width:90px"></div>
+      <div><label>Durée (jours)</label><input type="number" id="vp-dur" value="30" style="width:80px"></div>
+      <div><label>Niveau (1-3)</label><input type="number" id="vp-level" value="1" min="1" max="3" style="width:70px"></div>
+      <div><label>Cible</label><select id="vp-cible"><option value="tous">Tous les pros</option><option value="particulier">Particuliers</option><option value="entreprise">Entreprises</option></select></div>
+      <div style="flex:1;min-width:180px"><label>Avantages</label><input id="vp-av" style="width:100%" placeholder="Profil mis en avant, badge…"></div>
+      <button class="btn" onclick="A.vpAdd()">＋</button>
+    </div>
+    <table style="margin-top:8px"><tr><th>Formule</th><th>Prix</th><th>Durée</th><th>Niveau</th><th>Cible</th><th>Avantages</th><th>État</th><th>Actions</th></tr>
+    ${plans.map(pl => `<tr><td><b>${esc(pl.name)}</b></td><td>${fcfa(pl.price)}</td><td>${pl.duration_days} j</td><td>${pl.level}</td><td>${pl.cible}</td><td class="small">${esc(pl.avantages || '')}</td>
+      <td>${pl.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
+      <td><button class="btn sm sec" onclick="A.vpToggle(${pl.id},${pl.active ? 0 : 1})">${pl.active ? 'Désactiver' : 'Activer'}</button>
+      <button class="btn sm sec" onclick="A.vpEdit(${pl.id})">✏️</button>
+      <button class="btn sm warn" onclick="A.vpDel(${pl.id})">🗑️</button></td></tr>`).join('')}</table>
+  </div>
+
+  <div class="panel"><h2 style="margin-top:0">C. 📣 Campagnes publicitaires</h2>
+    <div class="frow" style="align-items:flex-end;flex-wrap:wrap">
+      ${onoff('pub_campagnes_enabled', 'Campagnes publicitaires')}
+      ${num('pub_max_actives', 'Emplacements simultanés', 90)}
+      <div style="min-width:220px"><label>Budgets proposés (FCFA, séparés par des virgules)</label><input id="cm-pub_budgets" value="${esc(s.pub_budgets || '')}" style="width:100%" onchange="A.cmTxt('pub_budgets')"></div>
+    </div>
+    <div class="small muted" style="margin-top:4px">Au-delà des emplacements disponibles, les campagnes validées entrent en <b>file d'attente</b> et passent en ligne automatiquement quand une place se libère. Le montant personnalisé reste toujours possible côté annonceur.</div>
+    <h3 class="small" style="margin:12px 0 4px">Niveaux de priorité (le poids augmente la fréquence de rotation — maximum ×3, jamais de monopole)</h3>
+    <table><tr><th>Code</th><th>Libellé</th><th>Poids (1-3)</th><th>Budget minimum (attribution auto)</th><th>Actif</th></tr>
+    ${niveaux.map((n, i) => `<tr><td>${esc(n.code)}</td>
+      <td><input id="nv-lb-${i}" value="${esc(n.label)}" style="width:110px"></td>
+      <td><input type="number" id="nv-po-${i}" value="${n.poids}" min="1" max="3" style="width:60px"></td>
+      <td><input type="number" id="nv-mb-${i}" value="${n.min_budget || 0}" style="width:100px"></td>
+      <td><input type="checkbox" id="nv-ac-${i}" ${n.actif ? 'checked' : ''}></td></tr>`).join('')}</table>
+    <button class="btn sm" style="margin-top:6px" onclick="A.nivSave(${niveaux.length})">Enregistrer les niveaux</button>
+  </div>
+
+  <div class="panel"><h2 style="margin-top:0">D. 🔎 Avis de recherche</h2>
+    <div class="frow" style="align-items:flex-end;flex-wrap:wrap">
+      ${num('avis_prix_normal', 'Avis normal (FCFA, 0 = gratuit)')}
+      ${onoff('avis_avant_enabled', 'Formule « Mis en avant »')} ${num('avis_prix_avant', 'Prix mis en avant')}
+      ${onoff('avis_urgent_enabled', 'Formule « Urgent »')} ${num('avis_prix_urgent', 'Prix urgent')}
+      ${num('avis_duree_jours', 'Durée de publication (jours)', 80)}
+    </div>
+  </div>
+
+  <div class="panel"><h2 style="margin-top:0">E. 👷 Recherche d'emploi (gratuite de base)</h2>
+    <div class="frow" style="align-items:flex-end;flex-wrap:wrap">
+      ${onoff('emploi_boost_enabled', 'Mise en avant emploi')}
+      ${num('emploi_prix_avant', 'Prix « Mis en avant »')}
+      ${num('emploi_prix_prioritaire', 'Prix « Prioritaire »')}
+      ${num('emploi_boost_duree_jours', 'Durée (jours)', 80)}
+    </div>
+    <div class="small muted">La création d'un profil « Je cherche un travail » reste toujours gratuite : seules les options de visibilité sont payantes, et elles peuvent être désactivées ici.</div>
+  </div>
+
+  <div class="panel"><h2 style="margin-top:0">🌍 International (préparation)</h2>
+    <div class="frow" style="align-items:flex-end">
+      <div><label>Pays</label><input id="cm-pays" value="${esc(s.pays || 'CI')}" style="width:70px" onchange="A.cmTxt('pays')"></div>
+      <div><label>Devise affichée</label><input id="cm-devise" value="${esc(s.devise || 'FCFA')}" style="width:90px" onchange="A.cmTxt('devise')"></div>
+      <span class="small muted">Les règles de commission par <b>zone</b> (section A) permettent déjà des taux différents par ville ou par pays.</span>
+    </div>
+  </div>`);
+};
+
+/* ---------- 📈 Finances & revenus (résumé + historique + encaissements) ---------- */
+views.finances = async () => {
+  const f = await api('/admin/finances');
+  const F = window._fxF || {};
+  const qs = Object.entries(F).filter(([, v]) => v).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
+  const trx = await api('/admin/transactions' + (qs ? '?' + qs : ''));
+  const camps = await api('/admin/pub/campagnes');
+  const subs = await api('/admin/visibilite/subs');
+  const pms = await api('/admin/prix-modifs');
+  const KL = { commission: '💰 Commission', publicite: '📣 Publicité', visibilite: '⭐ Visibilité', avis_recherche: '🔎 Avis de recherche', emploi: '👷 Emploi', remboursement: '↩️ Remboursement' };
+  const STL = { en_attente: '<span class="pill warn">En attente</span>', confirme: '<span class="pill ok">Confirmé</span>', echoue: '<span class="pill off">Échoué</span>', rembourse: '<span class="pill info">Remboursé</span>' };
+  const CST = { attente_paiement: '<span class="pill warn">Attente paiement</span>', attente_validation: '<span class="pill warn">À valider</span>', validee: '<span class="pill info">File d\u2019attente</span>', active: '<span class="pill ok">Active</span>', suspendue: '<span class="pill off">Suspendue</span>', refusee: '<span class="pill off">Refusée</span>', expiree: '<span class="pill off">Expirée</span>' };
+  shell(`<h1>📈 Finances & revenus</h1>
+  <div class="cards">
+    <div class="kpi"><div class="v">${fcfa(f.commissions.aujourdhui)}</div><div class="l">💰 Commissions aujourd'hui</div></div>
+    <div class="kpi"><div class="v">${fcfa(f.commissions.semaine)}</div><div class="l">💰 Cette semaine</div></div>
+    <div class="kpi"><div class="v">${fcfa(f.commissions.mois)}</div><div class="l">💰 Ce mois</div></div>
+    <div class="kpi"><div class="v">${fcfa(f.revenu_total)}</div><div class="l">🏦 REVENU TOTAL confirmé</div></div>
+  </div>
+  <div class="cards">
+    <div class="kpi"><div class="v">${f.pub.actives} / ${f.pub.en_attente}</div><div class="l">📢 Pubs actives / en attente — revenus ${fcfa(f.pub.revenus)}</div></div>
+    <div class="kpi"><div class="v">${f.visibilite.actifs}</div><div class="l">⭐ Abonnements visibilité — revenus ${fcfa(f.visibilite.revenus)}</div></div>
+    <div class="kpi"><div class="v">${f.avis.actifs}</div><div class="l">🔎 Avis actifs — revenus ${fcfa(f.avis.revenus)}</div></div>
+    <div class="kpi"><div class="v">${f.emploi.profils_actifs} / ${f.emploi.mis_en_avant}</div><div class="l">👷 Profils emploi / mis en avant — revenus ${fcfa(f.emploi.revenus)}</div></div>
+  </div>
+
+  <div class="panel"><h2 style="margin-top:0">📣 Campagnes publicitaires (${camps.filter(c => c.status === 'active').length} actives, ${camps.filter(c => ['attente_paiement', 'attente_validation', 'validee'].includes(c.status)).length} en attente, ${camps.filter(c => c.status === 'expiree').length} expirées, ${camps.filter(c => c.status === 'refusee').length} refusées)</h2>
+    <table><tr><th>Annonceur</th><th>Campagne</th><th>Budget</th><th>Durée</th><th>Priorité</th><th>Statut</th><th>Actions</th></tr>
+    ${camps.map(c => `<tr><td>${esc(c.user_name)}<div class="small muted">${esc(c.phone || '')}</div></td>
+      <td><b>${esc(c.title)}</b><div class="small muted">${esc(c.type)}${c.zone ? ' • ' + esc(c.zone) : ''}${c.end_at && c.status === 'active' ? ' • fin ' + fmtD(c.end_at) : ''}</div></td>
+      <td>${fcfa(c.budget)}</td><td>${c.duration_days} j</td><td>${esc(c.priorite)}</td><td>${CST[c.status] || esc(c.status)}</td>
+      <td>${c.status === 'attente_paiement' ? `<button class="btn sm" onclick="A.campAct(${c.id},'paiement')">💵 Paiement reçu</button>` : ''}
+      ${['attente_validation', 'paiement_confirme'].includes(c.status) ? `<button class="btn sm" onclick="A.campAct(${c.id},'valider')">✅ Valider</button>
+        <button class="btn sm warn" onclick="A.campAct(${c.id},'refuser',true)">Refuser</button>` : ''}
+      ${c.status === 'active' ? `<button class="btn sm sec" onclick="A.campAct(${c.id},'suspendre',true)">⏸ Suspendre</button>` : ''}
+      ${c.status === 'suspendue' ? `<button class="btn sm" onclick="A.campAct(${c.id},'reactiver')">▶️ Réactiver</button>` : ''}
+      <button class="btn sm sec" onclick="A.campDuree(${c.id},${c.duration_days})">⏱</button>
+      <button class="btn sm warn" onclick="A.campDel(${c.id})">🗑️</button></td></tr>`).join('')}
+    ${!camps.length ? '<tr><td colspan="7" class="muted">Aucune campagne pour le moment.</td></tr>' : ''}</table></div>
+
+  <div class="panel"><h2 style="margin-top:0">⭐ Abonnements de visibilité</h2>
+    <table><tr><th>Professionnel</th><th>Formule</th><th>Prix</th><th>Période</th><th>Statut</th></tr>
+    ${subs.map(sb => `<tr><td>${esc(sb.user_name)}<div class="small muted">${esc(sb.phone || '')}</div></td><td>${esc(sb.plan_name)}</td><td>${fcfa(sb.price)}</td>
+      <td class="small">${sb.start_at ? fmtD(sb.start_at) + ' → ' + fmtD(sb.end_at) : '—'}</td>
+      <td>${sb.status === 'active' ? '<span class="pill ok">Active</span>' : sb.status === 'attente_paiement' ? '<span class="pill warn">Attente paiement</span>' : `<span class="pill off">${esc(sb.status)}</span>`}</td></tr>`).join('')}
+    ${!subs.length ? '<tr><td colspan="5" class="muted">Aucun abonnement. La visibilité payante est facultative : les pros fonctionnent normalement sans.</td></tr>' : ''}</table></div>
+
+  <div class="panel"><h2 style="margin-top:0">💵 Historique financier — toutes les transactions</h2>
+    <div class="frow" style="align-items:flex-end;flex-wrap:wrap">
+      <div><label>Type</label><select id="fx-kind"><option value="">Tous</option>${Object.entries(KL).map(([k, l]) => `<option value="${k}" ${F.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label>Statut</label><select id="fx-status"><option value="">Tous</option>${['en_attente', 'confirme', 'echoue', 'rembourse'].map(x => `<option value="${x}" ${F.status === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+      <div><label>Du</label><input type="date" id="fx-du" value="${F.du || ''}"></div>
+      <div><label>Au</label><input type="date" id="fx-au" value="${F.au || ''}"></div>
+      <div><label>Recherche (ville, catégorie, nom…)</label><input id="fx-q" value="${esc(F.q || '')}" style="width:170px"></div>
+      <button class="btn sm" onclick="A.fxFilter()">Filtrer</button>
+    </div>
+    <table style="margin-top:8px"><tr><th>Date</th><th>Type</th><th>Détail</th><th>Utilisateur</th><th>Ville</th><th>Montant</th><th>Statut</th><th>Encaissement</th></tr>
+    ${trx.map(t => `<tr><td class="small">${fmtD(t.created_at)}</td><td>${KL[t.kind] || esc(t.kind)}</td><td class="small">${esc(t.label)}</td>
+      <td>${esc(t.user_name || '—')}</td><td class="small">${esc(t.ville || '—')}</td><td><b>${fcfa(t.amount)}</b></td><td>${STL[t.status] || esc(t.status)}</td>
+      <td>${t.status === 'en_attente' ? `<button class="btn sm" onclick="A.trxStatut(${t.id},'confirme')">💵 Paiement reçu</button>
+        <button class="btn sm warn" onclick="A.trxStatut(${t.id},'echoue')">Échec</button>` : ''}
+      ${t.status === 'confirme' && t.kind !== 'commission' ? `<button class="btn sm sec" onclick="A.trxStatut(${t.id},'rembourse')">↩️ Rembourser</button>` : ''}</td></tr>`).join('')}
+    ${!trx.length ? '<tr><td colspan="8" class="muted">Aucune transaction pour ces filtres.</td></tr>' : ''}</table>
+    <div class="small muted" style="margin-top:6px">« Paiement reçu » applique automatiquement l'effet associé : activation de la visibilité, passage de la campagne en validation, mise en avant de l'avis ou du profil emploi. Tout est journalisé.</div></div>
+
+  <div class="panel"><h2 style="margin-top:0">✏️ Modifications de prix sur le terrain</h2>
+    <table><tr><th>Date</th><th>Mission</th><th>Professionnel</th><th>Client</th><th>Ancien prix</th><th>Nouveau prix</th><th>Motif</th><th>Décision</th></tr>
+    ${pms.map(pc => `<tr><td class="small">${fmtD(pc.created_at)}</td><td class="small">${esc(pc.code)}</td><td>${esc(pc.pro_name)}</td><td>${esc(pc.client_name)}</td>
+      <td>${fcfa(pc.old_amount)}</td><td><b>${fcfa(pc.new_amount)}</b> <span class="small muted">(${pc.new_amount > pc.old_amount ? '+' : ''}${(pc.new_amount - pc.old_amount).toLocaleString('fr-FR')} F)</span></td>
+      <td class="small">${esc(pc.reason)}</td>
+      <td>${pc.status === 'accepte' ? '<span class="pill ok">Acceptée</span>' : pc.status === 'refuse' ? '<span class="pill off">Refusée</span>' : '<span class="pill warn">En attente</span>'}</td></tr>`).join('')}
+    ${!pms.length ? '<tr><td colspan="8" class="muted">Aucune modification de prix demandée.</td></tr>' : ''}</table></div>`);
+};
+
 /* ---------- Publicités ---------- */
 views.ads = async () => {
   const list = await api('/admin/ads');
   const s = await api('/admin/settings');
   const annonces = await api('/admin/annonces');
-  const vitesses = { '30': 'Lente', '60': 'Normale', '120': 'Rapide' };
+  const vitesses = { '15': 'Très lente', '30': 'Lente', '60': 'Normale', '120': 'Rapide', '200': 'Très rapide' };
+  const TB = { pub: { ic: '📢', lb: 'Pub', pl: 'Publicité' }, info: { ic: 'ℹ️', lb: 'Info', pl: 'Information' }, urgence: { ic: '🚨', lb: 'Urgence', pl: 'Urgence' } };
+  const nAct = t => annonces.filter(a => (a.type || 'info') === t && a.active).length;
+  const F = window._annFiltre || 'toutes';
+  const liste = F === 'toutes' ? annonces : annonces.filter(a => (a.type || 'info') === F);
+  const apercu = a => { const t = TB[a.type] || TB.info;
+    return `<span style="background:#0b1320;color:${esc(a.color)};padding:3px 10px;border-radius:6px"><b style="${(a.type || 'info') === 'urgence' ? 'color:#ff6b6b' : ''}">${t.ic} ${t.lb}${(a.theme || '').trim() ? ' (' + esc(a.theme) + ')' : ''} :</b> ${esc(a.content || a.title || '')}</span>`; };
   shell(`<h1>📣 Publicités & informations</h1>
   <div class="panel">
-    <h2 style="margin-top:0">📺 Bandeau d'annonces défilantes (bas de l'accueil, style bandeau info TV)</h2>
+    <h2 style="margin-top:0">📺 Bandeau fixe en bas de l'accueil — publicités, informations et urgences (défilement style chaîne info)</h2>
     <div class="frow" style="align-items:center">
       <button class="btn ${s.bandeau_enabled === '1' ? '' : 'sec'}" onclick="A.toggleSetting('bandeau_enabled','${s.bandeau_enabled === '1' ? '0' : '1'}')">Bandeau : ${s.bandeau_enabled === '1' ? 'Activé ✅' : 'Désactivé'}</button>
-      <label style="margin:0"><b>Vitesse :</b></label>
+      <label style="margin:0"><b>Vitesse du défilement :</b></label>
       <select onchange="A.bandeauVitesse(this.value)">
         ${Object.entries(vitesses).map(([v, lb]) => `<option value="${v}" ${s.bandeau_speed === v ? 'selected' : ''}>${lb} (${v} px/s)</option>`).join('')}
         <option value="autre" ${!vitesses[s.bandeau_speed] ? 'selected' : ''}>Personnalisée${!vitesses[s.bandeau_speed] ? ' (' + esc(s.bandeau_speed || '60') + ' px/s)' : '…'}</option>
       </select>
-      <span class="small muted">Les annonces tournent en boucle sans temps mort, pause au survol/toucher.</span>
+      <span class="small muted">Changement répercuté sur l'accueil en quelques secondes, sans recharger. Boucle sans temps mort, pause au survol/toucher.</span>
+    </div>
+    <div class="frow" style="margin-top:10px;flex-wrap:wrap">
+      <button class="btn sm ${F === 'pub' ? '' : 'sec'}" onclick="A.annFiltre('pub')">📢 Publicités actives : ${nAct('pub')}</button>
+      <button class="btn sm ${F === 'info' ? '' : 'sec'}" onclick="A.annFiltre('info')">ℹ️ Informations actives : ${nAct('info')}</button>
+      <button class="btn sm ${F === 'urgence' ? '' : 'sec'}" onclick="A.annFiltre('urgence')">🚨 Urgences actives : ${nAct('urgence')}</button>
+      <button class="btn sm ${F === 'toutes' ? '' : 'sec'}" onclick="A.annFiltre('toutes')">Toutes (${annonces.length})</button>
     </div>
     <div class="frow" style="align-items:flex-end;flex-wrap:wrap;margin-top:8px">
-      <div><label>Icône</label><input id="an-icon" value="📢" style="width:60px"></div>
-      <div><label>Titre</label><input id="an-title" placeholder="PROMO"></div>
-      <div style="flex:1;min-width:200px"><label>Contenu</label><input id="an-content" style="width:100%" placeholder="−20% sur le grand ménage ce week-end !"></div>
+      <div><label>Type</label><select id="an-type">
+        <option value="pub" ${F === 'pub' ? 'selected' : ''}>📢 Publicité</option>
+        <option value="info" ${F === 'pub' || F === 'urgence' ? '' : 'selected'}>ℹ️ Information</option>
+        <option value="urgence" ${F === 'urgence' ? 'selected' : ''}>🚨 Urgence</option></select></div>
+      <div><label>Thème (entre parenthèses)</label><input id="an-theme" placeholder="Sport, Éducation, Paiement…" style="width:160px"></div>
+      <div style="flex:1;min-width:200px"><label>Message</label><input id="an-content" style="width:100%" placeholder="Le grand tournoi commence ce samedi…"></div>
       <div><label>Couleur</label><input type="color" id="an-color" value="#ffffff" style="width:50px;height:34px;padding:2px"></div>
       <div><label>Lien (optionnel)</label><input id="an-link" placeholder="#/services ou https://…" style="width:150px"></div>
-      <button class="btn" onclick="A.annAdd()">＋</button>
+      <button class="btn" onclick="A.annAdd()">＋ Publier</button>
     </div>
-    <table style="margin-top:10px"><tr><th>Ordre</th><th>Annonce</th><th>Lien</th><th>État</th><th>Actions</th></tr>
-    ${annonces.map((a, i) => `<tr>
-      <td><button class="btn sm sec" ${i === 0 ? 'disabled' : ''} onclick="A.annMove(${a.id},-1)">↑</button>
-        <button class="btn sm sec" ${i === annonces.length - 1 ? 'disabled' : ''} onclick="A.annMove(${a.id},1)">↓</button></td>
-      <td><span style="background:#0b1320;color:${esc(a.color)};padding:3px 10px;border-radius:6px">${esc(a.icon)} <b>${esc(a.title)}</b> ${esc(a.content)}</span></td>
+    <div class="small muted" style="margin-top:4px">Inutile d'écrire « Pub », « Info » ou « Urgence » dans le message : l'application l'ajoute automatiquement selon le type choisi → <b>📢 Pub (Sport) : votre message…</b></div>
+    <table style="margin-top:10px"><tr><th>Ordre</th><th>Aperçu sur l'accueil</th><th>Lien</th><th>État</th><th>Actions</th></tr>
+    ${liste.map(a => { const gi = annonces.indexOf(a); return `<tr>
+      <td><button class="btn sm sec" ${gi === 0 ? 'disabled' : ''} onclick="A.annMove(${a.id},-1)">↑</button>
+        <button class="btn sm sec" ${gi === annonces.length - 1 ? 'disabled' : ''} onclick="A.annMove(${a.id},1)">↓</button></td>
+      <td>${apercu(a)}</td>
       <td class="small">${a.link ? esc(a.link) : '—'}</td>
       <td>${a.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
       <td><button class="btn sm sec" onclick="A.annToggle(${a.id},${a.active ? 0 : 1})">${a.active ? 'Désactiver' : 'Activer'}</button>
         <button class="btn sm sec" onclick="A.annEdit(${a.id})">✏️</button>
-        <button class="btn sm warn" onclick="A.annDel(${a.id})">🗑️</button></td></tr>`).join('')}
-    ${!annonces.length ? '<tr><td colspan="5" class="muted">Aucune annonce. Ajoutez-en une ci-dessus : elle défilera en bas de l\u2019accueil.</td></tr>' : ''}</table>
+        <button class="btn sm warn" onclick="A.annDel(${a.id})">🗑️</button></td></tr>`; }).join('')}
+    ${!liste.length ? '<tr><td colspan="5" class="muted">Aucune publication dans cette catégorie. Ajoutez-en une ci-dessus : elle défilera en bas de l\u2019accueil.</td></tr>' : ''}</table>
   </div>
   <div class="panel">
     <h2 style="margin-top:0">Publier (zone du haut de l'accueil)</h2>
@@ -1286,6 +1482,114 @@ const A = {
       toast('Publicité publiée ✓', 'ok'); render();
     } catch (e) { toast(e.message, 'err'); }
   },
+  /* ----- Paramètres commerciaux ----- */
+  async cmNum(k) {
+    const v = document.getElementById('cm-' + k).value;
+    try { await api('/admin/settings', { method: 'PUT', body: { [k]: String(v) } }); toast('Paramètre enregistré ✓ (modification journalisée)', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async cmTxt(k) {
+    const v = document.getElementById('cm-' + k).value;
+    try { await api('/admin/settings', { method: 'PUT', body: { [k]: v } }); toast('Paramètre enregistré ✓', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async crAdd() {
+    try {
+      await api('/admin/commissions', {
+        method: 'POST', body: {
+          label: document.getElementById('cr-label').value, pro_type: document.getElementById('cr-protype').value || null,
+          category_id: document.getElementById('cr-cat').value || null, ville: document.getElementById('cr-ville').value,
+          rate: document.getElementById('cr-rate').value, priority: document.getElementById('cr-prio').value,
+          date_debut: document.getElementById('cr-debut').value, date_fin: document.getElementById('cr-fin').value
+        }
+      });
+      toast('Règle de commission ajoutée ✓', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async crToggle(id, v) { try { await api('/admin/commissions/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async crDel(id) { if (!confirm('Supprimer cette règle ? Le taux général s\u2019appliquera à nouveau.')) return; try { await api('/admin/commissions/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async vpAdd() {
+    try {
+      await api('/admin/visibilite/plans', {
+        method: 'POST', body: {
+          name: document.getElementById('vp-name').value, price: document.getElementById('vp-price').value,
+          duration_days: document.getElementById('vp-dur').value, level: document.getElementById('vp-level').value,
+          cible: document.getElementById('vp-cible').value, avantages: document.getElementById('vp-av').value
+        }
+      });
+      toast('Formule créée ✓', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async vpEdit(id) {
+    try {
+      const pl = (await api('/admin/visibilite/plans')).find(x => x.id === id);
+      if (!pl) return;
+      openModal(`<h3>✏️ ${esc(pl.name)}</h3>
+        <div class="frow"><div><label>Nom</label><input id="ve-name" value="${esc(pl.name)}"></div>
+        <div><label>Prix (FCFA)</label><input type="number" id="ve-price" value="${pl.price}" style="width:100px"></div>
+        <div><label>Durée (jours)</label><input type="number" id="ve-dur" value="${pl.duration_days}" style="width:80px"></div>
+        <div><label>Niveau</label><input type="number" id="ve-level" value="${pl.level}" min="1" max="3" style="width:60px"></div></div>
+        <div><label>Avantages</label><input id="ve-av" value="${esc(pl.avantages || '')}" style="width:100%"></div>
+        <div style="margin-top:10px"><button class="btn" onclick="A._vpSave(${pl.id})">Enregistrer</button>
+        <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async _vpSave(id) {
+    try {
+      await api('/admin/visibilite/plans/' + id, {
+        method: 'PUT', body: {
+          name: document.getElementById('ve-name').value, price: document.getElementById('ve-price').value,
+          duration_days: document.getElementById('ve-dur').value, level: document.getElementById('ve-level').value,
+          avantages: document.getElementById('ve-av').value
+        }
+      });
+      toast('Formule modifiée ✓ — les abonnements déjà payés conservent leurs conditions.', 'ok'); closeModal(); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async vpToggle(id, v) { try { await api('/admin/visibilite/plans/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async vpDel(id) { if (!confirm('Supprimer cette formule ? Les abonnements déjà vendus sont conservés dans l\u2019historique.')) return; try { await api('/admin/visibilite/plans/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async nivSave(n) {
+    try {
+      const niveaux = [];
+      const s = await api('/admin/settings');
+      const base = JSON.parse(s.pub_niveaux || '[]');
+      for (let i = 0; i < n; i++) niveaux.push({
+        code: base[i].code, label: document.getElementById('nv-lb-' + i).value,
+        poids: Math.max(1, Math.min(3, parseInt(document.getElementById('nv-po-' + i).value, 10) || 1)),
+        min_budget: parseInt(document.getElementById('nv-mb-' + i).value, 10) || 0,
+        actif: document.getElementById('nv-ac-' + i).checked ? 1 : 0
+      });
+      await api('/admin/settings', { method: 'PUT', body: { pub_niveaux: JSON.stringify(niveaux) } });
+      toast('Niveaux de priorité enregistrés ✓', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  /* ----- Finances ----- */
+  fxFilter() {
+    window._fxF = {
+      kind: document.getElementById('fx-kind').value, status: document.getElementById('fx-status').value,
+      du: document.getElementById('fx-du').value, au: document.getElementById('fx-au').value, q: document.getElementById('fx-q').value
+    };
+    render();
+  },
+  async trxStatut(id, st) {
+    const msg = { confirme: 'Confirmer la réception de ce paiement ? L\u2019effet associé (visibilité, campagne, mise en avant…) sera appliqué automatiquement.', echoue: 'Marquer ce paiement comme échoué ?', rembourse: 'Marquer cette transaction comme remboursée ?' };
+    if (!confirm(msg[st])) return;
+    try { await api('/admin/transactions/' + id + '/statut', { method: 'POST', body: { status: st } }); toast('Transaction mise à jour ✓', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async campAct(id, action, withNote) {
+    let note = null;
+    if (withNote) { note = prompt(action === 'refuser' ? 'Motif du refus (transmis à l\u2019annonceur) :' : 'Motif (transmis à l\u2019annonceur) :'); if (note === null) return; }
+    try { await api('/admin/pub/campagnes/' + id + '/action', { method: 'POST', body: { action, note } }); toast('Campagne mise à jour ✓', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async campDuree(id, cur) {
+    const v = prompt('Nouvelle durée de diffusion (jours) :', cur);
+    if (v === null) return;
+    try { await api('/admin/pub/campagnes/' + id, { method: 'PUT', body: { duration_days: Math.max(1, parseInt(v, 10) || cur) } }); toast('Durée modifiée ✓', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async campDel(id) { if (!confirm('Supprimer définitivement cette campagne ?')) return; try { await api('/admin/pub/campagnes/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
   async bandeauVitesse(v) {
     if (v === 'autre') {
       v = prompt('Vitesse personnalisée en pixels/seconde (10 à 400) :', '60');
@@ -1294,20 +1598,21 @@ const A = {
     try { await api('/admin/settings', { method: 'PUT', body: { bandeau_speed: String(parseInt(v, 10) || 60) } }); toast('Vitesse mise à jour ✓', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); }
   },
+  annFiltre(f) { window._annFiltre = f; render(); },
   async annAdd() {
     try {
       await api('/admin/annonces', {
         method: 'POST', body: {
-          icon: document.getElementById('an-icon').value, title: document.getElementById('an-title').value,
+          type: document.getElementById('an-type').value, theme: document.getElementById('an-theme').value,
           content: document.getElementById('an-content').value, color: document.getElementById('an-color').value,
           link: document.getElementById('an-link').value
         }
       });
-      toast('Annonce ajoutée ✓ — elle défile déjà sur l\u2019accueil.', 'ok'); render();
+      toast('Publication ajoutée ✓ — elle défile déjà sur l\u2019accueil.', 'ok'); render();
     } catch (e) { toast(e.message, 'err'); }
   },
   async annToggle(id, v) { try { await api('/admin/annonces/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
-  async annDel(id) { if (!confirm('Supprimer cette annonce ?')) return; try { await api('/admin/annonces/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async annDel(id) { if (!confirm('Supprimer cette publication du bandeau ?')) return; try { await api('/admin/annonces/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
   async annMove(id, dir) {
     try {
       const list = await api('/admin/annonces');
@@ -1322,10 +1627,13 @@ const A = {
     try {
       const a = (await api('/admin/annonces')).find(x => x.id === id);
       if (!a) return;
-      openModal(`<h3>✏️ Modifier l'annonce</h3>
-        <div class="frow"><div><label>Icône</label><input id="ae-icon" value="${esc(a.icon)}" style="width:60px"></div>
-        <div style="flex:1"><label>Titre</label><input id="ae-title" value="${esc(a.title)}" style="width:100%"></div></div>
-        <div><label>Contenu</label><input id="ae-content" value="${esc(a.content)}" style="width:100%"></div>
+      openModal(`<h3>✏️ Modifier la publication</h3>
+        <div class="frow"><div><label>Type</label><select id="ae-type">
+          <option value="pub" ${a.type === 'pub' ? 'selected' : ''}>📢 Publicité</option>
+          <option value="info" ${a.type === 'urgence' || a.type === 'pub' ? '' : 'selected'}>ℹ️ Information</option>
+          <option value="urgence" ${a.type === 'urgence' ? 'selected' : ''}>🚨 Urgence</option></select></div>
+        <div style="flex:1"><label>Thème (entre parenthèses)</label><input id="ae-theme" value="${esc(a.theme || '')}" style="width:100%" placeholder="Sport, Éducation, Paiement…"></div></div>
+        <div><label>Message</label><input id="ae-content" value="${esc(a.content)}" style="width:100%"></div>
         <div class="frow" style="margin-top:6px"><div><label>Couleur</label><input type="color" id="ae-color" value="${esc(a.color)}" style="width:50px;height:34px;padding:2px"></div>
         <div style="flex:1"><label>Lien (optionnel)</label><input id="ae-link" value="${esc(a.link || '')}" style="width:100%"></div></div>
         <div style="margin-top:10px"><button class="btn" onclick="A._annSave(${a.id})">Enregistrer</button>
@@ -1336,12 +1644,12 @@ const A = {
     try {
       await api('/admin/annonces/' + id, {
         method: 'PUT', body: {
-          icon: document.getElementById('ae-icon').value, title: document.getElementById('ae-title').value,
+          type: document.getElementById('ae-type').value, theme: document.getElementById('ae-theme').value,
           content: document.getElementById('ae-content').value, color: document.getElementById('ae-color').value,
           link: document.getElementById('ae-link').value
         }
       });
-      toast('Annonce modifiée ✓', 'ok'); closeModal(); render();
+      toast('Publication modifiée ✓', 'ok'); closeModal(); render();
     } catch (e) { toast(e.message, 'err'); }
   },
   async toggleAd(id, v) { try { await api('/admin/ads/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },

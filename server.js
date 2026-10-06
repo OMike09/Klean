@@ -595,7 +595,7 @@ app.get('/api/pros/:id', auth, (req, res) => {
   res.json({
     ...publicUser(u), profession: p.profession, description: p.description, experience: p.experience,
     zone: p.zone, available: p.available, services: svcNames, missions_done: missionsDone,
-    documents_valides: JSON.parse(p.documents).length > 0, reviews
+    documents_valides: JSON.parse(p.documents).length > 0, mis_en_avant: visibiliteNiveau(u.id) > 0, reviews
   });
 });
 
@@ -617,7 +617,7 @@ function findMatchingPros(mission) {
   return pros
     .filter(p => JSON.parse(p.svc).includes(mission.service_id))
     .map(p => ({ ...p, dist: haversine(mission.lat, mission.lng, p.lat, p.lng) }))
-    .sort((a, b) => (b.available - a.available) || (a.dist - b.dist)); // 1. disponibilité 2. proximité
+    .sort((a, b) => (b.available - a.available) || (visibiliteNiveau(b.id) - visibiliteNiveau(a.id)) || (a.dist - b.dist)); // 1. disponibilité 2. visibilité payante (bonus facultatif, jamais bloquant) 3. proximité
 }
 
 function addEvent(missionId, status, actorId, note) {
@@ -671,6 +671,157 @@ function startDispatch(missionId) {
   }
   offerNext(missionId);
 }
+
+/* ================== MODÈLE ÉCONOMIQUE (tout est calculé CÔTÉ SERVEUR) ================== */
+function commissionInfo(mission) {
+  if (getSetting('commission_enabled', '1') !== '1') return { enabled: false, rate: 0 };
+  let rate = parseFloat(getSetting('commission_rate', '25'));
+  try {
+    const pro = mission.pro_id ? db.prepare('SELECT pro_type FROM pro_profiles WHERE user_id=?').get(mission.pro_id) : null;
+    const svc = db.prepare('SELECT category_id FROM services WHERE id=?').get(mission.service_id);
+    const cli = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
+    const rule = db.prepare(`SELECT rate FROM commission_rules WHERE active=1
+      AND (pro_type IS NULL OR pro_type='' OR pro_type=?)
+      AND (category_id IS NULL OR category_id=?)
+      AND (ville IS NULL OR ville='' OR ville=?)
+      AND (date_debut IS NULL OR date_debut='' OR date(date_debut) <= date('now'))
+      AND (date_fin IS NULL OR date_fin='' OR date(date_fin) >= date('now'))
+      ORDER BY priority DESC, id DESC LIMIT 1`)
+      .get((pro && pro.pro_type) || '', (svc && svc.category_id) || 0, (cli && cli.ville) || '');
+    if (rule) rate = rule.rate;
+  } catch { /* règle illisible : on garde le taux général */ }
+  return { enabled: true, rate };
+}
+function missionFinance(mission) {
+  // Transparence : prix total, commission Klean-Services et part du professionnel.
+  const { enabled, rate } = commissionInfo(mission);
+  const amount = mission.amount || 0;
+  const commission = enabled ? Math.round(amount * rate / 100) : 0;
+  return { amount, commission_enabled: enabled, commission_rate: rate, commission, pro_amount: amount - commission };
+}
+function addTransaction(o) {
+  return db.prepare(`INSERT INTO transactions(user_id, kind, ref_id, label, amount, method, ville, categorie, status)
+    VALUES(?,?,?,?,?,?,?,?,?)`)
+    .run(o.user_id || null, o.kind, o.ref_id || null, o.label || '', o.amount || 0, o.method || null,
+         o.ville || null, o.categorie || null, o.status || 'en_attente').lastInsertRowid;
+}
+function pubNiveaux() {
+  try { const n = JSON.parse(getSetting('pub_niveaux', '[]')); return Array.isArray(n) ? n : []; } catch { return []; }
+}
+function pubNiveauPourBudget(budget) {
+  const n = pubNiveaux().filter(x => x.actif).sort((a, b) => (b.min_budget || 0) - (a.min_budget || 0));
+  const hit = n.find(x => budget >= (x.min_budget || 0));
+  return hit ? hit.code : 'standard';
+}
+function pubPoids(code) {
+  const n = pubNiveaux().find(x => x.code === code && x.actif);
+  return Math.max(1, Math.min(3, (n && parseInt(n.poids, 10)) || 1)); // rotation équilibrée : jamais de monopole
+}
+function pubSlotsMax() { return Math.max(1, parseInt(getSetting('pub_max_actives', '10'), 10) || 10); }
+function pubTick() {
+  // Expiration automatique + promotion de la file d'attente (aucune demande supprimée)
+  db.prepare(`UPDATE ad_campaigns SET status='expiree' WHERE status='active' AND end_at IS NOT NULL AND end_at < datetime('now')`).run();
+  let actives = db.prepare(`SELECT COUNT(*) n FROM ad_campaigns WHERE status='active'`).get().n;
+  while (actives < pubSlotsMax()) {
+    const next = db.prepare(`SELECT * FROM ad_campaigns WHERE status='validee' ORDER BY
+      CASE priorite WHEN 'premium' THEN 0 WHEN 'prioritaire' THEN 1 ELSE 2 END, created_at LIMIT 1`).get();
+    if (!next) break;
+    db.prepare(`UPDATE ad_campaigns SET status='active', start_at=datetime('now'), end_at=datetime('now', '+' || duration_days || ' days') WHERE id=?`).run(next.id);
+    notify(next.user_id, 'information', '📣 Votre campagne est en ligne', `« ${next.title} » est maintenant diffusée pour ${next.duration_days} jour(s).`, '#/pub');
+    actives++;
+  }
+}
+function visibiliteTick() {
+  db.prepare(`UPDATE visibility_subs SET status='expiree' WHERE status='active' AND end_at < datetime('now')`).run();
+}
+function visibiliteNiveau(userId) {
+  if (getSetting('visibilite_enabled', '1') !== '1') return 0; // option facultative : jamais bloquante
+  const r = db.prepare(`SELECT MAX(level) l FROM visibility_subs WHERE user_id=? AND status='active' AND end_at >= datetime('now')`).get(userId);
+  return (r && r.l) || 0;
+}
+
+// Configuration commerciale visible par l'application (uniquement ce qui concerne l'utilisateur)
+app.get('/api/commerce/config', auth, (req, res) => {
+  res.json({
+    devise: getSetting('devise', 'FCFA'),
+    commission: { enabled: getSetting('commission_enabled', '1') === '1', rate: parseFloat(getSetting('commission_rate', '25')) },
+    visibilite: { enabled: getSetting('visibilite_enabled', '1') === '1' },
+    pub: {
+      enabled: getSetting('pub_campagnes_enabled', '1') === '1',
+      budgets: (getSetting('pub_budgets', '') || '').split(',').map(x => parseInt(x, 10)).filter(x => x > 0),
+      niveaux: pubNiveaux().filter(n => n.actif).map(n => ({ code: n.code, label: n.label, min_budget: n.min_budget || 0 }))
+    },
+    avis: {
+      prix_normal: parseInt(getSetting('avis_prix_normal', '0'), 10) || 0,
+      avant: { enabled: getSetting('avis_avant_enabled', '1') === '1', prix: parseInt(getSetting('avis_prix_avant', '1000'), 10) || 0 },
+      urgent: { enabled: getSetting('avis_urgent_enabled', '1') === '1', prix: parseInt(getSetting('avis_prix_urgent', '2000'), 10) || 0 },
+      duree_jours: parseInt(getSetting('avis_duree_jours', '30'), 10) || 30
+    },
+    emploi: {
+      enabled: getSetting('emploi_boost_enabled', '1') === '1',
+      prix_avant: parseInt(getSetting('emploi_prix_avant', '1000'), 10) || 0,
+      prix_prioritaire: parseInt(getSetting('emploi_prix_prioritaire', '2000'), 10) || 0,
+      duree_jours: parseInt(getSetting('emploi_boost_duree_jours', '30'), 10) || 30
+    }
+  });
+});
+
+// ----- Visibilité professionnelle : FACULTATIVE (le profil normal reste gratuit et complet) -----
+app.get('/api/visibilite', auth, (req, res) => {
+  visibiliteTick();
+  const enabled = getSetting('visibilite_enabled', '1') === '1';
+  const pp = db.prepare('SELECT pro_type FROM pro_profiles WHERE user_id=?').get(req.user.id);
+  const plans = enabled ? db.prepare('SELECT * FROM visibility_plans WHERE active=1 ORDER BY price').all()
+    .filter(pl => pl.cible === 'tous' || !pp || !pp.pro_type || pl.cible === pp.pro_type) : [];
+  const subs = db.prepare('SELECT * FROM visibility_subs WHERE user_id=? ORDER BY id DESC LIMIT 10').all(req.user.id);
+  res.json({ enabled, plans, subs, niveau_actuel: visibiliteNiveau(req.user.id), devise: getSetting('devise', 'FCFA') });
+});
+app.post('/api/visibilite/souscrire', auth, (req, res) => {
+  if (getSetting('visibilite_enabled', '1') !== '1') return res.status(403).json({ error: 'La visibilité payante est désactivée pour le moment. Votre profil reste pleinement fonctionnel gratuitement.' });
+  if (req.user.pro_status !== 'approved') return res.status(403).json({ error: 'Réservé aux professionnels validés.' });
+  const plan = db.prepare('SELECT * FROM visibility_plans WHERE id=? AND active=1').get(req.body.plan_id);
+  if (!plan) return res.status(400).json({ error: 'Formule introuvable ou désactivée.' });
+  if (db.prepare(`SELECT 1 FROM visibility_subs WHERE user_id=? AND status='attente_paiement'`).get(req.user.id))
+    return res.status(409).json({ error: 'Vous avez déjà une souscription en attente de paiement.' });
+  const sid = db.prepare(`INSERT INTO visibility_subs(user_id, plan_id, plan_name, price, level, duration_days)
+    VALUES(?,?,?,?,?,?)`).run(req.user.id, plan.id, plan.name, plan.price, plan.level, plan.duration_days).lastInsertRowid;
+  addTransaction({ user_id: req.user.id, kind: 'visibilite', ref_id: sid, label: `${plan.name} — ${req.user.name}`, amount: plan.price, ville: req.user.ville });
+  notifyAdmins('information', '⭐ Souscription visibilité à encaisser', `${req.user.name} : ${plan.name} (${plan.price.toLocaleString('fr-FR')} FCFA).`, 'admin:payments');
+  notify(req.user.id, 'information', '⭐ Souscription enregistrée', `Réglez ${plan.price.toLocaleString('fr-FR')} FCFA à Klean-Services : votre visibilité sera activée dès confirmation du paiement.`, '#/visibilite');
+  res.json({ ok: true, id: sid, status: 'attente_paiement' });
+});
+
+// ----- Campagnes publicitaires des annonceurs -----
+app.get('/api/pub', auth, (req, res) => {
+  pubTick();
+  res.json({
+    enabled: getSetting('pub_campagnes_enabled', '1') === '1',
+    budgets: (getSetting('pub_budgets', '') || '').split(',').map(x => parseInt(x, 10)).filter(x => x > 0),
+    niveaux: pubNiveaux().filter(n => n.actif).map(n => ({ code: n.code, label: n.label, min_budget: n.min_budget || 0 })),
+    devise: getSetting('devise', 'FCFA'),
+    campagnes: db.prepare('SELECT * FROM ad_campaigns WHERE user_id=? ORDER BY id DESC').all(req.user.id)
+  });
+});
+app.post('/api/pub/campagnes', auth, (req, res) => {
+  if (getSetting('pub_campagnes_enabled', '1') !== '1') return res.status(403).json({ error: 'Les campagnes publicitaires sont désactivées pour le moment.' });
+  const b = req.body || {};
+  const type = ['texte', 'image', 'video'].includes(b.type) ? b.type : 'texte';
+  if (!(b.title || '').trim()) return res.status(400).json({ error: 'Donnez un titre à votre campagne.' });
+  if (type === 'texte' && !(b.content || '').trim()) return res.status(400).json({ error: 'Écrivez le texte de votre publicité.' });
+  if (type !== 'texte' && !b.file) return res.status(400).json({ error: 'Ajoutez le fichier image ou vidéo de votre publicité.' });
+  const budget = parseInt(b.budget, 10);
+  if (!budget || budget < 500) return res.status(400).json({ error: 'Budget invalide (minimum 500 FCFA).' });
+  const duration = Math.max(1, Math.min(90, parseInt(b.duration_days, 10) || 7));
+  const prio = pubNiveauPourBudget(budget); // priorité déterminée côté serveur selon le budget
+  const cid = db.prepare(`INSERT INTO ad_campaigns(user_id, type, title, content, file, link, placement, zone, budget, duration_days, priorite)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(req.user.id, type, b.title.trim(), (b.content || '').trim() || null, b.file || null, (b.link || '').trim() || null,
+         b.placement === 'services' ? 'services' : 'accueil', (b.zone || '').trim() || null, budget, duration, prio).lastInsertRowid;
+  addTransaction({ user_id: req.user.id, kind: 'publicite', ref_id: cid, label: `Campagne « ${b.title.trim()} »`, amount: budget, ville: req.user.ville, categorie: prio });
+  notifyAdmins('information', '📣 Nouvelle campagne publicitaire', `${req.user.name} : « ${b.title.trim()} » — budget ${budget.toLocaleString('fr-FR')} FCFA, ${duration} j.`, 'admin:payments');
+  notify(req.user.id, 'information', '📣 Campagne enregistrée', `Réglez ${budget.toLocaleString('fr-FR')} FCFA à Klean-Services. Après confirmation du paiement, votre campagne sera examinée puis diffusée.`, '#/pub');
+  res.json({ ok: true, id: cid, status: 'attente_paiement', priorite: prio });
+});
 
 // Créer une demande
 app.post('/api/missions', auth, (req, res) => {
@@ -743,7 +894,9 @@ function missionFull(mission, role, user) {
     pro: pro ? publicUser(pro, role === 'client' && shareContact) : null,
     my_review: myReview || null, unread_messages: unreadMsgs,
     candidates, offer_pending: offerPending,
-    commission_rate: role !== 'client' ? parseFloat(getSetting('commission_rate', '25')) : undefined
+    finance: mission.amount ? missionFinance(mission) : null, // prix total, commission, part pro — calculés côté serveur
+    price_changes: db.prepare('SELECT * FROM mission_price_changes WHERE mission_id=? ORDER BY id DESC').all(mission.id),
+    commission_rate: role !== 'client' ? commissionInfo(mission).rate : undefined
   };
 }
 
@@ -849,11 +1002,59 @@ app.post('/api/missions/:id/montant', auth, (req, res) => {
   if (!['acceptee', 'confirmee', 'en_cours'].includes(mission.status)) return res.status(409).json({ error: 'Le montant ne peut plus être modifié.' });
   const amount = parseInt(req.body.amount, 10);
   if (!amount || amount < 100) return res.status(400).json({ error: 'Montant invalide (minimum 100 FCFA).' });
+  if (mission.amount && mission.amount !== amount)
+    return res.status(409).json({ error: `Le montant est déjà fixé à ${mission.amount.toLocaleString('fr-FR')} FCFA. Pour le modifier, utilisez « Demander une modification du prix » : le client devra l\u2019accepter.` });
   db.prepare('UPDATE missions SET amount=? WHERE id=?').run(amount, mission.id);
+  const fin = missionFinance({ ...mission, amount });
   addEvent(mission.id, mission.status, req.user.id, `Montant fixé : ${amount} FCFA`);
   notify(mission.client_id, 'paiement', 'Montant de la mission', `Le professionnel a fixé le montant à ${amount.toLocaleString('fr-FR')} FCFA.`, '#/mission/' + mission.id);
   push(mission.client_id, 'mission', { id: mission.id, status: mission.status });
-  res.json({ ok: true, amount });
+  res.json({ ok: true, amount, finance: fin });
+});
+
+// ----- Modification du prix sur le terrain : jamais cachée, toujours soumise à l'accord du client -----
+app.post('/api/missions/:id/prix-modif', auth, (req, res) => {
+  const mission = db.prepare('SELECT * FROM missions WHERE id=? AND pro_id=?').get(req.params.id, req.user.id);
+  if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
+  if (!['acceptee', 'confirmee', 'en_cours'].includes(mission.status)) return res.status(409).json({ error: 'Le prix ne peut plus être modifié à ce stade.' });
+  if (!mission.amount) return res.status(400).json({ error: 'Fixez d\u2019abord le montant initial.' });
+  const newAmount = parseInt(req.body.new_amount, 10);
+  const reason = (req.body.reason || '').trim();
+  if (!newAmount || newAmount < 100) return res.status(400).json({ error: 'Nouveau montant invalide (minimum 100 FCFA).' });
+  if (newAmount === mission.amount) return res.status(400).json({ error: 'Le nouveau montant est identique au montant actuel.' });
+  if (!reason) return res.status(400).json({ error: 'Indiquez la raison du changement de prix (obligatoire).' });
+  if (db.prepare(`SELECT 1 FROM mission_price_changes WHERE mission_id=? AND status='en_attente'`).get(mission.id))
+    return res.status(409).json({ error: 'Une demande de modification attend déjà la réponse du client.' });
+  const pcid = db.prepare(`INSERT INTO mission_price_changes(mission_id, pro_id, client_id, old_amount, new_amount, reason)
+    VALUES(?,?,?,?,?,?)`).run(mission.id, req.user.id, mission.client_id, mission.amount, newAmount, reason).lastInsertRowid;
+  const fin = missionFinance({ ...mission, amount: newAmount });
+  const diff = newAmount - mission.amount;
+  addEvent(mission.id, mission.status, req.user.id, `Demande de modification du prix : ${mission.amount} → ${newAmount} FCFA (${reason})`);
+  notify(mission.client_id, 'paiement', '💬 Changement de prix proposé',
+    `Ancien prix : ${mission.amount.toLocaleString('fr-FR')} FCFA → Nouveau prix : ${newAmount.toLocaleString('fr-FR')} FCFA (${diff > 0 ? '+' : ''}${diff.toLocaleString('fr-FR')} FCFA). Motif : ${reason}. Acceptez ou refusez dans la mission.`,
+    '#/mission/' + mission.id);
+  push(mission.client_id, 'mission', { id: mission.id, status: mission.status });
+  res.json({ ok: true, id: pcid, status: 'en_attente', finance_si_accepte: fin });
+});
+app.post('/api/missions/:id/prix-modif/:pcid/reponse', auth, (req, res) => {
+  const mission = db.prepare('SELECT * FROM missions WHERE id=? AND client_id=?').get(req.params.id, req.user.id);
+  if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
+  const pc = db.prepare(`SELECT * FROM mission_price_changes WHERE id=? AND mission_id=? AND status='en_attente'`).get(req.params.pcid, mission.id);
+  if (!pc) return res.status(404).json({ error: 'Demande de modification introuvable ou déjà traitée.' });
+  const accepte = !!req.body.accepte;
+  db.prepare(`UPDATE mission_price_changes SET status=?, decided_at=datetime('now') WHERE id=?`).run(accepte ? 'accepte' : 'refuse', pc.id);
+  if (accepte) {
+    db.prepare('UPDATE missions SET amount=? WHERE id=?').run(pc.new_amount, mission.id); // la commission sera recalculée automatiquement sur ce montant
+    const fin = missionFinance({ ...mission, amount: pc.new_amount });
+    addEvent(mission.id, mission.status, req.user.id, `Nouveau prix accepté par le client : ${pc.new_amount} FCFA`);
+    notify(mission.pro_id, 'paiement', '✅ Nouveau prix accepté',
+      `Le client a accepté ${pc.new_amount.toLocaleString('fr-FR')} FCFA. Commission ${fin.commission_rate}% : ${fin.commission.toLocaleString('fr-FR')} FCFA — votre part : ${fin.pro_amount.toLocaleString('fr-FR')} FCFA.`, '#/mission/' + mission.id);
+  } else {
+    addEvent(mission.id, mission.status, req.user.id, `Nouveau prix refusé par le client (l\u2019ancien prix ${pc.old_amount} FCFA reste valable)`);
+    notify(mission.pro_id, 'paiement', 'Nouveau prix refusé', `Le client a refusé la modification. Le prix reste ${pc.old_amount.toLocaleString('fr-FR')} FCFA.`, '#/mission/' + mission.id);
+  }
+  push(mission.pro_id, 'mission', { id: mission.id, status: mission.status });
+  res.json({ ok: true, status: accepte ? 'accepte' : 'refuse' });
 });
 
 // Démarrer la mission
@@ -874,12 +1075,13 @@ app.post('/api/missions/:id/complete', auth, (req, res) => {
   if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
   if (mission.status !== 'en_cours') return res.status(409).json({ error: 'La mission doit être en cours pour être terminée.' });
   if (!mission.amount) return res.status(400).json({ error: 'Fixez d\u2019abord le montant de la mission avant de la terminer.' });
-  const rate = parseFloat(getSetting('commission_rate', '25'));
-  const commission = Math.round(mission.amount * rate / 100);
+  if (db.prepare(`SELECT 1 FROM mission_price_changes WHERE mission_id=? AND status='en_attente'`).get(mission.id))
+    return res.status(409).json({ error: 'Une modification de prix attend la réponse du client. Attendez sa décision avant de terminer la mission.' });
+  const fin = missionFinance(mission); // commission calculée côté serveur (règles par type de pro / catégorie / zone), impossible à contourner
   db.prepare("UPDATE missions SET status='terminee' WHERE id=?").run(mission.id);
   db.prepare(`INSERT INTO payments(mission_id, amount, method, commission_rate, commission_amount, pro_amount)
               VALUES(?,?,?,?,?,?) ON CONFLICT(mission_id) DO NOTHING`)
-    .run(mission.id, mission.amount, 'especes', rate, commission, mission.amount - commission);
+    .run(mission.id, mission.amount, 'especes', fin.commission_rate, fin.commission, fin.pro_amount);
   addEvent(mission.id, 'terminee', req.user.id, 'Mission terminée — en attente de paiement');
   notify(mission.client_id, 'paiement', '✅ Mission terminée — paiement attendu',
     `Montant : ${mission.amount.toLocaleString('fr-FR')} FCFA (espèces). Confirmez le paiement une fois effectué.`, '#/mission/' + mission.id);
@@ -910,6 +1112,10 @@ app.post('/api/missions/:id/payment/confirm', auth, (req, res) => {
     addEvent(mission.id, 'payee', req.user.id, 'Paiement validé par les deux parties');
     notify(mission.client_id, 'paiement', '💰 Paiement validé', 'Merci ! Vous pouvez maintenant évaluer le professionnel.', '#/mission/' + mission.id);
     notify(mission.pro_id, 'paiement', '💰 Paiement validé', `Montant reçu : ${p2.amount.toLocaleString('fr-FR')} FCFA — votre part : ${p2.pro_amount.toLocaleString('fr-FR')} FCFA (commission ${p2.commission_rate}%).`, '#/mission/' + mission.id);
+    const cliV = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
+    const catV = db.prepare('SELECT c.name FROM services s JOIN service_categories c ON c.id=s.category_id WHERE s.id=?').get(mission.service_id);
+    addTransaction({ user_id: mission.pro_id, kind: 'commission', ref_id: p2.id, label: `Commission mission ${mission.code}`,
+      amount: p2.commission_amount, method: p2.method, ville: cliV && cliV.ville, categorie: catV && catV.name, status: 'confirme' });
     push(mission.client_id, 'mission', { id: mission.id, status: 'payee' });
     push(mission.pro_id, 'mission', { id: mission.id, status: 'payee' });
   } else {
@@ -1050,24 +1256,37 @@ app.get('/api/badges', auth, (req, res) => {
 // CONTENUS : avis de recherche, jobs, école & famille, urgence
 // ============================================================
 app.get('/api/avis-recherche', auth, (req, res) => {
-  const list = db.prepare("SELECT a.*, u.name publisher FROM avis_recherche a JOIN users u ON u.id=a.user_id WHERE a.status='approved' OR a.user_id=? ORDER BY a.id DESC").all(req.user.id);
+  const list = db.prepare(`SELECT a.*, u.name publisher FROM avis_recherche a JOIN users u ON u.id=a.user_id
+    WHERE (a.status='approved' AND (a.expire_at IS NULL OR a.expire_at >= datetime('now'))) OR a.user_id=?
+    ORDER BY CASE WHEN a.paid=1 AND a.formule='urgent' THEN 0 WHEN a.paid=1 AND a.formule='avant' THEN 1 ELSE 2 END, a.id DESC`).all(req.user.id);
   res.json(list);
 });
 app.post('/api/avis-recherche', auth, (req, res) => {
   const b = req.body || {};
   if (!b.nom || !b.contact) return res.status(400).json({ error: 'Le nom et un contact sont obligatoires.' });
-  const info = db.prepare(`INSERT INTO avis_recherche(user_id, nom, photo, description, date_disparition, heure_disparition, dernier_lieu, derniere_vue, description_physique, vetements, contact, infos)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+  // Formule : normal (gratuit ou payant selon le paramètre du PDG) | mis en avant | urgent
+  let formule = ['avant', 'urgent'].includes(b.formule) ? b.formule : 'normal';
+  if (formule === 'avant' && getSetting('avis_avant_enabled', '1') !== '1') formule = 'normal';
+  if (formule === 'urgent' && getSetting('avis_urgent_enabled', '1') !== '1') formule = 'normal';
+  const prixAvis = parseInt(getSetting('avis_prix_' + formule, '0'), 10) || 0;
+  const info = db.prepare(`INSERT INTO avis_recherche(user_id, nom, photo, description, date_disparition, heure_disparition, dernier_lieu, derniere_vue, description_physique, vetements, contact, infos, formule, paid)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(req.user.id, b.nom, b.photo || null, b.description || null, b.date_disparition || null, b.heure_disparition || null,
-         b.dernier_lieu || null, b.derniere_vue || null, b.description_physique || null, b.vetements || null, b.contact, b.infos || null);
-  notifyAdmins('information', 'Avis de recherche à modérer', `Publié par ${req.user.name} : ${b.nom}`, 'admin:contenu');
-  notify(req.user.id, 'information', 'Avis de recherche envoyé', 'Votre avis sera publié après validation par l\u2019administration.', '#/avis-recherche');
-  res.json({ ok: true, id: info.lastInsertRowid, status: 'pending' });
+         b.dernier_lieu || null, b.derniere_vue || null, b.description_physique || null, b.vetements || null, b.contact, b.infos || null,
+         formule, prixAvis === 0 ? 1 : 0);
+  if (prixAvis > 0) addTransaction({ user_id: req.user.id, kind: 'avis_recherche', ref_id: info.lastInsertRowid, label: `Avis de recherche « ${b.nom} » — formule ${formule}`, amount: prixAvis, ville: req.user.ville, categorie: formule });
+  notifyAdmins('information', 'Avis de recherche à modérer', `Publié par ${req.user.name} : ${b.nom}${prixAvis > 0 ? ` (formule ${formule} — ${prixAvis.toLocaleString('fr-FR')} FCFA à encaisser)` : ''}`, 'admin:contenu');
+  notify(req.user.id, 'information', 'Avis de recherche envoyé', prixAvis > 0
+    ? `Réglez ${prixAvis.toLocaleString('fr-FR')} FCFA à Klean-Services : la mise en avant sera appliquée après confirmation du paiement. L\u2019avis sera publié après validation.`
+    : 'Votre avis sera publié après validation par l\u2019administration.', '#/avis-recherche');
+  res.json({ ok: true, id: info.lastInsertRowid, status: 'pending', formule, prix: prixAvis });
 });
 
 app.get('/api/jobs', auth, (req, res) => {
   const q = normalize(req.query.q || '');
-  let list = db.prepare("SELECT j.*, u.name publisher FROM jobs j JOIN users u ON u.id=j.user_id WHERE j.status='approved' OR j.user_id=? ORDER BY j.id DESC").all(req.user.id);
+  let list = db.prepare(`SELECT j.*, u.name publisher FROM jobs j JOIN users u ON u.id=j.user_id WHERE j.status='approved' OR j.user_id=?
+    ORDER BY CASE WHEN j.boost != 'normal' AND (j.boost_until IS NULL OR j.boost_until >= datetime('now'))
+      THEN (CASE j.boost WHEN 'prioritaire' THEN 0 ELSE 1 END) ELSE 2 END, j.id DESC`).all(req.user.id);
   if (q) list = list.filter(j => normalize([j.metier, j.competences, j.localisation, j.description].join(' ')).includes(q));
   res.json(list);
 });
@@ -1080,6 +1299,27 @@ app.post('/api/jobs', auth, (req, res) => {
   notifyAdmins('information', 'Profil « Je cherche un job » à modérer', `${req.user.name} : ${b.metier}`, 'admin:contenu');
   notify(req.user.id, 'information', 'Profil envoyé', 'Votre profil sera visible après validation par l\u2019administration.', '#/jobs');
   res.json({ ok: true, id: info.lastInsertRowid, status: 'pending' });
+});
+// Mise en avant FACULTATIVE d'un profil emploi (la recherche d'emploi reste gratuite)
+app.post('/api/jobs/:id/boost', auth, (req, res) => {
+  if (getSetting('emploi_boost_enabled', '1') !== '1') return res.status(403).json({ error: 'La mise en avant des profils emploi est désactivée pour le moment. La recherche d\u2019emploi reste gratuite.' });
+  const j = db.prepare('SELECT * FROM jobs WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+  if (!j) return res.status(404).json({ error: 'Profil introuvable.' });
+  const f = req.body.formule === 'prioritaire' ? 'prioritaire' : 'avant';
+  const prix = parseInt(getSetting('emploi_prix_' + f, '1000'), 10) || 0;
+  if (db.prepare(`SELECT 1 FROM transactions WHERE kind='emploi' AND ref_id=? AND status='en_attente'`).get(j.id))
+    return res.status(409).json({ error: 'Une demande de mise en avant est déjà en attente de paiement pour ce profil.' });
+  const dj = Math.max(1, parseInt(getSetting('emploi_boost_duree_jours', '30'), 10) || 30);
+  if (prix === 0) {
+    db.prepare(`UPDATE jobs SET boost=?, boost_until=datetime('now', '+' || ? || ' days') WHERE id=?`).run(f, dj, j.id);
+    addTransaction({ user_id: req.user.id, kind: 'emploi', ref_id: j.id, label: `Mise en avant ${f} — profil « ${j.metier} » (gratuite)`, amount: 0, ville: req.user.ville, categorie: f, status: 'confirme' });
+    notify(req.user.id, 'information', '⭐ Profil mis en avant', `Votre profil « ${j.metier} » est mis en avant pour ${dj} jours.`, '#/jobs');
+    return res.json({ ok: true, status: 'active' });
+  }
+  addTransaction({ user_id: req.user.id, kind: 'emploi', ref_id: j.id, label: `Mise en avant ${f} — profil « ${j.metier} »`, amount: prix, ville: req.user.ville, categorie: f });
+  notifyAdmins('information', '⭐ Mise en avant emploi à encaisser', `${req.user.name} : profil « ${j.metier} » — ${prix.toLocaleString('fr-FR')} FCFA (${f}).`, 'admin:payments');
+  notify(req.user.id, 'information', '⭐ Demande enregistrée', `Réglez ${prix.toLocaleString('fr-FR')} FCFA à Klean-Services : la mise en avant sera activée dès confirmation du paiement.`, '#/jobs');
+  res.json({ ok: true, status: 'attente_paiement', prix });
 });
 
 app.get('/api/ecole-famille', auth, (req, res) => res.json(db.prepare('SELECT * FROM ecole_famille WHERE user_id=? ORDER BY id DESC').all(req.user.id)));
@@ -1365,9 +1605,18 @@ app.post('/api/games/kdo', auth, (req, res) => {
 
 // Publicités actives (côté application), avec leur nombre de vues (1 vue par compte maximum)
 app.get('/api/ads', (req, res) => {
-  res.json(db.prepare(`SELECT a.id, a.type, a.title, a.content, a.file, a.placement, a.duration,
+  pubTick(); // expiration + promotion automatique de la file d'attente des campagnes
+  const rows = db.prepare(`SELECT a.id, a.type, a.title, a.content, a.file, a.placement, a.duration,
     (SELECT COUNT(*) FROM view_seen v WHERE v.key = 'ad:' || a.id) AS views
-    FROM ads a WHERE a.active=1 ORDER BY a.sort, a.id`).all());
+    FROM ads a WHERE a.active=1 ORDER BY a.sort, a.id`).all();
+  if (getSetting('pub_campagnes_enabled', '1') === '1') {
+    const dur = Math.max(3, parseInt(getSetting('pub_duree_affichage', '6'), 10) || 6);
+    for (const c of db.prepare(`SELECT * FROM ad_campaigns WHERE status='active' ORDER BY id`).all()) {
+      const entry = { id: 'c' + c.id, type: c.type, title: c.title, content: c.content, file: c.file, placement: c.placement, duration: dur, views: 0, sponsor: true };
+      for (let i = 0; i < pubPoids(c.priorite); i++) rows.push(entry); // la priorité augmente la fréquence, sans monopole (max ×3)
+    }
+  }
+  res.json(rows);
 });
 
 // Bandeau d'annonces défilantes (bas de l'accueil) — visible aussi sans compte
@@ -1375,7 +1624,7 @@ app.get('/api/annonces', (req, res) => {
   res.json({
     enabled: getSetting('bandeau_enabled') === '1',
     speed: Math.max(10, Math.min(400, parseInt(getSetting('bandeau_speed') || '60', 10) || 60)),
-    items: db.prepare('SELECT id, title, content, icon, color, link FROM annonces WHERE active=1 ORDER BY sort, id').all()
+    items: db.prepare('SELECT id, type, theme, title, content, icon, color, link FROM annonces WHERE active=1 ORDER BY sort, id').all()
   });
 });
 
@@ -1404,6 +1653,8 @@ const PERM_ROUTES = [
   [/^\/questions/, 'questions'],
   [/^\/missions/, 'missions'],
   [/^\/payments/, 'paiements'],
+  [/^\/(finances|transactions|prix-modifs|visibilite|pub)/, 'paiements'],
+  [/^\/commissions/, 'parametres'],
   [/^\/(ads|broadcast|annonces)/, 'communication'],
   [/^\/(signalements|urgences|files|rules)/, 'securite'],
   [/^\/(avis-recherche|jobs|ecole-famille|quiz|kdo|game-plays|quiz-sessions)/, 'contenu'],
@@ -1439,6 +1690,10 @@ const ACTION_LABELS = [
   [/^POST \/maintenance/, '🛠 MODE MAINTENANCE modifié'],
   [/^POST \/missions\/\d+/, 'Intervention sur une mission'],
   [/^POST \/payments/, 'Intervention sur un paiement'],
+  [/^POST \/transactions/, '💰 Finance : statut d\u2019une transaction modifié'],
+  [/^(POST|PUT|DELETE) \/pub\/campagnes/, '📣 Publicité : action sur une campagne'],
+  [/^(POST|PUT|DELETE) \/commissions/, '💰 Commission : règle modifiée'],
+  [/^(POST|PUT|DELETE) \/visibilite/, '⭐ Visibilité : modification'],
 ];
 A.use((req, res, next) => {
   // L'écran « Questions dynamiques » lit le catalogue : la permission « questions » suffit pour la LECTURE du catalogue
@@ -1952,11 +2207,204 @@ A.get('/payments', (req, res) => {
   res.json(rows);
 });
 
+/* =============== COMMERCE : règles de commission =============== */
+A.get('/commissions', (req, res) => {
+  const rules = db.prepare(`SELECT r.*, c.name category_name FROM commission_rules r
+    LEFT JOIN service_categories c ON c.id=r.category_id ORDER BY r.priority DESC, r.id`).all();
+  res.json({ enabled: getSetting('commission_enabled', '1') === '1', rate: parseFloat(getSetting('commission_rate', '25')), rules });
+});
+A.post('/commissions', (req, res) => {
+  const b = req.body || {};
+  const rate = parseFloat(b.rate);
+  if (isNaN(rate) || rate < 0 || rate > 100) return res.status(400).json({ error: 'Taux invalide (0 à 100 %).' });
+  const info = db.prepare(`INSERT INTO commission_rules(label, pro_type, category_id, ville, rate, priority, date_debut, date_fin)
+    VALUES(?,?,?,?,?,?,?,?)`)
+    .run((b.label || '').trim(), ['particulier', 'entreprise'].includes(b.pro_type) ? b.pro_type : null,
+         parseInt(b.category_id, 10) || null, (b.ville || '').trim() || null, rate, parseInt(b.priority, 10) || 0,
+         (b.date_debut || '').trim() || null, (b.date_fin || '').trim() || null);
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+A.put('/commissions/:id', (req, res) => {
+  const b = req.body || {};
+  if (b.rate !== undefined) { const r = parseFloat(b.rate); if (isNaN(r) || r < 0 || r > 100) return res.status(400).json({ error: 'Taux invalide (0 à 100 %).' }); }
+  db.prepare(`UPDATE commission_rules SET label=COALESCE(?,label), rate=COALESCE(?,rate), priority=COALESCE(?,priority), active=COALESCE(?,active) WHERE id=?`)
+    .run(b.label ?? null, b.rate ?? null, b.priority ?? null, b.active ?? null, req.params.id);
+  res.json({ ok: true });
+});
+A.delete('/commissions/:id', (req, res) => { db.prepare('DELETE FROM commission_rules WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+
+/* =============== COMMERCE : formules de visibilité =============== */
+A.get('/visibilite/plans', (req, res) => res.json(db.prepare('SELECT * FROM visibility_plans ORDER BY price').all()));
+A.post('/visibilite/plans', (req, res) => {
+  const b = req.body || {};
+  if (!(b.name || '').trim()) return res.status(400).json({ error: 'Donnez un nom à la formule.' });
+  const price = parseInt(b.price, 10);
+  if (isNaN(price) || price < 0) return res.status(400).json({ error: 'Prix invalide.' });
+  const info = db.prepare(`INSERT INTO visibility_plans(name, price, duration_days, level, avantages, cible) VALUES(?,?,?,?,?,?)`)
+    .run(b.name.trim(), price, Math.max(1, parseInt(b.duration_days, 10) || 30), Math.max(1, Math.min(3, parseInt(b.level, 10) || 1)),
+         (b.avantages || '').trim(), ['particulier', 'entreprise'].includes(b.cible) ? b.cible : 'tous');
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+A.put('/visibilite/plans/:id', (req, res) => {
+  const b = req.body || {};
+  db.prepare(`UPDATE visibility_plans SET name=COALESCE(?,name), price=COALESCE(?,price), duration_days=COALESCE(?,duration_days),
+    level=COALESCE(?,level), avantages=COALESCE(?,avantages), cible=COALESCE(?,cible), active=COALESCE(?,active) WHERE id=?`)
+    .run(b.name ?? null, b.price ?? null, b.duration_days ?? null, b.level ?? null, b.avantages ?? null, b.cible ?? null, b.active ?? null, req.params.id);
+  res.json({ ok: true });
+});
+A.delete('/visibilite/plans/:id', (req, res) => { db.prepare('DELETE FROM visibility_plans WHERE id=?').run(req.params.id); res.json({ ok: true }); }); // les abonnements déjà vendus sont conservés (nom/prix copiés)
+A.get('/visibilite/subs', (req, res) => {
+  visibiliteTick();
+  res.json(db.prepare(`SELECT vs.*, u.name user_name, u.phone FROM visibility_subs vs JOIN users u ON u.id=vs.user_id ORDER BY vs.id DESC LIMIT 300`).all());
+});
+
+/* =============== COMMERCE : campagnes publicitaires =============== */
+A.get('/pub/campagnes', (req, res) => {
+  pubTick();
+  res.json(db.prepare(`SELECT c.*, u.name user_name, u.phone FROM ad_campaigns c JOIN users u ON u.id=c.user_id ORDER BY
+    CASE c.status WHEN 'active' THEN 0 WHEN 'attente_validation' THEN 1 WHEN 'validee' THEN 2 WHEN 'attente_paiement' THEN 3 ELSE 4 END, c.id DESC LIMIT 500`).all());
+});
+A.put('/pub/campagnes/:id', (req, res) => {
+  const b = req.body || {};
+  if (b.priorite !== undefined && !['standard', 'prioritaire', 'premium'].includes(b.priorite)) return res.status(400).json({ error: 'Priorité invalide.' });
+  db.prepare(`UPDATE ad_campaigns SET title=COALESCE(?,title), content=COALESCE(?,content), duration_days=COALESCE(?,duration_days),
+    placement=COALESCE(?,placement), priorite=COALESCE(?,priorite), zone=COALESCE(?,zone) WHERE id=?`)
+    .run(b.title ?? null, b.content ?? null, b.duration_days ?? null, b.placement ?? null, b.priorite ?? null, b.zone ?? null, req.params.id);
+  res.json({ ok: true });
+});
+A.post('/pub/campagnes/:id/action', (req, res) => {
+  const c = db.prepare('SELECT * FROM ad_campaigns WHERE id=?').get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Campagne introuvable.' });
+  const { action, note } = req.body || {};
+  const set = (st, extra = '') => db.prepare(`UPDATE ad_campaigns SET status=?, note_admin=COALESCE(?, note_admin) ${extra} WHERE id=?`).run(st, note || null, c.id);
+  const trx = db.prepare(`SELECT * FROM transactions WHERE kind='publicite' AND ref_id=? ORDER BY id DESC LIMIT 1`).get(c.id);
+  if (action === 'paiement') {
+    if (c.status !== 'attente_paiement') return res.status(409).json({ error: 'Cette campagne n\u2019attend pas de paiement.' });
+    set('attente_validation');
+    if (trx && trx.status === 'en_attente') db.prepare(`UPDATE transactions SET status='confirme', confirmed_at=datetime('now') WHERE id=?`).run(trx.id);
+    notify(c.user_id, 'information', '📣 Paiement confirmé', `Le paiement de « ${c.title} » est confirmé. Votre campagne est en cours de validation.`, '#/pub');
+  } else if (action === 'valider') {
+    if (!['attente_validation', 'paiement_confirme'].includes(c.status)) return res.status(409).json({ error: 'La campagne doit d\u2019abord être payée.' });
+    const actives = db.prepare(`SELECT COUNT(*) n FROM ad_campaigns WHERE status='active'`).get().n;
+    if (actives < pubSlotsMax()) {
+      db.prepare(`UPDATE ad_campaigns SET status='active', start_at=datetime('now'), end_at=datetime('now', '+' || duration_days || ' days'), note_admin=COALESCE(?, note_admin) WHERE id=?`).run(note || null, c.id);
+      notify(c.user_id, 'information', '📣 Campagne validée et diffusée', `« ${c.title} » est en ligne pour ${c.duration_days} jour(s).`, '#/pub');
+    } else {
+      set('validee'); // file d'attente : passera automatiquement en ligne dès qu'un emplacement se libère
+      notify(c.user_id, 'information', '📣 Campagne validée — en file d\u2019attente', `Tous les emplacements sont occupés. « ${c.title} » sera diffusée automatiquement dès qu\u2019une place se libère.`, '#/pub');
+    }
+  } else if (action === 'refuser') {
+    set('refusee');
+    if (trx && trx.status === 'confirme') db.prepare(`UPDATE transactions SET status='rembourse' WHERE id=?`).run(trx.id); // à rembourser
+    if (trx && trx.status === 'en_attente') db.prepare(`UPDATE transactions SET status='echoue' WHERE id=?`).run(trx.id);
+    notify(c.user_id, 'information', 'Campagne refusée', `« ${c.title} » n\u2019a pas été validée${note ? ' : ' + note : '.'}`, '#/pub');
+  } else if (action === 'suspendre') {
+    if (c.status !== 'active') return res.status(409).json({ error: 'Seule une campagne active peut être suspendue.' });
+    set('suspendue');
+    notify(c.user_id, 'information', 'Campagne suspendue', `« ${c.title} » est temporairement suspendue${note ? ' : ' + note : '.'}`, '#/pub');
+  } else if (action === 'reactiver') {
+    if (c.status !== 'suspendue') return res.status(409).json({ error: 'Seule une campagne suspendue peut être réactivée.' });
+    const actives = db.prepare(`SELECT COUNT(*) n FROM ad_campaigns WHERE status='active'`).get().n;
+    set(actives < pubSlotsMax() ? 'active' : 'validee');
+    notify(c.user_id, 'information', 'Campagne réactivée', `« ${c.title} » reprend sa diffusion.`, '#/pub');
+  } else return res.status(400).json({ error: 'Action inconnue.' });
+  res.json({ ok: true });
+});
+A.delete('/pub/campagnes/:id', (req, res) => { db.prepare('DELETE FROM ad_campaigns WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+
+/* =============== COMMERCE : historique financier & transactions =============== */
+A.get('/transactions', (req, res) => {
+  const q = req.query || {};
+  const cond = ['1=1']; const args = [];
+  if (q.kind) { cond.push('t.kind=?'); args.push(q.kind); }
+  if (q.status) { cond.push('t.status=?'); args.push(q.status); }
+  if (q.du) { cond.push("date(t.created_at) >= date(?)"); args.push(q.du); }
+  if (q.au) { cond.push("date(t.created_at) <= date(?)"); args.push(q.au); }
+  if (q.q) { cond.push('(t.label LIKE ? OR t.ville LIKE ? OR t.categorie LIKE ? OR u.name LIKE ?)'); const like = '%' + q.q + '%'; args.push(like, like, like, like); }
+  res.json(db.prepare(`SELECT t.*, u.name user_name FROM transactions t LEFT JOIN users u ON u.id=t.user_id
+    WHERE ${cond.join(' AND ')} ORDER BY t.id DESC LIMIT 500`).all(...args));
+});
+A.post('/transactions/:id/statut', (req, res) => {
+  const t = db.prepare('SELECT * FROM transactions WHERE id=?').get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Transaction introuvable.' });
+  const st = req.body.status;
+  if (!['confirme', 'echoue', 'rembourse'].includes(st)) return res.status(400).json({ error: 'Statut invalide.' });
+  db.prepare(`UPDATE transactions SET status=?, confirmed_at=CASE WHEN ?='confirme' THEN datetime('now') ELSE confirmed_at END WHERE id=?`).run(st, st, t.id);
+  // Effets automatiques à la confirmation du paiement (tout reste calculé et appliqué côté serveur)
+  if (st === 'confirme' && t.status !== 'confirme') {
+    if (t.kind === 'visibilite') {
+      const sub = db.prepare('SELECT * FROM visibility_subs WHERE id=?').get(t.ref_id);
+      if (sub && sub.status === 'attente_paiement') {
+        db.prepare(`UPDATE visibility_subs SET status='active', start_at=datetime('now'), end_at=datetime('now', '+' || duration_days || ' days') WHERE id=?`).run(sub.id);
+        notify(sub.user_id, 'information', '⭐ Visibilité activée', `Votre formule « ${sub.plan_name} » est active pour ${sub.duration_days} jours. Profil mis en avant !`, '#/visibilite');
+      }
+    } else if (t.kind === 'publicite') {
+      const c = db.prepare('SELECT * FROM ad_campaigns WHERE id=?').get(t.ref_id);
+      if (c && c.status === 'attente_paiement') {
+        db.prepare(`UPDATE ad_campaigns SET status='attente_validation' WHERE id=?`).run(c.id);
+        notify(c.user_id, 'information', '📣 Paiement confirmé', `Le paiement de « ${c.title} » est confirmé. Votre campagne est en cours de validation.`, '#/pub');
+      }
+    } else if (t.kind === 'avis_recherche') {
+      db.prepare('UPDATE avis_recherche SET paid=1 WHERE id=?').run(t.ref_id);
+      notify(t.user_id, 'information', '🔎 Mise en avant payée', 'Votre avis de recherche bénéficie maintenant de sa formule.', '#/avis-recherche');
+    } else if (t.kind === 'emploi') {
+      const dj = Math.max(1, parseInt(getSetting('emploi_boost_duree_jours', '30'), 10) || 30);
+      db.prepare(`UPDATE jobs SET boost=?, boost_until=datetime('now', '+' || ? || ' days') WHERE id=?`).run(t.categorie === 'prioritaire' ? 'prioritaire' : 'avant', dj, t.ref_id);
+      notify(t.user_id, 'information', '⭐ Profil emploi mis en avant', `Votre profil est mis en avant pour ${dj} jours.`, '#/jobs');
+    }
+  }
+  if (st !== 'confirme' && t.kind === 'visibilite') {
+    const sub = db.prepare('SELECT * FROM visibility_subs WHERE id=?').get(t.ref_id);
+    if (sub && sub.status === 'attente_paiement') db.prepare(`UPDATE visibility_subs SET status='annulee' WHERE id=?`).run(sub.id);
+  }
+  res.json({ ok: true });
+});
+A.get('/prix-modifs', (req, res) => {
+  res.json(db.prepare(`SELECT pc.*, m.code, up.name pro_name, uc.name client_name FROM mission_price_changes pc
+    JOIN missions m ON m.id=pc.mission_id JOIN users up ON up.id=pc.pro_id JOIN users uc ON uc.id=pc.client_id
+    ORDER BY pc.id DESC LIMIT 300`).all());
+});
+A.get('/finances', (req, res) => {
+  pubTick(); visibiliteTick();
+  const sum = (w, a = []) => db.prepare(`SELECT COALESCE(SUM(amount),0) n FROM transactions WHERE ${w}`).get(...a).n;
+  const cnt = (t, w) => db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE ${w}`).get().n;
+  const revKind = k => sum(`kind=? AND status='confirme'`, [k]);
+  res.json({
+    devise: getSetting('devise', 'FCFA'),
+    commissions: {
+      aujourdhui: sum(`kind='commission' AND status='confirme' AND date(created_at)=date('now')`),
+      semaine: sum(`kind='commission' AND status='confirme' AND created_at >= datetime('now', '-7 days')`),
+      mois: sum(`kind='commission' AND status='confirme' AND strftime('%Y-%m', created_at)=strftime('%Y-%m', 'now')`),
+      total: revKind('commission')
+    },
+    pub: {
+      actives: cnt('ad_campaigns', `status='active'`),
+      en_attente: cnt('ad_campaigns', `status IN ('attente_paiement','attente_validation','validee')`),
+      expirees: cnt('ad_campaigns', `status='expiree'`),
+      refusees: cnt('ad_campaigns', `status='refusee'`),
+      revenus: revKind('publicite')
+    },
+    visibilite: { actifs: cnt('visibility_subs', `status='active'`), revenus: revKind('visibilite') },
+    avis: { actifs: cnt('avis_recherche', `status='approved' AND (expire_at IS NULL OR expire_at >= datetime('now'))`), revenus: revKind('avis_recherche') },
+    emploi: {
+      profils_actifs: cnt('jobs', `status='approved'`),
+      mis_en_avant: cnt('jobs', `status='approved' AND boost != 'normal' AND (boost_until IS NULL OR boost_until >= datetime('now'))`),
+      revenus: revKind('emploi')
+    },
+    paiements: {
+      en_attente: sum(`status='en_attente'`), confirmes: sum(`status='confirme'`),
+      echoues: sum(`status='echoue'`), rembourses: sum(`status='rembourse'`)
+    },
+    revenu_total: sum(`status='confirme'`)
+  });
+});
+
 // PARAMÈTRES
 A.get('/settings', (req, res) => {
   const keys = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
     'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
-    'pro_doc_particulier', 'pro_doc_entreprise'];
+    'pro_doc_particulier', 'pro_doc_entreprise',
+    'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise'];
   const out = {};
   keys.forEach(k => out[k] = getSetting(k));
   res.json(out);
@@ -1964,7 +2412,8 @@ A.get('/settings', (req, res) => {
 A.put('/settings', (req, res) => {
   const allowed = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
     'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
-    'pro_doc_particulier', 'pro_doc_entreprise'];
+    'pro_doc_particulier', 'pro_doc_entreprise',
+    'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise'];
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!allowed.includes(k)) continue;
     if (k === 'admin_font_size') { // taille du tableau de bord : réservée au PDG
@@ -1973,7 +2422,11 @@ A.put('/settings', (req, res) => {
     }
     if (k === 'commission_rate') { const r = parseFloat(v); if (isNaN(r) || r < 0 || r > 100) return res.status(400).json({ error: 'Taux de commission invalide (0 à 100).' }); }
     if (k === 'dispatch_wait_seconds') { const s = parseInt(v, 10); if (isNaN(s) || s < 15 || s > 3600) return res.status(400).json({ error: 'Délai d\u2019attente invalide (15 à 3600 secondes).' }); }
+    if (k === 'pub_max_actives') { const n = parseInt(v, 10); if (isNaN(n) || n < 1 || n > 200) return res.status(400).json({ error: 'Nombre d\u2019emplacements publicitaires invalide (1 à 200).' }); }
+    const ancienneValeur = getSetting(k);
     setSetting(k, v);
+    // Sécurité financière : chaque modification de paramètre est journalisée (qui, ancienne valeur, nouvelle valeur, quand)
+    if (String(ancienneValeur) !== String(v)) logAction(req.user, 'Paramètre « ' + k + ' » modifié', { details: `Ancienne valeur : ${ancienneValeur === null ? '(vide)' : ancienneValeur} → Nouvelle valeur : ${v}` });
   }
   res.json({ ok: true });
 });
@@ -2001,19 +2454,25 @@ A.put('/ads/:id', (req, res) => {
 A.delete('/ads/:id', (req, res) => { db.prepare('DELETE FROM ads WHERE id=?').run(req.params.id); res.json({ ok: true }); });
 // ----- Bandeau d'annonces défilantes -----
 A.get('/annonces', (req, res) => res.json(db.prepare('SELECT * FROM annonces ORDER BY sort, id').all()));
+const TYPES_BANDEAU = { pub: '📢', info: 'ℹ️', urgence: '🚨' }; // icône posée automatiquement selon le type
 A.post('/annonces', (req, res) => {
-  const { title, content, icon, color, link } = req.body || {};
-  if (!(title || '').trim() && !(content || '').trim()) return res.status(400).json({ error: 'Écrivez au moins un titre ou un contenu.' });
-  const info = db.prepare('INSERT INTO annonces(title, content, icon, color, link) VALUES(?,?,?,?,?)')
-    .run((title || '').trim(), (content || '').trim(), (icon || '📢').trim() || '📢', (color || '#ffffff').trim() || '#ffffff', (link || '').trim() || null);
+  const { type, theme, title, content, color, link } = req.body || {};
+  if (!(content || '').trim() && !(title || '').trim()) return res.status(400).json({ error: 'Écrivez le message à faire défiler.' });
+  const t = TYPES_BANDEAU[type] ? type : 'info';
+  const info = db.prepare('INSERT INTO annonces(type, theme, title, content, icon, color, link) VALUES(?,?,?,?,?,?,?)')
+    .run(t, (theme || '').trim(), (title || '').trim(), (content || '').trim(), TYPES_BANDEAU[t],
+      (color || '#ffffff').trim() || '#ffffff', (link || '').trim() || null);
   db.prepare('UPDATE annonces SET sort=? WHERE id=?').run(info.lastInsertRowid, info.lastInsertRowid); // ordre stable
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 A.put('/annonces/:id', (req, res) => {
-  const { title, content, icon, color, link, active, sort } = req.body || {};
-  db.prepare(`UPDATE annonces SET title=COALESCE(?,title), content=COALESCE(?,content), icon=COALESCE(?,icon),
+  const { type, theme, title, content, color, link, active, sort } = req.body || {};
+  const t = (type !== undefined && type !== null) ? (TYPES_BANDEAU[type] ? type : 'info') : null;
+  db.prepare(`UPDATE annonces SET type=COALESCE(?,type), theme=COALESCE(?,theme), icon=COALESCE(?,icon),
+    title=COALESCE(?,title), content=COALESCE(?,content),
     color=COALESCE(?,color), link=COALESCE(?,link), active=COALESCE(?,active), sort=COALESCE(?,sort) WHERE id=?`)
-    .run(title ?? null, content ?? null, icon ?? null, color ?? null, link ?? null, active ?? null, sort ?? null, req.params.id);
+    .run(t, theme ?? null, t ? TYPES_BANDEAU[t] : null, title ?? null, content ?? null,
+      color ?? null, link ?? null, active ?? null, sort ?? null, req.params.id);
   res.json({ ok: true });
 });
 A.delete('/annonces/:id', (req, res) => { db.prepare('DELETE FROM annonces WHERE id=?').run(req.params.id); res.json({ ok: true }); });
@@ -2042,7 +2501,11 @@ A.post('/avis-recherche/:id/status', (req, res) => {
   const a = db.prepare('SELECT * FROM avis_recherche WHERE id=?').get(req.params.id);
   if (!a) return res.status(404).json({ error: 'Avis introuvable.' });
   db.prepare('UPDATE avis_recherche SET status=? WHERE id=?').run(req.body.status, a.id);
-  if (req.body.status === 'approved') notify(a.user_id, 'information', 'Avis de recherche publié ✅', `L\u2019avis concernant « ${a.nom} » est maintenant visible.`, '#/avis-recherche');
+  if (req.body.status === 'approved') {
+    const dj = Math.max(1, parseInt(getSetting('avis_duree_jours', '30'), 10) || 30);
+    db.prepare(`UPDATE avis_recherche SET expire_at=datetime('now', '+' || ? || ' days') WHERE id=?`).run(dj, a.id); // expiration automatique
+    notify(a.user_id, 'information', 'Avis de recherche publié ✅', `L\u2019avis concernant « ${a.nom} » est maintenant visible.`, '#/avis-recherche');
+  }
   if (req.body.status === 'rejected') notify(a.user_id, 'information', 'Avis de recherche refusé', 'Votre avis n\u2019a pas été validé par l\u2019administration.', '#/avis-recherche');
   res.json({ ok: true });
 });

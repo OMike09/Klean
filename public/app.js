@@ -660,13 +660,39 @@ routes.mission = async (id) => {
         : `<button class="btn mt" onclick="A.confirmPay(${m.id},this)">${isClient ? '💵 J\u2019ai remis le paiement en espèces' : '💵 J\u2019ai bien reçu le paiement en espèces'}</button>`) : ''}
     </div>`;
   } else if (isPro && ['acceptee', 'confirmee', 'en_cours'].includes(m.status)) {
-    payBlock = `<div class="sec-title">Montant de la mission</div><div class="card">
-      <div class="field"><label>Montant (FCFA) ${m.amount ? `<span class="muted small">— actuel : ${fmtFCFA(m.amount)}</span>` : '<span class="req">*</span>'}</label>
-      <input type="number" id="m-amount" min="100" step="100" value="${m.amount || ''}" placeholder="Ex : 10000"></div>
-      <div class="muted small mb">Commission Klean-Services CI : ${m.commission_rate}% — elle sera déduite de ce montant.</div>
-      <button class="btn sec sm" onclick="A.setAmount(${m.id},this)">Enregistrer le montant</button></div>`;
+    const pcPending = (m.price_changes || []).find(pc => pc.status === 'en_attente');
+    if (!m.amount) {
+      payBlock = `<div class="sec-title">Montant de la mission</div><div class="card">
+        <div class="field"><label>Montant (FCFA) <span class="req">*</span></label>
+        <input type="number" id="m-amount" min="100" step="100" placeholder="Ex : 10000" oninput="A.finPreview(${m.commission_rate})"></div>
+        <div class="small mb" id="fin-preview" class="muted">Commission Klean-Services : ${m.commission_rate}% — elle sera déduite de ce montant.</div>
+        <button class="btn sec sm" onclick="A.setAmount(${m.id},this)">Enregistrer le montant</button></div>`;
+    } else {
+      // Transparence totale : prix, commission et part du professionnel calculés par le serveur
+      payBlock = `<div class="sec-title">Montant de la mission</div><div class="card">
+        <div class="bold">${fmtFCFA(m.finance.amount)}</div>
+        <div class="muted small">Commission Klean-Services (${m.finance.commission_rate}%) : ${fmtFCFA(m.finance.commission)}<br><b>Votre part : ${fmtFCFA(m.finance.pro_amount)}</b></div>
+        ${pcPending
+          ? `<div class="status-banner search mt">⏳ Modification demandée : ${fmtFCFA(pcPending.old_amount)} → ${fmtFCFA(pcPending.new_amount)}. En attente de la réponse du client.</div>`
+          : `<button class="btn outline sm mt" onclick="A.prixModifForm(${m.id},${m.amount},${m.finance.commission_rate})">✏️ Demander une modification du prix</button>
+             <div class="muted small mt">Travail plus important que prévu ? Le nouveau prix devra être accepté par le client.</div>`}
+      </div>`;
+    }
   } else if (isClient && m.amount) {
-    payBlock = `<div class="sec-title">Montant</div><div class="card"><div class="bold">${fmtFCFA(m.amount)} <span class="muted small">• paiement en espèces à la fin de la mission</span></div></div>`;
+    const pcPending = (m.price_changes || []).find(pc => pc.status === 'en_attente');
+    const diff = pcPending ? pcPending.new_amount - pcPending.old_amount : 0;
+    const newCom = pcPending && m.finance ? Math.round(pcPending.new_amount * m.finance.commission_rate / 100) : 0;
+    payBlock = `<div class="sec-title">Montant</div><div class="card"><div class="bold">${fmtFCFA(m.amount)} <span class="muted small">• paiement en espèces à la fin de la mission</span></div></div>
+    ${pcPending ? `<div class="card" style="border:2px solid #f59e0b">
+      <div class="bold mb">💬 Le professionnel propose un nouveau prix</div>
+      <div class="small">Ancien prix : <b>${fmtFCFA(pcPending.old_amount)}</b></div>
+      <div class="small">Nouveau prix : <b>${fmtFCFA(pcPending.new_amount)}</b> (${diff > 0 ? '+' : ''}${diff.toLocaleString('fr-FR')} FCFA)</div>
+      ${m.finance && m.finance.commission_enabled ? `<div class="small">Nouvelle commission Klean-Services (${m.finance.commission_rate}%) : ${fmtFCFA(newCom)} — déjà incluse dans le prix.</div>` : ''}
+      <div class="small mt"><b>Motif :</b> ${esc(pcPending.reason)}</div>
+      <div class="btn-row mt">
+        <button class="btn warn" onclick="A.prixReponse(${m.id},${pcPending.id},false,this)">Refuser</button>
+        <button class="btn" onclick="A.prixReponse(${m.id},${pcPending.id},true,this)">✅ Accepter le nouveau prix</button>
+      </div></div>` : ''}`;
   }
 
   /* Avis */
@@ -960,8 +986,9 @@ routes.pro = async () => {
 };
 
 async function renderProDashboard() {
-  let d;
+  let d, cc = null;
   try { d = await api('/pro/dashboard'); } catch (e) { toast(e.message, 'err'); return; }
+  try { cc = await api('/commerce/config'); } catch { } // une option désactivée n'est pas proposée
   const upcoming = d.missions.filter(m => ['confirmee', 'acceptee'].includes(m.status));
   $app.innerHTML = `${header('Mon espace professionnel')}
   <div class="content">
@@ -992,6 +1019,8 @@ async function renderProDashboard() {
     <div class="menu-item" onclick="nav('#/pro-revenus')"><span class="mi-ic">💰</span>Mes revenus<span class="mi-arr">›</span></div>
     <div class="menu-item" onclick="nav('#/my-reviews')"><span class="mi-ic">⭐</span>Mes évaluations<span class="mi-arr">›</span></div>
     <div class="menu-item" onclick="nav('#/pro-edit')"><span class="mi-ic">✏️</span>Mon profil professionnel<span class="mi-arr">›</span></div>
+    ${cc && cc.visibilite.enabled ? `<div class="menu-item" onclick="nav('#/visibilite')"><span class="mi-ic">⭐</span>Améliorer ma visibilité <span class="muted small">(facultatif)</span><span class="mi-arr">›</span></div>` : ''}
+    ${cc && cc.pub.enabled ? `<div class="menu-item" onclick="nav('#/pub')"><span class="mi-ic">📣</span>Promouvoir mon activité (publicité)<span class="mi-arr">›</span></div>` : ''}
   </div>${bottomNav('account')}`;
   updateBadges();
 }
@@ -1067,7 +1096,8 @@ routes.pros = async (id) => {
       <div class="bold" style="font-size:19px;margin-top:8px">${esc(p.name)} ${p.verified ? '✅' : ''}</div>
       <div class="muted">${esc(p.profession || '')}</div>
       <div class="mt">${p.available ? '<span class="pill ok">🟢 Disponible</span>' : '<span class="pill warn">⚪ Indisponible</span>'}
-      ${p.documents_valides ? '<span class="pill ok">📄 Documents fournis</span>' : ''}</div>
+      ${p.documents_valides ? '<span class="pill ok">📄 Documents fournis</span>' : ''}
+      ${p.mis_en_avant ? '<span class="pill ok">⭐ Mis en avant</span>' : ''}</div>
       <div class="stat-grid mt">
         <div class="stat"><div class="v">${p.rating ? p.rating + ' ★' : '—'}</div><div class="l">${p.reviews_count} avis</div></div>
         <div class="stat"><div class="v">${p.missions_done}</div><div class="l">Missions réalisées</div></div>
@@ -1086,6 +1116,54 @@ routes.pros = async (id) => {
   </div>${bottomNav('search')}`;
 };
 
+/* ---------- Visibilité professionnelle (FACULTATIVE : le profil normal reste gratuit) ---------- */
+routes.visibilite = async () => {
+  if (!USER) { nav('#/login'); return; }
+  let v;
+  try { v = await api('/visibilite'); } catch (e) { toast(e.message, 'err'); back(); return; }
+  const stLbl = { attente_paiement: ['warn', '⏳ En attente de paiement'], active: ['ok', '🟢 Active'], expiree: ['warn', 'Expirée'], annulee: ['warn', 'Annulée'] };
+  $app.innerHTML = `${header('Améliorer ma visibilité')}
+  <div class="content">
+    <div class="card"><div class="small">⭐ Option <b>facultative</b> : votre profil professionnel reste entièrement gratuit et continue de recevoir des missions normalement. La visibilité payante met simplement votre profil en avant.</div></div>
+    ${!v.enabled ? `<div class="status-banner info">La visibilité payante n'est pas proposée pour le moment.</div>` : ''}
+    ${v.niveau_actuel ? `<div class="status-banner ok">⭐ Votre profil est actuellement mis en avant (niveau ${v.niveau_actuel}).</div>` : ''}
+    ${v.enabled ? v.plans.map(pl => `<div class="card">
+      <div class="row"><div class="grow"><div class="bold">${esc(pl.name)}</div>
+        <div class="small muted">${esc(pl.avantages || '')}</div>
+        <div class="small mt"><b>${pl.price.toLocaleString('fr-FR')} ${esc(v.devise)}</b> pour ${pl.duration_days} jours</div></div></div>
+      <button class="btn sm mt" onclick="A.visSub(${pl.id},'${esc(pl.name)}',${pl.price},this)">Choisir cette formule</button>
+    </div>`).join('') : ''}
+    ${v.subs.length ? `<div class="sec-title">Mes souscriptions</div>` + v.subs.map(sb => `<div class="card"><div class="row">
+      <div class="grow"><div class="bold">${esc(sb.plan_name)}</div><div class="small muted">${sb.price.toLocaleString('fr-FR')} ${esc(v.devise)} • ${sb.duration_days} j${sb.end_at ? ' • jusqu\u2019au ' + fmtDate(sb.end_at) : ''}</div></div>
+      <span class="pill ${(stLbl[sb.status] || ['warn'])[0]}">${(stLbl[sb.status] || ['', sb.status])[1]}</span></div></div>`).join('') : ''}
+  </div>${bottomNav('account')}`;
+};
+
+/* ---------- Campagnes publicitaires (annonceurs) ---------- */
+routes.pub = async () => {
+  if (!USER) { nav('#/login'); return; }
+  let v;
+  try { v = await api('/pub'); } catch (e) { toast(e.message, 'err'); back(); return; }
+  const stLbl = {
+    brouillon: ['warn', 'Brouillon'], attente_paiement: ['warn', '⏳ En attente de paiement'], paiement_confirme: ['ok', 'Paiement confirmé'],
+    attente_validation: ['warn', '🔍 En attente de validation'], validee: ['warn', '📋 Validée — en file d\u2019attente'],
+    active: ['ok', '🟢 En diffusion'], suspendue: ['warn', '⏸ Suspendue'], refusee: ['bad', 'Refusée'], expiree: ['warn', 'Expirée']
+  };
+  $app.innerHTML = `${header('Promouvoir mon activité')}
+  <div class="content">
+    ${!v.enabled ? `<div class="status-banner info">Les campagnes publicitaires ne sont pas proposées pour le moment.</div>`
+    : `<div class="card"><div class="bold mb">📣 Faites connaître votre activité</div>
+      <div class="small muted">Votre publicité (texte, image ou vidéo) sera diffusée sur l'écran d'accueil après paiement et validation par Klean-Services.</div>
+      <button class="btn mt" onclick="A.pubForm()">＋ Créer une campagne</button></div>`}
+    ${v.campagnes.length ? `<div class="sec-title">Mes campagnes</div>` + v.campagnes.map(c => `<div class="card">
+      <div class="row"><div class="grow"><div class="bold">${esc(c.title)}</div>
+        <div class="small muted">Budget : ${c.budget.toLocaleString('fr-FR')} ${esc(v.devise)} • ${c.duration_days} j • ${esc(c.type)}${c.zone ? ' • ' + esc(c.zone) : ''}</div>
+        ${c.end_at && c.status === 'active' ? `<div class="small muted">Jusqu'au ${fmtDate(c.end_at)}</div>` : ''}
+        ${c.note_admin ? `<div class="small mt">Note de l'administration : ${esc(c.note_admin)}</div>` : ''}</div>
+      <span class="pill ${(stLbl[c.status] || ['warn'])[0]}">${(stLbl[c.status] || ['', c.status])[1]}</span></div></div>`).join('') : ''}
+  </div>${bottomNav('account')}`;
+};
+
 /* ---------- Avis de recherche ---------- */
 routes['avis-recherche'] = async () => {
   if (!USER) { nav('#/login'); return; }
@@ -1094,8 +1172,9 @@ routes['avis-recherche'] = async () => {
   $app.innerHTML = `${header('Avis de recherche')}
   <div class="content">
     <button class="btn mb" onclick="A.avisForm()">📢 Publier un avis de recherche</button>
-    ${list.length ? list.map(a => `<div class="card">
+    ${list.length ? list.map(a => `<div class="card" ${a.paid && a.formule === 'urgent' ? 'style="border:2px solid #dc2626"' : ''}>
       ${a.status === 'pending' && a.publisher ? '<span class="pill warn">En attente de validation</span>' : ''}
+      ${a.paid && a.formule === 'urgent' ? '<span class="pill bad">🚨 URGENT</span>' : a.paid && a.formule === 'avant' ? '<span class="pill ok">⭐ Mis en avant</span>' : ''}
       <div class="row">${a.photo ? `<img src="${esc(a.photo)}" style="width:72px;height:72px;border-radius:10px;object-fit:cover">` : ''}
         <div class="grow"><div class="bold">${esc(a.nom)}</div>
         ${a.date_disparition ? `<div class="small">Disparu(e) le : ${esc(a.date_disparition)} ${esc(a.heure_disparition || '')}</div>` : ''}
@@ -1122,6 +1201,7 @@ routes.jobs = async () => {
     <div class="searchbar"><input type="text" id="job-q" placeholder="🔎 Rechercher un profil (ex : chauffeur)" value="${esc(q)}"><button onclick="A.jobSearch()">🔍</button></div>
     ${list.length ? list.map(j => `<div class="card">
       ${j.status === 'pending' ? '<span class="pill warn">En attente de validation</span>' : ''}
+      ${j.boost && j.boost !== 'normal' && (!j.boost_until || j.boost_until >= new Date().toISOString().slice(0, 19).replace('T', ' ')) ? `<span class="pill ok">⭐ ${j.boost === 'prioritaire' ? 'Profil prioritaire' : 'Mis en avant'}</span>` : ''}
       <div class="row">${avatar({ name: j.publisher, photo: j.photo })}
         <div class="grow"><div class="bold">${esc(j.metier)}</div><div class="muted small">${esc(j.publisher)} • ${esc(j.localisation || '')}</div></div></div>
       ${j.competences ? `<div class="small mt"><b>Compétences :</b> ${esc(j.competences)}</div>` : ''}
@@ -1130,6 +1210,7 @@ routes.jobs = async () => {
       ${j.description ? `<div class="small mt">${esc(j.description)}</div>` : ''}
       ${j.cv ? `<div class="small mt"><a href="${esc(j.cv)}" target="_blank">📄 Voir le CV</a></div>` : ''}
       <div class="small mt bold">📞 <a href="tel:${esc(j.contact)}">${esc(j.contact)}</a></div>
+      ${j.user_id === USER.id && (!j.boost || j.boost === 'normal') ? `<button class="btn outline sm mt" onclick="A.jobBoost(${j.id})">⭐ Mettre mon profil en avant (facultatif)</button>` : ''}
     </div>`).join('') : emptyState('💼', 'Aucun profil publié pour le moment.')}
   </div>${bottomNav('account')}`;
   document.getElementById('job-q').addEventListener('keydown', e => { if (e.key === 'Enter') A.jobSearch(); });
@@ -1328,18 +1409,37 @@ routes.payments = async () => {
   </div>${bottomNav('account')}`;
 };
 
-/* ---------- Bandeau d'annonces défilantes (bas de l'accueil) ---------- */
+/* ---------- Bandeau fixe en bas de l'accueil : publicités, informations, urgences ---------- */
+let BD_TIMER = null, BD_JSON = '';
+const BD_TYPES = { pub: { ic: '📢', lb: 'Pub' }, info: { ic: 'ℹ️', lb: 'Info' }, urgence: { ic: '🚨', lb: 'Urgence' } };
 async function bandeauMount() {
+  if (BD_TIMER) { clearInterval(BD_TIMER); BD_TIMER = null; }
+  BD_JSON = '';
+  await bandeauRender();
+  // Synchronisation : tout changement fait dans le tableau de bord (type, thème, message,
+  // activation, ordre, vitesse) est répercuté sur l'accueil sans recharger la page.
+  BD_TIMER = setInterval(() => {
+    if (!document.getElementById('bandeau-host')) { clearInterval(BD_TIMER); BD_TIMER = null; return; }
+    bandeauRender();
+  }, 12000);
+}
+async function bandeauRender() {
   const host = document.getElementById('bandeau-host');
   if (!host) return;
   let b;
   try { b = await api('/annonces'); } catch { return; }
+  const j = JSON.stringify(b);
+  if (j === BD_JSON && host.innerHTML) return; // rien n'a changé : on ne casse pas l'animation en cours
+  BD_JSON = j;
   const espace = document.getElementById('bandeau-espace');
   if (!b.enabled || !b.items.length) { host.innerHTML = ''; if (espace) espace.style.height = '0'; return; }
-  const item = a => `<span ${a.link ? `data-link="${esc(a.link)}" onclick="A.bandeauGo(this.dataset.link)"` : ''}
+  // Préfixe généré automatiquement selon le type : 📢 Pub (Thème) : … | ℹ️ Info (Thème) : … | 🚨 Urgence (Thème) : …
+  const item = a => { const t = BD_TYPES[a.type] || BD_TYPES.info;
+    return `<span ${a.link ? `data-link="${esc(a.link)}" onclick="A.bandeauGo(this.dataset.link)"` : ''}
     style="display:inline-flex;align-items:center;gap:7px;padding:0 20px;cursor:${a.link ? 'pointer' : 'default'};color:${esc(a.color || '#ffffff')}">
-    <span>${esc(a.icon || '📢')}</span><b>${esc(a.title || '')}</b><span style="opacity:.92">${esc(a.content || '')}</span>
-    <span style="opacity:.35;padding-left:20px">◆</span></span>`;
+    <b style="${(a.type || 'info') === 'urgence' ? 'color:#ff6b6b' : ''}">${t.ic} ${t.lb}${(a.theme || '').trim() ? ' (' + esc(a.theme.trim()) + ')' : ''} :</b>
+    <span style="opacity:.92">${esc(a.content || a.title || '')}</span>
+    <span style="opacity:.35;padding-left:20px">◆</span></span>`; };
   const bloc = b.items.map(item).join('');
   host.innerHTML = `
   <style>@keyframes ksdefile{from{transform:translateX(0)}to{transform:translateX(-50%)}}
@@ -1915,6 +2015,41 @@ const A = {
     try { await api('/missions/' + id + '/montant', { method: 'POST', body: { amount: v } }); toast('Montant enregistré ✓', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); busy(btn, false); }
   },
+  finPreview(rate) {
+    const v = parseInt(document.getElementById('m-amount').value, 10) || 0;
+    const el = document.getElementById('fin-preview');
+    if (!el) return;
+    const com = Math.round(v * rate / 100);
+    el.innerHTML = v ? `Prix total : <b>${fmtFCFA(v)}</b> — Commission Klean-Services (${rate}%) : <b>${fmtFCFA(com)}</b> — Votre part : <b>${fmtFCFA(v - com)}</b>` : `Commission Klean-Services : ${rate}% — elle sera déduite de ce montant.`;
+  },
+  prixModifForm(id, actuel, rate) {
+    openModal(`<h3>✏️ Demander une modification du prix</h3>
+      <p class="small">Prix actuel : <b>${fmtFCFA(actuel)}</b>. Le client recevra votre proposition et devra l'accepter. Rien n'est modifié sans son accord.</p>
+      <div class="field"><label>Nouveau montant (FCFA) <span class="req">*</span></label><input type="number" id="pm-montant" min="100" step="100" oninput="A._pmPreview(${rate})"></div>
+      <div class="small muted mb" id="pm-preview"></div>
+      <div class="field"><label>Raison de l'augmentation ou de la baisse <span class="req">*</span></label><textarea id="pm-raison" placeholder="Ex : fuite plus importante que prévu, pièce supplémentaire à remplacer…"></textarea></div>
+      <div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button>
+      <button class="btn" onclick="A._sendPrixModif(${id},this)">Envoyer au client</button></div>`);
+  },
+  _pmPreview(rate) {
+    const v = parseInt(document.getElementById('pm-montant').value, 10) || 0;
+    const el = document.getElementById('pm-preview');
+    if (el) el.innerHTML = v ? `Si le client accepte : commission (${rate}%) ${fmtFCFA(Math.round(v * rate / 100))} — votre part ${fmtFCFA(v - Math.round(v * rate / 100))}.` : '';
+  },
+  async _sendPrixModif(id, btn) {
+    busy(btn, true);
+    try {
+      await api('/missions/' + id + '/prix-modif', { method: 'POST', body: { new_amount: document.getElementById('pm-montant').value, reason: document.getElementById('pm-raison').value } });
+      closeModal(); toast('Proposition envoyée au client ✓', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); busy(btn, false); }
+  },
+  async prixReponse(mid, pcid, accepte, btn) {
+    busy(btn, true);
+    try {
+      await api(`/missions/${mid}/prix-modif/${pcid}/reponse`, { method: 'POST', body: { accepte } });
+      toast(accepte ? 'Nouveau prix accepté ✓' : 'Modification refusée — l\u2019ancien prix reste valable.', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); busy(btn, false); }
+  },
   async confirmPay(id, btn) {
     openModal(`<h3>💵 Confirmation du paiement</h3>
       <p class="small">Confirmez-vous que le paiement en espèces a bien été ${btn.textContent.includes('reçu') ? 'reçu' : 'remis'} ? Cette action est enregistrée.</p>
@@ -2036,9 +2171,23 @@ const A = {
   },
 
   /* Avis de recherche / jobs */
-  avisForm() {
+  async avisForm() {
     REQ = { photos: [] };
-    openModal(`<h3>📢 Publier un avis de recherche</h3>
+    let cc = null;
+    try { cc = await api('/commerce/config'); } catch { }
+    const av = cc ? cc.avis : null;
+    const fmls = [];
+    if (av) {
+      fmls.push({ code: 'normal', label: 'Normal', prix: av.prix_normal });
+      if (av.avant.enabled) fmls.push({ code: 'avant', label: '⭐ Mis en avant', prix: av.avant.prix });
+      if (av.urgent.enabled) fmls.push({ code: 'urgent', label: '🚨 Urgent', prix: av.urgent.prix });
+    }
+    window._avisFormule = 'normal';
+    const fmlBlock = av && fmls.length > 1 ? `
+      <div class="field"><label>Formule</label><div class="choices" id="av-fml">
+        ${fmls.map((f, i) => `<button type="button" class="chip ${i === 0 ? 'on' : ''}" onclick="A.pickChip(this,'${f.code}');window._avisFormule='${f.code}'">${f.label} — ${f.prix ? f.prix.toLocaleString('fr-FR') + ' ' + cc.devise : 'gratuit'}</button>`).join('')}
+      </div><div class="muted small">Les formules payantes placent votre avis en tête de liste après confirmation du paiement. Durée de publication : ${av.duree_jours} jours.</div></div>` : '';
+    openModal(`<h3>📢 Publier un avis de recherche</h3>${fmlBlock}
       <div class="field"><label>Nom de la personne <span class="req">*</span></label><input type="text" id="av-nom"></div>
       <div class="field"><label>Photo</label><div class="photo-strip" id="av-photo"><button class="ph-add" onclick="A.pickPhotos('av-photo')">＋</button></div>
       <input type="file" id="file-input" accept="image/*" style="display:none"></div>
@@ -2062,7 +2211,8 @@ const A = {
           date_disparition: document.getElementById('av-date').value, heure_disparition: document.getElementById('av-heure').value,
           dernier_lieu: document.getElementById('av-lieu').value, derniere_vue: document.getElementById('av-vue').value,
           description_physique: document.getElementById('av-phys').value, vetements: document.getElementById('av-vet').value,
-          contact: document.getElementById('av-contact').value, infos: document.getElementById('av-infos').value
+          contact: document.getElementById('av-contact').value, infos: document.getElementById('av-infos').value,
+          formule: window._avisFormule || 'normal'
         }
       });
       closeModal(); toast('Avis envoyé pour validation ✓', 'ok'); render();
@@ -2096,6 +2246,78 @@ const A = {
         }
       });
       closeModal(); toast('Profil envoyé pour validation ✓', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); busy(btn, false); }
+  },
+
+  /* Visibilité professionnelle */
+  visSub(planId, name, price, btn) {
+    openModal(`<h3>⭐ ${esc(name)}</h3>
+      <p class="small">Montant : <b>${price.toLocaleString('fr-FR')} FCFA</b>.<br>Après votre souscription, réglez ce montant à Klean-Services (espèces ou mobile money). Votre visibilité sera activée dès confirmation du paiement par l'administration.</p>
+      <div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button>
+      <button class="btn" onclick="A._visSub(${planId},this)">Confirmer ma souscription</button></div>`);
+  },
+  async _visSub(planId, btn) {
+    busy(btn, true);
+    try { await api('/visibilite/souscrire', { method: 'POST', body: { plan_id: planId } }); closeModal(); toast('Souscription enregistrée ✓ — en attente de paiement.', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); busy(btn, false); }
+  },
+
+  /* Campagnes publicitaires */
+  async pubForm() {
+    let v;
+    try { v = await api('/pub'); } catch (e) { toast(e.message, 'err'); return; }
+    REQ = { photos: [] };
+    window._pubType = 'texte';
+    openModal(`<h3>📣 Créer une campagne publicitaire</h3>
+      <div class="field"><label>Format</label><div class="choices">
+        ${[['texte', '📝 Texte'], ['image', '🖼️ Image'], ['video', '🎬 Vidéo']].map(([c, l], i) => `<button type="button" class="chip ${i === 0 ? 'on' : ''}" onclick="A.pickChip(this,'${c}');window._pubType='${c}'">${l}</button>`).join('')}
+      </div></div>
+      <div class="field"><label>Titre <span class="req">*</span></label><input type="text" id="pb-title" placeholder="Ex : Mon salon de coiffure"></div>
+      <div class="field"><label>Texte de la publicité</label><textarea id="pb-content" placeholder="Décrivez votre offre…"></textarea></div>
+      <div class="field"><label>Image ou vidéo (pour les formats image/vidéo)</label><div class="photo-strip" id="pb-file"><button class="ph-add" onclick="A.pickPhotos('pb-file')">＋</button></div>
+      <input type="file" id="file-input" accept="image/*,video/*" style="display:none"></div>
+      <div class="field"><label>Budget <span class="req">*</span></label><div class="choices" id="pb-budgets">
+        ${v.budgets.map(b => `<button type="button" class="chip" onclick="A.pickChip(this,'${b}');document.getElementById('pb-budget').value='${b}'">${b.toLocaleString('fr-FR')} ${esc(v.devise)}</button>`).join('')}
+      </div><input type="number" id="pb-budget" min="500" step="500" placeholder="Ou montant personnalisé"></div>
+      <div class="field"><label>Durée de diffusion (jours)</label><input type="number" id="pb-duree" min="1" max="90" value="7"></div>
+      <div class="field"><label>Zone ciblée (facultatif)</label><input type="text" id="pb-zone" placeholder="Ex : Bouaké — vide = partout"></div>
+      <div class="field"><label>Lien (facultatif)</label><input type="text" id="pb-link" placeholder="https://… ou numéro WhatsApp"></div>
+      <div class="muted small mb">Après paiement et validation par Klean-Services, votre campagne est diffusée. Si tous les emplacements sont occupés, elle entre automatiquement en file d'attente.</div>
+      <button class="btn" onclick="A._sendPub(this)">Envoyer ma campagne</button>`);
+  },
+  async _sendPub(btn) {
+    busy(btn, true);
+    try {
+      const r = await api('/pub/campagnes', {
+        method: 'POST', body: {
+          type: window._pubType || 'texte', title: document.getElementById('pb-title').value,
+          content: document.getElementById('pb-content').value, file: REQ.photos[0] || null,
+          budget: document.getElementById('pb-budget').value, duration_days: document.getElementById('pb-duree').value,
+          zone: document.getElementById('pb-zone').value, link: document.getElementById('pb-link').value
+        }
+      });
+      closeModal(); toast('Campagne enregistrée ✓ — réglez le budget pour lancer la validation.', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); busy(btn, false); }
+  },
+
+  /* Mise en avant du profil emploi (facultative) */
+  async jobBoost(id) {
+    let cc;
+    try { cc = await api('/commerce/config'); } catch (e) { toast(e.message, 'err'); return; }
+    if (!cc.emploi.enabled) { toast('La mise en avant n\u2019est pas proposée pour le moment. Votre profil reste visible gratuitement.', 'err'); return; }
+    openModal(`<h3>⭐ Mettre mon profil en avant</h3>
+      <p class="small">Option <b>facultative</b> : votre profil reste visible gratuitement. La mise en avant le place en tête de liste pendant ${cc.emploi.duree_jours} jours.</p>
+      <div class="btn-row" style="flex-direction:column;gap:8px">
+        <button class="btn outline" onclick="A._sendBoost(${id},'avant',this)">⭐ Mis en avant — ${cc.emploi.prix_avant.toLocaleString('fr-FR')} ${esc(cc.devise)}</button>
+        <button class="btn outline" onclick="A._sendBoost(${id},'prioritaire',this)">🥇 Prioritaire — ${cc.emploi.prix_prioritaire.toLocaleString('fr-FR')} ${esc(cc.devise)}</button>
+        <button class="btn sec" onclick="closeModal()">Annuler</button>
+      </div>`);
+  },
+  async _sendBoost(id, formule, btn) {
+    busy(btn, true);
+    try {
+      const r = await api(`/jobs/${id}/boost`, { method: 'POST', body: { formule } });
+      closeModal(); toast(r.status === 'active' ? 'Profil mis en avant ✓' : 'Demande enregistrée ✓ — mise en avant activée après confirmation du paiement.', 'ok'); render();
     } catch (e) { toast(e.message, 'err'); busy(btn, false); }
   },
 
