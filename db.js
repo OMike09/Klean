@@ -472,12 +472,12 @@ function seed() {
     quiz_enabled: '0',
     flipfizz_enabled: '0',
     kdo_enabled: '0',
-    urgence_info: "En cas d'urgence grave, appelez directement les services compétents. Klean-Services CI transmettra votre alerte à son équipe.",
+    urgence_info: "En cas d'urgence grave, appelez directement les services compétents. Klean Services transmettra votre alerte à son équipe.",
     urgence_contacts: JSON.stringify([
       { nom: 'Police secours', tel: '110' },
       { nom: 'Pompiers', tel: '180' },
       { nom: 'SAMU', tel: '185' },
-      { nom: 'Klean-Services CI', tel: '+225 07 00 00 00 00' }
+      { nom: 'Klean Services', tel: '+225 07 00 00 00 00' }
     ]),
     rules_client: `RÈGLES D'UTILISATION — CLIENT
 
@@ -488,14 +488,14 @@ function seed() {
 5. FRAUDE : toute tentative de contournement de la plateforme ou de fraude entraîne l'exclusion.
 6. ANNULATION : annulez au plus tôt si vous n'avez plus besoin du service. Les annulations répétées de missions confirmées peuvent être sanctionnées.
 7. SÉCURITÉ : ne partagez jamais votre mot de passe. Signalez tout comportement suspect.
-8. PLATEFORME : la mise en relation doit se faire via Klean-Services CI.`,
+8. PLATEFORME : la mise en relation doit se faire via Klean Services.`,
     rules_pro: `RÈGLES D'UTILISATION — PROFESSIONNEL
 
 1. PAIEMENT & COMMISSION : une commission est prélevée sur chaque mission (taux affiché dans vos revenus). Confirmez la réception du paiement dans l'application.
 2. ESPÈCES : après réception du paiement en espèces, confirmez-le immédiatement dans l'application.
 3. COMPORTEMENT & RESPECT : soyez ponctuel, courtois et professionnel. Tout abus entraîne la suspension.
 4. RESPONSABILITÉ : vous êtes responsable de la qualité de vos prestations et de votre matériel.
-5. FRAUDE : il est interdit de traiter hors plateforme une mission reçue via Klean-Services CI.
+5. FRAUDE : il est interdit de traiter hors plateforme une mission reçue via Klean Services.
 6. ANNULATION : n'acceptez une mission que si vous pouvez l'honorer. Les abandons répétés sont sanctionnés.
 7. SÉCURITÉ : présentez-vous avec votre profil vérifié. Ne demandez jamais d'informations sensibles au client.
 8. PLATEFORME : maintenez votre disponibilité et votre zone d'intervention à jour.`,
@@ -665,6 +665,10 @@ function migrate() {
   ensureColumn('services', 'seasonal', 'INTEGER NOT NULL DEFAULT 0');// service saisonnier
   ensureColumn('services', 'cities', "TEXT NOT NULL DEFAULT '[]'");  // villes où le service est proposé ([]=partout)
   ensureColumn('missions', 'tache', 'TEXT');                        // tâche précise choisie par le client
+  ensureColumn('missions', 'taches', "TEXT NOT NULL DEFAULT '[]'"); // plusieurs tâches demandées (JSON : id, nom, précision)
+  ensureColumn('pro_profiles', 'service_city', 'TEXT');                // lieu de service actuel, distinct de la ville d'inscription
+  ensureColumn('ads', 'zones', "TEXT NOT NULL DEFAULT '[]'");         // ciblage géographique : [] = toute la Côte d'Ivoire
+  ensureColumn('ad_campaigns', 'zones', "TEXT NOT NULL DEFAULT '[]'"); // même logique pour les campagnes payantes
   ensureColumn('users', 'ville', 'TEXT');
   ensureColumn('users', 'quartier', 'TEXT');
   // --- Hiérarchie & gestion des comptes (v2 étape 2) ---
@@ -722,6 +726,30 @@ function migrate() {
   }
 }
 migrate();
+
+// Contacts directs client ↔ Klean Services. Séparés de la messagerie de mission
+// afin de ne jamais mélanger une suggestion/préoccupation avec un chantier.
+db.exec(`CREATE TABLE IF NOT EXISTS support_conversations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  subject TEXT NOT NULL CHECK(subject IN ('suggestion','preoccupation')),
+  status TEXT NOT NULL DEFAULT 'ouverte' CHECK(status IN ('ouverte','fermee')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS support_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id INTEGER NOT NULL REFERENCES support_conversations(id) ON DELETE CASCADE,
+  sender_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  type TEXT NOT NULL DEFAULT 'text' CHECK(type IN ('text','audio')),
+  content TEXT,
+  file TEXT,
+  is_auto INTEGER NOT NULL DEFAULT 0,
+  read INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_support_conversations_user ON support_conversations(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_support_messages_conversation ON support_messages(conversation_id, id);`);
 
 // ============================================================
 // FUSION DE LA GRANDE BASE DES MÉTIERS DE CÔTE D'IVOIRE
@@ -977,6 +1005,19 @@ ensureColumn('services', 'price_show', 'INTEGER NOT NULL DEFAULT 1');    // affi
   setSetting('villes_v2', '1');
 })();
 
+// District d'Abidjan : les communes sont des localités rattachées à « Abidjan / … ».
+// L'ancienne valeur générique est conservée dans les profils historiques, mais n'est
+// plus proposée dans les listes de sélection.
+(function seedCommunesAbidjan() {
+  const communes = ['Abidjan / Abobo', 'Abidjan / Adjamé', 'Abidjan / Anyama', 'Abidjan / Attécoubé',
+    'Abidjan / Bingerville', 'Abidjan / Cocody', 'Abidjan / Koumassi', 'Abidjan / Marcory',
+    'Abidjan / Plateau', 'Abidjan / Port-Bouët', 'Abidjan / Songon', 'Abidjan / Treichville', 'Abidjan / Yopougon'];
+  const base = db.prepare('SELECT COALESCE(MAX(sort),0) n FROM villes').get().n;
+  const ins = db.prepare('INSERT OR IGNORE INTO villes(name, active, sort) VALUES(?,1,?)');
+  communes.forEach((name, i) => ins.run(name, base + i + 1));
+  db.prepare("UPDATE villes SET active=0 WHERE name='Abidjan'").run();
+})();
+
 // ============================================================
 // COMPTE PROFESSIONNEL : PARTICULIER OU ENTREPRISE (É2)
 // ============================================================
@@ -999,7 +1040,7 @@ ensureColumn('avis_recherche', 'paid', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('jobs', 'boost', "TEXT NOT NULL DEFAULT 'normal'");             // normal | avant | prioritaire
 ensureColumn('jobs', 'boost_until', 'TEXT');
 const ECO_DEFAULTS = {
-  commission_enabled: '1',               // commission obligatoire quand la prestation passe par Klean-Services
+  commission_enabled: '1',               // commission obligatoire quand la prestation passe par Klean Services
   visibilite_enabled: '1',               // visibilité payante FACULTATIVE (désactivable)
   pub_campagnes_enabled: '1',            // campagnes publicitaires des annonceurs
   pub_max_actives: '10',                 // emplacements simultanés (file d'attente au-delà)

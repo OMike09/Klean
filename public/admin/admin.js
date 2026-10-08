@@ -13,6 +13,7 @@ function can(k) { return ME && (ME.role === 'pdg' || (ME.perms || []).includes(k
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function fmtD(s) { if (!s) return ''; const d = new Date(s.replace(' ', 'T') + 'Z'); return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function fcfa(n) { return (n ?? 0).toLocaleString('fr-FR') + ' F'; }
+function zonesLabel(raw) { try { const z = Array.isArray(raw) ? raw : JSON.parse(raw || '[]'); return z && z.length ? z.join(', ') : '🌍 Toute la Côte d’Ivoire'; } catch { return '🌍 Toute la Côte d’Ivoire'; } }
 function toast(m, cls) { const z = document.getElementById('toast'); const t = document.createElement('div'); t.className = 'toast ' + (cls || ''); t.textContent = m; z.appendChild(t); setTimeout(() => t.remove(), 4500); }
 
 async function api(path, opts = {}) {
@@ -32,13 +33,13 @@ async function api(path, opts = {}) {
 }
 
 function openModal(html) { closeModal(); const bg = document.createElement('div'); bg.className = 'modal-bg'; bg.id = 'modal'; bg.innerHTML = `<div class="modal">${html}</div>`; bg.onclick = e => { if (e.target === bg) closeModal(); }; document.body.appendChild(bg); }
-function closeModal() { const m = document.getElementById('modal'); if (m) m.remove(); }
+function closeModal() { if (window._supportPoll) { clearInterval(window._supportPoll); window._supportPoll = null; } const m = document.getElementById('modal'); if (m) m.remove(); }
 
 /* ---------- Connexion ---------- */
 function renderLogin() {
   root.innerHTML = `<div class="login-wrap"><div class="login-box">
     <h2 style="margin:0 0 4px">🖥️ Administration</h2>
-    <div class="muted small" style="margin-bottom:18px">Klean-Services CI</div>
+    <div class="muted small" style="margin-bottom:18px">Klean Services</div>
     <label class="small muted">Identifiant</label>
     <input type="text" id="l-phone" placeholder="Identifiant administrateur">
     <label class="small muted">Mot de passe</label>
@@ -70,7 +71,7 @@ const MENU = [
   ['UTILISATEURS', [['users', '👥 Tous les comptes', null, 'comptes'], ['pros', '✅ Validations pro', 'pros_pending', 'pros']]],
   ['SERVICES', [['catalog', '🗂️ Services & catégories', null, 'catalogue'], ['questions', '❓ Questions dynamiques', null, 'questions']]],
   ['MISSIONS', [['missions', '🧰 Demandes & missions', null, 'missions'], ['payments', '💰 Paiements & commissions', null, 'paiements'], ['finances', '📈 Finances & revenus', null, 'paiements']]],
-  ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['broadcast', '📨 Message système', null, 'communication']]],
+  ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['support', '📩 Messages Klean Services', null, 'communication'], ['broadcast', '📨 Message système', null, 'communication']]],
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
   ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Je cherche un job', null, 'contenu'], ['ecole', '🏫 École & famille', null, 'contenu'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
   ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
@@ -82,7 +83,7 @@ function shell(content) {
   root.innerHTML = `
   <div class="layout">
     <div class="side" id="side">
-      <div class="logo">Klean-Services CI<br><span class="small" style="color:#6d9c94;font-weight:600">Administration</span>
+      <div class="logo">Klean Services<br><span class="small" style="color:#6d9c94;font-weight:600">Administration</span>
       ${ME ? `<br><span class="small" style="color:#9fc8c0">${esc(ME.name || '')} — ${ROLE_LB[ME.role] || ME.role}</span>` : ''}</div>
       ${MENU.map(([grp, items]) => {
         const vis = items.filter(it => menuVisible(it[3]));
@@ -228,7 +229,7 @@ views.maintenance = async () => {
       ${m.until ? 'Jusqu\u2019au : <b>' + esc(m.until.replace('T', ' ')) + '</b> (fin automatique)<br>' : 'Durée : indéterminée (jusqu\u2019à désactivation manuelle)<br>'}
       Justification : ${esc(m.reason || '—')}<br>
       Activée le ${esc(m.activated_at || '')} par ${esc(m.activated_by || '')}<br>
-      Message affiché aux utilisateurs : « ${esc(m.message || 'Klean-Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.')} »</div>
+      Message affiché aux utilisateurs : « ${esc(m.message || 'Klean Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.')} »</div>
       <button class="btn" style="margin-top:12px" onclick="A.maintOff()">🟢 Désactiver la maintenance maintenant</button>` : ''}
   </div>
   <div class="panel">
@@ -249,7 +250,7 @@ views.maintenance = async () => {
     <label class="small muted" style="margin-top:10px;display:block">Justification (obligatoire — enregistrée dans le journal)</label>
     <input id="mt-reason" style="width:100%;margin-bottom:10px" value="${esc(m.reason || '')}" placeholder="Ex : mise à jour du système de paiement">
     <label class="small muted">Message affiché aux utilisateurs (facultatif)</label>
-    <input id="mt-msg" style="width:100%;margin-bottom:12px" value="${esc(m.message || '')}" placeholder="Klean-Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.">
+    <input id="mt-msg" style="width:100%;margin-bottom:12px" value="${esc(m.message || '')}" placeholder="Klean Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.">
     <button class="btn warn" onclick="A.maintOn()">🔴 ${actif ? 'Mettre à jour la maintenance' : 'Activer la maintenance'}</button>
   </div>`);
 };
@@ -507,7 +508,7 @@ views.payments = async () => {
   shell(`<h1>💰 Paiements & commissions</h1>
   <div class="cards">
     <div class="kpi"><div class="v">${fcfa(valid.reduce((s, p) => s + p.amount, 0))}</div><div class="l">Total encaissé (validé)</div></div>
-    <div class="kpi"><div class="v">${fcfa(valid.reduce((s, p) => s + p.commission_amount, 0))}</div><div class="l">Commissions Klean-Services</div></div>
+    <div class="kpi"><div class="v">${fcfa(valid.reduce((s, p) => s + p.commission_amount, 0))}</div><div class="l">Commissions Klean Services</div></div>
     <div class="kpi"><div class="v">${fcfa(valid.reduce((s, p) => s + p.pro_amount, 0))}</div><div class="l">Reversé aux professionnels</div></div>
     <div class="kpi"><div class="v">${list.filter(p => p.status !== 'valide').length}</div><div class="l">En attente de confirmation</div></div>
   </div>
@@ -532,7 +533,7 @@ views.commerce = async () => {
   const onoff = (k, lb) => `<button class="btn sm ${s[k] === '1' ? '' : 'sec'}" onclick="A.toggleSetting('${k}','${s[k] === '1' ? '0' : '1'}')">${lb} : ${s[k] === '1' ? '🟢 ACTIVÉE' : '🔴 DÉSACTIVÉE'}</button>`;
   const num = (k, label, w = 110) => `<div><label>${label}</label><input type="number" id="cm-${k}" value="${esc(s[k] || '')}" style="width:${w}px" onchange="A.cmNum('${k}')"></div>`;
   shell(`<h1>💰 Paramètres commerciaux</h1>
-  <div class="small muted" style="margin-bottom:10px">Modèle Klean-Services : <b>prestation → commission obligatoire</b> • <b>visibilité → paiement facultatif</b> • <b>publicité → campagne payante</b> • <b>avis de recherche → gratuit ou payant selon vos réglages</b> • <b>recherche d'emploi → gratuite + mise en avant facultative</b>. Toute modification est journalisée (qui, ancienne et nouvelle valeur).</div>
+  <div class="small muted" style="margin-bottom:10px">Modèle Klean Services : <b>prestation → commission obligatoire</b> • <b>visibilité → paiement facultatif</b> • <b>publicité → campagne payante</b> • <b>avis de recherche → gratuit ou payant selon vos réglages</b> • <b>recherche d'emploi → gratuite + mise en avant facultative</b>. Toute modification est journalisée (qui, ancienne et nouvelle valeur).</div>
 
   <div class="panel"><h2 style="margin-top:0">A. 💰 Commission sur les prestations</h2>
     <div class="frow" style="align-items:flex-end">
@@ -705,6 +706,7 @@ views.ads = async () => {
   const list = await api('/admin/ads');
   const s = await api('/admin/settings');
   const annonces = await api('/admin/annonces');
+  const villes = await api('/villes');
   const vitesses = { '15': 'Très lente', '30': 'Lente', '60': 'Normale', '120': 'Rapide', '200': 'Très rapide' };
   const TB = { pub: { ic: '📢', lb: 'Pub', pl: 'Publicité' }, info: { ic: 'ℹ️', lb: 'Info', pl: 'Information' }, urgence: { ic: '🚨', lb: 'Urgence', pl: 'Urgence' } };
   const nAct = t => annonces.filter(a => (a.type || 'info') === t && a.active).length;
@@ -767,15 +769,33 @@ views.ads = async () => {
       <div><label>Durée d'affichage (s)</label><input type="number" id="ad-dur" value="6" style="width:90px"></div>
       <button class="btn" onclick="A.addAd()">Publier</button>
     </div>
+    <div class="frow" style="align-items:flex-start;margin-top:8px"><div style="min-width:250px"><label>Zone de diffusion</label>
+      <label style="display:block;margin:5px 0"><input type="radio" name="ad-zone-mode" value="all" checked onchange="A.adZoneMode()"> 🌍 Toute la Côte d’Ivoire</label>
+      <label style="display:block;margin:5px 0"><input type="radio" name="ad-zone-mode" value="cities" onchange="A.adZoneMode()"> 📍 Une ou plusieurs villes</label>
+      <div id="ad-zones-wrap" style="display:none;max-height:185px;overflow:auto;border:1px solid #d9e5e2;border-radius:8px;padding:8px;margin-top:6px">${villes.map(v => `<label style="display:inline-flex;gap:5px;align-items:center;width:220px;padding:3px 0;font-size:13px"><input class="ad-zone" type="checkbox" value="${esc(v)}"> ${esc(v)}</label>`).join('')}</div>
+      <div class="small muted">Une publicité ciblée n'est montrée qu'aux comptes dont la ville correspond exactement (les communes d'Abidjan restent distinctes).</div></div></div>
     <div class="small muted">Les images/vidéos trop lourdes sont limitées à 15 Mo. Les publicités s'affichent sans bloquer l'utilisation de l'application.</div>
   </div>
-  <div class="panel"><table><tr><th>Type</th><th>Titre</th><th>Contenu</th><th>Emplacement</th><th>👁️ Vues</th><th>État</th><th>Actions</th></tr>
+  <div class="panel"><table><tr><th>Type</th><th>Titre</th><th>Contenu</th><th>Emplacement</th><th>Zone de diffusion</th><th>👁️ Vues</th><th>État</th><th>Actions</th></tr>
   ${list.map(a => `<tr><td>${a.type}</td><td><b>${esc(a.title || '')}</b></td>
     <td class="small">${esc((a.content || '').slice(0, 60))} ${a.file ? `<a href="${esc(a.file)}" target="_blank">📎</a>` : ''}</td>
-    <td>${a.placement}</td><td><b>${Number(a.views || 0).toLocaleString('fr-FR')}</b></td><td>${a.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
+    <td>${a.placement}</td><td class="small">${esc(zonesLabel(a.zones))}</td><td><b>${Number(a.views || 0).toLocaleString('fr-FR')}</b></td><td>${a.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
     <td><button class="btn sm sec" onclick="A.toggleAd(${a.id},${a.active ? 0 : 1})">${a.active ? 'Désactiver' : 'Activer'}</button>
     <button class="btn sm warn" onclick="A.delAd(${a.id})">🗑️</button></td></tr>`).join('')}
-  ${!list.length ? '<tr><td colspan="7" class="muted">Aucune publicité.</td></tr>' : ''}</table></div>`);
+  ${!list.length ? '<tr><td colspan="8" class="muted">Aucune publicité.</td></tr>' : ''}</table></div>`);
+};
+
+/* ---------- Messagerie Klean Services ---------- */
+views.support = async () => {
+  const list = await api('/admin/support/conversations');
+  const subject = window._supportFilter || 'toutes';
+  const rows = subject === 'toutes' ? list : list.filter(c => c.subject === subject);
+  const label = c => c.subject === 'suggestion' ? '💡 Suggestion' : '⚠️ Préoccupation';
+  shell(`<h1>📩 Messages Klean Services</h1><div class="panel"><div class="small muted" style="margin-bottom:10px">Conversations directes des clients. Les réponses sont synchronisées immédiatement dans leur application.</div>
+    <div class="frow"><button class="btn sm ${subject === 'toutes' ? '' : 'sec'}" onclick="A.supportFilter('toutes')">Toutes (${list.length})</button><button class="btn sm ${subject === 'suggestion' ? '' : 'sec'}" onclick="A.supportFilter('suggestion')">💡 Suggestions (${list.filter(c => c.subject === 'suggestion').length})</button><button class="btn sm ${subject === 'preoccupation' ? '' : 'sec'}" onclick="A.supportFilter('preoccupation')">⚠️ Préoccupations (${list.filter(c => c.subject === 'preoccupation').length})</button></div>
+    <table style="margin-top:12px"><tr><th>Type</th><th>Client</th><th>Dernier message</th><th>État</th><th>Mis à jour</th><th></th></tr>
+      ${rows.map(c => `<tr><td>${label(c)}</td><td><b>${esc(c.user_name)}</b><br><span class="small muted">${esc(c.user_phone || '')} • ${esc(c.user_ville || '')}</span></td><td class="small">${c.last_type === 'audio' ? '🎤 Message vocal' : esc((c.last_content || '').slice(0, 120))}</td><td>${c.status === 'ouverte' ? '<span class="pill ok">Ouverte</span>' : '<span class="pill off">Fermée</span>'}</td><td class="small">${fmtD(c.last_at || c.updated_at)}</td><td><button class="btn sm" onclick="A.supportOpen(${c.id})">Ouvrir</button></td></tr>`).join('')}
+      ${!rows.length ? '<tr><td colspan="6" class="muted">Aucune conversation.</td></tr>' : ''}</table></div>`);
 };
 
 /* ---------- Message système ---------- */
@@ -986,7 +1006,7 @@ views.settings = async () => {
   <div class="panel">
     <h2 style="margin-top:0">Missions & paiements</h2>
     <div class="frow">
-      <div><label>Commission Klean-Services CI (%)</label><input type="number" id="st-comm" value="${esc(s.commission_rate)}" min="0" max="100" step="0.5" style="width:110px"></div>
+      <div><label>Commission Klean Services (%)</label><input type="number" id="st-comm" value="${esc(s.commission_rate)}" min="0" max="100" step="0.5" style="width:110px"></div>
       <div><label>Délai de réponse d'un professionnel (secondes)</label><input type="number" id="st-wait" value="${esc(s.dispatch_wait_seconds)}" min="15" max="3600" style="width:130px"></div>
       <div><label>Conservation des fichiers (jours)</label><input type="number" id="st-ret" value="${esc(s.file_retention_days)}" min="1" style="width:110px"></div>
     </div>
@@ -1215,7 +1235,7 @@ const A = {
         <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;margin:0"><input type="checkbox" id="es-sea" ${s.seasonal ? 'checked' : ''}> 📅 Saisonnier</label>
       </div>
       <label class="small muted">Villes où ce service est proposé (séparées par des virgules — <b>laisser vide = toutes les villes</b>)</label>
-      <input id="es-cities" style="width:100%;margin-bottom:12px" value="${esc((s.cities || []).join(', '))}" placeholder="Ex : Bouaké, Abidjan">
+      <input id="es-cities" style="width:100%;margin-bottom:12px" value="${esc((s.cities || []).join(', '))}" placeholder="Ex : Bouaké, Abidjan / Cocody">
       <div><button class="btn" onclick="A._svcSave(${id || 0})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
   },
   async _svcSave(id) {
@@ -1461,6 +1481,30 @@ const A = {
 
   async litige(id, open) { try { await api(`/admin/missions/${id}/litige`, { method: 'POST', body: { open } }); toast(open ? 'Litige ouvert.' : 'Litige résolu.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
 
+  supportFilter(v) { window._supportFilter = v; render(); },
+  async supportOpen(id) {
+    try {
+      const d = await api('/admin/support/conversations/' + id); const c = d.conversation;
+      const bubble = m => `<div style="max-width:88%;margin:${m.sender_id ? '8px auto 8px 0' : '8px 0 8px auto'};padding:9px 11px;border-radius:10px;background:${m.sender_id ? '#f0f5f4' : '#e3f5ef'}"><b class="small">${m.sender_id ? esc(m.sender_name || c.user_name) : 'Klean Services'}${m.is_auto ? ' • automatique' : ''}</b><div class="small">${m.type === 'audio' ? `<audio controls src="${esc(m.file)}"></audio>` : esc(m.content || '')}</div><div class="small muted">${fmtD(m.created_at)}</div></div>`;
+      openModal(`<h3>${c.subject === 'suggestion' ? '💡 Suggestion' : '⚠️ Préoccupation'} — ${esc(c.user_name)}</h3><div class="small muted">${esc(c.user_phone || '')} • ${esc(c.user_ville || '')}</div><div id="support-thread" style="max-height:330px;overflow:auto;border:1px solid #e2ebe8;border-radius:10px;padding:8px;margin:12px 0">${d.messages.map(bubble).join('')}</div>
+        <label class="small muted">Répondre au client</label><textarea id="support-reply" style="width:100%;min-height:84px"></textarea><div class="frow" style="margin-top:8px"><button class="btn" onclick="A.supportReply(${c.id})">Envoyer la réponse</button><button class="btn sec" onclick="A.supportStatus(${c.id},'${c.status === 'ouverte' ? 'fermee' : 'ouverte'}')">${c.status === 'ouverte' ? 'Fermer la conversation' : 'Rouvrir la conversation'}</button></div>`);
+      window._supportPoll = setInterval(() => A.supportRefresh(c.id), 5000);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async supportRefresh(id) {
+    try {
+      const d = await api('/admin/support/conversations/' + id); const thread = document.getElementById('support-thread');
+      if (!thread) return;
+      thread.innerHTML = d.messages.map(m => `<div style="max-width:88%;margin:${m.sender_id ? '8px auto 8px 0' : '8px 0 8px auto'};padding:9px 11px;border-radius:10px;background:${m.sender_id ? '#f0f5f4' : '#e3f5ef'}"><b class="small">${m.sender_id ? esc(m.sender_name || d.conversation.user_name) : 'Klean Services'}${m.is_auto ? ' • automatique' : ''}</b><div class="small">${m.type === 'audio' ? `<audio controls src="${esc(m.file)}"></audio>` : esc(m.content || '')}</div><div class="small muted">${fmtD(m.created_at)}</div></div>`).join('');
+      thread.scrollTop = thread.scrollHeight;
+    } catch { }
+  },
+  async supportReply(id) {
+    const content = (document.getElementById('support-reply') || {}).value || ''; if (!content.trim()) return toast('Écrivez une réponse.', 'err');
+    try { await api('/admin/support/conversations/' + id + '/messages', { method: 'POST', body: { type: 'text', content } }); closeModal(); toast('Réponse envoyée au client ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async supportStatus(id, status) { try { await api('/admin/support/conversations/' + id + '/status', { method: 'POST', body: { status } }); closeModal(); toast(status === 'fermee' ? 'Conversation fermée.' : 'Conversation rouverte.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  adZoneMode() { const cities = document.querySelector('input[name="ad-zone-mode"]:checked').value === 'cities'; const box = document.getElementById('ad-zones-wrap'); if (box) box.style.display = cities ? 'block' : 'none'; },
   async addAd() {
     const fileInput = document.getElementById('ad-file');
     let file = null;
@@ -1476,7 +1520,8 @@ const A = {
         method: 'POST', body: {
           type: document.getElementById('ad-type').value, title: document.getElementById('ad-title').value,
           content: document.getElementById('ad-content').value, file,
-          placement: document.getElementById('ad-place').value, duration: parseInt(document.getElementById('ad-dur').value, 10) || 6
+          placement: document.getElementById('ad-place').value, duration: parseInt(document.getElementById('ad-dur').value, 10) || 6,
+          zones: document.querySelector('input[name="ad-zone-mode"]:checked').value === 'cities' ? [...document.querySelectorAll('.ad-zone:checked')].map(c => c.value) : []
         }
       });
       toast('Publicité publiée ✓', 'ok'); render();

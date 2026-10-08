@@ -16,6 +16,7 @@ let navStack = [];
 let suppressPush = false;
 let sse = null;
 let currentChat = null;     // mission id du chat ouvert
+let currentSupport = null;  // conversation directe avec Klean Services
 
 /* ---------- Utilitaires ---------- */
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -23,6 +24,23 @@ function fmtDate(s) { if (!s) return ''; const d = new Date(s.replace(' ', 'T') 
 function fmtFCFA(n) { return (n ?? 0).toLocaleString('fr-FR') + ' FCFA'; }
 function initials(name) { return (name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(); }
 function avatar(u, cls) { return `<div class="avatar ${cls || ''}">${u && u.photo ? `<img src="${esc(u.photo)}" alt="">` : esc(initials(u && u.name))}</div>`; }
+// iPhone Safari and Android do not necessarily record in the same container.
+// Prefer a format the browser explicitly supports instead of forcing WebM.
+function audioRecorderOptions() {
+  if (!window.MediaRecorder) return null;
+  const types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+  const mimeType = types.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
+  return mimeType ? { mimeType } : {};
+}
+function audioExtension(mime) { return /mp4|aac|m4a/i.test(mime || '') ? 'm4a' : 'webm'; }
+function microphoneError(err) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder)
+    return 'Votre navigateur ne prend pas encore en charge l’enregistrement vocal. Utilisez Safari à jour ou un navigateur récent.';
+  if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError'))
+    return 'Microphone non autorisé. Sur iPhone, autorisez le microphone pour Klean Services dans Réglages/Safari, puis réessayez.';
+  if (err && err.name === 'NotFoundError') return 'Aucun microphone n’a été détecté sur cet appareil.';
+  return 'Impossible de démarrer le microphone. Vérifiez son autorisation puis réessayez.';
+}
 
 function toast(msg, cls, title) {
   const z = document.getElementById('toast-zone');
@@ -100,6 +118,11 @@ function connectSSE() {
     if (currentChat === m.mission_id) { appendChatMsg(m); api('/missions/' + m.mission_id + '/messages').catch(() => { }); }
     refreshBadges();
   });
+  sse.addEventListener('support', e => {
+    const d = JSON.parse(e.data);
+    if (currentSupport === Number(d.conversation_id)) appendSupportMsg(d.message);
+    else refreshBadges();
+  });
   sse.addEventListener('mission', e => {
     const d = JSON.parse(e.data);
     const h = location.hash;
@@ -158,7 +181,7 @@ function logout(manual = true) {
 function header(title, opts = {}) {
   return `<div class="hdr">
     ${opts.back !== false ? `<button class="back-btn" onclick="back()">←<span>Retour</span></button>` : ''}
-    ${opts.brand ? `<div class="brand">Klean-Services CI</div>` : `<div class="title">${esc(title)}</div>`}
+    ${opts.brand ? `<div class="brand" aria-label="Klean Services"><img src="/logo.png" alt=""> <span>Klean Services</span></div>` : `<div class="title">${esc(title)}</div>`}
     ${opts.bell !== false ? `<button class="bell" onclick="nav('#/notifications')">🔔<span class="js-bell-badge"></span></button>` : ''}
   </div>`;
 }
@@ -196,8 +219,8 @@ const routes = {};
 routes.login = () => {
   $app.innerHTML = `
   <div class="content no-nav" style="padding-top:52px">
-    <div class="center mb"><div class="splash-logo" style="margin:0 auto;background:var(--p);color:#fff">K</div>
-      <h2 style="margin:14px 0 2px">Klean-Services CI</h2>
+    <div class="center mb"><img class="splash-logo splash-image" src="/logo.png" alt="Logo Klean Services" style="margin:0 auto">
+      <h2 style="margin:14px 0 2px">Klean Services</h2>
       <div class="muted">Tous vos services à portée de main</div></div>
     <div class="card">
       <div class="field"><label>Numéro de téléphone</label><input type="tel" id="f-phone" placeholder="Ex : 07 00 00 00 00" autocomplete="tel"></div>
@@ -238,7 +261,7 @@ routes.register = async () => {
       <div class="field"><label>Quartier</label><input type="text" id="f-quartier" placeholder="Ex : Air France, Cocody Angré…"></div>
       <div class="sec-title">Règles d'utilisation</div>
       <div class="rules-box">${esc(rules.client || '')}</div>
-      <label class="check-line"><input type="checkbox" id="f-accept"> J'ai lu et j'accepte les règles d'utilisation de Klean-Services CI.</label>
+      <label class="check-line"><input type="checkbox" id="f-accept"> J'ai lu et j'accepte les règles d'utilisation de Klean Services.</label>
       <button class="btn" id="b-reg">Créer mon compte</button>
       <div class="muted small center mt">Un seul compte par numéro de téléphone. Vous pourrez l'utiliser comme client et, si vous le souhaitez, devenir aussi professionnel.</div>
     </div>
@@ -260,7 +283,7 @@ routes.register = async () => {
       });
       TOKEN = r.token; USER = r.user; localStorage.setItem('ks_token', TOKEN);
       connectSSE(); refreshBadges();
-      toast('Bienvenue sur Klean-Services CI !', 'ok');
+      toast('Bienvenue sur Klean Services !', 'ok');
       nav('#/home');
     } catch (err) {
       busy(e.target, false);
@@ -277,7 +300,7 @@ routes.register = async () => {
 };
 
 /* Prix indicatif de départ d'un service (toujours modifiable dans le tableau
-   de bord ; jamais un prix définitif). Affiché en noir sous le service. */
+   de bord ; jamais un prix définitif). Affiché en rouge sous le service. */
 function prixHtml(s, small) {
   if (!s || !s.price_show || !s.price_from) return '';
   return `<div class="svc-prix" style="color:#dc2626;font-weight:700;font-size:${small ? '12px' : '13px'};margin-top:2px">${esc(s.price_prefix || 'Dès')} ${Number(s.price_from).toLocaleString('fr-FR')} FCFA</div>`;
@@ -287,9 +310,15 @@ function prixHtml(s, small) {
    partout ailleurs. Un professionnel peut sélectionner plusieurs catégories. */
 function proServiceChips(selectedIds) {
   const sel = selectedIds || [];
-  return SERVICES.filter(c => c.services.length).map(c => `
-    <div class="small" style="width:100%;font-weight:700;margin:8px 0 2px">${esc(c.icon || '🔹')} ${esc(c.name)}</div>
-    ${c.services.map(s => `<button type="button" class="chip ${sel.includes(s.id) ? 'on' : ''}" data-sid="${s.id}" onclick="this.classList.toggle('on')">${esc(s.name)}</button>`).join('')}`).join('');
+  return SERVICES.filter(c => c.services.length).map((c, i) => `
+    <div class="pro-service-category">
+      <button type="button" class="pro-service-head" onclick="A.toggleProCategory(this)" aria-expanded="${i === 0 ? 'true' : 'false'}">
+        <span>${esc(c.icon || '🔹')} ${esc(c.name)}</span><span>⌄</span>
+      </button>
+      <div class="choices pro-cat-services ${i === 0 ? 'open' : ''}">
+        ${c.services.map(s => `<button type="button" class="chip ${sel.includes(s.id) ? 'on' : ''}" data-sid="${s.id}" onclick="this.classList.toggle('on')">${esc(s.name)}</button>`).join('')}
+      </div>
+    </div>`).join('');
 }
 
 /* Carte publicité / info : la vidéo s'affiche en grand et démarre automatiquement (muette) */
@@ -320,8 +349,10 @@ function adsBandHtml(list) {
 
 /* ---------- Accueil ---------- */
 routes.home = async () => {
-  if (!SERVICES) try { SERVICES = await api('/services'); } catch (e) { $app.innerHTML = header('Accueil', { brand: true }) + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home'); return; }
-  if (!POPULAIRES.length) try { POPULAIRES = await api('/services/populaires'); } catch { }
+  // Les prix et services populaires affichés viennent toujours de la configuration actuelle du tableau de bord.
+  const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
+  try { SERVICES = await api('/services' + cityQuery); POPULAIRES = await api('/services/populaires' + cityQuery); }
+  catch (e) { $app.innerHTML = header('Accueil', { brand: true }) + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home'); return; }
   try { GAMES = await api('/games/config'); } catch { }
   try { ADS = await api('/ads'); } catch { }
   const homeAds = ADS; // toutes les publicités actives sortent sur l'écran d'accueil
@@ -344,7 +375,7 @@ routes.home = async () => {
   $app.innerHTML = `
   ${header('', { brand: true, back: false })}
   <div class="content" style="padding-top:0">
-    <div id="home-fixe" style="position:sticky;top:57px;z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
+    <div id="home-fixe" style="position:sticky;top:calc(58px + var(--safe-t));z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
       ${adsBandHtml(topZone)}
       <div class="searchbar" style="margin:0 2px">
         <input type="text" id="home-q" placeholder="🔎 Que recherchez-vous ?" enterkeyhint="search">
@@ -398,7 +429,7 @@ routes.search = async (params) => {
 
 /* ---------- Tous les services (liste complète : CATÉGORIE → SERVICES) ---------- */
 routes.services = async (params) => {
-  try { if (!CATALOGUE) CATALOGUE = await api('/catalogue'); }
+  try { CATALOGUE = await api('/catalogue' + (USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '')); }
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('search'); return; }
   if (!ADS.length) try { ADS = await api('/ads'); } catch { }
   const pubsServices = ADS.filter(a => a.placement === 'services');
@@ -483,9 +514,10 @@ routes.request = async (serviceId) => {
         <div class="muted small">Prix de départ indicatif — le montant final dépend de votre demande (quantité, difficulté, déplacement…) et sera proposé par le professionnel.</div>
       </div>` : ''}
       <div class="muted small mb">Répondez à ces quelques questions pour que le professionnel comprenne bien votre besoin.</div>
-      ${taches.length ? `<div class="field"><label>Que faut-il faire ?</label>
-        <div class="choices" id="r-tache">${taches.map(t => `<button type="button" class="chip ${sug && t.name === sug ? 'on' : ''}" onclick="A.pickChip(this,'${esc(t.name).replace(/'/g, "\\'")}')">${esc(t.name)}</button>`).join('')}
-        <button type="button" class="chip" onclick="A.pickChip(this,'Autre')">Autre / je ne sais pas</button></div></div>` : ''}
+      ${taches.length ? `<div class="field"><label>Une ou plusieurs tâches à réaliser</label>
+        <div class="muted small mb">Vous pouvez sélectionner plusieurs tâches dans cette même demande.</div>
+        <div class="choices" id="r-taches">${taches.map(t => `<button type="button" class="chip task-chip ${sug && t.name === sug ? 'on' : ''}" data-task-id="${t.id}" data-task-name="${esc(t.name)}" onclick="A.toggleTask(this)">☐ ${esc(t.name)}</button>`).join('')}</div>
+        <div id="r-task-details" class="mt"></div></div>` : ''}
       ${data.questions.map(qst => renderQuestion(qst)).join('')}
       <div class="field"><label>Message (facultatif)</label><textarea id="r-desc" placeholder="Autre précision utile…"></textarea></div>
       <div class="field"><label>Photos (facultatif)</label>
@@ -506,7 +538,7 @@ routes.request = async (serviceId) => {
     </div>
   </div>${bottomNav('search')}`;
   updateBadges();
-  if (sug && taches.some(t => t.name === sug)) { const tz = document.getElementById('r-tache'); if (tz) tz.dataset.val = sug; }
+  if (sug && taches.some(t => t.name === sug)) { const chip = [...document.querySelectorAll('#r-taches .task-chip')].find(c => c.dataset.taskName === sug); if (chip) A.toggleTask(chip, true); }
   document.getElementById('b-send').onclick = async e => {
     const answers = {};
     let missing = null;
@@ -524,11 +556,13 @@ routes.request = async (serviceId) => {
     if (!addr.trim()) { toast('Indiquez votre localisation (bouton GPS ou saisie manuelle).', 'err'); return; }
     busy(e.target, true, 'Envoi en cours…');
     try {
-      const tz = document.getElementById('r-tache');
+      const selectedTasks = [...document.querySelectorAll('#r-taches .task-chip.on')].map(chip => ({
+        id: Number(chip.dataset.taskId), name: chip.dataset.taskName,
+        detail: (document.getElementById('r-task-detail-' + chip.dataset.taskId) || {}).value || ''
+      }));
       const r = await api('/missions', {
         method: 'POST', body: {
-          service_id: REQ.service_id, answers,
-          tache: tz && tz.dataset.val && tz.dataset.val !== 'Autre' ? tz.dataset.val : null,
+          service_id: REQ.service_id, answers, taches: selectedTasks,
           description: document.getElementById('r-desc').value,
           address: addr, lat: REQ.lat, lng: REQ.lng,
           urgence: document.getElementById('r-urgent').checked,
@@ -567,7 +601,7 @@ routes.missions = async () => {
     <div class="card tap" onclick="nav('#/mission/${m.id}')">
       <div class="row"><span class="mi-ic" style="font-size:24px">${esc(m.icon || '📋')}</span>
         <div class="grow"><div class="bold">${esc(m.service)}</div>
-        ${m.tache ? `<div class="small">🛠️ ${esc(m.tache)}</div>` : ''}
+        ${m.taches && m.taches.length ? `<div class="small">🛠️ ${m.taches.map(t => esc(t.name)).join(' • ')}</div>` : (m.tache ? `<div class="small">🛠️ ${esc(m.tache)}</div>` : '')}
         <div class="muted small">${esc(m.address || '')} • ${fmtDate(m.created_at)}</div></div>
         ${statusPill(m.status)}</div>
       ${m.urgence ? '<div class="small" style="color:var(--danger);font-weight:700;margin-top:6px">🔥 Urgent</div>' : ''}
@@ -652,7 +686,7 @@ routes.mission = async (id) => {
     payBlock = `<div class="sec-title">Paiement</div><div class="card">
       <div class="row"><div class="grow">
         <div class="bold">${fmtFCFA(p.amount)} <span class="muted small">• Espèces</span></div>
-        ${!isClient ? `<div class="muted small">Commission Klean-Services (${p.commission_rate}%) : ${fmtFCFA(p.commission_amount)}<br><b>Votre part : ${fmtFCFA(p.pro_amount)}</b></div>` : ''}
+        ${!isClient ? `<div class="muted small">Commission Klean Services (${p.commission_rate}%) : ${fmtFCFA(p.commission_amount)}<br><b>Votre part : ${fmtFCFA(p.pro_amount)}</b></div>` : ''}
       </div>
       <span class="pill ${p.status === 'valide' ? 'ok' : 'warn'}">${p.status === 'valide' ? 'Payé ✓' : p.status === 'en_attente' ? 'En attente' : 'Confirmation partielle'}</span></div>
       ${p.status !== 'valide' ? (meConfirmed
@@ -665,13 +699,13 @@ routes.mission = async (id) => {
       payBlock = `<div class="sec-title">Montant de la mission</div><div class="card">
         <div class="field"><label>Montant (FCFA) <span class="req">*</span></label>
         <input type="number" id="m-amount" min="100" step="100" placeholder="Ex : 10000" oninput="A.finPreview(${m.commission_rate})"></div>
-        <div class="small mb" id="fin-preview" class="muted">Commission Klean-Services : ${m.commission_rate}% — elle sera déduite de ce montant.</div>
+        <div class="small mb" id="fin-preview" class="muted">Commission Klean Services : ${m.commission_rate}% — elle sera déduite de ce montant.</div>
         <button class="btn sec sm" onclick="A.setAmount(${m.id},this)">Enregistrer le montant</button></div>`;
     } else {
       // Transparence totale : prix, commission et part du professionnel calculés par le serveur
       payBlock = `<div class="sec-title">Montant de la mission</div><div class="card">
         <div class="bold">${fmtFCFA(m.finance.amount)}</div>
-        <div class="muted small">Commission Klean-Services (${m.finance.commission_rate}%) : ${fmtFCFA(m.finance.commission)}<br><b>Votre part : ${fmtFCFA(m.finance.pro_amount)}</b></div>
+        <div class="muted small">Commission Klean Services (${m.finance.commission_rate}%) : ${fmtFCFA(m.finance.commission)}<br><b>Votre part : ${fmtFCFA(m.finance.pro_amount)}</b></div>
         ${pcPending
           ? `<div class="status-banner search mt">⏳ Modification demandée : ${fmtFCFA(pcPending.old_amount)} → ${fmtFCFA(pcPending.new_amount)}. En attente de la réponse du client.</div>`
           : `<button class="btn outline sm mt" onclick="A.prixModifForm(${m.id},${m.amount},${m.finance.commission_rate})">✏️ Demander une modification du prix</button>
@@ -687,7 +721,7 @@ routes.mission = async (id) => {
       <div class="bold mb">💬 Le professionnel propose un nouveau prix</div>
       <div class="small">Ancien prix : <b>${fmtFCFA(pcPending.old_amount)}</b></div>
       <div class="small">Nouveau prix : <b>${fmtFCFA(pcPending.new_amount)}</b> (${diff > 0 ? '+' : ''}${diff.toLocaleString('fr-FR')} FCFA)</div>
-      ${m.finance && m.finance.commission_enabled ? `<div class="small">Nouvelle commission Klean-Services (${m.finance.commission_rate}%) : ${fmtFCFA(newCom)} — déjà incluse dans le prix.</div>` : ''}
+      ${m.finance && m.finance.commission_enabled ? `<div class="small">Nouvelle commission Klean Services (${m.finance.commission_rate}%) : ${fmtFCFA(newCom)} — déjà incluse dans le prix.</div>` : ''}
       <div class="small mt"><b>Motif :</b> ${esc(pcPending.reason)}</div>
       <div class="btn-row mt">
         <button class="btn warn" onclick="A.prixReponse(${m.id},${pcPending.id},false,this)">Refuser</button>
@@ -723,7 +757,7 @@ routes.mission = async (id) => {
       <div class="row"><span style="font-size:26px">${esc(m.icon || '📋')}</span>
         <div class="grow"><div class="bold">${esc(m.service)}</div><div class="muted small">N° ${esc(m.code)} • ${fmtDate(m.created_at)}</div></div>
         ${statusPill(m.status)}</div>
-      ${m.tache ? `<div class="small mt"><b>🛠️ Tâche demandée :</b> ${esc(m.tache)}</div>` : ''}
+      ${m.taches && m.taches.length ? `<div class="small mt"><b>🛠️ Tâches demandées :</b>${m.taches.map(t => `<div>• ${esc(t.name)}${t.detail ? ` — ${esc(t.detail)}` : ''}</div>`).join('')}</div>` : (m.tache ? `<div class="small mt"><b>🛠️ Tâche demandée :</b> ${esc(m.tache)}</div>` : '')}
       ${m.urgence ? '<div class="small mt" style="color:var(--danger);font-weight:700">🔥 Demande urgente</div>' : ''}
       ${m.date_souhaitee ? `<div class="small mt">📅 Souhaité : ${fmtDate(m.date_souhaitee)}</div>` : ''}
       <div class="small mt">📍 ${esc(m.address || '')}</div>
@@ -795,6 +829,54 @@ function appendChatMsg(x) {
   box.scrollTop = box.scrollHeight;
 }
 
+/* ---------- Contact direct avec Klean Services ---------- */
+function supportBubble(x) {
+  const mine = USER && x.sender_id === USER.id;
+  const label = mine ? 'Vous' : 'Klean Services';
+  const body = x.type === 'audio' ? `<audio controls src="${esc(x.file)}"></audio>` : esc(x.content || '');
+  return `<div class="bubble ${mine ? 'me' : 'them'}"><div class="small" style="font-weight:700;margin-bottom:3px">${label}${x.is_auto ? ' • réponse automatique' : ''}</div>${body}<div class="b-time">${fmtDate(x.created_at)}</div></div>`;
+}
+function appendSupportMsg(x) {
+  const box = document.getElementById('support-msgs');
+  if (!box || !x) return;
+  box.insertAdjacentHTML('beforeend', supportBubble(x));
+  box.scrollTop = box.scrollHeight;
+}
+routes.contact = async (param) => {
+  if (!USER) { nav('#/login'); return; }
+  if (param === 'new') {
+    const subject = sessionStorage.getItem('ks_contact_subject') || '';
+    if (!['suggestion', 'preoccupation'].includes(subject)) { nav('#/contact'); return; }
+    const label = subject === 'suggestion' ? '💡 Suggestion' : '⚠️ Préoccupation';
+    const question = subject === 'suggestion' ? 'Que voulez-vous suggérer ?' : 'Quelle est votre préoccupation ?';
+    $app.innerHTML = `${header(label)}<div class="content"><div class="card">
+      <div class="bold mb">${question}</div><div class="field"><textarea id="support-first" maxlength="3000" placeholder="Écrivez votre message ici…"></textarea></div>
+      <button class="btn" onclick="A.supportCreate('${subject}',this)">Envoyer</button></div></div>${bottomNav('account')}`;
+    return;
+  }
+  if (param) {
+    let d; try { d = await api('/support/conversations/' + encodeURIComponent(param)); } catch (e) { toast(e.message, 'err'); back(); return; }
+    currentSupport = Number(d.conversation.id);
+    const subjectLabel = d.conversation.subject === 'suggestion' ? '💡 Suggestion' : '⚠️ Préoccupation';
+    $app.innerHTML = `${header('Klean Services — ' + subjectLabel, { bell: false })}
+      <div class="chat-wrap"><div class="chat-msgs" id="support-msgs">
+        <div class="center muted small">Conversation ${d.conversation.status === 'ouverte' ? 'ouverte' : 'fermée'} • ${subjectLabel}</div>
+        ${d.messages.map(supportBubble).join('')}</div>
+        ${d.conversation.status === 'ouverte' ? `<div class="chat-input"><textarea id="support-text" rows="1" maxlength="3000" placeholder="Votre message…"></textarea><button class="icon-btn main" onclick="A.supportSend(${d.conversation.id})">➤</button></div>` : `<div class="chat-input"><div class="muted small">Cette conversation est fermée. Vous pouvez ouvrir une nouvelle demande depuis « Contacter Klean Services ».</div></div>`}
+      </div>`;
+    const box = document.getElementById('support-msgs'); box.scrollTop = box.scrollHeight;
+    const input = document.getElementById('support-text'); if (input) input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); A.supportSend(d.conversation.id); } });
+    return;
+  }
+  let conversations = []; try { conversations = await api('/support/conversations'); } catch (e) { toast(e.message, 'err'); }
+  $app.innerHTML = `${header('Contacter Klean Services')}
+    <div class="content"><div class="hint">Choisissez le sujet de votre message. Notre équipe peut ensuite vous répondre directement ici.</div>
+      <div class="menu-item" onclick="A.startContact('suggestion')"><span class="mi-ic">💡</span><div>Suggestion<div class="muted small">Proposer une amélioration</div></div><span class="mi-arr">›</span></div>
+      <div class="menu-item" onclick="A.startContact('preoccupation')"><span class="mi-ic">⚠️</span><div>Préoccupation<div class="muted small">Signaler une difficulté ou demander de l'aide</div></div><span class="mi-arr">›</span></div>
+      ${conversations.length ? `<div class="sec-title">Mes conversations</div>${conversations.map(c => `<div class="card tap" onclick="nav('#/contact/${c.id}')"><div class="row"><span class="mi-ic">${c.subject === 'suggestion' ? '💡' : '⚠️'}</span><div class="grow"><div class="bold">${c.subject === 'suggestion' ? 'Suggestion' : 'Préoccupation'} <span class="muted small">• ${c.status === 'ouverte' ? 'Ouverte' : 'Fermée'}</span></div><div class="conv-prev">${c.last_type === 'audio' ? '🎤 Message vocal' : esc(c.last_content || '')}</div></div><div class="muted small">${fmtDate(c.last_at || c.updated_at)}</div></div></div>`).join('')}` : ''}
+    </div>${bottomNav('account')}`;
+};
+
 /* ---------- Messages (conversations) ---------- */
 routes.messages = async () => {
   if (!USER) { nav('#/login'); return; }
@@ -855,6 +937,7 @@ routes.account = async () => {
     <div class="menu-item" onclick="nav('#/pro')"><span class="mi-ic">💼</span>Mon espace professionnel
       ${USER.pro_status === 'pending' ? '<span class="pill warn">En validation</span>' : USER.pro_status === 'approved' ? '' : '<span class="pill ok">Devenir pro</span>'}<span class="mi-arr">›</span></div>
     <div class="menu-item" onclick="nav('#/messages')"><span class="mi-ic">💬</span>Mes messages<span class="mi-arr">›</span></div>
+    <div class="menu-item" onclick="nav('#/contact')"><span class="mi-ic">📩</span>Contacter Klean Services<span class="mi-arr">›</span></div>
     <div class="menu-item" onclick="nav('#/my-reviews')"><span class="mi-ic">⭐</span>Mes avis<span class="mi-arr">›</span></div>
 
     <div class="collap" id="c-autres">
@@ -900,7 +983,7 @@ routes.pro = async () => {
     return;
   }
   // Devenir professionnel
-  if (!SERVICES) SERVICES = await api('/services');
+  SERVICES = await api('/services' + (USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : ''));
   let rules = { pro: '' };
   try { rules = await api('/rules'); } catch { }
   const rejected = USER.pro_status === 'rejected';
@@ -957,7 +1040,7 @@ routes.pro = async () => {
       </div>
       <div class="sec-title">Règles professionnelles</div>
       <div class="rules-box">${esc(rules.pro || '')}</div>
-      <label class="check-line"><input type="checkbox" id="p-accept"> J'ai lu et j'accepte les règles professionnelles de Klean-Services CI.</label>
+      <label class="check-line"><input type="checkbox" id="p-accept"> J'ai lu et j'accepte les règles professionnelles de Klean Services.</label>
       <button class="btn" id="b-apply">Envoyer ma demande</button>
     </div>
   </div>${bottomNav('account')}`;
@@ -1004,7 +1087,7 @@ async function renderProDashboard() {
       <div class="stat"><div class="v">${(d.stats.revenus).toLocaleString('fr-FR')}</div><div class="l">Revenus (FCFA)</div></div>
       <div class="stat"><div class="v">${d.stats.rating ? d.stats.rating + ' ★' : '—'}</div><div class="l">${d.stats.reviews} évaluation(s)</div></div>
     </div>
-    <div class="muted small center mb">Commission Klean-Services CI : ${d.stats.commission_rate}% par mission</div>
+    <div class="muted small center mb">Commission Klean Services : ${d.stats.commission_rate}% par mission</div>
     ${d.offers.length ? `<div class="sec-title">🔔 Missions à traiter (${d.offers.length})</div>` + d.offers.map(m => `
       <div class="card tap" onclick="nav('#/mission/${m.id}')"><div class="row"><div class="grow">
         <div class="bold">${esc(m.service_name)}</div><div class="muted small">📍 ${esc(m.address || '')} ${m.urgence ? ' • 🔥 Urgent' : ''}</div></div>
@@ -1018,6 +1101,7 @@ async function renderProDashboard() {
     <div class="menu-item" onclick="nav('#/messages')"><span class="mi-ic">💬</span>Messages<span class="mi-arr">›</span></div>
     <div class="menu-item" onclick="nav('#/pro-revenus')"><span class="mi-ic">💰</span>Mes revenus<span class="mi-arr">›</span></div>
     <div class="menu-item" onclick="nav('#/my-reviews')"><span class="mi-ic">⭐</span>Mes évaluations<span class="mi-arr">›</span></div>
+    <div class="menu-item" onclick="A.changeServiceCity()"><span class="mi-ic">📍</span><div class="grow">Changer mon lieu de service<div class="muted small">${esc(d.profile.service_city || USER.ville || 'Non renseigné')}</div></div><span class="mi-arr">›</span></div>
     <div class="menu-item" onclick="nav('#/pro-edit')"><span class="mi-ic">✏️</span>Mon profil professionnel<span class="mi-arr">›</span></div>
     ${cc && cc.visibilite.enabled ? `<div class="menu-item" onclick="nav('#/visibilite')"><span class="mi-ic">⭐</span>Améliorer ma visibilité <span class="muted small">(facultatif)</span><span class="mi-arr">›</span></div>` : ''}
     ${cc && cc.pub.enabled ? `<div class="menu-item" onclick="nav('#/pub')"><span class="mi-ic">📣</span>Promouvoir mon activité (publicité)<span class="mi-arr">›</span></div>` : ''}
@@ -1027,7 +1111,7 @@ async function renderProDashboard() {
 
 routes['pro-edit'] = async () => {
   if (!USER || USER.pro_status !== 'approved') { nav('#/pro'); return; }
-  if (!SERVICES) SERVICES = await api('/services');
+  SERVICES = await api('/services' + (USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : ''));
   const p = USER.pro;
   const estEnt = p.pro_type === 'entreprise';
   $app.innerHTML = `${header('Mon profil professionnel')}
@@ -1153,7 +1237,7 @@ routes.pub = async () => {
   <div class="content">
     ${!v.enabled ? `<div class="status-banner info">Les campagnes publicitaires ne sont pas proposées pour le moment.</div>`
     : `<div class="card"><div class="bold mb">📣 Faites connaître votre activité</div>
-      <div class="small muted">Votre publicité (texte, image ou vidéo) sera diffusée sur l'écran d'accueil après paiement et validation par Klean-Services.</div>
+      <div class="small muted">Votre publicité (texte, image ou vidéo) sera diffusée sur l'écran d'accueil après paiement et validation par Klean Services.</div>
       <button class="btn mt" onclick="A.pubForm()">＋ Créer une campagne</button></div>`}
     ${v.campagnes.length ? `<div class="sec-title">Mes campagnes</div>` + v.campagnes.map(c => `<div class="card">
       <div class="row"><div class="grow"><div class="bold">${esc(c.title)}</div>
@@ -1363,14 +1447,14 @@ routes.settings = () => {
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${FONT_SIZES.map(s => `<button class="chip ${font === s ? 'on' : ''}" style="font-size:${Math.min(s, 20)}px" onclick="A.setFont(${s})">${s === 16 ? s + ' (normal)' : s}</button>`).join('')}
       </div>
-      <div class="small muted mt">Aperçu : <span style="font-size:${font}px">Klean-Services CI — tous vos services à portée de main.</span></div>
+      <div class="small muted mt">Aperçu : <span style="font-size:${font}px">Klean Services — tous vos services à portée de main.</span></div>
     </div>
     <div class="card">
       <div class="switch"><div><div class="bold small">🔊 Son des notifications</div><div class="muted small">Jouer un son à chaque notification</div></div>
       <button class="chip ${sound ? 'on' : ''}" onclick="A.toggleSound(this)">${sound ? 'Activé' : 'Désactivé'}</button></div>
     </div>
     <div class="card muted small">
-      <b>Klean-Services CI</b><br>Version 2.0 — Tous vos services à portée de main.<br>
+      <b>Klean Services</b><br>Version 2.0 — Tous vos services à portée de main.<br>
       JE CHERCHE → JE DEMANDE → JE SUIS MIS EN RELATION → JE COMMUNIQUE → JE RÉALISE → JE PAIE → J'ÉVALUE
     </div>
   </div>${bottomNav('account')}`;
@@ -1561,7 +1645,7 @@ routes.quiz = async () => {
   // Public non autorisé
   if (!etat.allowed && !p) {
     const motif = etat.audience === 'clients_servis'
-      ? 'Ce quiz est réservé aux clients ayant déjà bénéficié d\u2019un service sur Klean-Services. Commandez votre premier service pour pouvoir participer !'
+      ? 'Ce quiz est réservé aux clients ayant déjà bénéficié d\u2019un service sur Klean Services. Commandez votre premier service pour pouvoir participer !'
       : 'Ce quiz est réservé aux clients.';
     $app.innerHTML = `${header('Quiz')}<div class="content"><div class="card center">
       <div style="font-size:44px">🔒</div><div class="bold mb">${motif}</div>
@@ -1739,7 +1823,7 @@ routes.flip = async () => {
     try {
       const r = await api('/games/flipfizz', { method: 'POST' });
       document.getElementById('flip-result').innerHTML = r.win
-        ? `<div class="status-banner ok">🎉 GAGNÉ ! L'équipe Klean-Services CI vous contactera pour votre récompense.</div>`
+        ? `<div class="status-banner ok">🎉 GAGNÉ ! L'équipe Klean Services vous contactera pour votre récompense.</div>`
         : `<div class="status-banner info">Pas de chance cette fois. Essais restants aujourd'hui : ${r.essais_restants}</div>`;
     } catch (err) { toast(err.message, 'err'); }
     busy(e.target, false);
@@ -1878,7 +1962,7 @@ const A = {
     if (!q) { zone.innerHTML = '<div class="hint">Tapez votre besoin ci-dessus.</div>'; return; }
     zone.innerHTML = '<div class="center muted mt"><div class="spinner" style="margin:0 auto"></div></div>';
     try {
-      const r = await api('/search?q=' + encodeURIComponent(q));
+      const r = await api('/search?q=' + encodeURIComponent(q) + (USER && USER.ville ? '&ville=' + encodeURIComponent(USER.ville) : ''));
       zone.innerHTML = r.results.length
         ? `<div class="sec-title">Services correspondants</div>` + r.results.map(s =>
           `<div class="menu-item" onclick="${s.tache_suggeree ? `sessionStorage.setItem('ks_sug_tache','${esc(s.tache_suggeree).replace(/'/g, "\\'")}');` : ''}nav('#/request/${s.id}')">
@@ -1892,6 +1976,39 @@ const A = {
     [...el.parentElement.children].forEach(c => c.classList.remove('on'));
     el.classList.add('on');
     el.parentElement.dataset.val = val;
+  },
+  toggleTask(el, forceOn) {
+    if (forceOn === true) el.classList.add('on'); else el.classList.toggle('on');
+    el.textContent = (el.classList.contains('on') ? '☑ ' : '☐ ') + el.dataset.taskName;
+    const zone = document.getElementById('r-task-details'); if (!zone) return;
+    const tasks = [...document.querySelectorAll('#r-taches .task-chip.on')];
+    zone.innerHTML = tasks.map(t => `<div class="field" style="margin:10px 0 0"><label class="small">Précision pour « ${esc(t.dataset.taskName)} » <span class="muted">(facultatif)</span></label><input type="text" id="r-task-detail-${esc(t.dataset.taskId)}" maxlength="500" placeholder="Ex : cuisine, 2 robinets concernés…"></div>`).join('');
+  },
+  toggleProCategory(el) {
+    const list = el.parentElement.querySelector('.pro-cat-services');
+    const open = list.classList.toggle('open'); el.setAttribute('aria-expanded', open ? 'true' : 'false');
+  },
+  async changeServiceCity() {
+    let cities = []; try { cities = await api('/villes'); } catch (e) { toast(e.message, 'err'); return; }
+    const current = (USER.pro && USER.pro.service_city) || USER.ville || '';
+    openModal(`<h3>📍 Changer mon lieu de service</h3><p class="small muted">Votre ville d'inscription ne change pas. Ce choix indique simplement où vous souhaitez recevoir des opportunités actuellement.</p>
+      <label class="small muted">Lieu de service actuel</label><select id="pro-service-city" style="width:100%;margin-bottom:14px">${cities.map(v => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
+      <button class="btn" onclick="A.saveServiceCity()">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+  },
+  async saveServiceCity() {
+    try { USER = await api('/pro/service-location', { method: 'PUT', body: { service_city: document.getElementById('pro-service-city').value } }); closeModal(); toast('Lieu de service mis à jour ✓', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  startContact(subject) { sessionStorage.setItem('ks_contact_subject', subject); nav('#/contact/new'); },
+  async supportCreate(subject, btn) {
+    const content = (document.getElementById('support-first') || {}).value || ''; busy(btn, true);
+    try { const r = await api('/support/conversations', { method: 'POST', body: { subject, content } }); sessionStorage.removeItem('ks_contact_subject'); nav('#/contact/' + r.id); }
+    catch (e) { toast(e.message, 'err'); busy(btn, false); }
+  },
+  async supportSend(id) {
+    const input = document.getElementById('support-text'); const content = input && input.value.trim(); if (!content) return;
+    try { const m = await api('/support/conversations/' + id + '/messages', { method: 'POST', body: { type: 'text', content } }); input.value = ''; appendSupportMsg(m); }
+    catch (e) { toast(e.message, 'err'); }
   },
   collap(id) { document.getElementById(id).classList.toggle('open'); },
   mTab(t) { sessionStorage.setItem('ks_mtab', t); render(); },
@@ -1935,31 +2052,35 @@ const A = {
     input.click();
   },
 
-  /* Audio */
-  _rec: null, _recChunks: [],
+  /* Audio — enregistre, arrête, puis affiche une écoute avant l'envoi de la demande. */
+  _rec: null, _recChunks: [], _pendingChatAudio: null,
   async toggleRec(zoneId) {
     const btn = document.getElementById('r-rec');
     if (A._rec && A._rec.state === 'recording') { A._rec.stop(); return; }
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      A._recChunks = [];
-      A._rec = new MediaRecorder(stream);
-      A._rec.ondataavailable = e => A._recChunks.push(e.data);
+      const options = audioRecorderOptions(); if (!options) throw new Error('unsupported');
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      A._recChunks = []; A._rec = new MediaRecorder(stream, options);
+      A._rec.ondataavailable = e => { if (e.data && e.data.size) A._recChunks.push(e.data); };
       A._rec.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(A._recChunks, { type: A._rec.mimeType || 'audio/webm' });
-        const fd = new FormData(); fd.append('files', blob, 'vocal.webm');
+        const mime = A._rec && A._rec.mimeType || (options && options.mimeType) || 'audio/webm'; A._rec = null;
+        const blob = new Blob(A._recChunks, { type: mime });
+        if (!blob.size) return toast('Aucun son n’a été enregistré. Réessayez.', 'err');
+        const fd = new FormData(); fd.append('files', blob, 'vocal.' + audioExtension(mime));
         try {
-          const r = await api('/upload', { method: 'POST', body: fd });
-          REQ.audio = r.files[0];
-          document.getElementById(zoneId).innerHTML = `<audio controls src="${esc(REQ.audio)}"></audio> <button class="btn ghost sm" onclick="REQ.audio=null;this.parentElement.innerHTML='<button class=\\'btn sec sm\\' id=\\'r-rec\\' onclick=\\'A.toggleRec(\\'${zoneId}\\')\\'>🎤 Enregistrer un message vocal</button>'">🗑️</button>`;
-          toast('Message vocal enregistré ✓', 'ok');
+          const r = await api('/upload', { method: 'POST', body: fd }); REQ.audio = r.files[0];
+          const zone = document.getElementById(zoneId); if (!zone) return;
+          zone.innerHTML = `<audio controls preload="metadata" src="${esc(REQ.audio)}"></audio><div class="small muted">Écoutez puis envoyez votre demande.</div><button class="btn ghost sm" onclick="A.clearRequestAudio('${zoneId}')">🗑️ Supprimer</button>`;
+          toast('Message vocal enregistré. Vous pouvez l’écouter avant l’envoi ✓', 'ok');
         } catch (e) { toast(e.message, 'err'); }
       };
-      A._rec.start();
-      btn.textContent = '⏹️ Arrêter l\u2019enregistrement';
-      btn.classList.add('warn');
-    } catch { toast('Microphone non autorisé. Autorisez l\u2019accès au micro ou envoyez un message texte.', 'err'); }
+      A._rec.start(250); btn.textContent = '⏹️ Arrêter l’enregistrement'; btn.classList.add('warn');
+    } catch (e) { if (stream) stream.getTracks().forEach(t => t.stop()); toast(microphoneError(e), 'err'); }
+  },
+  clearRequestAudio(zoneId) {
+    REQ.audio = null; const zone = document.getElementById(zoneId); if (zone) zone.innerHTML = `<button class="btn sec sm" id="r-rec" onclick="A.toggleRec('${zoneId}')">🎤 Enregistrer un message vocal</button>`;
   },
 
   /* GPS */
@@ -2020,7 +2141,7 @@ const A = {
     const el = document.getElementById('fin-preview');
     if (!el) return;
     const com = Math.round(v * rate / 100);
-    el.innerHTML = v ? `Prix total : <b>${fmtFCFA(v)}</b> — Commission Klean-Services (${rate}%) : <b>${fmtFCFA(com)}</b> — Votre part : <b>${fmtFCFA(v - com)}</b>` : `Commission Klean-Services : ${rate}% — elle sera déduite de ce montant.`;
+    el.innerHTML = v ? `Prix total : <b>${fmtFCFA(v)}</b> — Commission Klean Services (${rate}%) : <b>${fmtFCFA(com)}</b> — Votre part : <b>${fmtFCFA(v - com)}</b>` : `Commission Klean Services : ${rate}% — elle sera déduite de ce montant.`;
   },
   prixModifForm(id, actuel, rate) {
     openModal(`<h3>✏️ Demander une modification du prix</h3>
@@ -2134,26 +2255,32 @@ const A = {
   },
   async chatAudio(id) {
     const btn = document.getElementById('chat-rec');
-    if (A._rec && A._rec.state === 'recording') { A._rec.stop(); btn.classList.remove('rec'); btn.textContent = '🎤'; return; }
+    if (A._rec && A._rec.state === 'recording') { A._rec.stop(); if (btn) { btn.classList.remove('rec'); btn.textContent = '🎤'; } return; }
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      A._recChunks = [];
-      A._rec = new MediaRecorder(stream);
-      A._rec.ondataavailable = e => A._recChunks.push(e.data);
+      const options = audioRecorderOptions(); if (!options) throw new Error('unsupported');
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      A._recChunks = []; A._rec = new MediaRecorder(stream, options);
+      A._rec.ondataavailable = e => { if (e.data && e.data.size) A._recChunks.push(e.data); };
       A._rec.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(A._recChunks, { type: A._rec.mimeType || 'audio/webm' });
-        const fd = new FormData(); fd.append('files', blob, 'vocal.webm');
+        const mime = A._rec && A._rec.mimeType || (options && options.mimeType) || 'audio/webm'; A._rec = null;
+        const blob = new Blob(A._recChunks, { type: mime }); if (!blob.size) return toast('Aucun son n’a été enregistré. Réessayez.', 'err');
+        const fd = new FormData(); fd.append('files', blob, 'vocal.' + audioExtension(mime));
         try {
-          const r = await api('/upload', { method: 'POST', body: fd });
-          await api('/missions/' + id + '/messages', { method: 'POST', body: { type: 'audio', file: r.files[0] } });
+          const r = await api('/upload', { method: 'POST', body: fd }); A._pendingChatAudio = { id, file: r.files[0] };
+          openModal(`<h3>🎤 Note vocale prête</h3><audio controls preload="metadata" style="width:100%" src="${esc(r.files[0])}"></audio><p class="small muted">Écoutez-la avant l’envoi.</p><button class="btn" onclick="A.sendPendingChatAudio()">Envoyer la note vocale</button><button class="btn sec mt" onclick="A.cancelPendingChatAudio()">Supprimer</button>`);
         } catch (e) { toast(e.message, 'err'); }
       };
-      A._rec.start();
-      btn.classList.add('rec'); btn.textContent = '⏹️';
-      toast('Enregistrement… touchez ⏹️ pour envoyer.');
-    } catch { toast('Microphone non autorisé.', 'err'); }
+      A._rec.start(250); if (btn) { btn.classList.add('rec'); btn.textContent = '⏹️'; }
+      toast('Enregistrement en cours… touchez ⏹️ pour arrêter.');
+    } catch (e) { if (stream) stream.getTracks().forEach(t => t.stop()); toast(microphoneError(e), 'err'); }
   },
+  async sendPendingChatAudio() {
+    const pending = A._pendingChatAudio; if (!pending) return; try { const m = await api('/missions/' + pending.id + '/messages', { method: 'POST', body: { type: 'audio', file: pending.file } }); appendChatMsg(m); A._pendingChatAudio = null; closeModal(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  cancelPendingChatAudio() { A._pendingChatAudio = null; closeModal(); },
 
   /* Notifications */
   async openNotif(id, link) {
@@ -2252,7 +2379,7 @@ const A = {
   /* Visibilité professionnelle */
   visSub(planId, name, price, btn) {
     openModal(`<h3>⭐ ${esc(name)}</h3>
-      <p class="small">Montant : <b>${price.toLocaleString('fr-FR')} FCFA</b>.<br>Après votre souscription, réglez ce montant à Klean-Services (espèces ou mobile money). Votre visibilité sera activée dès confirmation du paiement par l'administration.</p>
+      <p class="small">Montant : <b>${price.toLocaleString('fr-FR')} FCFA</b>.<br>Après votre souscription, réglez ce montant à Klean Services (espèces ou mobile money). Votre visibilité sera activée dès confirmation du paiement par l'administration.</p>
       <div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button>
       <button class="btn" onclick="A._visSub(${planId},this)">Confirmer ma souscription</button></div>`);
   },
@@ -2282,7 +2409,7 @@ const A = {
       <div class="field"><label>Durée de diffusion (jours)</label><input type="number" id="pb-duree" min="1" max="90" value="7"></div>
       <div class="field"><label>Zone ciblée (facultatif)</label><input type="text" id="pb-zone" placeholder="Ex : Bouaké — vide = partout"></div>
       <div class="field"><label>Lien (facultatif)</label><input type="text" id="pb-link" placeholder="https://… ou numéro WhatsApp"></div>
-      <div class="muted small mb">Après paiement et validation par Klean-Services, votre campagne est diffusée. Si tous les emplacements sont occupés, elle entre automatiquement en file d'attente.</div>
+      <div class="muted small mb">Après paiement et validation par Klean Services, votre campagne est diffusée. Si tous les emplacements sont occupés, elle entre automatiquement en file d'attente.</div>
       <button class="btn" onclick="A._sendPub(this)">Envoyer ma campagne</button>`);
   },
   async _sendPub(btn) {
@@ -2324,7 +2451,7 @@ const A = {
   /* Urgence */
   sosConfirm() {
     openModal(`<h3>🚨 Confirmer l'alerte</h3>
-      <p class="small">Voulez-vous vraiment envoyer une alerte d'urgence à l'équipe Klean-Services CI ?</p>
+      <p class="small">Voulez-vous vraiment envoyer une alerte d'urgence à l'équipe Klean Services ?</p>
       <div class="field"><input type="text" id="sos-msg" placeholder="Précisez la situation (facultatif)"></div>
       <div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button>
       <button class="btn warn" onclick="A._doSOS(this)">🚨 OUI, ENVOYER</button></div>`);
@@ -2423,7 +2550,7 @@ function maintenanceScreen() {
   $app.innerHTML = `<div class="content" style="display:flex;flex-direction:column;justify-content:center;min-height:80vh;text-align:center">
     <div style="font-size:64px">🛠️</div>
     <h2 style="margin:12px 0 8px">Maintenance en cours</h2>
-    <p class="muted">${esc(MAINT.message || 'Klean-Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.')}</p>
+    <p class="muted">${esc(MAINT.message || 'Klean Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.')}</p>
     ${MAINT.until ? `<p class="small muted">Retour prévu : ${esc(MAINT.until.replace('T', ' à '))}</p>` : ''}
     <button class="btn mt" onclick="A.maintRetry()">Réessayer</button>
   </div>`;
@@ -2431,6 +2558,7 @@ function maintenanceScreen() {
 
 function render() {
   currentChat = null;
+  currentSupport = null;
   const h = (location.hash || '#/home').slice(2);
   const [route, ...rest] = h.split('/');
   const param = rest.join('/');
@@ -2446,10 +2574,21 @@ function render() {
 
 /* ---------- Démarrage ---------- */
 (async function init() {
+  const splashUntil = Date.now() + 1000;
   if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('/sw.js'); } catch { } }
   applyFont(localStorage.getItem('ks_font') || 16);
   await checkMaintenance();
   setInterval(async () => { const was = MAINT.active; await checkMaintenance(); if (was !== MAINT.active) render(); }, 60000);
+  // Prix et disponibilité catalogue : l'accueil reste synchronisé avec le tableau de bord,
+  // même s'il est déjà ouvert au moment où le PDG change un prix.
+  setInterval(async () => {
+    if (!TOKEN || (location.hash || '#/home') !== '#/home') return;
+    try {
+      const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
+      const [services, populaires] = await Promise.all([api('/services' + cityQuery), api('/services/populaires' + cityQuery)]);
+      if (JSON.stringify(services) !== JSON.stringify(SERVICES) || JSON.stringify(populaires) !== JSON.stringify(POPULAIRES)) { SERVICES = services; POPULAIRES = populaires; render(); }
+    } catch { }
+  }, 25000);
   if (TOKEN) {
     try {
       USER = await api('/me');
@@ -2459,5 +2598,7 @@ function render() {
   }
   if (!location.hash) location.hash = TOKEN ? '#/home' : '#/login';
   navStack = [location.hash];
+  const splashWait = splashUntil - Date.now();
+  if (splashWait > 0) await new Promise(resolve => setTimeout(resolve, splashWait));
   render();
 })();

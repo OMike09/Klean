@@ -101,8 +101,8 @@ function auth(req, res, next) {
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(payload.id);
   if (!user) return res.status(401).json({ error: 'Compte introuvable.' });
   if (user.role !== 'pdg') { // le compte PDG reste TOUJOURS accessible
-    if (user.blocked) return res.status(403).json({ error: 'Votre compte est bloqué. Contactez Klean-Services CI.' });
-    if (user.suspended) return res.status(403).json({ error: 'Votre compte est suspendu. Contactez Klean-Services CI.' });
+    if (user.blocked) return res.status(403).json({ error: 'Votre compte est bloqué. Contactez Klean Services.' });
+    if (user.suspended) return res.status(403).json({ error: 'Votre compte est suspendu. Contactez Klean Services.' });
     if (user.disabled_until && user.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' '))
       return res.status(403).json({ error: 'Votre compte est temporairement désactivé jusqu\u2019au ' + user.disabled_until.slice(0, 16).replace('T', ' ') + '.' });
   }
@@ -242,7 +242,7 @@ function getMaintenance() {
   } catch { return {}; }
 }
 function maintenanceMessage(m) {
-  return m.message || 'Klean-Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.';
+  return m.message || 'Klean Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.';
 }
 // État public (l'application affiche le message aux utilisateurs)
 app.get('/api/maintenance', (req, res) => {
@@ -288,7 +288,7 @@ app.post('/api/auth/register', (req, res) => {
   const info = db.prepare(`INSERT INTO users(name, phone, password_hash, salt, address, ville, quartier, lat, lng, rules_accepted_at) VALUES(?,?,?,?,?,?,?,?,?,datetime('now'))`)
     .run(name.trim(), p, hashPassword(password, salt), salt, adr, (ville || '').trim() || null, (quartier || '').trim() || null, lat || null, lng || null);
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(info.lastInsertRowid);
-  notify(user.id, 'compte', 'Bienvenue sur Klean-Services CI 👋', 'Votre compte est créé. Recherchez un service ou devenez professionnel depuis Mon compte.', '#/home');
+  notify(user.id, 'compte', 'Bienvenue sur Klean Services 👋', 'Votre compte est créé. Recherchez un service ou devenez professionnel depuis Mon compte.', '#/home');
   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(user) });
 });
 
@@ -310,8 +310,8 @@ app.post('/api/auth/login', (req, res) => {
   if (!ok)
     return res.status(401).json({ error: 'Téléphone ou mot de passe incorrect.' });
   if (user.role !== 'pdg') { // le compte PDG reste toujours accessible
-    if (user.blocked) return res.status(403).json({ error: 'Votre compte est bloqué. Contactez Klean-Services CI.' });
-    if (user.suspended) return res.status(403).json({ error: 'Votre compte est suspendu. Contactez Klean-Services CI.' });
+    if (user.blocked) return res.status(403).json({ error: 'Votre compte est bloqué. Contactez Klean Services.' });
+    if (user.suspended) return res.status(403).json({ error: 'Votre compte est suspendu. Contactez Klean Services.' });
     if (user.disabled_until && user.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' '))
       return res.status(403).json({ error: 'Votre compte est temporairement désactivé jusqu\u2019au ' + user.disabled_until.slice(0, 16) + '.' });
   }
@@ -362,7 +362,7 @@ app.post('/api/auth/reset-request', (req, res) => {
   if (!user) return res.json(reponse); // réponse identique pour ne pas révéler l'existence d'un compte
   // Limite : 3 demandes par heure
   const recentes = db.prepare("SELECT COUNT(*) n FROM reset_codes WHERE user_id=? AND created_at > datetime('now','-1 hour')").get(user.id).n;
-  if (recentes >= 3) return res.status(429).json({ error: 'Trop de demandes. Réessayez dans une heure ou contactez Klean-Services CI.' });
+  if (recentes >= 3) return res.status(429).json({ error: 'Trop de demandes. Réessayez dans une heure ou contactez Klean Services.' });
   const code = String(Math.floor(100000 + Math.random() * 900000));
   db.prepare('UPDATE reset_codes SET used=1 WHERE user_id=? AND used=0').run(user.id); // un seul code actif à la fois
   db.prepare("INSERT INTO reset_codes(user_id, code_hash, expires_at) VALUES(?,?,datetime('now','+15 minutes'))")
@@ -387,7 +387,7 @@ app.post('/api/auth/reset-confirm', (req, res) => {
   const salt = crypto.randomBytes(16).toString('hex');
   db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, user.id);
   db.prepare('UPDATE reset_codes SET used=1 WHERE id=?').run(rc.id);
-  notify(user.id, 'compte', '🔑 Mot de passe modifié', 'Votre mot de passe a été modifié grâce au code de vérification. Si ce n\u2019était pas vous, contactez immédiatement Klean-Services CI.', '#/account');
+  notify(user.id, 'compte', '🔑 Mot de passe modifié', 'Votre mot de passe a été modifié grâce au code de vérification. Si ce n\u2019était pas vous, contactez immédiatement Klean Services.', '#/account');
   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
 });
 
@@ -439,11 +439,19 @@ app.get('/api/services', (req, res) => {
     .filter(s => villeOk(s, req.query.ville));
   res.json(cats.map(c => ({ ...c, services: svcs.filter(s => s.category_id === c.id) })).filter(c => c.services.length));
 });
+// Correspondance géographique : les communes restent bien distinctes. Une ancienne
+// zone « Abidjan » couvre ses communes, mais « Abidjan / Cocody » ne cible que Cocody.
+function cityMatches(target, city) {
+  const a = normalize(target), b = normalize(city);
+  if (!a || !b) return true;
+  return a === b || (a === 'abidjan' && b.startsWith('abidjan '));
+}
 // Un service est-il proposé dans la ville demandée ? ([] = partout)
 function villeOk(s, ville) {
   if (!ville) return true;
-  const cities = typeof s.cities === 'string' ? JSON.parse(s.cities || '[]') : (s.cities || []);
-  return !cities.length || cities.some(c => normalize(c) === normalize(ville));
+  let cities = [];
+  try { cities = typeof s.cities === 'string' ? JSON.parse(s.cities || '[]') : (s.cities || []); } catch { cities = []; }
+  return !cities.length || cities.some(c => cityMatches(c, ville));
 }
 // Catalogue complet : CATÉGORIES → SERVICES (avec leurs tâches)
 app.get('/api/catalogue', (req, res) => {
@@ -560,6 +568,18 @@ app.put('/api/pro/profile', auth, (req, res) => {
   res.json(me(db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id)));
 });
 
+// Lieu où le professionnel travaille actuellement : indépendant de son inscription.
+app.put('/api/pro/service-location', auth, (req, res) => {
+  if (req.user.pro_status !== 'approved') return res.status(403).json({ error: 'Espace réservé aux professionnels validés.' });
+  const city = String((req.body || {}).service_city || '').trim();
+  if (!city) return res.status(400).json({ error: 'Choisissez votre lieu de service actuel.' });
+  const valid = db.prepare('SELECT 1 FROM villes WHERE active=1 AND lower(name)=lower(?)').get(city);
+  if (!valid) return res.status(400).json({ error: 'Choisissez un lieu dans la liste proposée.' });
+  db.prepare('UPDATE pro_profiles SET service_city=? WHERE user_id=?').run(city, req.user.id);
+  notify(req.user.id, 'compte', '📍 Lieu de service mis à jour', `Vous recevez désormais les demandes correspondant à ${city}.`, '#/pro');
+  res.json(me(db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id)));
+});
+
 app.get('/api/pro/dashboard', auth, (req, res) => {
   if (req.user.pro_status !== 'approved') return res.status(403).json({ error: 'Espace réservé aux professionnels validés.' });
   const uid = req.user.id;
@@ -594,7 +614,7 @@ app.get('/api/pros/:id', auth, (req, res) => {
   const reviews = db.prepare(`SELECT r.rating, r.comment, r.created_at, u.name author FROM reviews r JOIN users u ON u.id=r.author_id WHERE r.target_id=? ORDER BY r.id DESC LIMIT 20`).all(u.id);
   res.json({
     ...publicUser(u), profession: p.profession, description: p.description, experience: p.experience,
-    zone: p.zone, available: p.available, services: svcNames, missions_done: missionsDone,
+    zone: p.zone, service_city: p.service_city || null, available: p.available, services: svcNames, missions_done: missionsDone,
     documents_valides: JSON.parse(p.documents).length > 0, mis_en_avant: visibiliteNiveau(u.id) > 0, reviews
   });
 });
@@ -612,12 +632,15 @@ function haversine(lat1, lng1, lat2, lng2) {
 }
 
 function findMatchingPros(mission) {
-  const pros = db.prepare(`SELECT u.*, p.services svc, p.available, p.zone FROM users u JOIN pro_profiles p ON p.user_id=u.id
+  const pros = db.prepare(`SELECT u.*, p.services svc, p.available, p.zone, p.service_city FROM users u JOIN pro_profiles p ON p.user_id=u.id
     WHERE u.pro_status='approved' AND u.suspended=0 AND u.id != ?`).all(mission.client_id);
+  const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
   return pros
     .filter(p => JSON.parse(p.svc).includes(mission.service_id))
     .map(p => ({ ...p, dist: haversine(mission.lat, mission.lng, p.lat, p.lng) }))
-    .sort((a, b) => (b.available - a.available) || (visibiliteNiveau(b.id) - visibiliteNiveau(a.id)) || (a.dist - b.dist)); // 1. disponibilité 2. visibilité payante (bonus facultatif, jamais bloquant) 3. proximité
+    // Le lieu de service déclaré est la règle. Avec deux GPS disponibles, la proximité réelle garde la priorité.
+    .filter(p => !p.service_city || !client || !client.ville || cityMatches(p.service_city, client.ville) || p.dist <= 50)
+    .sort((a, b) => (b.available - a.available) || (visibiliteNiveau(b.id) - visibiliteNiveau(a.id)) || (a.dist - b.dist)); // disponibilité, bonus facultatif, proximité
 }
 
 function addEvent(missionId, status, actorId, note) {
@@ -693,7 +716,7 @@ function commissionInfo(mission) {
   return { enabled: true, rate };
 }
 function missionFinance(mission) {
-  // Transparence : prix total, commission Klean-Services et part du professionnel.
+  // Transparence : prix total, commission Klean Services et part du professionnel.
   const { enabled, rate } = commissionInfo(mission);
   const amount = mission.amount || 0;
   const commission = enabled ? Math.round(amount * rate / 100) : 0;
@@ -787,7 +810,7 @@ app.post('/api/visibilite/souscrire', auth, (req, res) => {
     VALUES(?,?,?,?,?,?)`).run(req.user.id, plan.id, plan.name, plan.price, plan.level, plan.duration_days).lastInsertRowid;
   addTransaction({ user_id: req.user.id, kind: 'visibilite', ref_id: sid, label: `${plan.name} — ${req.user.name}`, amount: plan.price, ville: req.user.ville });
   notifyAdmins('information', '⭐ Souscription visibilité à encaisser', `${req.user.name} : ${plan.name} (${plan.price.toLocaleString('fr-FR')} FCFA).`, 'admin:payments');
-  notify(req.user.id, 'information', '⭐ Souscription enregistrée', `Réglez ${plan.price.toLocaleString('fr-FR')} FCFA à Klean-Services : votre visibilité sera activée dès confirmation du paiement.`, '#/visibilite');
+  notify(req.user.id, 'information', '⭐ Souscription enregistrée', `Réglez ${plan.price.toLocaleString('fr-FR')} FCFA à Klean Services : votre visibilité sera activée dès confirmation du paiement.`, '#/visibilite');
   res.json({ ok: true, id: sid, status: 'attente_paiement' });
 });
 
@@ -812,20 +835,21 @@ app.post('/api/pub/campagnes', auth, (req, res) => {
   const budget = parseInt(b.budget, 10);
   if (!budget || budget < 500) return res.status(400).json({ error: 'Budget invalide (minimum 500 FCFA).' });
   const duration = Math.max(1, Math.min(90, parseInt(b.duration_days, 10) || 7));
+  let zones; try { zones = assertValidZones(b.zones !== undefined ? b.zones : b.zone); } catch (e) { return res.status(400).json({ error: e.message }); }
   const prio = pubNiveauPourBudget(budget); // priorité déterminée côté serveur selon le budget
-  const cid = db.prepare(`INSERT INTO ad_campaigns(user_id, type, title, content, file, link, placement, zone, budget, duration_days, priorite)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+  const cid = db.prepare(`INSERT INTO ad_campaigns(user_id, type, title, content, file, link, placement, zone, zones, budget, duration_days, priorite)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(req.user.id, type, b.title.trim(), (b.content || '').trim() || null, b.file || null, (b.link || '').trim() || null,
-         b.placement === 'services' ? 'services' : 'accueil', (b.zone || '').trim() || null, budget, duration, prio).lastInsertRowid;
+         b.placement === 'services' ? 'services' : 'accueil', zones[0] || null, JSON.stringify(zones), budget, duration, prio).lastInsertRowid;
   addTransaction({ user_id: req.user.id, kind: 'publicite', ref_id: cid, label: `Campagne « ${b.title.trim()} »`, amount: budget, ville: req.user.ville, categorie: prio });
   notifyAdmins('information', '📣 Nouvelle campagne publicitaire', `${req.user.name} : « ${b.title.trim()} » — budget ${budget.toLocaleString('fr-FR')} FCFA, ${duration} j.`, 'admin:payments');
-  notify(req.user.id, 'information', '📣 Campagne enregistrée', `Réglez ${budget.toLocaleString('fr-FR')} FCFA à Klean-Services. Après confirmation du paiement, votre campagne sera examinée puis diffusée.`, '#/pub');
+  notify(req.user.id, 'information', '📣 Campagne enregistrée', `Réglez ${budget.toLocaleString('fr-FR')} FCFA à Klean Services. Après confirmation du paiement, votre campagne sera examinée puis diffusée.`, '#/pub');
   res.json({ ok: true, id: cid, status: 'attente_paiement', priorite: prio });
 });
 
 // Créer une demande
 app.post('/api/missions', auth, (req, res) => {
-  const { service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache } = req.body || {};
+  const { service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache, taches } = req.body || {};
   const svc = db.prepare('SELECT * FROM services WHERE id=? AND active=1').get(service_id);
   if (!svc) return res.status(400).json({ error: 'Service invalide.' });
   if (!address || !address.trim()) return res.status(400).json({ error: 'Indiquez votre localisation (GPS ou saisie manuelle).' });
@@ -840,11 +864,31 @@ app.post('/api/missions', auth, (req, res) => {
     AND created_at > datetime('now','-2 hours')`).get(req.user.id, service_id);
   if (dup) return res.status(409).json({ error: 'Vous avez déjà une demande en cours pour ce service. Consultez-la dans « Demandes ».', mission_id: dup.id });
 
+  // Une demande peut regrouper plusieurs tâches du MÊME service. Les noms viennent de la base,
+  // et chaque précision est bornée : un client ne peut pas injecter une tâche d'un autre service.
+  const rawTasks = Array.isArray(taches) ? taches.slice(0, 30) : [];
+  const selected = [];
+  const allowedTasks = db.prepare('SELECT id, name FROM taches WHERE service_id=? AND active=1').all(service_id);
+  const allowedById = new Map(allowedTasks.map(t => [String(t.id), t]));
+  const seenTasks = new Set();
+  for (const raw of rawTasks) {
+    const id = String(raw && (raw.id ?? raw));
+    const task = allowedById.get(id);
+    if (task && !seenTasks.has(id)) {
+      seenTasks.add(id);
+      selected.push({ id: task.id, name: task.name, detail: String((raw && raw.detail) || '').trim().slice(0, 500) || null });
+    }
+  }
+  // Compatibilité totale avec les anciennes versions de l'application (une seule tâche texte).
+  if (!selected.length && tache && allowedTasks.some(t => t.name === String(tache))) {
+    const task = allowedTasks.find(t => t.name === String(tache)); selected.push({ id: task.id, name: task.name, detail: null });
+  }
+  const legacyTask = selected.length ? selected.map(t => t.name).join(' • ') : null;
   const code = 'KS' + Date.now().toString(36).toUpperCase() + Math.floor(Math.random() * 90 + 10);
-  const info = db.prepare(`INSERT INTO missions(code, client_id, service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  const info = db.prepare(`INSERT INTO missions(code, client_id, service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache, taches)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(code, req.user.id, service_id, JSON.stringify(answers || {}), description || '', address.trim(), lat || null, lng || null,
-         urgence ? 1 : 0, date_souhaitee || null, JSON.stringify(photos || []), audio || null, tache || null);
+         urgence ? 1 : 0, date_souhaitee || null, JSON.stringify(photos || []), audio || null, legacyTask, JSON.stringify(selected));
   addEvent(info.lastInsertRowid, 'recherche', req.user.id, 'Demande créée');
   startDispatch(info.lastInsertRowid);
   res.json({ id: info.lastInsertRowid, code, status: 'recherche' });
@@ -863,6 +907,8 @@ function missionFull(mission, role, user) {
   const svc = db.prepare('SELECT s.name, c.icon FROM services s JOIN service_categories c ON c.id=s.category_id WHERE s.id=?').get(mission.service_id);
   const questions = db.prepare('SELECT id, label, type FROM service_questions WHERE service_id=?').all(mission.service_id);
   const answers = JSON.parse(mission.answers);
+  let missionTasks = [];
+  try { missionTasks = JSON.parse(mission.taches || '[]'); if (!Array.isArray(missionTasks)) missionTasks = []; } catch { missionTasks = []; }
   const detail = questions.filter(q => answers[q.id] !== undefined && String(answers[q.id]).trim() !== '')
     .map(q => ({ label: q.label, value: q.type === 'bool' ? (answers[q.id] ? 'Oui' : 'Non') : answers[q.id] }));
   const events = db.prepare('SELECT status, note, created_at FROM mission_events WHERE mission_id=? ORDER BY id').all(mission.id);
@@ -885,7 +931,7 @@ function missionFull(mission, role, user) {
   }
   return {
     id: mission.id, code: mission.code, status: mission.status, role,
-    service: svc.name, icon: svc.icon, tache: mission.tache || null, detail, description: mission.description,
+    service: svc.name, icon: svc.icon, tache: mission.tache || null, taches: missionTasks, detail, description: mission.description,
     address: mission.address, lat: mission.lat, lng: mission.lng,
     urgence: mission.urgence, date_souhaitee: mission.date_souhaitee,
     photos: JSON.parse(mission.photos), audio: mission.audio,
@@ -1232,6 +1278,75 @@ app.get('/api/conversations', auth, (req, res) => {
 });
 
 // ============================================================
+// CONTACT DIRECT : client ↔ Klean Services (suggestions et préoccupations)
+// ============================================================
+const SUPPORT_SUBJECTS = { suggestion: '💡 Suggestion', preoccupation: '⚠️ Préoccupation' };
+function supportMessageRow(id) {
+  return db.prepare(`SELECT sm.*, COALESCE(u.name, 'Klean Services') sender_name, u.photo sender_photo
+    FROM support_messages sm LEFT JOIN users u ON u.id=sm.sender_id WHERE sm.id=?`).get(id);
+}
+function supportConversationForUser(id, user) {
+  const c = db.prepare('SELECT * FROM support_conversations WHERE id=?').get(id);
+  if (!c || c.user_id !== user.id) return null;
+  return c;
+}
+function supportMessages(id) {
+  return db.prepare(`SELECT sm.*, COALESCE(u.name, 'Klean Services') sender_name, u.photo sender_photo
+    FROM support_messages sm LEFT JOIN users u ON u.id=sm.sender_id WHERE sm.conversation_id=? ORDER BY sm.id`).all(id);
+}
+app.get('/api/support/conversations', auth, (req, res) => {
+  const rows = db.prepare(`SELECT c.*,
+    (SELECT content FROM support_messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) last_content,
+    (SELECT type FROM support_messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) last_type,
+    (SELECT created_at FROM support_messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) last_at,
+    (SELECT COUNT(*) FROM support_messages WHERE conversation_id=c.id AND sender_id IS NULL AND read=0) unread
+    FROM support_conversations c WHERE c.user_id=? ORDER BY c.updated_at DESC, c.id DESC`).all(req.user.id);
+  res.json(rows);
+});
+app.post('/api/support/conversations', auth, (req, res) => {
+  const body = req.body || {};
+  const subject = body.subject === 'suggestion' ? 'suggestion' : body.subject === 'preoccupation' ? 'preoccupation' : null;
+  const content = String(body.content || '').trim();
+  if (!subject) return res.status(400).json({ error: 'Choisissez Suggestion ou Préoccupation.' });
+  if (!content) return res.status(400).json({ error: 'Écrivez votre message avant de l’envoyer.' });
+  if (content.length > 3000) return res.status(400).json({ error: 'Message trop long (3 000 caractères maximum).' });
+  const tx = db.transaction(() => {
+    const c = db.prepare('INSERT INTO support_conversations(user_id, subject) VALUES(?,?)').run(req.user.id, subject);
+    const m = db.prepare("INSERT INTO support_messages(conversation_id, sender_id, type, content) VALUES(?,?, 'text', ?)").run(c.lastInsertRowid, req.user.id, content);
+    const automatic = subject === 'suggestion'
+      ? 'Merci pour votre suggestion. Nous l’avons bien reçue et nous en tiendrons compte.'
+      : 'Nous avons bien reçu votre préoccupation. Un agent Klean Services vous contactera dans peu de temps.';
+    db.prepare("INSERT INTO support_messages(conversation_id, sender_id, type, content, is_auto, read) VALUES(?,NULL, 'text', ?,1,1)").run(c.lastInsertRowid, automatic);
+    db.prepare("UPDATE support_conversations SET updated_at=datetime('now') WHERE id=?").run(c.lastInsertRowid);
+    return { id: c.lastInsertRowid, message_id: m.lastInsertRowid };
+  });
+  const out = tx();
+  notifyAdmins('message', SUPPORT_SUBJECTS[subject] + ' reçue', `${req.user.name} : ${content.slice(0, 120)}`, 'admin:support');
+  res.status(201).json({ id: out.id, conversation: db.prepare('SELECT * FROM support_conversations WHERE id=?').get(out.id), messages: supportMessages(out.id) });
+});
+app.get('/api/support/conversations/:id', auth, (req, res) => {
+  const c = supportConversationForUser(req.params.id, req.user);
+  if (!c) return res.status(404).json({ error: 'Conversation introuvable.' });
+  db.prepare('UPDATE support_messages SET read=1 WHERE conversation_id=? AND sender_id IS NULL').run(c.id);
+  res.json({ conversation: c, messages: supportMessages(c.id) });
+});
+app.post('/api/support/conversations/:id/messages', auth, (req, res) => {
+  const c = supportConversationForUser(req.params.id, req.user);
+  if (!c) return res.status(404).json({ error: 'Conversation introuvable.' });
+  if (c.status !== 'ouverte') return res.status(409).json({ error: 'Cette conversation est fermée.' });
+  const body = req.body || {}, type = body.type === 'audio' ? 'audio' : 'text';
+  const content = String(body.content || '').trim(), file = String(body.file || '').trim();
+  if (type === 'text' && !content) return res.status(400).json({ error: 'Message vide.' });
+  if (type === 'audio' && !file.startsWith('/uploads/')) return res.status(400).json({ error: 'Fichier audio manquant.' });
+  if (content.length > 3000) return res.status(400).json({ error: 'Message trop long (3 000 caractères maximum).' });
+  const info = db.prepare('INSERT INTO support_messages(conversation_id, sender_id, type, content, file) VALUES(?,?,?,?,?)').run(c.id, req.user.id, type, content || null, file || null);
+  db.prepare("UPDATE support_conversations SET updated_at=datetime('now'), status='ouverte' WHERE id=?").run(c.id);
+  const m = supportMessageRow(info.lastInsertRowid);
+  notifyAdmins('message', SUPPORT_SUBJECTS[c.subject] + ' — nouveau message', `${req.user.name} : ${type === 'audio' ? '🎤 Message vocal' : content.slice(0, 120)}`, 'admin:support');
+  res.status(201).json(m);
+});
+
+// ============================================================
 // NOTIFICATIONS
 // ============================================================
 app.get('/api/notifications', auth, (req, res) => {
@@ -1277,7 +1392,7 @@ app.post('/api/avis-recherche', auth, (req, res) => {
   if (prixAvis > 0) addTransaction({ user_id: req.user.id, kind: 'avis_recherche', ref_id: info.lastInsertRowid, label: `Avis de recherche « ${b.nom} » — formule ${formule}`, amount: prixAvis, ville: req.user.ville, categorie: formule });
   notifyAdmins('information', 'Avis de recherche à modérer', `Publié par ${req.user.name} : ${b.nom}${prixAvis > 0 ? ` (formule ${formule} — ${prixAvis.toLocaleString('fr-FR')} FCFA à encaisser)` : ''}`, 'admin:contenu');
   notify(req.user.id, 'information', 'Avis de recherche envoyé', prixAvis > 0
-    ? `Réglez ${prixAvis.toLocaleString('fr-FR')} FCFA à Klean-Services : la mise en avant sera appliquée après confirmation du paiement. L\u2019avis sera publié après validation.`
+    ? `Réglez ${prixAvis.toLocaleString('fr-FR')} FCFA à Klean Services : la mise en avant sera appliquée après confirmation du paiement. L\u2019avis sera publié après validation.`
     : 'Votre avis sera publié après validation par l\u2019administration.', '#/avis-recherche');
   res.json({ ok: true, id: info.lastInsertRowid, status: 'pending', formule, prix: prixAvis });
 });
@@ -1318,7 +1433,7 @@ app.post('/api/jobs/:id/boost', auth, (req, res) => {
   }
   addTransaction({ user_id: req.user.id, kind: 'emploi', ref_id: j.id, label: `Mise en avant ${f} — profil « ${j.metier} »`, amount: prix, ville: req.user.ville, categorie: f });
   notifyAdmins('information', '⭐ Mise en avant emploi à encaisser', `${req.user.name} : profil « ${j.metier} » — ${prix.toLocaleString('fr-FR')} FCFA (${f}).`, 'admin:payments');
-  notify(req.user.id, 'information', '⭐ Demande enregistrée', `Réglez ${prix.toLocaleString('fr-FR')} FCFA à Klean-Services : la mise en avant sera activée dès confirmation du paiement.`, '#/jobs');
+  notify(req.user.id, 'information', '⭐ Demande enregistrée', `Réglez ${prix.toLocaleString('fr-FR')} FCFA à Klean Services : la mise en avant sera activée dès confirmation du paiement.`, '#/jobs');
   res.json({ ok: true, status: 'attente_paiement', prix });
 });
 
@@ -1329,7 +1444,7 @@ app.post('/api/ecole-famille', auth, (req, res) => {
   if (!details || !details.trim()) return res.status(400).json({ error: 'Décrivez votre besoin.' });
   const info = db.prepare('INSERT INTO ecole_famille(user_id, type, details, contact) VALUES(?,?,?,?)').run(req.user.id, type, details.trim(), contact || req.user.phone);
   notifyAdmins('information', 'Nouvelle demande École & famille', `${req.user.name} : ${type}`, 'admin:contenu');
-  notify(req.user.id, 'information', 'Demande École & famille envoyée ✅', 'L\u2019équipe Klean-Services CI va vous recontacter.', '#/ecole-famille');
+  notify(req.user.id, 'information', 'Demande École & famille envoyée ✅', 'L\u2019équipe Klean Services va vous recontacter.', '#/ecole-famille');
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 
@@ -1340,7 +1455,7 @@ app.post('/api/urgence', auth, (req, res) => {
   const { message, lat, lng } = req.body || {};
   const info = db.prepare('INSERT INTO urgences(user_id, message, lat, lng) VALUES(?,?,?,?)').run(req.user.id, message || '', lat || null, lng || null);
   notifyAdmins('urgence', '🚨 ALERTE URGENCE', `${req.user.name} (${req.user.phone}) a déclenché une urgence${message ? ' : ' + message : ''}.`, 'admin:securite');
-  notify(req.user.id, 'urgence', '🚨 Alerte envoyée', 'Votre alerte a été transmise à l\u2019équipe Klean-Services CI.', '#/urgence');
+  notify(req.user.id, 'urgence', '🚨 Alerte envoyée', 'Votre alerte a été transmise à l\u2019équipe Klean Services.', '#/urgence');
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 
@@ -1491,7 +1606,7 @@ app.get('/api/games/concours', auth, (req, res) => {
 app.post('/api/games/concours/:id/rejoindre', auth, (req, res) => {
   if (getSetting('quiz_enabled') !== '1') return res.status(403).json({ error: 'Le quiz est désactivé.' });
   if (!quizAudienceOk(req.user)) return res.status(403).json({ error: (getSetting('quiz_audience') === 'clients_servis')
-    ? 'Ce quiz est réservé aux clients ayant déjà bénéficié d\u2019un service sur Klean-Services.'
+    ? 'Ce quiz est réservé aux clients ayant déjà bénéficié d\u2019un service sur Klean Services.'
     : 'Ce quiz est réservé aux clients.' });
   const s = db.prepare("SELECT * FROM quiz_sessions WHERE id=? AND status='en_cours'").get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Ce quiz n\u2019est pas (ou plus) en cours.' });
@@ -1603,17 +1718,45 @@ app.post('/api/games/kdo', auth, (req, res) => {
   res.json({ ok: true, reward: row.reward });
 });
 
-// Publicités actives (côté application), avec leur nombre de vues (1 vue par compte maximum)
+// Ciblage des publicités : [] signifie toute la Côte d'Ivoire. Les zones sont
+// validées côté serveur à la création, puis comparées à la ville du compte.
+function cleanZones(raw) {
+  let a = raw;
+  if (typeof a === 'string') { try { a = JSON.parse(a); } catch { a = a ? [a] : []; } }
+  if (!Array.isArray(a)) a = [];
+  return [...new Set(a.map(v => String(v || '').trim()).filter(Boolean))].slice(0, 100);
+}
+function assertValidZones(raw) {
+  const zones = cleanZones(raw);
+  for (const zone of zones) if (!db.prepare('SELECT 1 FROM villes WHERE active=1 AND lower(name)=lower(?)').get(zone))
+    throw new Error('Une zone sélectionnée n’est plus disponible : ' + zone);
+  return zones;
+}
+function adZoneAllowed(zones, city) {
+  const list = cleanZones(zones);
+  return !list.length || (!!city && list.some(z => cityMatches(z, city)));
+}
+function viewerForAds(req) {
+  const token = (req.headers.authorization || '').replace('Bearer ', '');
+  const payload = verifyToken(token);
+  return payload ? db.prepare('SELECT ville FROM users WHERE id=?').get(payload.id) : null;
+}
+// Publicités actives, avec leur nombre de vues (une vue par compte maximum), filtrées géographiquement.
 app.get('/api/ads', (req, res) => {
-  pubTick(); // expiration + promotion automatique de la file d'attente des campagnes
-  const rows = db.prepare(`SELECT a.id, a.type, a.title, a.content, a.file, a.placement, a.duration,
+  pubTick();
+  const viewer = viewerForAds(req);
+  const rows = db.prepare(`SELECT a.id, a.type, a.title, a.content, a.file, a.placement, a.duration, a.zones,
     (SELECT COUNT(*) FROM view_seen v WHERE v.key = 'ad:' || a.id) AS views
-    FROM ads a WHERE a.active=1 ORDER BY a.sort, a.id`).all();
+    FROM ads a WHERE a.active=1 ORDER BY a.sort, a.id`).all()
+    .filter(a => adZoneAllowed(a.zones, viewer && viewer.ville));
   if (getSetting('pub_campagnes_enabled', '1') === '1') {
     const dur = Math.max(3, parseInt(getSetting('pub_duree_affichage', '6'), 10) || 6);
     for (const c of db.prepare(`SELECT * FROM ad_campaigns WHERE status='active' ORDER BY id`).all()) {
-      const entry = { id: 'c' + c.id, type: c.type, title: c.title, content: c.content, file: c.file, placement: c.placement, duration: dur, views: 0, sponsor: true };
-      for (let i = 0; i < pubPoids(c.priorite); i++) rows.push(entry); // la priorité augmente la fréquence, sans monopole (max ×3)
+      // Anciennes campagnes avec « zone » unique sont conservées et ciblées correctement.
+      const zones = cleanZones(c.zones).length ? c.zones : (c.zone ? [c.zone] : []);
+      if (!adZoneAllowed(zones, viewer && viewer.ville)) continue;
+      const entry = { id: 'c' + c.id, type: c.type, title: c.title, content: c.content, file: c.file, placement: c.placement, duration: dur, zones, views: 0, sponsor: true };
+      for (let i = 0; i < pubPoids(c.priorite); i++) rows.push(entry);
     }
   }
   res.json(rows);
@@ -1655,7 +1798,7 @@ const PERM_ROUTES = [
   [/^\/payments/, 'paiements'],
   [/^\/(finances|transactions|prix-modifs|visibilite|pub)/, 'paiements'],
   [/^\/commissions/, 'parametres'],
-  [/^\/(ads|broadcast|annonces)/, 'communication'],
+  [/^\/(ads|broadcast|annonces|support)/, 'communication'],
   [/^\/(signalements|urgences|files|rules)/, 'securite'],
   [/^\/(avis-recherche|jobs|ecole-famille|quiz|kdo|game-plays|quiz-sessions)/, 'contenu'],
   [/^\/settings/, 'parametres'],
@@ -1681,6 +1824,7 @@ const ACTION_LABELS = [
   [/^(POST|PUT|DELETE) \/questions/, 'Question dynamique'],
   [/^PUT \/settings/, 'Modification des paramètres'],
   [/^POST \/broadcast/, 'Message système envoyé'],
+  [/^POST \/support\/conversations\/\d+\/messages/, 'Réponse à un client'],
   [/^(POST|PUT|DELETE) \/ads/, 'Publicité / information'],
   [/^PUT \/rules/, 'Modification des règles'],
   [/^POST \/staff\/\d+\/reset-access/, 'Équipe : réinitialisation d\u2019accès'],
@@ -1796,7 +1940,7 @@ A.post('/users', (req, res) => {
   const salt = crypto.randomBytes(16).toString('hex');
   const info = db.prepare(`INSERT INTO users(name, phone, email, password_hash, salt, must_change_password, profile_incomplete, created_by)
     VALUES(?,?,?,?,?,1,1,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(temp, salt), salt, req.user.id);
-  notify(info.lastInsertRowid, 'compte', 'Bienvenue sur Klean-Services CI 👋',
+  notify(info.lastInsertRowid, 'compte', 'Bienvenue sur Klean Services 👋',
     'Votre compte a été créé par notre équipe. Connectez-vous, choisissez votre mot de passe et complétez votre profil.' +
     (type === 'pro' ? ' Pour devenir professionnel, faites votre demande depuis Mon compte (validation normale).' : ''), '#/account');
   res.json({ id: info.lastInsertRowid, temp_password: temp });
@@ -2431,7 +2575,44 @@ A.put('/settings', (req, res) => {
   res.json({ ok: true });
 });
 
-// COMMUNICATION : publicités + message système
+// COMMUNICATION : support client + publicités + message système
+A.get('/support/conversations', (req, res) => {
+  const subject = ['suggestion', 'preoccupation'].includes(req.query.subject) ? req.query.subject : null;
+  const rows = db.prepare(`SELECT c.*, u.name user_name, u.phone user_phone, u.ville user_ville,
+    (SELECT content FROM support_messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) last_content,
+    (SELECT type FROM support_messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) last_type,
+    (SELECT created_at FROM support_messages WHERE conversation_id=c.id ORDER BY id DESC LIMIT 1) last_at,
+    (SELECT COUNT(*) FROM support_messages WHERE conversation_id=c.id AND sender_id IS NOT NULL AND read=0) unread_client
+    FROM support_conversations c JOIN users u ON u.id=c.user_id ${subject ? 'WHERE c.subject=?' : ''}
+    ORDER BY CASE c.status WHEN 'ouverte' THEN 0 ELSE 1 END, c.updated_at DESC, c.id DESC`).all(...(subject ? [subject] : []));
+  res.json(rows);
+});
+A.get('/support/conversations/:id', (req, res) => {
+  const c = db.prepare(`SELECT c.*, u.name user_name, u.phone user_phone, u.ville user_ville FROM support_conversations c JOIN users u ON u.id=c.user_id WHERE c.id=?`).get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Conversation introuvable.' });
+  db.prepare('UPDATE support_messages SET read=1 WHERE conversation_id=? AND sender_id IS NOT NULL').run(c.id);
+  res.json({ conversation: c, messages: supportMessages(c.id) });
+});
+A.post('/support/conversations/:id/messages', (req, res) => {
+  const c = db.prepare('SELECT * FROM support_conversations WHERE id=?').get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Conversation introuvable.' });
+  const body = req.body || {}, type = body.type === 'audio' ? 'audio' : 'text';
+  const content = String(body.content || '').trim(), file = String(body.file || '').trim();
+  if (type === 'text' && !content) return res.status(400).json({ error: 'Écrivez votre réponse.' });
+  if (type === 'audio' && !file.startsWith('/uploads/')) return res.status(400).json({ error: 'Fichier audio manquant.' });
+  const info = db.prepare('INSERT INTO support_messages(conversation_id, sender_id, type, content, file) VALUES(?,?,?,?,?)').run(c.id, req.user.id, type, content || null, file || null);
+  db.prepare("UPDATE support_conversations SET updated_at=datetime('now'), status='ouverte' WHERE id=?").run(c.id);
+  const m = supportMessageRow(info.lastInsertRowid);
+  notify(c.user_id, 'message', '💬 Klean Services', type === 'audio' ? '🎤 Nouveau message vocal' : content.slice(0, 120), '#/contact/' + c.id);
+  push(c.user_id, 'support', { conversation_id: c.id, message: m });
+  res.status(201).json(m);
+});
+A.post('/support/conversations/:id/status', (req, res) => {
+  const status = (req.body || {}).status === 'fermee' ? 'fermee' : 'ouverte';
+  const out = db.prepare("UPDATE support_conversations SET status=?, updated_at=datetime('now') WHERE id=?").run(status, req.params.id);
+  if (!out.changes) return res.status(404).json({ error: 'Conversation introuvable.' });
+  res.json({ ok: true, status });
+});
 A.get('/ads', (req, res) => res.json(db.prepare(`SELECT a.*,
   (SELECT COUNT(*) FROM view_seen v WHERE v.key = 'ad:' || a.id) AS views
   FROM ads a ORDER BY a.sort, a.id DESC`).all()));
@@ -2441,14 +2622,17 @@ A.get('/game-plays/vues', (req, res) => {
 });
 A.post('/ads', (req, res) => {
   const { type, title, content, file, placement, duration, active } = req.body || {};
-  const info = db.prepare('INSERT INTO ads(type, title, content, file, placement, duration, active) VALUES(?,?,?,?,?,?,?)')
-    .run(type || 'texte', title || '', content || '', file || null, placement || 'accueil', duration || 6, active ?? 1);
-  res.json({ id: info.lastInsertRowid });
+  let zones; try { zones = assertValidZones((req.body || {}).zones); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const info = db.prepare('INSERT INTO ads(type, title, content, file, placement, duration, active, zones) VALUES(?,?,?,?,?,?,?,?)')
+    .run(type || 'texte', title || '', content || '', file || null, placement || 'accueil', duration || 6, active ?? 1, JSON.stringify(zones));
+  res.json({ id: info.lastInsertRowid, zones });
 });
 A.put('/ads/:id', (req, res) => {
   const { title, content, placement, duration, active, sort } = req.body || {};
-  db.prepare('UPDATE ads SET title=COALESCE(?,title), content=COALESCE(?,content), placement=COALESCE(?,placement), duration=COALESCE(?,duration), active=COALESCE(?,active), sort=COALESCE(?,sort) WHERE id=?')
-    .run(title ?? null, content ?? null, placement || null, duration ?? null, active ?? null, sort ?? null, req.params.id);
+  let zones = null;
+  if ((req.body || {}).zones !== undefined) { try { zones = JSON.stringify(assertValidZones(req.body.zones)); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  db.prepare('UPDATE ads SET title=COALESCE(?,title), content=COALESCE(?,content), placement=COALESCE(?,placement), duration=COALESCE(?,duration), active=COALESCE(?,active), sort=COALESCE(?,sort), zones=COALESCE(?,zones) WHERE id=?')
+    .run(title ?? null, content ?? null, placement || null, duration ?? null, active ?? null, sort ?? null, zones, req.params.id);
   res.json({ ok: true });
 });
 A.delete('/ads/:id', (req, res) => { db.prepare('DELETE FROM ads WHERE id=?').run(req.params.id); res.json({ ok: true }); });
@@ -2743,7 +2927,7 @@ function diagnosticPage(res) {
   .box{background:rgba(0,0,0,.25);border-radius:14px;padding:20px;max-width:560px;margin:0 auto}
   code{background:rgba(255,255,255,.15);padding:2px 7px;border-radius:5px;display:inline-block;margin:2px 0}</style></head>
   <body><div class="box"><h2>⚠️ Installation incomplète</h2>
-  <p>Le serveur Klean-Services CI fonctionne, mais ces fichiers n'ont pas été trouvés :</p>
+  <p>Le serveur Klean Services fonctionne, mais ces fichiers n'ont pas été trouvés :</p>
   <p>${missingFiles.map(f => '<code>' + f + '</code>').join('<br>')}</p>
   <p><b>Solution :</b> envoyez les dossiers <code>public/</code> et <code>public/admin/</code> complets
   dans votre dépôt GitHub (à côté de <code>server.js</code>), puis redéployez.</p></div></body></html>`);
@@ -2766,4 +2950,4 @@ app.use((err, req, res, next) => {
   diagnosticPage(res);
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log('Klean-Services CI en écoute sur le port ' + PORT));
+app.listen(PORT, '0.0.0.0', () => console.log('Klean Services en écoute sur le port ' + PORT));
