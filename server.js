@@ -1894,16 +1894,27 @@ A.get('/stats', (req, res) => {
 // UTILISATEURS
 A.get('/users', (req, res) => {
   const f = req.query.filter || 'all';
-  let where = "role='user'";
-  if (f === 'pros') where += " AND pro_status='approved'";
-  if (f === 'clients') where += " AND (pro_status IS NULL OR pro_status!='approved')";
-  if (f === 'pending') where += " AND pro_status='pending'";
-  if (f === 'suspended') where = "role='user' AND (suspended=1 OR blocked=1 OR (disabled_until IS NOT NULL AND disabled_until > datetime('now')))";
-  if (f === 'verified') where += ' AND verified=1';
-  if (f === 'incomplete') where += ' AND profile_incomplete=1';
-  const sort = req.query.sort === 'nom' ? 'name COLLATE NOCASE ASC' : 'id DESC'; // alphabétique ou date d'inscription (récents d'abord)
-  const rows = db.prepare(`SELECT id, name, phone, email, address, ville, quartier, is_pro, pro_status, kp_code, suspended, blocked, disabled_until, must_change_password, profile_incomplete, verified, created_at FROM users WHERE ${where} ORDER BY ${sort} LIMIT 500`).all();
-  res.json(rows);
+  let where = "u.role='user'";
+  if (f === 'pros') where += " AND u.pro_status='approved'";
+  if (f === 'clients') where += " AND (u.pro_status IS NULL OR u.pro_status!='approved')";
+  if (f === 'pending') where += " AND u.pro_status='pending'";
+  if (f === 'suspended') where = "u.role='user' AND (u.suspended=1 OR u.blocked=1 OR (u.disabled_until IS NOT NULL AND u.disabled_until > datetime('now')))";
+  if (f === 'verified') where += ' AND u.verified=1';
+  if (f === 'incomplete') where += ' AND u.profile_incomplete=1';
+  const sort = req.query.sort === 'nom' ? 'u.name COLLATE NOCASE ASC' : 'u.id DESC'; // alphabétique ou date d'inscription (récents d'abord)
+  const rows = db.prepare(`SELECT u.id, u.name, u.phone, u.email, u.address, u.ville, u.quartier, u.is_pro, u.pro_status, u.kp_code, u.suspended, u.blocked, u.disabled_until, u.must_change_password, u.profile_incomplete, u.verified, u.created_at,
+    p.profession AS pro_profession, p.services AS pro_services, p.service_city AS service_city
+    FROM users u LEFT JOIN pro_profiles p ON p.user_id=u.id WHERE ${where} ORDER BY ${sort} LIMIT 500`).all();
+  // Les identifiants enregistrés dans le profil sont résolus à chaque lecture : aucune copie
+  // et donc aucune désynchronisation lorsque le professionnel modifie ses services.
+  const ids = [...new Set(rows.flatMap(r => { try { return JSON.parse(r.pro_services || '[]'); } catch { return []; } }).map(Number).filter(Number.isInteger))];
+  const names = new Map();
+  if (ids.length) db.prepare(`SELECT id, name FROM services WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids).forEach(s => names.set(s.id, s.name));
+  res.json(rows.map(r => {
+    let serviceIds = []; try { serviceIds = JSON.parse(r.pro_services || '[]'); } catch { serviceIds = []; }
+    const services = serviceIds.map(Number).map(id => names.get(id)).filter(Boolean);
+    return { ...r, services, pro_profession: r.pro_profession || null, service_city: r.service_city || null, pro_services: undefined };
+  }));
 });
 A.get('/users/:id', (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
@@ -2870,14 +2881,177 @@ A.post('/kdo', (req, res) => {
 });
 A.delete('/kdo/:id', (req, res) => { db.prepare('DELETE FROM kdo_codes WHERE id=?').run(req.params.id); res.json({ ok: true }); });
 
-// GESTION DES FICHIERS
-A.get('/files', (req, res) => {
-  const files = fs.readdirSync(UPLOAD_DIR).map(f => {
+// GESTION DES FICHIERS — les contenus de demandes, conversations et support sont regroupés
+// par CLIENT. On ne déduit jamais un propriétaire à partir d'un nom de fichier aléatoire.
+function uploadName(file) {
+  if (!file || typeof file !== 'string' || !file.startsWith('/uploads/')) return null;
+  const name = path.basename(file);
+  return name && name === file.slice('/uploads/'.length) ? name : null;
+}
+function safeDownloadStem(s) {
+  return String(s || 'client').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'client';
+}
+function contentKind(type) { return type === 'audio' ? 'audio' : type === 'photo' || type === 'image' ? 'image' : 'texte'; }
+function parsePhotos(raw) { try { const a = JSON.parse(raw || '[]'); return Array.isArray(a) ? a.filter(uploadName) : []; } catch { return []; } }
+function clientContentRows(clientId, max = 1000) {
+  const out = [];
+  // Demande initiale : texte, photos et vocal éventuel.
+  const missions = db.prepare(`SELECT m.id, m.code, m.description, m.photos, m.audio, m.created_at, s.name service_name
+    FROM missions m JOIN services s ON s.id=m.service_id WHERE m.client_id=? ORDER BY m.id DESC`).all(clientId);
+  for (const m of missions) {
+    if ((m.description || '').trim()) out.push({ source: 'mission', id: m.id, type: 'texte', content: m.description, created_at: m.created_at, label: `Demande ${m.code} — ${m.service_name}` });
+    if (uploadName(m.audio)) out.push({ source: 'mission-audio', id: m.id, type: 'audio', file: m.audio, created_at: m.created_at, label: `Vocal de la demande ${m.code}` });
+    parsePhotos(m.photos).forEach((file, index) => out.push({ source: 'mission-photo', id: `${m.id}-${index}`, type: 'image', file, created_at: m.created_at, label: `Photo de la demande ${m.code}` }));
+  }
+  // Messages client/pro : même lorsqu'un professionnel est l'expéditeur, le fil reste rangé sous le client de la mission.
+  db.prepare(`SELECT msg.id, msg.type, msg.content, msg.file, msg.created_at, m.code, s.name service_name
+    FROM messages msg JOIN missions m ON m.id=msg.mission_id JOIN services s ON s.id=m.service_id
+    WHERE m.client_id=? ORDER BY msg.id DESC`).all(clientId).forEach(m => {
+      const type = contentKind(m.type);
+      if (type === 'texte' && !(m.content || '').trim()) return;
+      if (type !== 'texte' && !uploadName(m.file)) return;
+      out.push({ source: 'message', id: m.id, type, content: type === 'texte' ? m.content : null, file: type !== 'texte' ? m.file : null, created_at: m.created_at, label: `Discussion ${m.code} — ${m.service_name}` });
+    });
+  // Contact direct Klean Services : suggestion/préoccupation et leurs vocaux éventuels.
+  db.prepare(`SELECT sm.id, sm.type, sm.content, sm.file, sm.created_at, sc.subject
+    FROM support_messages sm JOIN support_conversations sc ON sc.id=sm.conversation_id
+    WHERE sc.user_id=? ORDER BY sm.id DESC`).all(clientId).forEach(m => {
+      const type = contentKind(m.type);
+      if (type === 'texte' && !(m.content || '').trim()) return;
+      if (type !== 'texte' && !uploadName(m.file)) return;
+      out.push({ source: 'support', id: m.id, type, content: type === 'texte' ? m.content : null, file: type !== 'texte' ? m.file : null, created_at: m.created_at, label: `Contact Klean Services — ${m.subject === 'suggestion' ? 'Suggestion' : 'Préoccupation'}` });
+    });
+  return out.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, Math.max(1, Math.min(3000, max)));
+}
+function clientContentSummary(clientId) {
+  const items = clientContentRows(clientId, 3000);
+  return { items, texts: items.filter(i => i.type === 'texte').length, audios: items.filter(i => i.type === 'audio').length, images: items.filter(i => i.type === 'image').length, files: items.filter(i => i.file).length };
+}
+function physicalFilesList() {
+  return fs.readdirSync(UPLOAD_DIR).map(f => {
     const st = fs.statSync(path.join(UPLOAD_DIR, f));
     return { name: f, size: st.size, mtime: st.mtime, age_days: Math.floor((Date.now() - st.mtimeMs) / 86400000) };
   }).sort((a, b) => b.mtime - a.mtime);
-  res.json({ files: files.slice(0, 300), total: files.length, total_size: files.reduce((s, f) => s + f.size, 0), retention_days: parseInt(getSetting('file_retention_days', '90'), 10) });
+}
+function filesInventory() {
+  const files = physicalFilesList();
+  return { total: files.length, total_size: files.reduce((s, f) => s + f.size, 0), retention_days: parseInt(getSetting('file_retention_days', '90'), 10) };
+}
+function clientFilterWhere(q, type, from, to) {
+  const params = [];
+  const dateParts = [];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(from || '')) dateParts.push("created_at >= ?"), params.push(from + ' 00:00:00');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(to || '')) dateParts.push("created_at < datetime(?, '+1 day')"), params.push(to);
+  const when = dateParts.length ? ' AND ' + dateParts.join(' AND ') : '';
+  const typeSql = type === 'audio'
+    ? `(EXISTS(SELECT 1 FROM missions m WHERE m.client_id=u.id AND m.audio IS NOT NULL AND m.audio!=''${when}) OR EXISTS(SELECT 1 FROM messages x JOIN missions m ON m.id=x.mission_id WHERE m.client_id=u.id AND x.type='audio'${when.replace(/created_at/g, 'x.created_at')}) OR EXISTS(SELECT 1 FROM support_messages x JOIN support_conversations sc ON sc.id=x.conversation_id WHERE sc.user_id=u.id AND x.type='audio'${when.replace(/created_at/g, 'x.created_at')}))`
+    : type === 'image'
+      ? `(EXISTS(SELECT 1 FROM missions m WHERE m.client_id=u.id AND m.photos IS NOT NULL AND m.photos!='[]'${when}) OR EXISTS(SELECT 1 FROM messages x JOIN missions m ON m.id=x.mission_id WHERE m.client_id=u.id AND x.type='photo'${when.replace(/created_at/g, 'x.created_at')}))`
+      : type === 'texte'
+        ? `(EXISTS(SELECT 1 FROM missions m WHERE m.client_id=u.id AND m.description IS NOT NULL AND trim(m.description)!=''${when}) OR EXISTS(SELECT 1 FROM messages x JOIN missions m ON m.id=x.mission_id WHERE m.client_id=u.id AND x.type='text' AND trim(x.content)!=''${when.replace(/created_at/g, 'x.created_at')}) OR EXISTS(SELECT 1 FROM support_messages x JOIN support_conversations sc ON sc.id=x.conversation_id WHERE sc.user_id=u.id AND x.type='text' AND trim(x.content)!=''${when.replace(/created_at/g, 'x.created_at')}))`
+        : `(EXISTS(SELECT 1 FROM missions m WHERE m.client_id=u.id${when}) OR EXISTS(SELECT 1 FROM messages x JOIN missions m ON m.id=x.mission_id WHERE m.client_id=u.id${when.replace(/created_at/g, 'x.created_at')}) OR EXISTS(SELECT 1 FROM support_messages x JOIN support_conversations sc ON sc.id=x.conversation_id WHERE sc.user_id=u.id${when.replace(/created_at/g, 'x.created_at')}))`;
+  // Les paramètres de date sont répétés pour chaque sous-requête EXISTS qui les utilise.
+  const repeats = type === 'image' ? 2 : 3;
+  const dateParams = Array.from({ length: repeats }, () => params).flat();
+  const conditions = [typeSql];
+  if (q) {
+    const like = '%' + q.toLowerCase() + '%';
+    conditions.push(`(lower(u.name) LIKE ? OR lower(COALESCE(u.phone,'')) LIKE ? OR EXISTS(SELECT 1 FROM missions m WHERE m.client_id=u.id AND lower(COALESCE(m.description,'')) LIKE ?) OR EXISTS(SELECT 1 FROM messages x JOIN missions m ON m.id=x.mission_id WHERE m.client_id=u.id AND lower(COALESCE(x.content,'')) LIKE ?) OR EXISTS(SELECT 1 FROM support_messages x JOIN support_conversations sc ON sc.id=x.conversation_id WHERE sc.user_id=u.id AND lower(COALESCE(x.content,'')) LIKE ?))`);
+    dateParams.push(like, like, like, like, like);
+  }
+  return { where: conditions.join(' AND '), params: dateParams };
+}
+A.get('/files/clients', (req, res) => {
+  const q = String(req.query.q || '').trim().slice(0, 120);
+  const type = ['all', 'texte', 'audio', 'image'].includes(req.query.type) ? req.query.type : 'all';
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1), limit = Math.min(50, Math.max(10, parseInt(req.query.limit, 10) || 25));
+  const filter = clientFilterWhere(q, type, String(req.query.from || ''), String(req.query.to || ''));
+  const total = db.prepare(`SELECT COUNT(*) n FROM users u WHERE u.role='user' AND ${filter.where}`).get(...filter.params).n;
+  const users = db.prepare(`SELECT u.id, u.name, u.phone, u.ville, u.quartier FROM users u WHERE u.role='user' AND ${filter.where} ORDER BY u.name COLLATE NOCASE ASC LIMIT ? OFFSET ?`).all(...filter.params, limit, (page - 1) * limit);
+  const clients = users.map(u => ({ ...u, ...clientContentSummary(u.id) }));
+  res.json({ ...filesInventory(), clients, total_clients: total, page, limit, pages: Math.max(1, Math.ceil(total / limit)), q, type });
 });
+A.get('/files/clients/:id', (req, res) => {
+  const client = db.prepare("SELECT id, name, phone, ville, quartier FROM users WHERE id=? AND role='user'").get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+  const summary = clientContentSummary(client.id);
+  res.json({ client, ...summary });
+});
+async function storedUpload(name) {
+  const disk = path.join(UPLOAD_DIR, name);
+  if (fs.existsSync(disk)) return fs.readFileSync(disk);
+  if (persist.enabled()) return await persist.loadFile(name);
+  return null;
+}
+function sendDownload(res, data, name, mime = 'application/octet-stream') {
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Content-Length', data.length);
+  res.setHeader('Content-Disposition', `attachment; filename="${safeDownloadStem(name).slice(0, 90)}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+  res.send(data);
+}
+function clientMediaItem(clientId, name) {
+  const clean = uploadName('/uploads/' + path.basename(name));
+  if (!clean) return null;
+  return clientContentRows(clientId, 3000).find(i => uploadName(i.file) === clean) || null;
+}
+A.get('/files/clients/:id/media/:name/download', async (req, res) => {
+  const client = db.prepare("SELECT id, name FROM users WHERE id=? AND role='user'").get(req.params.id);
+  const item = client && clientMediaItem(client.id, req.params.name);
+  if (!client || !item) return res.status(404).json({ error: 'Fichier associé au client introuvable.' });
+  const name = uploadName(item.file), data = await storedUpload(name);
+  if (!data) return res.status(404).json({ error: 'Le fichier n’est plus disponible.' });
+  const ext = path.extname(name) || (item.type === 'audio' ? '.m4a' : '.jpg');
+  sendDownload(res, data, `${safeDownloadStem(client.name)}_${item.type}_${String(item.created_at || '').slice(0, 10)}${ext}`);
+});
+A.get('/files/clients/:id/text/:source/:itemId/download', (req, res) => {
+  const client = db.prepare("SELECT id, name FROM users WHERE id=? AND role='user'").get(req.params.id);
+  const item = client && clientContentRows(client.id, 3000).find(i => !i.file && i.source === req.params.source && String(i.id) === String(req.params.itemId));
+  if (!client || !item) return res.status(404).json({ error: 'Texte associé au client introuvable.' });
+  const body = `Klean Services — ${item.label}
+Client : ${client.name}
+Date : ${item.created_at || ''}
+
+${item.content || ''}
+`;
+  sendDownload(res, Buffer.from(body, 'utf8'), `${safeDownloadStem(client.name)}_texte_${String(item.created_at || '').slice(0, 10)}.txt`, 'text/plain; charset=utf-8');
+});
+// ZIP « sans compression » généré en Node, sans dépendance externe : photos/audios + export des textes.
+const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(buf) { let c = 0xffffffff; for (const b of buf) c = CRC_TABLE[(c ^ b) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function zipStore(entries) {
+  let offset = 0; const locals = [], centrals = [];
+  for (const e of entries) {
+    const name = Buffer.from(e.name, 'utf8'), data = Buffer.isBuffer(e.data) ? e.data : Buffer.from(e.data), crc = crc32(data);
+    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6); local.writeUInt16LE(0, 8); local.writeUInt16LE(0, 10); local.writeUInt16LE(0, 12); local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(name.length, 26); local.writeUInt16LE(0, 28);
+    locals.push(local, name, data);
+    const central = Buffer.alloc(46); central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(0x0800, 8); central.writeUInt16LE(0, 10); central.writeUInt16LE(0, 12); central.writeUInt16LE(0, 14); central.writeUInt32LE(crc, 16); central.writeUInt32LE(data.length, 20); central.writeUInt32LE(data.length, 24); central.writeUInt16LE(name.length, 28); central.writeUInt16LE(0, 30); central.writeUInt16LE(0, 32); central.writeUInt16LE(0, 34); central.writeUInt16LE(0, 36); central.writeUInt32LE(0, 38); central.writeUInt32LE(offset, 42);
+    centrals.push(central, name); offset += local.length + name.length + data.length;
+  }
+  const centralBytes = centrals.reduce((n, b) => n + b.length, 0), end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(0, 4); end.writeUInt16LE(0, 6); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10); end.writeUInt32LE(centralBytes, 12); end.writeUInt32LE(offset, 16); end.writeUInt16LE(0, 20);
+  return Buffer.concat([...locals, ...centrals, end]);
+}
+A.get('/files/clients/:id/download', async (req, res) => {
+  const client = db.prepare("SELECT id, name, phone FROM users WHERE id=? AND role='user'").get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+  const items = clientContentRows(client.id, 3000), entries = [];
+  const texts = items.filter(i => !i.file && i.content).map(i => `[${i.created_at || ''}] ${i.label}\n${i.content}`).join('\n\n');
+  entries.push({ name: 'messages-et-textes.txt', data: Buffer.from(`Klean Services — échanges de ${client.name}
+
+${texts || 'Aucun texte.'}
+`, 'utf8') });
+  const seen = new Set(); let totalBytes = entries[0].data.length;
+  for (const item of items.filter(i => i.file)) {
+    const source = uploadName(item.file); if (!source || seen.has(source)) continue; seen.add(source);
+    const data = await storedUpload(source); if (!data) continue;
+    totalBytes += data.length;
+    if (totalBytes > 200 * 1024 * 1024) return res.status(413).json({ error: 'Téléchargement trop volumineux (maximum 200 Mo). Téléchargez les éléments individuellement.' });
+    const ext = path.extname(source) || (item.type === 'audio' ? '.m4a' : '.jpg');
+    entries.push({ name: `${safeDownloadStem(client.name)}_${item.type}_${String(item.created_at || '').slice(0, 10)}_${entries.length}${ext}`, data });
+  }
+  sendDownload(res, zipStore(entries), `klean-services_${safeDownloadStem(client.name)}_echanges.zip`, 'application/zip');
+});
+// Compatibilité API : l'ancien inventaire technique reste disponible, même si le dashboard utilise désormais le classement par client.
+A.get('/files', (req, res) => { const files = physicalFilesList(); res.json({ files: files.slice(0, 300), total: files.length, total_size: files.reduce((s, f) => s + f.size, 0), retention_days: parseInt(getSetting('file_retention_days', '90'), 10) }); });
 A.post('/files/cleanup', (req, res) => res.json({ deleted: cleanupFiles() }));
 
 app.use('/api/admin', A);

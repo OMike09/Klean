@@ -158,16 +158,21 @@ views.users = async () => {
       </select>
       <button class="btn sm" onclick="A.userQuickCreate()">＋ Créer rapidement un compte</button>
     </span></div>
-  <div class="panel"><table><tr><th>Nom</th><th>Téléphone</th><th>Code pro</th><th>Localisation</th><th>Statut</th><th>Inscrit le</th><th>Actions</th></tr>
-  ${list.map(u => `<tr>
+  <div class="panel"><table><tr><th>Nom</th><th>Téléphone</th><th>Code pro</th><th>Service</th><th>Localisation</th><th>Statut</th><th>Inscrit le</th><th>Actions</th></tr>
+  ${list.map(u => {
+    const services = Array.isArray(u.services) ? u.services : [];
+    const domaine = services.length ? services.join(' • ') : (u.pro_profession || '—');
+    return `<tr>
     <td><b>${esc(u.name)}</b> ${u.verified ? '✅' : ''}${u.profile_incomplete ? ' <span class="pill warn small">profil à compléter</span>' : ''}</td>
     <td>${esc(u.phone)}${u.email ? `<div class="small muted">${esc(u.email)}</div>` : ''}</td>
     <td class="small">${u.kp_code ? '<b>' + esc(u.kp_code) + '</b>' : '—'}</td>
+    <td class="small" style="min-width:180px;white-space:normal">${esc(domaine)}${u.service_city ? `<div class="muted">📍 Service : ${esc(u.service_city)}</div>` : ''}</td>
     <td class="small">${esc(u.ville ? u.ville + (u.quartier ? ' / ' + u.quartier : '') : (u.address || '—'))}</td>
     <td>${userStatusPill(u)}</td>
     <td class="small">${fmtD(u.created_at)}</td>
-    <td><button class="btn sm sec" onclick="A.userDetail(${u.id})">📋 Fiche</button></td></tr>`).join('')}
-  ${!list.length ? '<tr><td colspan="7" class="muted">Aucun compte.</td></tr>' : ''}</table></div>`);
+    <td><button class="btn sm sec" onclick="A.userDetail(${u.id})">📋 Fiche</button></td></tr>`;
+  }).join('')}
+  ${!list.length ? '<tr><td colspan="8" class="muted">Aucun compte.</td></tr>' : ''}</table></div>`);
 };
 
 /* ---------- Validations professionnelles ---------- */
@@ -849,23 +854,37 @@ views.urgences = async () => {
   ${!list.length ? '<tr><td colspan="7" class="muted">Aucune urgence.</td></tr>' : ''}</table></div>`);
 };
 
-/* ---------- Fichiers ---------- */
+/* ---------- Échanges & fichiers, organisés par client ---------- */
 views.files = async () => {
-  const d = await api('/admin/files');
-  shell(`<h1>🗄️ Gestion des fichiers</h1>
+  const q = sessionStorage.getItem('adm_fq') || '';
+  const type = sessionStorage.getItem('adm_ft') || 'all';
+  const from = sessionStorage.getItem('adm_ffrom') || '';
+  const to = sessionStorage.getItem('adm_fto') || '';
+  const page = Math.max(1, parseInt(sessionStorage.getItem('adm_fp') || '1', 10));
+  const d = await api('/admin/files/clients?q=' + encodeURIComponent(q) + '&type=' + encodeURIComponent(type) + '&from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) + '&page=' + page);
+  const typeLabel = { all: 'Tous les contenus', texte: 'Textes', audio: 'Audios / vocaux', image: 'Images / photos' };
+  shell(`<h1>🗄️ Échanges & fichiers par client</h1>
   <div class="cards">
+    <div class="kpi"><div class="v">${d.total_clients}</div><div class="l">Clients avec contenu</div></div>
     <div class="kpi"><div class="v">${d.total}</div><div class="l">Fichiers stockés</div></div>
     <div class="kpi"><div class="v">${(d.total_size / 1048576).toFixed(1)} Mo</div><div class="l">Espace utilisé</div></div>
     <div class="kpi"><div class="v">${d.retention_days} j</div><div class="l">Durée de conservation</div></div>
   </div>
-  <div class="panel">
-    <div class="small muted" style="margin-bottom:10px">Les fichiers plus anciens que la durée de conservation (modifiable dans Paramètres) sont supprimés automatiquement toutes les 12 h. Vous pouvez aussi lancer le nettoyage manuellement.</div>
-    <button class="btn warn" onclick="A.cleanup()">🧹 Lancer le nettoyage maintenant</button>
+  <div class="panel"><div class="small muted" style="margin-bottom:12px">Rechercher un client, puis consulter ses messages, vocaux et photos. Les téléchargements sont générés côté serveur et arrivent dans le dossier Téléchargements du navigateur.</div>
+    <div class="frow"><div style="min-width:250px;flex:1"><label>Recherche : client, téléphone ou texte d’un message</label><input id="files-q" value="${esc(q)}" placeholder="Ex : Dangbé, fuite, rendez-vous…" style="width:100%"></div>
+      <div><label>Type de contenu</label><select id="files-type">${Object.entries(typeLabel).map(([v,l]) => `<option value="${v}" ${type === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label>Du</label><input type="date" id="files-from" value="${esc(from)}"></div><div><label>Au</label><input type="date" id="files-to" value="${esc(to)}"></div>
+      <button class="btn" onclick="A.filesSearch()">🔎 Rechercher</button><button class="btn sec" onclick="A.filesReset()">Réinitialiser</button></div>
   </div>
-  <div class="panel"><table><tr><th>Fichier</th><th>Taille</th><th>Âge</th></tr>
-  ${d.files.slice(0, 100).map(f => `<tr><td><a href="/uploads/${esc(f.name)}" target="_blank">${esc(f.name)}</a></td>
-    <td>${(f.size / 1024).toFixed(0)} Ko</td><td>${f.age_days} jour(s)</td></tr>`).join('')}
-  ${!d.files.length ? '<tr><td colspan="3" class="muted">Aucun fichier.</td></tr>' : ''}</table></div>`);
+  <div class="panel"><table><tr><th>Client</th><th>Localisation</th><th>Textes</th><th>Vocaux</th><th>Photos</th><th>Dernière activité</th><th>Actions</th></tr>
+  ${d.clients.map(c => { const latest = c.items && c.items[0]; return `<tr><td><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.phone || '')}</span></td>
+    <td class="small">${esc(c.ville || '—')}${c.quartier ? '<br>' + esc(c.quartier) : ''}</td>
+    <td>💬 <b>${c.texts}</b></td><td>🎤 <b>${c.audios}</b></td><td>🖼️ <b>${c.images}</b></td>
+    <td class="small">${latest ? `${fmtD(latest.created_at)}<br><span class="muted">${esc(latest.label)}</span>` : '—'}</td>
+    <td style="white-space:nowrap"><button class="btn sm sec" onclick="A.openClientFiles(${c.id})">Voir</button> <button class="btn sm" onclick="A.downloadClient(${c.id})">⬇ Télécharger</button></td></tr>`; }).join('')}
+  ${!d.clients.length ? '<tr><td colspan="7" class="muted">Aucun client ou contenu ne correspond à cette recherche.</td></tr>' : ''}</table>
+  ${d.pages > 1 ? `<div class="frow" style="margin:14px 0 0;align-items:center"><button class="btn sm sec" ${d.page <= 1 ? 'disabled' : ''} onclick="A.filesPage(${d.page - 1})">← Précédent</button><span class="small muted">Page ${d.page} / ${d.pages} — ${d.total_clients} client(s)</span><button class="btn sm sec" ${d.page >= d.pages ? 'disabled' : ''} onclick="A.filesPage(${d.page + 1})">Suivant →</button></div>` : ''}</div>
+  <div class="panel"><div class="small muted" style="margin-bottom:10px">Les fichiers plus anciens que la durée de conservation sont supprimés automatiquement toutes les 12 h. Cette action n’efface pas les messages texte en base.</div><button class="btn warn" onclick="A.cleanup()">🧹 Lancer le nettoyage maintenant</button></div>`);
 };
 
 /* ---------- Contenu : avis, jobs, école ---------- */
@@ -1709,6 +1728,49 @@ const A = {
   async saveRules(key, elId) { try { await api('/admin/settings', { method: 'PUT', body: { [key]: document.getElementById(elId).value } }); toast('Règles enregistrées ✓ (appliquées immédiatement dans l\u2019application)', 'ok'); } catch (e) { toast(e.message, 'err'); } },
   async treatReport(id) { try { await api(`/admin/signalements/${id}/traiter`, { method: 'POST' }); render(); } catch (e) { toast(e.message, 'err'); } },
   async treatUrg(id) { try { await api(`/admin/urgences/${id}/traiter`, { method: 'POST' }); render(); } catch (e) { toast(e.message, 'err'); } },
+  filesSearch() {
+    sessionStorage.setItem('adm_fq', (document.getElementById('files-q') || {}).value || '');
+    sessionStorage.setItem('adm_ft', (document.getElementById('files-type') || {}).value || 'all');
+    sessionStorage.setItem('adm_ffrom', (document.getElementById('files-from') || {}).value || '');
+    sessionStorage.setItem('adm_fto', (document.getElementById('files-to') || {}).value || '');
+    sessionStorage.setItem('adm_fp', '1'); render();
+  },
+  filesReset() { ['adm_fq','adm_ft','adm_ffrom','adm_fto','adm_fp'].forEach(k => sessionStorage.removeItem(k)); render(); },
+  filesPage(n) { sessionStorage.setItem('adm_fp', String(Math.max(1, n))); render(); },
+  async downloadAdminFile(pathname, filename) {
+    try {
+      const r = await fetch('/api/admin' + pathname, { headers: { Authorization: 'Bearer ' + TOKEN } });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Téléchargement impossible.'); }
+      const cd = r.headers.get('content-disposition') || '';
+      const utfName = (cd.match(/filename\*=UTF-8''([^;]+)/i) || [])[1];
+      const normalName = (cd.match(/filename="([^"]+)"/i) || [])[1];
+      let serverName = ''; try { serverName = utfName ? decodeURIComponent(utfName) : (normalName || ''); } catch { serverName = normalName || ''; }
+      const blob = await r.blob(), url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = serverName || filename || 'klean-services-fichier'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast('Téléchargement lancé ✓', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  downloadClient(id) { A.downloadAdminFile('/files/clients/' + id + '/download', 'klean-services-echanges-client-' + id + '.zip'); },
+  async openClientFiles(id) {
+    try {
+      const d = await api('/admin/files/clients/' + id); const c = d.client;
+      const itemHtml = i => {
+        const date = fmtD(i.created_at), title = esc(i.label || 'Échange');
+        const mediaName = i.file ? encodeURIComponent(i.file.split('/').pop()) : '';
+        const download = i.file
+          ? `<button class="btn sm" onclick="A.downloadAdminFile('/files/clients/${c.id}/media/${mediaName}/download')">⬇ Télécharger</button>`
+          : `<button class="btn sm" onclick="A.downloadAdminFile('/files/clients/${c.id}/text/${i.source}/${encodeURIComponent(i.id)}/download')">⬇ Télécharger</button>`;
+        let body = '';
+        if (i.type === 'audio') body = `<audio controls preload="metadata" src="${esc(i.file)}" style="max-width:100%"></audio>`;
+        else if (i.type === 'image') body = `<a href="${esc(i.file)}" target="_blank" rel="noopener"><img src="${esc(i.file)}" alt="Photo" style="display:block;max-width:160px;max-height:115px;border-radius:8px;object-fit:cover"></a>`;
+        else body = `<div style="white-space:pre-wrap;word-break:break-word">${esc(i.content || '')}</div>`;
+        return `<div style="border:1px solid #e2e8e6;border-radius:10px;padding:10px;margin:8px 0"><div class="small muted">${i.type === 'audio' ? '🎤 Vocal' : i.type === 'image' ? '🖼️ Photo' : '💬 Texte'} • ${title} • ${date}</div><div style="margin:6px 0">${body}</div>${download}</div>`;
+      };
+      openModal(`<h3>📂 ${esc(c.name)}</h3><div class="small muted">${esc(c.phone || '')} • ${esc(c.ville || '')}${c.quartier ? ' / ' + esc(c.quartier) : ''}</div>
+        <div class="frow" style="margin:10px 0"><span class="pill info">💬 ${d.texts} texte(s)</span><span class="pill warn">🎤 ${d.audios} vocal(aux)</span><span class="pill ok">🖼️ ${d.images} photo(s)</span><button class="btn sm" onclick="A.downloadClient(${c.id})">⬇ Tout télécharger (.zip)</button></div>
+        <div style="max-height:55vh;overflow:auto">${d.items.length ? d.items.map(itemHtml).join('') : '<div class="muted">Aucun élément associé.</div>'}</div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
   async cleanup() { try { const r = await api('/admin/files/cleanup', { method: 'POST' }); toast(`Nettoyage terminé : ${r.deleted} fichier(s) supprimé(s).`, 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async avisStatus(id, st) { try { await api(`/admin/avis-recherche/${id}/status`, { method: 'POST', body: { status: st } }); toast('Statut mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async jobStatus(id, st) { try { await api(`/admin/jobs/${id}/status`, { method: 'POST', body: { status: st } }); toast('Statut mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
