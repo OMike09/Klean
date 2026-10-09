@@ -1751,33 +1751,38 @@ function quizLiveFor(s, userId) {
   const tl = quizTimeline(s);
   if (tl.over) return null;
   const qids = JSON.parse(s.qids || '[]');
+  const p = quizParticipant(s.id, userId);
   const getAns = qi => db.prepare('SELECT answer, correct FROM quiz_answers WHERE session_id=? AND user_id=? AND question_id=?').get(s.id, userId, qids[qi]);
   const mine = getAns(tl.index);
   const prev = tl.index > 0 ? getAns(tl.index - 1) : null;
-  const okPrev = tl.index === 0 || !s.elimination || !!(prev && prev.correct === 1);
+  const eliminated = !!(p && p.status === 'elimine');
+  const okPrev = !eliminated && (tl.index === 0 || !s.elimination || !!(prev && prev.correct === 1));
   const base = { phase: tl.phase, index: tl.index, total: tl.n, time_per_q: s.time_per_q, interval_s: s.interval_s, paused: !!tl.paused };
   if (tl.phase === 'question') {
     const q = db.prepare('SELECT id, question, options FROM quiz_questions WHERE id=?').get(qids[tl.index]);
     return { ...base, remaining_ms: tl.remaining_ms,
       question: q ? { id: q.id, question: q.question, options: JSON.parse(q.options).slice(0, 4) } : null,
       answered: !!mine, my_answer: mine ? mine.answer : null,
-      can_answer: !mine && okPrev, spectator: !mine && !okPrev };
+      can_answer: !mine && okPrev, spectator: eliminated || (!mine && !okPrev), eliminated };
   }
   const q = db.prepare('SELECT question, options, answer FROM quiz_questions WHERE id=?').get(qids[tl.index]);
   return { ...base, next_in_ms: tl.next_in_ms, next_index: tl.index + 1, last_question: tl.index + 1 >= tl.n,
     reveal: q ? { question: q.question, options: JSON.parse(q.options).slice(0, 4), correct: q.answer,
       my_answer: mine ? mine.answer : null, my_correct: !!(mine && mine.correct === 1) } : null,
-    spectator_next: s.elimination ? !(mine && mine.correct === 1) : false };
+    spectator_next: eliminated || (s.elimination ? !(mine && mine.correct === 1) : false), eliminated };
 }
 
 function quizRecordView(sid, uid) {
   db.prepare("INSERT INTO quiz_views(session_id,user_id,updated_at) VALUES(?,?,datetime('now')) ON CONFLICT(session_id,user_id) DO UPDATE SET updated_at=datetime('now')").run(sid, uid);
 }
 function quizLiveCounts(sid) {
-  const participants = db.prepare('SELECT COUNT(*) n FROM quiz_participants WHERE session_id=?').get(sid).n;
+  const registered = db.prepare('SELECT COUNT(*) n FROM quiz_participants WHERE session_id=?').get(sid).n;
+  const in_competition = db.prepare("SELECT COUNT(*) n FROM quiz_participants WHERE session_id=? AND status='en_lice'").get(sid).n;
   const watchers = db.prepare("SELECT COUNT(*) n FROM quiz_views v WHERE v.session_id=? AND v.updated_at >= datetime('now','-20 seconds')").get(sid).n;
+  // Un spectateur est soit un visiteur non inscrit, soit une personne éliminée :
+  // elle reste visible mais n'est jamais comptée parmi les concurrents en lice.
   const spectators = db.prepare("SELECT COUNT(*) n FROM quiz_views v LEFT JOIN quiz_participants p ON p.session_id=v.session_id AND p.user_id=v.user_id WHERE v.session_id=? AND v.updated_at >= datetime('now','-20 seconds') AND (p.id IS NULL OR p.status='elimine')").get(sid).n;
-  return { participants, spectators, watchers };
+  return { registered, participants: registered, in_competition, spectators, watchers };
 }
 function archiveQuizSession(s, userId, reason) {
   const participants = db.prepare('SELECT user_id,status,score,total_ms,current_q,finished_at FROM quiz_participants WHERE session_id=? ORDER BY id').all(s.id);
@@ -1808,7 +1813,7 @@ app.get('/api/games/concours', auth, (req, res) => {
     session: {
       id: s.id, title: s.title, status: s.status, nb_questions: JSON.parse(s.qids || '[]').length || s.nb_questions,
       time_per_q: s.time_per_q, interval_s: s.interval_s, elimination: !!s.elimination, nb_winners: s.nb_winners, winners_designated: winnersDone,
-      paused: !!s.paused_at, counts: s.status === 'en_cours' ? quizLiveCounts(s.id) : { participants: db.prepare('SELECT COUNT(*) n FROM quiz_participants WHERE session_id=?').get(s.id).n, spectators: 0, watchers: 0 }
+      paused: !!s.paused_at, counts: s.status === 'en_cours' ? quizLiveCounts(s.id) : { registered: db.prepare('SELECT COUNT(*) n FROM quiz_participants WHERE session_id=?').get(s.id).n, participants: db.prepare('SELECT COUNT(*) n FROM quiz_participants WHERE session_id=?').get(s.id).n, in_competition: 0, spectators: 0, watchers: 0 }
     },
     participant: p ? { status: p.status, score: p.score, current_q: p.current_q, photo_asked: !!p.photo_asked, photo_consent: p.photo_consent } : null,
     est_gagnant: !!(p && p.status === 'gagnant')
@@ -1872,9 +1877,12 @@ app.post('/api/games/concours/:id/repondre', auth, (req, res) => {
     db.prepare('INSERT INTO quiz_answers(session_id, user_id, question_id, answer, correct, ms) VALUES(?,?,?,?,?,?)')
       .run(s.id, req.user.id, qid, answer, correct, ms);
   } catch { return res.status(400).json({ error: 'Votre réponse est déjà enregistrée et verrouillée.' }); }
-  db.prepare('UPDATE quiz_participants SET score=score+?, total_ms=total_ms+?, current_q=? WHERE session_id=? AND user_id=?')
-    .run(correct, ms, index + 1, s.id, req.user.id);
-  res.json({ ok: true, locked: true });
+  // L'élimination est immédiate et persistée. La personne pourra encore lire le direct,
+  // mais aucun endpoint ne lui laissera répondre aux questions suivantes.
+  const eliminatedNow = !!(s.elimination && !correct);
+  db.prepare("UPDATE quiz_participants SET score=score+?, total_ms=total_ms+?, current_q=?, status=CASE WHEN ? THEN 'elimine' ELSE status END, finished_at=CASE WHEN ? THEN datetime('now') ELSE finished_at END WHERE session_id=? AND user_id=?")
+    .run(correct, ms, index + 1, eliminatedNow ? 1 : 0, eliminatedNow ? 1 : 0, s.id, req.user.id);
+  res.json({ ok: true, locked: true, correct: !!correct, eliminated: eliminatedNow, counts: quizLiveCounts(s.id) });
 });
 
 // Consentement photo du gagnant : ✅ j'accepte / ❌ je refuse (jamais redemandé après un refus)
@@ -2974,6 +2982,7 @@ A.delete('/quiz/:id', (req, res) => { db.prepare('DELETE FROM quiz_questions WHE
 A.get('/quiz-sessions', (req, res) => {
   const list = db.prepare(`SELECT s.*, (SELECT COUNT(*) FROM quiz_participants p WHERE p.session_id=s.id) AS participants,
     (SELECT COUNT(*) FROM quiz_participants p WHERE p.session_id=s.id AND p.status='gagnant') AS gagnants,
+    (SELECT COUNT(*) FROM quiz_participants p WHERE p.session_id=s.id AND p.status='en_lice') AS in_competition,
     (SELECT COUNT(*) FROM quiz_views v LEFT JOIN quiz_participants p ON p.session_id=v.session_id AND p.user_id=v.user_id WHERE v.session_id=s.id AND v.updated_at >= datetime('now','-20 seconds') AND (p.id IS NULL OR p.status='elimine')) AS spectators
     FROM quiz_sessions s ORDER BY s.id DESC`).all();
   res.json(list);

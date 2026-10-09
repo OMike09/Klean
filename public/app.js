@@ -1596,17 +1596,19 @@ function qlRender() {
   }
   const live = e.live;
   if (!live) { box.innerHTML = ''; return; }
-  if (live.paused) { box.innerHTML = carte(`<div class="center"><div style="font-size:32px">⏸️</div><b>Quiz en pause</b><div class="small muted mt">La chronologie est figée par l’administration. Restez sur l’accueil : le quiz reprendra automatiquement.</div><div class="small muted mt">👥 ${s.counts ? s.counts.participants : 0} participant(s) • 👁️ ${s.counts ? s.counts.spectators : 0} spectateur(s)</div></div>`); return; }
+  if (live.paused) { box.innerHTML = carte(`<div class="center"><div style="font-size:32px">⏸️</div><b>Quiz en pause</b><div class="small muted mt">La chronologie est figée par l’administration. Restez sur l’accueil : le quiz reprendra automatiquement.</div><div class="small muted mt">👥 ${s.counts ? (s.counts.in_competition ?? s.counts.participants) : 0} en lice • 👁️ ${s.counts ? s.counts.spectators : 0} spectateur(s)</div></div>`); return; }
   const letters = ['A', 'B', 'C', 'D'];
   if (live.phase === 'question') {
     const secs = Math.max(0, Math.ceil(live.remaining_ms / 1000));
-    const etatTxt = live.answered
-      ? '<div class="small center bold" style="color:#16a34a">✅ Réponse envoyée — verrouillée. Résultat à la fin du décompte.</div>'
+    const etatTxt = live.eliminated
+      ? '<div class="small center bold" style="color:#6b7280">👁️ Vous êtes éliminé(e), mais vous pouvez suivre le reste du concours en mode spectateur.</div>'
+      : live.answered
+        ? '<div class="small center bold" style="color:#16a34a">✅ Réponse envoyée — verrouillée. Résultat à la fin du décompte.</div>'
       : live.spectator
         ? '<div class="small center bold" style="color:#6b7280">👁️ Mode spectateur — vous ne pouvez plus répondre, mais vous suivez tout.</div>'
         : '<div class="small muted center">Une seule réponse possible — elle sera verrouillée.</div>';
     box.innerHTML = carte(`
-      <div class="small muted center">🧠 QUIZ EN DIRECT • « ${esc(s.title)} » • Question ${live.index + 1} / ${live.total}<br>👥 ${s.counts ? s.counts.participants : 0} participant(s) • 👁️ ${s.counts ? s.counts.spectators : 0} spectateur(s)</div>
+      <div class="small muted center">🧠 QUIZ EN DIRECT • « ${esc(s.title)} » • Question ${live.index + 1} / ${live.total}<br>👥 ${s.counts ? (s.counts.in_competition ?? s.counts.participants) : 0} en lice • 👁️ ${s.counts ? s.counts.spectators : 0} spectateur(s)</div>
       <div class="center" style="margin:2px 0">
         <span style="font-size:38px;font-weight:800;line-height:1;color:${secs <= 5 ? '#dc2626' : '#16a34a'}">${secs}</span>
         <span class="small muted"> seconde(s)</span></div>

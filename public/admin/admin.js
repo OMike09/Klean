@@ -981,7 +981,7 @@ views.games = async () => {
     ${sessions.map(x => `<tr><td><b>${esc(x.title)}</b><br><span class="small muted">${fmtD(x.created_at)}</span></td>
       <td>${stLbl[x.status] || esc(x.status)}${x.paused_at ? '<br><span class="pill info">⏸ Pause</span>' : ''}</td>
       <td class="small">${x.nb_questions} questions • ${x.time_per_q}s/question • pause ${x.interval_s == null ? 30 : x.interval_s}s<br>${x.elimination ? '👁️ Progression (spectateurs) • ' : ''}${x.nb_winners} gagnant(s) • désignation ${x.winner_mode === 'auto' ? 'auto' : 'admin'}</td>
-      <td>👥 ${x.participants}${x.spectators ? ` • 👁️ ${x.spectators}` : ''}${x.gagnants ? ` <span class="pill ok">🏆 ${x.gagnants}</span>` : ''}</td>
+      <td>👥 ${x.in_competition} en lice <span class="small muted">/ ${x.participants} inscrits</span>${x.spectators ? ` • 👁️ ${x.spectators}` : ''}${x.gagnants ? ` <span class="pill ok">🏆 ${x.gagnants}</span>` : ''}</td>
       <td>
         ${x.status === 'brouillon' ? `<button class="btn sm" onclick="A.quizLancer(${x.id})" ${enCours ? 'disabled title="Un quiz est déjà en cours"' : ''}>🚀 Lancer</button>
           <button class="btn sm warn" onclick="A.quizSessionDel(${x.id})">🗑️</button>` : ''}
