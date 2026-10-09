@@ -11,6 +11,7 @@ const ROLE_LB = { pdg: '👑 PDG', admin: 'Administrateur', gestionnaire: 'Gesti
 function can(k) { return ME && (ME.role === 'pdg' || (ME.perms || []).includes(k)); }
 
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function mediaUrl(src) { const s = String(src || ''); return s.startsWith('/uploads/') && TOKEN ? s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN) : s; }
 function fmtD(s) { if (!s) return ''; const d = new Date(s.replace(' ', 'T') + 'Z'); return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function fcfa(n) { return (n ?? 0).toLocaleString('fr-FR') + ' F'; }
 function zonesLabel(raw) { try { const z = Array.isArray(raw) ? raw : JSON.parse(raw || '[]'); return z && z.length ? z.join(', ') : '🌍 Toute la Côte d’Ivoire'; } catch { return '🌍 Toute la Côte d’Ivoire'; } }
@@ -74,7 +75,7 @@ const MENU = [
   ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['support', '📩 Messages Klean Services', null, 'communication'], ['broadcast', '📨 Message système', null, 'communication']]],
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
   ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Je cherche un job', null, 'contenu'], ['ecole', '🏫 École & famille', null, 'contenu'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
-  ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
+  ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
   ['CONFIGURATION', [['commerce', '💰 Paramètres commerciaux', null, 'parametres'], ['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
 ];
 function menuVisible(perm) { return !perm || (perm === 'PDG' ? ME && ME.role === 'pdg' : can(perm)); }
@@ -884,7 +885,7 @@ views.files = async () => {
     <td style="white-space:nowrap"><button class="btn sm sec" onclick="A.openClientFiles(${c.id})">Voir</button> <button class="btn sm" onclick="A.downloadClient(${c.id})">⬇ Télécharger</button></td></tr>`; }).join('')}
   ${!d.clients.length ? '<tr><td colspan="7" class="muted">Aucun client ou contenu ne correspond à cette recherche.</td></tr>' : ''}</table>
   ${d.pages > 1 ? `<div class="frow" style="margin:14px 0 0;align-items:center"><button class="btn sm sec" ${d.page <= 1 ? 'disabled' : ''} onclick="A.filesPage(${d.page - 1})">← Précédent</button><span class="small muted">Page ${d.page} / ${d.pages} — ${d.total_clients} client(s)</span><button class="btn sm sec" ${d.page >= d.pages ? 'disabled' : ''} onclick="A.filesPage(${d.page + 1})">Suivant →</button></div>` : ''}</div>
-  <div class="panel"><div class="small muted" style="margin-bottom:10px">Les fichiers plus anciens que la durée de conservation sont supprimés automatiquement toutes les 12 h. Cette action n’efface pas les messages texte en base.</div><button class="btn warn" onclick="A.cleanup()">🧹 Lancer le nettoyage maintenant</button></div>`);
+  <div class="panel"><h2 style="margin-top:0">Cycle de vie et registre sécurisé</h2><div class="small muted" style="margin-bottom:10px">Masquez, archivez ou placez des fichiers en récupération avant suppression réelle. Les messages texte restent conservés. Les archives ZIP sont limitées à 200 Mo.</div><button class="btn" onclick="A.fileRegistry()">🗃️ Gérer les fichiers enregistrés</button> <button class="btn warn" onclick="A.cleanup()">🧹 Purger les récupérations échues</button></div>`);
 };
 
 /* ---------- Contenu : avis, jobs, école ---------- */
@@ -893,7 +894,7 @@ views.avis = async () => {
   shell(`<h1>📢 Avis de recherche</h1>
   <div class="panel"><table><tr><th></th><th>Nom</th><th>Publié par</th><th>Détails</th><th>Contact</th><th>Statut</th><th>Actions</th></tr>
   ${list.map(a => `<tr>
-    <td>${a.photo ? `<img class="thumb" src="${esc(a.photo)}">` : '—'}</td>
+    <td>${a.photo ? `<img class="thumb" src="${esc(mediaUrl(a.photo))}">` : '—'}</td>
     <td><b>${esc(a.nom)}</b></td><td class="small">${esc(a.publisher)}<br>${esc(a.phone)}</td>
     <td class="small">${esc([a.date_disparition, a.dernier_lieu, a.description_physique].filter(Boolean).join(' • '))}</td>
     <td class="small">${esc(a.contact)}</td>
@@ -936,6 +937,7 @@ views.games = async () => {
   const kdo = await api('/admin/kdo');
   const plays = await api('/admin/game-plays');
   const sessions = await api('/admin/quiz-sessions');
+  const archives = await api('/admin/quiz-archives');
   let gvues = { quiz: 0, flipfizz: 0, kdo: 0 };
   try { gvues = await api('/admin/game-plays/vues'); } catch { }
   const enCours = sessions.find(x => x.status === 'en_cours');
@@ -977,18 +979,19 @@ views.games = async () => {
     </div>
     <table style="margin-top:10px"><tr><th>Titre</th><th>Statut</th><th>Réglages</th><th>Participants</th><th>Actions</th></tr>
     ${sessions.map(x => `<tr><td><b>${esc(x.title)}</b><br><span class="small muted">${fmtD(x.created_at)}</span></td>
-      <td>${stLbl[x.status] || esc(x.status)}</td>
+      <td>${stLbl[x.status] || esc(x.status)}${x.paused_at ? '<br><span class="pill info">⏸ Pause</span>' : ''}</td>
       <td class="small">${x.nb_questions} questions • ${x.time_per_q}s/question • pause ${x.interval_s == null ? 30 : x.interval_s}s<br>${x.elimination ? '👁️ Progression (spectateurs) • ' : ''}${x.nb_winners} gagnant(s) • désignation ${x.winner_mode === 'auto' ? 'auto' : 'admin'}</td>
-      <td>${x.participants}${x.gagnants ? ` <span class="pill ok">🏆 ${x.gagnants}</span>` : ''}</td>
+      <td>👥 ${x.participants}${x.spectators ? ` • 👁️ ${x.spectators}` : ''}${x.gagnants ? ` <span class="pill ok">🏆 ${x.gagnants}</span>` : ''}</td>
       <td>
         ${x.status === 'brouillon' ? `<button class="btn sm" onclick="A.quizLancer(${x.id})" ${enCours ? 'disabled title="Un quiz est déjà en cours"' : ''}>🚀 Lancer</button>
           <button class="btn sm warn" onclick="A.quizSessionDel(${x.id})">🗑️</button>` : ''}
-        ${x.status === 'en_cours' ? `<button class="btn sm warn" onclick="A.quizArreter(${x.id})">⏹️ Arrêter</button>` : ''}
-        ${x.status === 'terminee' ? `<button class="btn sm" onclick="A.quizRejouer(${x.id})">🔄 Rejouer</button>
-          <button class="btn sm warn" onclick="A.quizSessionDel(${x.id})">🗑️</button>` : ''}
+        ${x.status === 'en_cours' ? `${x.paused_at ? `<button class="btn sm" onclick="A.quizReprendre(${x.id})">▶️ Reprendre</button>` : `<button class="btn sm sec" onclick="A.quizPause(${x.id})">⏸️ Pause</button>`} <button class="btn sm warn" onclick="A.quizArreter(${x.id})">⏹️ Arrêter</button>` : ''}
+        ${x.status === 'terminee' ? `<button class="btn sm" onclick="A.quizRejouer(${x.id})">🔄 Archiver puis rejouer</button>` : ''}
         ${x.status !== 'brouillon' ? `<button class="btn sm sec" onclick="A.quizSessionDetail(${x.id})">📋 Détails</button>` : ''}
       </td></tr>`).join('')}
     ${!sessions.length ? '<tr><td colspan="5" class="muted">Aucune session. Créez votre premier quiz concours ci-dessus.</td></tr>' : ''}</table></div>
+
+  <div class="panel"><h2 style="margin-top:0">🗄️ Archives de réinitialisation</h2><div class="small muted mb">Chaque redémarrage confirmé archive les résultats et réponses précédents.</div><table><tr><th>Quiz</th><th>Session source</th><th>Archivé le</th><th></th></tr>${archives.map(a => `<tr><td>${esc(a.title)}</td><td>#${a.source_session_id}</td><td class="small">${fmtD(a.archived_at)}</td><td><button class="btn sm sec" onclick="A.quizArchive(${a.id})">Voir</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted">Aucune archive.</td></tr>'}</table></div>
 
   <div class="panel"><h2 style="margin-top:0">Questions du quiz (QCM — 4 réponses A, B, C, D)</h2>
     <div class="frow" style="flex-wrap:wrap;align-items:flex-end">
@@ -1017,6 +1020,16 @@ views.games = async () => {
     ${!plays.length ? '<tr><td colspan="4" class="muted">Aucune participation.</td></tr>' : ''}</table></div>`);
 };
 
+/* ---------- Options de comptes professionnels (PDG) ---------- */
+views.prooptions = async () => {
+  const [opts, catalog] = await Promise.all([api('/admin/pro-options'), api('/admin/catalog')]);
+  window._PRO_OPTS = opts; window._PRO_OPT_CATS = catalog.categories || [];
+  shell(`<h1>🧩 Options des comptes professionnels</h1>
+    <div class="panel"><div class="frow"><div class="grow"><b>Fonctions configurables par la direction</b><div class="small muted">Créez uniquement les options réellement proposées. Elles sont filtrées côté serveur par cible et catégories, et aucune option inactive ne peut être utilisée.</div></div><button class="btn" onclick="A.proOptForm()">＋ Créer une option</button></div></div>
+    <div class="panel"><table><tr><th>Ordre</th><th>Option</th><th>Cible / catégories</th><th>Règle</th><th>État</th><th>Actions</th></tr>
+    ${opts.map((o,i) => `<tr><td><b>${o.sort}</b>${i ? ` <button class="btn sm sec" onclick="A.proOptMove(${o.id},${opts[i-1].sort},true)">↑</button>` : ''}${i<opts.length-1 ? ` <button class="btn sm sec" onclick="A.proOptMove(${o.id},${opts[i+1].sort},false)">↓</button>` : ''}</td><td><b>${esc(o.name)}</b><br><span class="small muted">${esc(o.opt_key)}${o.description ? ' — ' + esc(o.description) : ''}</span></td><td class="small">${o.pro_type === 'tous' ? 'Tous les pros' : esc(o.pro_type)}<br>${o.categories.length ? o.categories.map(id => (catalog.categories || []).find(c => c.id === +id)?.name || ('#' + id)).map(esc).join(', ') : 'Toutes catégories'}</td><td>${o.required ? '<span class="pill warn">Obligatoire</span>' : '<span class="pill info">Facultative</span>'}</td><td>${o.active && !o.suspended ? '<span class="pill ok">Active</span>' : `<span class="pill bad">${o.suspended ? 'Suspendue' : 'Inactive'}</span>`}</td><td><button class="btn sm sec" onclick="A.proOptForm(${o.id})">Modifier</button> <button class="btn sm ${o.active && !o.suspended ? 'warn' : ''}" onclick="A.proOptToggle(${o.id},'${o.active && !o.suspended ? 'suspended' : 'active'}')">${o.active && !o.suspended ? 'Suspendre' : 'Activer'}</button> <button class="btn sm warn" onclick="A.proOptDelete(${o.id})">Supprimer</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Aucune option créée : rien n’est affiché aux professionnels.</td></tr>'}</table></div>`);
+};
+
 /* ---------- Paramètres ---------- */
 views.settings = async () => {
   const s = await api('/admin/settings');
@@ -1028,6 +1041,23 @@ views.settings = async () => {
       <div><label>Commission Klean Services (%)</label><input type="number" id="st-comm" value="${esc(s.commission_rate)}" min="0" max="100" step="0.5" style="width:110px"></div>
       <div><label>Délai de réponse d'un professionnel (secondes)</label><input type="number" id="st-wait" value="${esc(s.dispatch_wait_seconds)}" min="15" max="3600" style="width:130px"></div>
       <div><label>Conservation des fichiers (jours)</label><input type="number" id="st-ret" value="${esc(s.file_retention_days)}" min="1" style="width:110px"></div>
+    </div>
+    <h3 style="margin:18px 0 8px">Attribution automatique</h3>
+    <div class="frow">
+      <div><label>1re vague (professionnels)</label><input type="number" id="st-wave1" value="${esc(s.dispatch_initial_alert_count || '3')}" min="1" max="50" style="width:110px"></div>
+      <div><label>Vagues suivantes</label><input type="number" id="st-wave2" value="${esc(s.dispatch_expand_alert_count || '5')}" min="1" max="50" style="width:110px"></div>
+    </div>
+    <div class="small muted">Les professionnels sont classés par compatibilité, disponibilité, distance GPS et visibilité facultative. Chaque vague part seulement après expiration/refus de la précédente.</div>
+    <h3 style="margin:18px 0 8px">Messagerie mission</h3>
+    <div class="frow">
+      <div><label>Textes / personne</label><input type="number" id="st-chattext" value="${esc(s.chat_text_limit || '30')}" min="1" max="500" style="width:110px"></div>
+      <div><label>Images / personne</label><input type="number" id="st-chatimages" value="${esc(s.chat_image_limit || '3')}" min="0" max="30" style="width:110px"></div>
+      <div><label>Vocal max. (secondes)</label><input type="number" id="st-chataudio" value="${esc(s.chat_audio_max_seconds || '20')}" min="1" max="120" style="width:130px"></div>
+      <div><label>Récupération fichiers (jours)</label><input type="number" id="st-recovery" value="${esc(s.file_recovery_days || '30')}" min="0" max="365" style="width:130px"></div>
+    </div>
+    <div class="frow">
+      <button class="btn ${s.chat_audio_enabled !== '0' ? '' : 'sec'}" onclick="A.toggleSetting('chat_audio_enabled',${s.chat_audio_enabled !== '0' ? "'0'" : "'1'"})">🎤 Vocaux : ${s.chat_audio_enabled !== '0' ? 'activés ✅' : 'suspendus'}</button>
+      <button class="btn ${s.chat_image_enabled !== '0' ? '' : 'sec'}" onclick="A.toggleSetting('chat_image_enabled',${s.chat_image_enabled !== '0' ? "'0'" : "'1'"})">📷 Images : ${s.chat_image_enabled !== '0' ? 'activées ✅' : 'suspendues'}</button>
     </div>
     <div class="frow">
       <button class="btn ${s.payment_especes === '1' ? '' : 'sec'}" onclick="A.toggleSetting('payment_especes',${s.payment_especes === '1' ? "'0'" : "'1'"})">💵 Paiement espèces : ${s.payment_especes === '1' ? 'Activé ✅' : 'Désactivé'}</button>
@@ -1377,6 +1407,26 @@ const A = {
     try { await api('/admin/maintenance', { method: 'POST', body: { active: 0 } }); toast('🟢 Maintenance désactivée. Tout fonctionne normalement.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
   },
 
+  // Options de comptes pro (PDG)
+  proOptForm(id = null) {
+    const o = id ? (window._PRO_OPTS || []).find(x => x.id === id) : null, cats = window._PRO_OPT_CATS || [];
+    openModal(`<h3>${o ? 'Modifier' : 'Créer'} une option de compte pro</h3>
+      <label class="small muted">Clé technique unique (lettres, chiffres, - ou _)</label><input id="po-key" style="width:100%;margin-bottom:8px" value="${o ? esc(o.opt_key) : ''}" placeholder="ex. charte-qualite">
+      <label class="small muted">Nom visible</label><input id="po-name" style="width:100%;margin-bottom:8px" value="${o ? esc(o.name) : ''}" placeholder="ex. Charte qualité">
+      <label class="small muted">Description</label><textarea id="po-desc" style="width:100%;margin-bottom:8px" placeholder="Expliquez l’option aux professionnels.">${o ? esc(o.description || '') : ''}</textarea>
+      <div class="frow"><div><label>Cible</label><select id="po-type"><option value="tous" ${!o || o.pro_type === 'tous' ? 'selected' : ''}>Tous les pros</option><option value="particulier" ${o && o.pro_type === 'particulier' ? 'selected' : ''}>Particuliers</option><option value="entreprise" ${o && o.pro_type === 'entreprise' ? 'selected' : ''}>Entreprises</option></select></div><div><label>Ordre</label><input id="po-sort" type="number" value="${o ? o.sort : ((window._PRO_OPTS || []).length * 10 + 10)}" style="width:90px"></div></div>
+      <label class="small muted">Catégories autorisées (aucune cochée = toutes)</label><div style="max-height:130px;overflow:auto;border:1px solid #e3edeb;padding:7px;border-radius:8px;margin:4px 0 10px">${cats.map(c => `<label style="display:block;padding:3px"><input type="checkbox" class="po-cat" value="${c.id}" ${o && o.categories.map(Number).includes(c.id) ? 'checked' : ''}> ${esc((c.icon || '') + ' ' + c.name)}</label>`).join('') || '<span class="small muted">Aucune catégorie configurée.</span>'}</div>
+      <label style="display:block;margin:6px 0"><input type="checkbox" id="po-req" ${o && o.required ? 'checked' : ''}> Cette option est obligatoire</label><label style="display:block;margin:6px 0"><input type="checkbox" id="po-active" ${!o || o.active ? 'checked' : ''}> Active</label>
+      <div class="frow"><button class="btn" onclick="A.proOptSave(${o ? o.id : 'null'})">Enregistrer</button><button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
+  },
+  async proOptSave(id) {
+    const body = { opt_key: document.getElementById('po-key').value, name: document.getElementById('po-name').value, description: document.getElementById('po-desc').value, pro_type: document.getElementById('po-type').value, sort: +document.getElementById('po-sort').value || 0, categories: [...document.querySelectorAll('.po-cat:checked')].map(x => +x.value), required: document.getElementById('po-req').checked, active: document.getElementById('po-active').checked, suspended: false };
+    try { if (id) await api('/admin/pro-options/' + id, { method: 'PUT', body }); else await api('/admin/pro-options', { method: 'POST', body }); closeModal(); toast('Option professionnelle enregistrée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async proOptToggle(id, state) { try { await api('/admin/pro-options/' + id, { method: 'PUT', body: state === 'active' ? { active: true, suspended: false } : { suspended: true } }); toast(state === 'active' ? 'Option activée.' : 'Option suspendue.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async proOptMove(id, sort, up) { try { await api('/admin/pro-options/' + id, { method: 'PUT', body: { sort: sort + (up ? -1 : 1) } }); render(); } catch (e) { toast(e.message, 'err'); } },
+  async proOptDelete(id) { if (!confirm('Supprimer cette option ? Les usages historiques associés seront supprimés, mais aucune autre donnée professionnelle ne sera touchée.')) return; try { await api('/admin/pro-options/' + id, { method: 'DELETE' }); toast('Option supprimée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+
   // Équipe & permissions (PDG)
   staffCreate() {
     openModal(`<h3>＋ Ajouter un membre de l\u2019équipe</h3>
@@ -1504,7 +1554,7 @@ const A = {
   async supportOpen(id) {
     try {
       const d = await api('/admin/support/conversations/' + id); const c = d.conversation;
-      const bubble = m => `<div style="max-width:88%;margin:${m.sender_id ? '8px auto 8px 0' : '8px 0 8px auto'};padding:9px 11px;border-radius:10px;background:${m.sender_id ? '#f0f5f4' : '#e3f5ef'}"><b class="small">${m.sender_id ? esc(m.sender_name || c.user_name) : 'Klean Services'}${m.is_auto ? ' • automatique' : ''}</b><div class="small">${m.type === 'audio' ? `<audio controls src="${esc(m.file)}"></audio>` : esc(m.content || '')}</div><div class="small muted">${fmtD(m.created_at)}</div></div>`;
+      const bubble = m => `<div style="max-width:88%;margin:${m.sender_id ? '8px auto 8px 0' : '8px 0 8px auto'};padding:9px 11px;border-radius:10px;background:${m.sender_id ? '#f0f5f4' : '#e3f5ef'}"><b class="small">${m.sender_id ? esc(m.sender_name || c.user_name) : 'Klean Services'}${m.is_auto ? ' • automatique' : ''}</b><div class="small">${m.type === 'audio' ? `<audio controls src="${esc(mediaUrl(m.file))}"></audio>` : esc(m.content || '')}</div><div class="small muted">${fmtD(m.created_at)}</div></div>`;
       openModal(`<h3>${c.subject === 'suggestion' ? '💡 Suggestion' : '⚠️ Préoccupation'} — ${esc(c.user_name)}</h3><div class="small muted">${esc(c.user_phone || '')} • ${esc(c.user_ville || '')}</div><div id="support-thread" style="max-height:330px;overflow:auto;border:1px solid #e2ebe8;border-radius:10px;padding:8px;margin:12px 0">${d.messages.map(bubble).join('')}</div>
         <label class="small muted">Répondre au client</label><textarea id="support-reply" style="width:100%;min-height:84px"></textarea><div class="frow" style="margin-top:8px"><button class="btn" onclick="A.supportReply(${c.id})">Envoyer la réponse</button><button class="btn sec" onclick="A.supportStatus(${c.id},'${c.status === 'ouverte' ? 'fermee' : 'ouverte'}')">${c.status === 'ouverte' ? 'Fermer la conversation' : 'Rouvrir la conversation'}</button></div>`);
       window._supportPoll = setInterval(() => A.supportRefresh(c.id), 5000);
@@ -1514,7 +1564,7 @@ const A = {
     try {
       const d = await api('/admin/support/conversations/' + id); const thread = document.getElementById('support-thread');
       if (!thread) return;
-      thread.innerHTML = d.messages.map(m => `<div style="max-width:88%;margin:${m.sender_id ? '8px auto 8px 0' : '8px 0 8px auto'};padding:9px 11px;border-radius:10px;background:${m.sender_id ? '#f0f5f4' : '#e3f5ef'}"><b class="small">${m.sender_id ? esc(m.sender_name || d.conversation.user_name) : 'Klean Services'}${m.is_auto ? ' • automatique' : ''}</b><div class="small">${m.type === 'audio' ? `<audio controls src="${esc(m.file)}"></audio>` : esc(m.content || '')}</div><div class="small muted">${fmtD(m.created_at)}</div></div>`).join('');
+      thread.innerHTML = d.messages.map(m => `<div style="max-width:88%;margin:${m.sender_id ? '8px auto 8px 0' : '8px 0 8px auto'};padding:9px 11px;border-radius:10px;background:${m.sender_id ? '#f0f5f4' : '#e3f5ef'}"><b class="small">${m.sender_id ? esc(m.sender_name || d.conversation.user_name) : 'Klean Services'}${m.is_auto ? ' • automatique' : ''}</b><div class="small">${m.type === 'audio' ? `<audio controls src="${esc(mediaUrl(m.file))}"></audio>` : esc(m.content || '')}</div><div class="small muted">${fmtD(m.created_at)}</div></div>`).join('');
       thread.scrollTop = thread.scrollHeight;
     } catch { }
   },
@@ -1745,7 +1795,24 @@ const A = {
       const utfName = (cd.match(/filename\*=UTF-8''([^;]+)/i) || [])[1];
       const normalName = (cd.match(/filename="([^"]+)"/i) || [])[1];
       let serverName = ''; try { serverName = utfName ? decodeURIComponent(utfName) : (normalName || ''); } catch { serverName = normalName || ''; }
-      const blob = await r.blob(), url = URL.createObjectURL(blob), a = document.createElement('a');
+      const total = Number(r.headers.get('content-length') || 0);
+      const progress = document.createElement('div'); progress.className = 'download-progress';
+      progress.innerHTML = `<b>Préparation du téléchargement…</b><div class="small muted" id="download-progress-text">${total ? '0 %' : 'Réception en cours…'}</div><div class="download-progress-bar"><i></i></div>`;
+      document.body.appendChild(progress);
+      let blob;
+      try {
+        if (r.body && r.body.getReader) {
+          const reader = r.body.getReader(), chunks = []; let received = 0;
+          for (;;) { const part = await reader.read(); if (part.done) break; chunks.push(part.value); received += part.value.length;
+            const pct = total ? Math.min(100, Math.round(received * 100 / total)) : null;
+            const text = progress.querySelector('#download-progress-text'), bar = progress.querySelector('i');
+            if (text) text.textContent = pct === null ? `${Math.round(received / 1024)} Ko reçus…` : pct + ' %';
+            if (bar && pct !== null) bar.style.width = pct + '%';
+          }
+          blob = new Blob(chunks, { type: r.headers.get('content-type') || 'application/octet-stream' });
+        } else blob = await r.blob();
+      } finally { progress.remove(); }
+      const url = URL.createObjectURL(blob), a = document.createElement('a');
       a.href = url; a.download = serverName || filename || 'klean-services-fichier'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast('Téléchargement lancé ✓', 'ok');
     } catch (e) { toast(e.message, 'err'); }
@@ -1761,8 +1828,8 @@ const A = {
           ? `<button class="btn sm" onclick="A.downloadAdminFile('/files/clients/${c.id}/media/${mediaName}/download')">⬇ Télécharger</button>`
           : `<button class="btn sm" onclick="A.downloadAdminFile('/files/clients/${c.id}/text/${i.source}/${encodeURIComponent(i.id)}/download')">⬇ Télécharger</button>`;
         let body = '';
-        if (i.type === 'audio') body = `<audio controls preload="metadata" src="${esc(i.file)}" style="max-width:100%"></audio>`;
-        else if (i.type === 'image') body = `<a href="${esc(i.file)}" target="_blank" rel="noopener"><img src="${esc(i.file)}" alt="Photo" style="display:block;max-width:160px;max-height:115px;border-radius:8px;object-fit:cover"></a>`;
+        if (i.type === 'audio') body = `<audio controls preload="metadata" src="${esc(mediaUrl(i.file))}" style="max-width:100%"></audio>`;
+        else if (i.type === 'image') body = `<a href="${esc(mediaUrl(i.file))}" target="_blank" rel="noopener"><img src="${esc(mediaUrl(i.file))}" alt="Photo" style="display:block;max-width:160px;max-height:115px;border-radius:8px;object-fit:cover"></a>`;
         else body = `<div style="white-space:pre-wrap;word-break:break-word">${esc(i.content || '')}</div>`;
         return `<div style="border:1px solid #e2e8e6;border-radius:10px;padding:10px;margin:8px 0"><div class="small muted">${i.type === 'audio' ? '🎤 Vocal' : i.type === 'image' ? '🖼️ Photo' : '💬 Texte'} • ${title} • ${date}</div><div style="margin:6px 0">${body}</div>${download}</div>`;
       };
@@ -1771,7 +1838,34 @@ const A = {
         <div style="max-height:55vh;overflow:auto">${d.items.length ? d.items.map(itemHtml).join('') : '<div class="muted">Aucun élément associé.</div>'}</div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`);
     } catch (e) { toast(e.message, 'err'); }
   },
-  async cleanup() { try { const r = await api('/admin/files/cleanup', { method: 'POST' }); toast(`Nettoyage terminé : ${r.deleted} fichier(s) supprimé(s).`, 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async fileRegistry() {
+    try {
+      const d = await api('/admin/files/records');
+      const fmtBytes = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' Mo' : n > 1024 ? (n / 1024).toFixed(1) + ' Ko' : (n || 0) + ' o';
+      const stateLabel = { active: 'Actif', hidden: 'Masqué', archived: 'Archivé', recovery: 'Récupération', purged: 'Supprimé' };
+      const rows = d.records.map(f => `<tr><td><input type="checkbox" class="fr-check" value="${esc(f.name)}" ${f.state === 'purged' ? 'disabled' : ''}></td><td class="small" style="max-width:180px;word-break:break-all"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.uploader_name || 'Ancien fichier')} • ${fmtBytes(f.size)} • ${esc(f.mime || 'type inconnu')}</span></td><td><span class="pill ${f.state === 'purged' ? 'bad' : f.state === 'recovery' ? 'warn' : f.state === 'archived' ? 'info' : 'ok'}">${stateLabel[f.state] || f.state}</span>${f.delete_after ? `<br><span class="small muted">purge : ${fmtD(f.delete_after)}</span>` : ''}</td><td class="small">${fmtD(f.created_at)}</td><td style="white-space:nowrap">${f.state !== 'purged' ? `${f.state !== 'active' ? `<button class="btn sm" onclick="A.fileState('${esc(f.name)}','active')">Restaurer</button> ` : ''}<button class="btn sm sec" onclick="A.fileState('${esc(f.name)}','hidden')">Masquer</button> <button class="btn sm sec" onclick="A.fileState('${esc(f.name)}','archived')">Archiver</button> <button class="btn sm warn" onclick="A.fileState('${esc(f.name)}','recovery')">À supprimer</button>` : ''}</td></tr>`).join('');
+      openModal(`<h3>🗃️ Registre des fichiers</h3><p class="small muted">Cochez les fichiers pour télécharger une sélection ZIP. « À supprimer » les rend récupérables pendant ${d.recovery_days} jour(s), puis la purge retire réellement le binaire local et Render/PostgreSQL.</p><div class="frow"><button class="btn sm" onclick="A.fileDownload(false)">⬇ Télécharger la sélection</button><button class="btn sm sec" onclick="A.fileDownload(true)">⬇ Tous les fichiers disponibles</button><button class="btn sm warn" onclick="A.fileBulkRecovery()">Mettre la sélection à supprimer</button></div><div style="max-height:55vh;overflow:auto"><table><tr><th></th><th>Fichier</th><th>État</th><th>Date</th><th>Actions</th></tr>${rows || '<tr><td colspan="5" class="muted">Aucun fichier enregistré.</td></tr>'}</table></div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  _selectedRecords() { return [...document.querySelectorAll('.fr-check:checked')].map(x => x.value); },
+  async fileState(name, state) {
+    const isPurge = state === 'recovery';
+    const note = prompt(isPurge ? 'Motif (facultatif) — le fichier sera récupérable avant la suppression réelle :' : 'Note interne (facultative) :');
+    if (note === null) return;
+    if (isPurge && !confirm('Placer ce fichier en récupération ? Il sera réellement supprimé après le délai configuré.')) return;
+    try { await api('/admin/files/' + encodeURIComponent(name) + '/state', { method: 'POST', body: { state, note } }); toast(isPurge ? 'Fichier placé en récupération.' : 'État du fichier mis à jour.', 'ok'); A.fileRegistry(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async fileBulkRecovery() {
+    const names = A._selectedRecords(); if (!names.length) return toast('Sélectionnez au moins un fichier.', 'err');
+    if (!confirm(`Placer ${names.length} fichier(s) en récupération avant suppression réelle ?`)) return;
+    try { for (const name of names) await api('/admin/files/' + encodeURIComponent(name) + '/state', { method: 'POST', body: { state: 'recovery', note: 'Sélection du tableau de bord' } }); toast(`${names.length} fichier(s) placé(s) en récupération.`, 'ok'); A.fileRegistry(); } catch (e) { toast(e.message, 'err'); }
+  },
+  fileDownload(all) {
+    const names = A._selectedRecords(); if (!all && !names.length) return toast('Sélectionnez au moins un fichier.', 'err');
+    const query = all ? '?all=1' : '?names=' + encodeURIComponent(names.join(','));
+    A.downloadAdminFile('/files/records/download' + query, all ? 'klean-services-tous-fichiers.zip' : 'klean-services-selection.zip');
+  },
+  async cleanup() { try { const r = await api('/admin/files/cleanup', { method: 'POST' }); toast(`Nettoyage terminé : ${r.deleted} fichier(s) récupérables supprimé(s).`, 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async avisStatus(id, st) { try { await api(`/admin/avis-recherche/${id}/status`, { method: 'POST', body: { status: st } }); toast('Statut mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async jobStatus(id, st) { try { await api(`/admin/jobs/${id}/status`, { method: 'POST', body: { status: st } }); toast('Statut mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async efStatus(id, st) { try { await api(`/admin/ecole-famille/${id}/status`, { method: 'POST', body: { status: st } }); render(); } catch (e) { toast(e.message, 'err'); } },
@@ -1825,15 +1919,18 @@ const A = {
     try { await api(`/admin/quiz-sessions/${id}/arreter`, { method: 'POST' }); toast('Quiz arrêté ⏹️', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); }
   },
+  async quizPause(id) { if (!confirm('Mettre le quiz en pause ? Le chronomètre serveur sera figé pour tous.')) return; try { await api(`/admin/quiz-sessions/${id}/pause`, { method: 'POST' }); toast('Quiz en pause ⏸️', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async quizReprendre(id) { try { await api(`/admin/quiz-sessions/${id}/reprendre`, { method: 'POST' }); toast('Quiz repris ▶️', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async quizRejouer(id) {
     if (!confirm('Rejouer cette série ? Les réponses et les statuts des participants seront réinitialisés, et la série redémarrera immédiatement pour tout le monde. (Les messages des anciens gagnants sont conservés dans les détails.)')) return;
-    try { await api(`/admin/quiz-sessions/${id}/rejouer`, { method: 'POST' }); toast('Série relancée 🔄 — la question 1 s\u2019affiche sur les accueils.', 'ok'); render(); }
+    try { await api(`/admin/quiz-sessions/${id}/rejouer`, { method: 'POST', body: { confirmed: true } }); toast('Série relancée 🔄 — la question 1 s\u2019affiche sur les accueils.', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); }
   },
   async quizSessionDel(id) {
     if (!confirm('Supprimer ce quiz ? Les réponses, participants et messages liés seront définitivement effacés.')) return;
     try { await api('/admin/quiz-sessions/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); }
   },
+  async quizArchive(id) { try { const a = await api('/admin/quiz-archives/' + id); const s = a.snapshot || {}; openModal(`<h3>🗄️ Archive — ${esc(a.title)}</h3><div class="small muted">${fmtD(a.archived_at)} • ${esc(s.reason || '')}</div><div class="frow mt"><span class="pill info">👥 ${(s.participants || []).length} participant(s)</span><span class="pill info">📝 ${(s.answers || []).length} réponse(s)</span></div><div style="max-height:300px;overflow:auto;margin-top:10px"><table><tr><th>Utilisateur</th><th>Statut</th><th>Score</th><th>Temps</th></tr>${(s.participants || []).map(p => `<tr><td>#${p.user_id}</td><td>${esc(p.status)}</td><td>${p.score}</td><td>${Math.round((p.total_ms || 0)/1000)} s</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Aucun participant.</td></tr>'}</table></div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`); } catch (e) { toast(e.message, 'err'); } },
   async quizSessionDetail(id) {
     try {
       const d = await api('/admin/quiz-sessions/' + id);
@@ -1892,6 +1989,12 @@ const A = {
         method: 'PUT', body: {
           commission_rate: document.getElementById('st-comm').value,
           dispatch_wait_seconds: document.getElementById('st-wait').value,
+          dispatch_initial_alert_count: document.getElementById('st-wave1').value,
+          dispatch_expand_alert_count: document.getElementById('st-wave2').value,
+          chat_text_limit: document.getElementById('st-chattext').value,
+          chat_image_limit: document.getElementById('st-chatimages').value,
+          chat_audio_max_seconds: document.getElementById('st-chataudio').value,
+          file_recovery_days: document.getElementById('st-recovery').value,
           file_retention_days: document.getElementById('st-ret').value
         }
       });

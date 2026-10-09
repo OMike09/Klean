@@ -681,6 +681,19 @@ function migrate() {
   ensureColumn('users', 'profile_incomplete', 'INTEGER NOT NULL DEFAULT 0');   // compte créé rapidement par un admin
   ensureColumn('users', 'created_by', 'INTEGER');                    // admin qui a créé le compte (création rapide)
   ensureColumn('users', 'font_size', 'INTEGER');                     // taille de texte choisie (14–26 px)
+  // État métier du professionnel : le booléen historique available reste conservé
+  // pour compatibilité, mais l'état explicite est la référence serveur.
+  ensureColumn('pro_profiles', 'availability_status', "TEXT NOT NULL DEFAULT 'disponible'");
+  ensureColumn('pro_profiles', 'availability_before_mission', 'INTEGER');
+  // Paiement / conversation : valeur utile au contrôle serveur et à l'audit.
+  ensureColumn('missions', 'conversation_locked_at', 'TEXT');
+  ensureColumn('missions', 'conversation_lock_reason', 'TEXT');
+  // Chronologie d'un concours synchronisé (pause/reprise sans dérive locale).
+  ensureColumn('quiz_sessions', 'started_ms', 'INTEGER');
+  ensureColumn('quiz_sessions', 'interval_s', 'INTEGER NOT NULL DEFAULT 30');
+  ensureColumn('quiz_sessions', 'paused_elapsed_ms', 'INTEGER');
+  ensureColumn('quiz_sessions', 'paused_at', 'TEXT');
+  ensureColumn('services', 'price_updated_at', 'TEXT');
 
   db.exec(`CREATE TABLE IF NOT EXISTS reset_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -709,6 +722,80 @@ function migrate() {
   CREATE INDEX IF NOT EXISTS idx_log_target ON admin_log(target_type, target_id);
   CREATE INDEX IF NOT EXISTS idx_log_date ON admin_log(created_at);`);
 
+  // Options administrables de l'espace professionnel. Aucun jeu de démonstration n'est créé :
+  // le PDG choisit lui-même les options réellement proposées.
+  db.exec(`CREATE TABLE IF NOT EXISTS pro_account_options (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    opt_key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    categories TEXT NOT NULL DEFAULT '[]',
+    pro_type TEXT NOT NULL DEFAULT 'tous',
+    required INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    suspended INTEGER NOT NULL DEFAULT 0,
+    sort INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS pro_option_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    option_id INTEGER NOT NULL REFERENCES pro_account_options(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    payload TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_pro_options_state ON pro_account_options(active, suspended, pro_type, sort);
+
+  -- Référentiel de fichiers : permet de distinguer affichage, archive, récupération et purge réelle.
+  CREATE TABLE IF NOT EXISTS file_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    mime TEXT,
+    size INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'active', -- active | hidden | archived | recovery | purged
+    hidden_at TEXT, archived_at TEXT, delete_after TEXT, deleted_at TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_file_records_state ON file_records(state, created_at);
+
+  -- Abonnements Web Push : utiles seulement si les clés VAPID sont configurées sur Render.
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    subscription TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+
+  -- Les vues d'un concours sont différentes de ses participants. updated_at permet
+  -- de compter les spectateurs réellement présents sur les dernières secondes.
+  CREATE TABLE IF NOT EXISTS quiz_views (
+    session_id INTEGER NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY(session_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_quiz_views_live ON quiz_views(session_id, updated_at);
+  CREATE TABLE IF NOT EXISTS quiz_archives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_session_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    snapshot TEXT NOT NULL,
+    archived_at TEXT NOT NULL DEFAULT (datetime('now')),
+    archived_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_quiz_archives_source ON quiz_archives(source_session_id, archived_at);
+
+  CREATE INDEX IF NOT EXISTS idx_messages_sender_type ON messages(mission_id, sender_id, type);
+  CREATE INDEX IF NOT EXISTS idx_missions_active_pro ON missions(pro_id, status);`);
+
   // Migration hiérarchie : le plus ancien compte administrateur devient PDG (une seule fois)
   if (!getSetting('hierarchie_v1')) {
     const first = db.prepare("SELECT id FROM users WHERE role IN ('admin','pdg') ORDER BY id LIMIT 1").get();
@@ -724,6 +811,16 @@ function migrate() {
     while (db.prepare('SELECT 1 FROM users WHERE kp_code=?').get(code));
     db.prepare('UPDATE users SET kp_code=? WHERE id=?').run(code, u.id);
   }
+
+  // Paramètres ajoutés après la première version : uniquement si absents, sans écraser les choix du PDG.
+  const newDefaults = {
+    dispatch_initial_alert_count: '3', dispatch_expand_alert_count: '3', dispatch_expand_strategy: 'vagues',
+    chat_text_limit: '30', chat_audio_max_seconds: '20', chat_image_limit: '3',
+    chat_audio_enabled: '1', chat_image_enabled: '1', file_recovery_days: '7'
+  };
+  for (const [key, value] of Object.entries(newDefaults)) if (getSetting(key) === null) setSetting(key, value);
+  // Cohérence des profils déjà existants.
+  db.prepare("UPDATE pro_profiles SET availability_status=CASE WHEN available=1 THEN 'disponible' ELSE 'indisponible' END WHERE availability_status IS NULL OR availability_status='' ").run();
 }
 migrate();
 

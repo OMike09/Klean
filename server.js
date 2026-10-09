@@ -6,16 +6,28 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
+const webpush = require('web-push');
 const { db, hashPassword, getSetting, setSetting, DB_PATH } = require('./db');
 const persist = require('./persist'); // sauvegarde PostgreSQL (activée si DATABASE_URL est définie)
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(express.json({ limit: '2mb' }));
+// Les prix, disponibilités et états sont toujours lus frais : aucun cache HTTP ne doit
+// maintenir un ancien réglage du tableau de bord côté client.
+app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private'); next(); });
 
 // Secret de session persistant
 let SECRET = getSetting('auth_secret');
 if (!SECRET) { SECRET = crypto.randomBytes(32).toString('hex'); setSetting('auth_secret', SECRET); }
+
+// Web Push réel : s'active uniquement lorsque les 3 variables VAPID sont fournies sur Render.
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:contact@kleanservices.ci';
+const WEB_PUSH_READY = !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+if (WEB_PUSH_READY) webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+else console.log('ℹ️ Web Push inactif : configurez VAPID_PUBLIC_KEY et VAPID_PRIVATE_KEY sur Render.');
 
 // Réinitialisation du mot de passe administrateur via variable d'environnement (secours)
 // Sur Render : Environment → ADMIN_PASSWORD = NouveauMotDePasse → redéployer → se connecter → retirer la variable.
@@ -39,16 +51,53 @@ const storage = multer.diskStorage({
   }
 });
 const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } });
-app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
-// Si un fichier manque en local (après redéploiement), on le restaure depuis PostgreSQL
-app.use('/uploads/:name', async (req, res, next) => {
-  if (!persist.enabled()) return res.status(404).end();
+// Les médias privés ne sont jamais servis par un simple dossier statique : connaître
+// /uploads/nom.ext ne donne aucun droit. Une annonce publique active est la seule exception.
+function uploadRequestUser(req) {
+  const token = (req.headers.authorization || '').replace('Bearer ', '') || req.query.token;
+  const payload = verifyToken(token);
+  return payload ? db.prepare('SELECT * FROM users WHERE id=?').get(payload.id) : null;
+}
+function fileHasName(raw, name) {
+  if (!raw) return false;
+  try { return JSON.parse(raw).some(v => path.basename(String(v)) === name); } catch { return false; }
+}
+function uploadIsPublicAd(name) {
+  return !!db.prepare("SELECT 1 FROM ads WHERE active=1 AND file LIKE ?").get('%/uploads/' + name);
+}
+function canReadUpload(user, name) {
+  if (!user) return false;
+  if (isStaff(user) && (hasPerm(user, 'securite') || hasPerm(user, 'missions') || hasPerm(user, 'communication'))) return true;
+  const record = db.prepare('SELECT state, uploaded_by FROM file_records WHERE name=?').get(name);
+  if (record && ['hidden', 'archived', 'recovery', 'purged'].includes(record.state) && record.uploaded_by !== user.id) return false;
+  if (record && record.uploaded_by === user.id) return true;
+  if (db.prepare('SELECT 1 FROM users WHERE id=? AND photo LIKE ?').get(user.id, '%/uploads/' + name)) return true;
+  if (db.prepare('SELECT 1 FROM pro_profiles WHERE user_id=? AND documents LIKE ?').get(user.id, '%/uploads/' + name)) return true;
+  const missions = db.prepare('SELECT * FROM missions WHERE photos LIKE ? OR audio LIKE ?').all('%/uploads/' + name, '%/uploads/' + name);
+  for (const mission of missions) if ((fileHasName(mission.photos, name) || path.basename(mission.audio || '') === name) && missionAccess(mission, user)) return true;
+  const msgMission = db.prepare('SELECT m.* FROM messages msg JOIN missions m ON m.id=msg.mission_id WHERE msg.file LIKE ?').all('%/uploads/' + name);
+  for (const mission of msgMission) if (chatAccess(mission, user)) return true;
+  const support = db.prepare('SELECT sc.* FROM support_messages sm JOIN support_conversations sc ON sc.id=sm.conversation_id WHERE sm.file LIKE ?').get('%/uploads/' + name);
+  if (support && support.user_id === user.id) return true;
+  // Les contenus explicitement publiés restent lisibles aux comptes connectés qui peuvent les voir dans l'application.
+  if (db.prepare("SELECT 1 FROM avis_recherche WHERE photo LIKE ? AND status='approved'").get('%/uploads/' + name)) return true;
+  if (db.prepare("SELECT 1 FROM jobs WHERE cv LIKE ? AND status='approved'").get('%/uploads/' + name)) return true;
+  return false;
+}
+app.get('/uploads/:name', async (req, res) => {
+  const name = path.basename(String(req.params.name || ''));
+  if (!name || name !== req.params.name) return res.status(404).end();
+  const user = uploadRequestUser(req);
+  if (!uploadIsPublicAd(name) && !canReadUpload(user, name)) return res.status(user ? 403 : 401).end();
+  const disk = path.join(UPLOAD_DIR, name);
   try {
-    const name = path.basename(req.params.name);
-    const data = await persist.loadFile(name);
-    if (!data) return res.status(404).end();
-    fs.writeFileSync(path.join(UPLOAD_DIR, name), data); // remis en cache local
-    res.sendFile(path.join(UPLOAD_DIR, name));
+    if (!fs.existsSync(disk) && persist.enabled()) {
+      const data = await persist.loadFile(name);
+      if (data) fs.writeFileSync(disk, data); // restauration locale après redéploiement
+    }
+    if (!fs.existsSync(disk)) return res.status(404).end();
+    res.set('Cache-Control', 'private, no-store');
+    res.sendFile(disk);
   } catch { res.status(404).end(); }
 });
 
@@ -189,10 +238,24 @@ function push(userId, type, data) {
   const msg = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of set) { try { res.write(msg); } catch {} }
 }
+function sendWebPush(userId, payload) {
+  if (!WEB_PUSH_READY) return;
+  const subscriptions = db.prepare('SELECT id, subscription FROM push_subscriptions WHERE user_id=?').all(userId);
+  subscriptions.forEach(s => {
+    let sub; try { sub = JSON.parse(s.subscription); } catch { db.prepare('DELETE FROM push_subscriptions WHERE id=?').run(s.id); return; }
+    webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 60 }).catch(err => {
+      // Une souscription expirée/invalide ne doit pas être réessayée indéfiniment.
+      if (err && (err.statusCode === 404 || err.statusCode === 410)) db.prepare('DELETE FROM push_subscriptions WHERE id=?').run(s.id);
+      else console.warn('Web Push non envoyé :', err && err.statusCode || err && err.message || 'erreur');
+    });
+  });
+}
 function notify(userId, category, title, body, link) {
   const info = db.prepare('INSERT INTO notifications(user_id, category, title, body, link) VALUES(?,?,?,?,?)').run(userId, category, title, body || '', link || '');
   const unread = db.prepare('SELECT COUNT(*) n FROM notifications WHERE user_id=? AND read=0').get(userId).n;
-  push(userId, 'notification', { id: info.lastInsertRowid, category, title, body, link, unread });
+  const payload = { id: info.lastInsertRowid, category, title, body, link, unread };
+  push(userId, 'notification', payload);
+  sendWebPush(userId, payload);
   return info.lastInsertRowid;
 }
 function notifyAdmins(category, title, body, link) {
@@ -400,6 +463,23 @@ app.put('/api/me/password', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// Souscriptions Web Push : permission navigateur nécessaire, VAPID requis côté Render.
+app.get('/api/push/config', auth, (req, res) => res.json({ enabled: WEB_PUSH_READY, public_key: WEB_PUSH_READY ? VAPID_PUBLIC_KEY : null }));
+app.post('/api/push/subscribe', auth, (req, res) => {
+  if (!WEB_PUSH_READY) return res.status(503).json({ error: 'Les notifications Web Push ne sont pas encore configurées par Klean Services.' });
+  const sub = (req.body || {}).subscription;
+  if (!sub || typeof sub.endpoint !== 'string' || !sub.endpoint.startsWith('https://') || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) return res.status(400).json({ error: 'Souscription navigateur invalide.' });
+  db.prepare(`INSERT INTO push_subscriptions(user_id,endpoint,subscription,updated_at) VALUES(?,?,?,datetime('now'))
+    ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id, subscription=excluded.subscription, updated_at=datetime('now')`).run(req.user.id, sub.endpoint, JSON.stringify(sub));
+  res.json({ ok: true });
+});
+app.delete('/api/push/subscribe', auth, (req, res) => {
+  const endpoint = String((req.body || {}).endpoint || '');
+  if (!endpoint) return res.status(400).json({ error: 'Souscription manquante.' });
+  db.prepare('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?').run(req.user.id, endpoint);
+  res.json({ ok: true });
+});
+
 // Adresses
 app.get('/api/addresses', auth, (req, res) => res.json(db.prepare('SELECT * FROM addresses WHERE user_id=? ORDER BY id DESC').all(req.user.id)));
 app.post('/api/addresses', auth, (req, res) => {
@@ -416,6 +496,10 @@ app.delete('/api/addresses/:id', auth, (req, res) => {
 // Upload générique (photos, audio, documents) — copié aussi dans PostgreSQL si configuré
 app.post('/api/upload', auth, upload.array('files', 8), async (req, res) => {
   if (!req.files || !req.files.length) return res.status(400).json({ error: 'Aucun fichier reçu.' });
+  // Le registre rend chaque fichier traçable (propriétaire, taille, état de conservation).
+  const register = db.prepare(`INSERT INTO file_records(name, uploaded_by, mime, size) VALUES(?,?,?,?)
+    ON CONFLICT(name) DO UPDATE SET uploaded_by=excluded.uploaded_by, mime=excluded.mime, size=excluded.size, state='active', updated_at=datetime('now')`);
+  for (const f of req.files) register.run(f.filename, req.user.id, f.mimetype || '', f.size || 0);
   if (persist.enabled()) {
     try {
       for (const f of req.files) await persist.saveFile(f.filename, fs.readFileSync(f.path));
@@ -423,6 +507,43 @@ app.post('/api/upload', auth, upload.array('files', 8), async (req, res) => {
   }
   res.json({ files: req.files.map(f => '/uploads/' + f.filename) });
 });
+
+// Contrôles serveur des médias et quotas de discussion. Le client peut afficher un chrono,
+// mais il ne décide jamais seul de ce qui est accepté.
+function uploadRecordFor(file) {
+  const name = typeof file === 'string' && file.startsWith('/uploads/') ? path.basename(file) : null;
+  if (!name || file !== '/uploads/' + name) return null;
+  return db.prepare('SELECT * FROM file_records WHERE name=?').get(name);
+}
+function settingInt(key, fallback, min, max) {
+  const n = parseInt(getSetting(key, String(fallback)), 10);
+  return Math.max(min, Math.min(max, Number.isFinite(n) ? n : fallback));
+}
+let musicMetadataModule = null;
+async function audioDurationSeconds(file) {
+  const rec = uploadRecordFor(file);
+  if (!rec) return null;
+  const local = path.join(UPLOAD_DIR, rec.name);
+  try {
+    if (!fs.existsSync(local) && persist.enabled()) {
+      const data = await persist.loadFile(rec.name); if (data) fs.writeFileSync(local, data);
+    }
+    if (!fs.existsSync(local)) return null;
+    musicMetadataModule = musicMetadataModule || await import('music-metadata');
+    const meta = await musicMetadataModule.parseFile(local, { duration: true });
+    const d = meta && meta.format && Number(meta.format.duration);
+    return Number.isFinite(d) && d >= 0 ? d : null;
+  } catch { return null; }
+}
+function assertOwnUploadedFile(user, file, expected) {
+  const rec = uploadRecordFor(file);
+  if (!rec) throw new Error('Fichier invalide ou non enregistré.');
+  if (rec.uploaded_by && rec.uploaded_by !== user.id) throw new Error('Ce fichier ne vous appartient pas.');
+  if (rec.state !== 'active') throw new Error('Ce fichier est archivé, masqué ou indisponible.');
+  if (expected === 'photo' && !/^image\//i.test(rec.mime || '')) throw new Error('Le fichier sélectionné n’est pas une image.');
+  if (expected === 'audio' && !/^audio\//i.test(rec.mime || '')) throw new Error('Le fichier sélectionné n’est pas un audio.');
+  return rec;
+}
 
 // Règles (textes gérés par l'administration)
 app.get('/api/rules', (req, res) => res.json({ client: getSetting('rules_client'), pro: getSetting('rules_pro') }));
@@ -549,10 +670,40 @@ app.post('/api/pro/apply', auth, (req, res) => {
   res.json({ ok: true, pro_status: 'pending' });
 });
 
+function parseOption(row) { return { ...row, categories: (() => { try { return JSON.parse(row.categories || '[]'); } catch { return []; } })() }; }
+function eligibleProOptions(user) {
+  const prof = db.prepare('SELECT pro_type, services FROM pro_profiles WHERE user_id=?').get(user.id);
+  if (!prof) return [];
+  let serviceIds = []; try { serviceIds = JSON.parse(prof.services || '[]').map(Number); } catch {}
+  const cats = serviceIds.length ? db.prepare(`SELECT DISTINCT category_id FROM services WHERE id IN (${serviceIds.map(() => '?').join(',')})`).all(...serviceIds).map(r => r.category_id) : [];
+  return db.prepare("SELECT * FROM pro_account_options WHERE active=1 AND suspended=0 AND (pro_type='tous' OR pro_type=?) ORDER BY sort,id").all(prof.pro_type || 'particulier')
+    .map(parseOption).filter(o => !o.categories.length || o.categories.some(c => cats.includes(Number(c))));
+}
+app.get('/api/pro-options', auth, (req, res) => {
+  if (req.user.pro_status !== 'approved') return res.status(403).json({ error: 'Espace réservé aux professionnels validés.' });
+  const used = db.prepare('SELECT option_id, payload, created_at FROM pro_option_usage WHERE user_id=? ORDER BY id DESC').all(req.user.id);
+  const latest = new Map(); used.forEach(u => { if (!latest.has(u.option_id)) latest.set(u.option_id, u); });
+  res.json(eligibleProOptions(req.user).map(o => ({ ...o, usage: latest.get(o.id) ? { payload: latest.get(o.id).payload, created_at: latest.get(o.id).created_at } : null })));
+});
+app.post('/api/pro-options/:id/use', auth, (req, res) => {
+  if (req.user.pro_status !== 'approved') return res.status(403).json({ error: 'Espace réservé aux professionnels validés.' });
+  const option = db.prepare('SELECT * FROM pro_account_options WHERE id=?').get(req.params.id);
+  if (!option || !option.active || option.suspended) return res.status(403).json({ error: 'Cette option professionnelle est inactive ou suspendue par Klean Services.' });
+  if (!eligibleProOptions(req.user).some(o => o.id === option.id)) return res.status(403).json({ error: 'Cette option ne s’applique pas à votre type de compte ou à vos catégories.' });
+  const payload = String((req.body || {}).payload || '').trim().slice(0, 2000);
+  if (option.required && !payload) return res.status(400).json({ error: 'Cette option obligatoire doit être renseignée.' });
+  db.prepare('INSERT INTO pro_option_usage(option_id,user_id,payload) VALUES(?,?,?)').run(option.id, req.user.id, payload || null);
+  res.json({ ok: true });
+});
+
 app.put('/api/pro/availability', auth, (req, res) => {
   if (req.user.pro_status !== 'approved') return res.status(403).json({ error: 'Espace réservé aux professionnels validés.' });
-  db.prepare('UPDATE pro_profiles SET available=? WHERE user_id=?').run(req.body.available ? 1 : 0, req.user.id);
-  res.json({ available: req.body.available ? 1 : 0 });
+  const active = db.prepare("SELECT 1 FROM missions WHERE pro_id=? AND status IN ('acceptee','confirmee','en_cours') LIMIT 1").get(req.user.id);
+  if (active && req.body.available) return res.status(409).json({ error: 'Vous êtes déjà en mission. Votre disponibilité sera rétablie à la clôture de celle-ci.' });
+  const available = req.body.available ? 1 : 0;
+  db.prepare('UPDATE pro_profiles SET available=?, availability_status=?, availability_before_mission=NULL WHERE user_id=?')
+    .run(available, available ? 'disponible' : 'indisponible', req.user.id);
+  res.json({ available, availability_status: available ? 'disponible' : 'indisponible' });
 });
 
 app.put('/api/pro/profile', auth, (req, res) => {
@@ -592,7 +743,7 @@ app.get('/api/pro/dashboard', auth, (req, res) => {
   const revenus = pays.reduce((s, p) => s + p.pro_amount, 0);
   const r = db.prepare('SELECT AVG(rating) avg, COUNT(*) n FROM reviews WHERE target_id=?').get(uid);
   res.json({
-    available: pro.available, profile: { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents) },
+    available: pro.available, availability_status: pro.availability_status || (pro.available ? 'disponible' : 'indisponible'), profile: { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents) },
     offers, missions,
     stats: {
       en_cours: missions.filter(m => ['acceptee', 'confirmee', 'en_cours'].includes(m.status)).length,
@@ -630,67 +781,82 @@ function haversine(lat1, lng1, lat2, lng2) {
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
-
+function proHasActiveMission(proId) {
+  return !!db.prepare("SELECT 1 FROM missions WHERE pro_id=? AND status IN ('acceptee','confirmee','en_cours') LIMIT 1").get(proId);
+}
+function proCanReceiveMission(proId) {
+  const p = db.prepare(`SELECT u.pro_status, u.suspended, u.blocked, p.available, p.availability_status
+    FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(proId);
+  return !!(p && p.pro_status === 'approved' && !p.suspended && !p.blocked && p.available &&
+    !['indisponible', 'en_mission', 'suspendu'].includes(p.availability_status || '') && !proHasActiveMission(proId));
+}
+function setAlertStatus(proId) { db.prepare("UPDATE pro_profiles SET availability_status='alerte' WHERE user_id=? AND available=1 AND availability_status='disponible'").run(proId); }
+function clearAlertStatus(proId) { if (!proHasActiveMission(proId)) db.prepare("UPDATE pro_profiles SET availability_status='disponible' WHERE user_id=? AND available=1 AND availability_status='alerte'").run(proId); }
+function releaseProfessional(proId, reason) {
+  if (!proId || proHasActiveMission(proId)) return;
+  const u = db.prepare('SELECT suspended, blocked, pro_status FROM users WHERE id=?').get(proId);
+  if (!u) return;
+  const can = u.pro_status === 'approved' && !u.suspended && !u.blocked;
+  db.prepare('UPDATE pro_profiles SET available=?, availability_status=?, availability_before_mission=NULL WHERE user_id=?')
+    .run(can ? 1 : 0, can ? 'disponible' : 'suspendu', proId);
+  if (reason) notify(proId, 'mission', '🟢 Vous êtes de nouveau disponible', reason, '#/pro');
+}
 function findMatchingPros(mission) {
-  const pros = db.prepare(`SELECT u.*, p.services svc, p.available, p.zone, p.service_city FROM users u JOIN pro_profiles p ON p.user_id=u.id
-    WHERE u.pro_status='approved' AND u.suspended=0 AND u.id != ?`).all(mission.client_id);
+  const pros = db.prepare(`SELECT u.*, p.services svc, p.available, p.zone, p.service_city, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id
+    WHERE u.pro_status='approved' AND u.suspended=0 AND COALESCE(u.blocked,0)=0 AND u.id != ?`).all(mission.client_id);
   const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
   return pros
-    .filter(p => JSON.parse(p.svc).includes(mission.service_id))
+    .filter(p => { try { return JSON.parse(p.svc || '[]').map(Number).includes(Number(mission.service_id)); } catch { return false; } })
+    .filter(p => p.available && !['indisponible', 'en_mission', 'suspendu'].includes(p.availability_status || '') && !proHasActiveMission(p.id))
     .map(p => ({ ...p, dist: haversine(mission.lat, mission.lng, p.lat, p.lng) }))
-    // Le lieu de service déclaré est la règle. Avec deux GPS disponibles, la proximité réelle garde la priorité.
     .filter(p => !p.service_city || !client || !client.ville || cityMatches(p.service_city, client.ville) || p.dist <= 50)
-    .sort((a, b) => (b.available - a.available) || (visibiliteNiveau(b.id) - visibiliteNiveau(a.id)) || (a.dist - b.dist)); // disponibilité, bonus facultatif, proximité
+    .sort((a, b) => (a.dist - b.dist) || (visibiliteNiveau(b.id) - visibiliteNiveau(a.id)) || a.id - b.id);
 }
-
 function addEvent(missionId, status, actorId, note) {
   db.prepare('INSERT INTO mission_events(mission_id,status,actor_id,note) VALUES(?,?,?,?)').run(missionId, status, actorId || null, note || null);
   db.prepare("UPDATE missions SET updated_at=datetime('now') WHERE id=?").run(missionId);
 }
-
+function alertWaveSize(missionId) {
+  const already = db.prepare("SELECT COUNT(*) n FROM mission_candidates WHERE mission_id=? AND status IN ('offered','expired','refused')").get(missionId).n;
+  const key = already ? 'dispatch_expand_alert_count' : 'dispatch_initial_alert_count';
+  return Math.max(1, Math.min(50, parseInt(getSetting(key, '3'), 10) || 3));
+}
+function expireOfferedWave(missionId) {
+  const offered = db.prepare("SELECT pro_id FROM mission_candidates WHERE mission_id=? AND status='offered'").all(missionId);
+  if (!offered.length) return;
+  db.prepare("UPDATE mission_candidates SET status='expired', responded_at=datetime('now') WHERE mission_id=? AND status='offered'").run(missionId);
+  offered.forEach(o => { clearAlertStatus(o.pro_id); notify(o.pro_id, 'mission', 'Mission retirée', 'Le délai de réponse est dépassé : la demande a été proposée à d’autres professionnels.', '#/pro'); push(o.pro_id, 'mission', { id: missionId, status: 'retiree' }); });
+}
 function offerNext(missionId) {
   const mission = db.prepare('SELECT * FROM missions WHERE id=?').get(missionId);
   if (!mission || mission.status !== 'recherche') return;
-  const next = db.prepare(`SELECT mc.*, p.available FROM mission_candidates mc JOIN pro_profiles p ON p.user_id=mc.pro_id
-    WHERE mc.mission_id=? AND mc.status='pending' ORDER BY p.available DESC, mc.rank ASC LIMIT 1`).get(missionId);
-  if (!next) {
-    db.prepare("UPDATE missions SET status='sans_pro' WHERE id=?").run(missionId);
-    addEvent(missionId, 'sans_pro', null, 'Aucun professionnel n\u2019a répondu');
-    notify(mission.client_id, 'mission', 'Aucun professionnel disponible pour le moment',
-      'Vous pouvez relancer la recherche ou contacter directement un professionnel depuis votre demande.', '#/mission/' + missionId);
-    push(mission.client_id, 'mission', { id: missionId, status: 'sans_pro' });
-    return;
+  if (db.prepare("SELECT 1 FROM mission_candidates WHERE mission_id=? AND status='offered'").get(missionId)) return;
+  const pending = db.prepare(`SELECT mc.* FROM mission_candidates mc JOIN pro_profiles p ON p.user_id=mc.pro_id JOIN users u ON u.id=mc.pro_id
+    WHERE mc.mission_id=? AND mc.status='pending' AND p.available=1 AND COALESCE(p.availability_status,'disponible') NOT IN ('indisponible','en_mission','suspendu')
+      AND u.pro_status='approved' AND u.suspended=0 AND COALESCE(u.blocked,0)=0
+      AND NOT EXISTS (SELECT 1 FROM missions busy WHERE busy.pro_id=mc.pro_id AND busy.status IN ('acceptee','confirmee','en_cours'))
+    ORDER BY mc.rank ASC LIMIT ?`).all(missionId, alertWaveSize(missionId));
+  if (!pending.length) {
+    db.prepare("UPDATE missions SET status='sans_pro' WHERE id=? AND status='recherche'").run(missionId);
+    addEvent(missionId, 'sans_pro', null, 'Aucun professionnel disponible après les vagues d’alerte');
+    notify(mission.client_id, 'mission', 'Aucun professionnel disponible pour le moment', 'Aucun professionnel n’a répondu. Vous pouvez relancer la recherche ; Klean Services garde votre demande dans l’historique.', '#/mission/' + missionId);
+    push(mission.client_id, 'mission', { id: missionId, status: 'sans_pro' }); return;
   }
   const svc = db.prepare('SELECT name FROM services WHERE id=?').get(mission.service_id);
-  db.prepare("UPDATE mission_candidates SET status='offered', offered_at=datetime('now') WHERE id=?").run(next.id);
-  notify(next.pro_id, 'mission', '🔔 Nouvelle mission : ' + svc.name,
-    (mission.urgence ? 'URGENT — ' : '') + (mission.address || 'Localisation fournie') + '. Touchez pour voir la demande et répondre.',
-    '#/mission/' + missionId);
-  push(next.pro_id, 'mission', { id: missionId, status: 'offre' });
+  const tx = db.transaction(() => pending.forEach(c => db.prepare("UPDATE mission_candidates SET status='offered', offered_at=datetime('now') WHERE id=? AND status='pending'").run(c.id))); tx();
+  pending.forEach(c => { setAlertStatus(c.pro_id); notify(c.pro_id, 'mission', '🔔 Nouvelle mission : ' + svc.name, (mission.urgence ? 'URGENT — ' : '') + (mission.address || 'Localisation fournie') + '. Touchez pour voir et accepter la mission.', '#/mission/' + missionId); push(c.pro_id, 'mission', { id: missionId, status: 'offre', persistent: true }); });
   const wait = Math.max(15, parseInt(getSetting('dispatch_wait_seconds', '60'), 10)) * 1000;
   clearTimeout(dispatchTimers.get(missionId));
-  dispatchTimers.set(missionId, setTimeout(() => {
-    const cand = db.prepare('SELECT * FROM mission_candidates WHERE id=?').get(next.id);
-    if (cand && cand.status === 'offered') {
-      db.prepare("UPDATE mission_candidates SET status='expired', responded_at=datetime('now') WHERE id=?").run(next.id);
-      notify(next.pro_id, 'mission', 'Mission expirée', 'Le délai de réponse est dépassé, la mission a été proposée à un autre professionnel.', '#/pro');
-      offerNext(missionId);
-    }
-  }, wait));
+  dispatchTimers.set(missionId, setTimeout(() => { expireOfferedWave(missionId); offerNext(missionId); }, wait));
 }
-
 function startDispatch(missionId) {
   const mission = db.prepare('SELECT * FROM missions WHERE id=?').get(missionId);
-  const pros = findMatchingPros(mission);
-  const ins = db.prepare('INSERT OR IGNORE INTO mission_candidates(mission_id, pro_id, rank) VALUES(?,?,?)');
+  if (!mission || mission.status !== 'recherche') return;
+  const pros = findMatchingPros(mission), ins = db.prepare('INSERT OR IGNORE INTO mission_candidates(mission_id, pro_id, rank) VALUES(?,?,?)');
   pros.forEach((p, i) => ins.run(missionId, p.id, i));
   if (!pros.length) {
-    db.prepare("UPDATE missions SET status='sans_pro' WHERE id=?").run(missionId);
-    addEvent(missionId, 'sans_pro', null, 'Aucun professionnel compatible trouvé');
-    notify(mission.client_id, 'mission', 'Recherche sans résultat',
-      'Aucun professionnel ne propose encore ce service dans votre zone. Nous avons alerté l\u2019administration ; vous pourrez relancer la recherche.', '#/mission/' + missionId);
-    notifyAdmins('mission', 'Demande sans professionnel', `Demande #${mission.code} : aucun professionnel compatible.`, 'admin:missions');
-    return;
+    db.prepare("UPDATE missions SET status='sans_pro' WHERE id=?").run(missionId); addEvent(missionId, 'sans_pro', null, 'Aucun professionnel compatible et disponible trouvé');
+    notify(mission.client_id, 'mission', 'Recherche sans résultat', 'Aucun professionnel disponible ne propose ce service dans votre zone. Vous pourrez relancer la recherche.', '#/mission/' + missionId); notifyAdmins('mission', 'Demande sans professionnel', `Demande #${mission.code} : aucun professionnel compatible disponible.`, 'admin:missions'); return;
   }
   offerNext(missionId);
 }
@@ -848,11 +1014,19 @@ app.post('/api/pub/campagnes', auth, (req, res) => {
 });
 
 // Créer une demande
-app.post('/api/missions', auth, (req, res) => {
+app.post('/api/missions', auth, async (req, res) => {
   const { service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache, taches } = req.body || {};
   const svc = db.prepare('SELECT * FROM services WHERE id=? AND active=1').get(service_id);
   if (!svc) return res.status(400).json({ error: 'Service invalide.' });
   if (!address || !address.trim()) return res.status(400).json({ error: 'Indiquez votre localisation (GPS ou saisie manuelle).' });
+  // Les pièces jointes d'une demande doivent appartenir à son créateur.
+  for (const photo of (Array.isArray(photos) ? photos : [])) { try { assertOwnUploadedFile(req.user, photo, 'photo'); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (audio) {
+    try { assertOwnUploadedFile(req.user, audio, 'audio'); } catch (e) { return res.status(400).json({ error: e.message }); }
+    const seconds = await audioDurationSeconds(audio), max = settingInt('chat_audio_max_seconds', 20, 1, 120);
+    if (seconds === null) return res.status(400).json({ error: 'La durée de cette note vocale ne peut pas être vérifiée. Réenregistrez-la depuis l’application.' });
+    if (seconds > max + 0.25) return res.status(400).json({ error: `La note vocale dépasse la limite autorisée (${max} secondes).` });
+  }
   // Questions obligatoires du service
   const required = db.prepare('SELECT * FROM service_questions WHERE service_id=? AND active=1 AND required=1').all(service_id);
   for (const rq of required) {
@@ -917,18 +1091,28 @@ function missionFull(mission, role, user) {
   const pro = mission.pro_id ? db.prepare('SELECT * FROM users WHERE id=?').get(mission.pro_id) : null;
   const myReview = db.prepare('SELECT * FROM reviews WHERE mission_id=? AND author_id=?').get(mission.id, user.id);
   const unreadMsgs = db.prepare('SELECT COUNT(*) n FROM messages WHERE mission_id=? AND sender_id!=? AND read=0').get(mission.id, user.id).n;
-  const shareContact = ['acceptee', 'confirmee', 'en_cours', 'terminee', 'payee'].includes(mission.status);
+  // Confidentialité stricte : le téléphone professionnel n'est jamais envoyé au client.
+  // Le téléphone client est transmis uniquement au professionnel effectivement attribué,
+  // à partir de l'acceptation de la mission. Les administrateurs habilités gardent la vue de gestion.
+  const assignedStage = ['acceptee', 'confirmee', 'en_cours', 'terminee', 'payee', 'litige'].includes(mission.status);
+  const adminView = isStaff(user) && hasPerm(user, 'missions');
+  const shareClientContact = adminView || (role === 'pro' && mission.pro_id === user.id && assignedStage);
   let candidates = null, offerPending = null;
-  if (role === 'client' && ['recherche', 'sans_pro'].includes(mission.status)) {
-    candidates = db.prepare(`SELECT mc.status cstatus, u.* FROM mission_candidates mc JOIN users u ON u.id=mc.pro_id WHERE mc.mission_id=? ORDER BY mc.rank`).all(mission.id)
-      .map(u => {
-        const pp = db.prepare('SELECT profession, zone, available FROM pro_profiles WHERE user_id=?').get(u.id);
-        return { ...publicUser(u), cstatus: u.cstatus, profession: pp.profession, zone: pp.zone, available: pp.available };
-      });
-  }
+  // Le client n'obtient plus de liste de professionnels/candidats : l'attribution est automatique.
   if (role === 'candidat') {
     offerPending = db.prepare("SELECT 1 FROM mission_candidates WHERE mission_id=? AND pro_id=? AND status='offered'").get(mission.id, user.id) ? true : false;
   }
+  const canChat = ['client', 'pro'].includes(role) && !!mission.pro_id;
+  const chatMeta = {
+    locked: conversationIsLocked(mission),
+    text_limit: settingInt('chat_text_limit', 30, 1, 500),
+    image_limit: settingInt('chat_image_limit', 3, 0, 30),
+    audio_max_seconds: settingInt('chat_audio_max_seconds', 20, 1, 120),
+    image_enabled: getSetting('chat_image_enabled', '1') === '1',
+    audio_enabled: getSetting('chat_audio_enabled', '1') === '1',
+    used_text: canChat ? db.prepare("SELECT COUNT(*) n FROM messages WHERE mission_id=? AND sender_id=? AND type='text'").get(mission.id, user.id).n : 0,
+    used_images: canChat ? db.prepare("SELECT COUNT(*) n FROM messages WHERE mission_id=? AND sender_id=? AND type='photo'").get(mission.id, user.id).n : 0
+  };
   return {
     id: mission.id, code: mission.code, status: mission.status, role,
     service: svc.name, icon: svc.icon, tache: mission.tache || null, taches: missionTasks, detail, description: mission.description,
@@ -936,8 +1120,9 @@ function missionFull(mission, role, user) {
     urgence: mission.urgence, date_souhaitee: mission.date_souhaitee,
     photos: JSON.parse(mission.photos), audio: mission.audio,
     amount: mission.amount, created_at: mission.created_at, events, payment,
-    client: publicUser(client, role !== 'client' && shareContact),
-    pro: pro ? publicUser(pro, role === 'client' && shareContact) : null,
+    client: publicUser(client, shareClientContact),
+    pro: pro ? publicUser(pro, adminView) : null,
+    chat: chatMeta,
     my_review: myReview || null, unread_messages: unreadMsgs,
     candidates, offer_pending: offerPending,
     finance: mission.amount ? missionFinance(mission) : null, // prix total, commission, part pro — calculés côté serveur
@@ -969,22 +1154,35 @@ app.get('/api/missions/:id', auth, (req, res) => {
   res.json(missionFull(mission, role === 'admin' ? 'client' : role, req.user));
 });
 
-// Le professionnel accepte
+// Le professionnel accepte : une transaction atomique garantit un unique gagnant.
 app.post('/api/missions/:id/accept', auth, (req, res) => {
-  const mission = db.prepare('SELECT * FROM missions WHERE id=?').get(req.params.id);
-  if (!mission) return res.status(404).json({ error: 'Demande introuvable.' });
-  if (mission.status !== 'recherche' && mission.status !== 'sans_pro') return res.status(409).json({ error: 'Cette demande n\u2019est plus disponible.' });
-  const cand = db.prepare("SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=? AND status IN ('offered','pending')").get(mission.id, req.user.id);
-  if (!cand) return res.status(403).json({ error: 'Cette mission ne vous a pas été proposée.' });
-  clearTimeout(dispatchTimers.get(mission.id)); dispatchTimers.delete(mission.id);
-  db.prepare("UPDATE mission_candidates SET status='accepted', responded_at=datetime('now') WHERE id=?").run(cand.id);
-  db.prepare("UPDATE mission_candidates SET status='expired' WHERE mission_id=? AND id!=? AND status IN ('pending','offered')").run(mission.id, cand.id);
-  db.prepare("UPDATE missions SET status='acceptee', pro_id=? WHERE id=?").run(req.user.id, mission.id);
-  addEvent(mission.id, 'acceptee', req.user.id, 'Professionnel : ' + req.user.name);
-  const svc = db.prepare('SELECT name FROM services WHERE id=?').get(mission.service_id);
-  notify(mission.client_id, 'mission', '✅ Un professionnel a accepté votre demande',
-    `${req.user.name} a accepté « ${svc.name} ». Consultez son profil et confirmez pour démarrer.`, '#/mission/' + mission.id);
-  push(mission.client_id, 'mission', { id: mission.id, status: 'acceptee' });
+  let result;
+  try {
+    result = db.transaction(() => {
+      const mission = db.prepare('SELECT * FROM missions WHERE id=?').get(req.params.id);
+      if (!mission) throw new Error('NOT_FOUND');
+      if (mission.status !== 'recherche') throw new Error('TAKEN');
+      if (!proCanReceiveMission(req.user.id)) throw new Error('BUSY');
+      const cand = db.prepare("SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=? AND status='offered'").get(mission.id, req.user.id);
+      if (!cand) throw new Error('NOT_OFFERED');
+      const won = db.prepare("UPDATE missions SET status='acceptee', pro_id=?, updated_at=datetime('now') WHERE id=? AND status='recherche'").run(req.user.id, mission.id);
+      if (!won.changes) throw new Error('TAKEN');
+      db.prepare("UPDATE mission_candidates SET status='accepted', responded_at=datetime('now') WHERE id=?").run(cand.id);
+      const others = db.prepare("SELECT pro_id FROM mission_candidates WHERE mission_id=? AND id!=? AND status IN ('pending','offered')").all(mission.id, cand.id);
+      db.prepare("UPDATE mission_candidates SET status='expired', responded_at=datetime('now') WHERE mission_id=? AND id!=? AND status IN ('pending','offered')").run(mission.id, cand.id);
+      db.prepare("UPDATE pro_profiles SET availability_before_mission=available, available=0, availability_status='en_mission' WHERE user_id=?").run(req.user.id);
+      addEvent(mission.id, 'acceptee', req.user.id, 'Professionnel : ' + req.user.name);
+      return { mission, others };
+    })();
+  } catch (err) {
+    const errMap = { NOT_FOUND: ['Demande introuvable.', 404], BUSY: ['Vous êtes indisponible ou déjà en mission : vous ne pouvez pas accepter une nouvelle demande.', 409], NOT_OFFERED: ['Cette mission ne vous est plus proposée.', 403], TAKEN: ['Cette demande a déjà été attribuée à un autre professionnel.', 409] };
+    const out = errMap[err.message] || ['Attribution impossible.', 409]; return res.status(out[1]).json({ error: out[0] });
+  }
+  clearTimeout(dispatchTimers.get(result.mission.id)); dispatchTimers.delete(result.mission.id);
+  result.others.forEach(o => { clearAlertStatus(o.pro_id); notify(o.pro_id, 'mission', 'Mission déjà attribuée', 'Un autre professionnel a accepté cette demande avant vous.', '#/pro'); push(o.pro_id, 'mission', { id: result.mission.id, status: 'attribuee' }); });
+  const svc = db.prepare('SELECT name FROM services WHERE id=?').get(result.mission.service_id);
+  notify(result.mission.client_id, 'mission', '✅ Un professionnel a accepté votre demande', `${req.user.name} a accepté « ${svc.name} ». Votre commande est attribuée ; vous pouvez consulter son profil et poursuivre la mission.`, '#/mission/' + result.mission.id);
+  push(result.mission.client_id, 'mission', { id: result.mission.id, status: 'acceptee' });
   res.json({ ok: true, status: 'acceptee' });
 });
 
@@ -995,26 +1193,14 @@ app.post('/api/missions/:id/refuse', auth, (req, res) => {
   const cand = db.prepare("SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=? AND status='offered'").get(mission.id, req.user.id);
   if (!cand) return res.status(409).json({ error: 'Aucune offre en attente pour cette mission.' });
   db.prepare("UPDATE mission_candidates SET status='refused', responded_at=datetime('now') WHERE id=?").run(cand.id);
+  clearAlertStatus(req.user.id);
   clearTimeout(dispatchTimers.get(mission.id));
   offerNext(mission.id);
   res.json({ ok: true });
 });
 
-// Le client contacte/choisit directement un professionnel candidat
-app.post('/api/missions/:id/choisir/:proId', auth, (req, res) => {
-  const mission = db.prepare('SELECT * FROM missions WHERE id=? AND client_id=?').get(req.params.id, req.user.id);
-  if (!mission) return res.status(404).json({ error: 'Demande introuvable.' });
-  if (!['recherche', 'sans_pro'].includes(mission.status)) return res.status(409).json({ error: 'Cette demande a déjà un professionnel.' });
-  const cand = db.prepare('SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=?').get(mission.id, req.params.proId);
-  if (!cand) return res.status(404).json({ error: 'Ce professionnel ne correspond pas à la demande.' });
-  clearTimeout(dispatchTimers.get(mission.id));
-  db.prepare("UPDATE missions SET status='recherche' WHERE id=?").run(mission.id);
-  db.prepare("UPDATE mission_candidates SET status='offered', offered_at=datetime('now') WHERE id=?").run(cand.id);
-  const svc = db.prepare('SELECT name FROM services WHERE id=?').get(mission.service_id);
-  notify(cand.pro_id, 'mission', '🔔 Un client vous sollicite directement', `Demande « ${svc.name} » — touchez pour voir les détails et répondre.`, '#/mission/' + mission.id);
-  push(cand.pro_id, 'mission', { id: mission.id, status: 'offre' });
-  res.json({ ok: true });
-});
+// L’attribution est automatique : le client ne sélectionne plus de professionnel.
+app.post('/api/missions/:id/choisir/:proId', auth, (req, res) => res.status(410).json({ error: 'L’attribution est désormais automatique : attendez qu’un professionnel disponible accepte la demande.' }));
 
 // Relancer la recherche
 app.post('/api/missions/:id/relancer', auth, (req, res) => {
@@ -1132,6 +1318,7 @@ app.post('/api/missions/:id/complete', auth, (req, res) => {
   notify(mission.client_id, 'paiement', '✅ Mission terminée — paiement attendu',
     `Montant : ${mission.amount.toLocaleString('fr-FR')} FCFA (espèces). Confirmez le paiement une fois effectué.`, '#/mission/' + mission.id);
   push(mission.client_id, 'mission', { id: mission.id, status: 'terminee' });
+  releaseProfessional(mission.pro_id, 'La prestation est terminée : vous pouvez recevoir de nouvelles demandes.');
   res.json({ ok: true, status: 'terminee' });
 });
 
@@ -1154,8 +1341,8 @@ app.post('/api/missions/:id/payment/confirm', auth, (req, res) => {
   let status = p2.client_confirmed_at && p2.pro_confirmed_at ? 'valide' : (p2.client_confirmed_at ? 'confirme_client' : 'confirme_pro');
   db.prepare('UPDATE payments SET status=? WHERE id=?').run(status, pay.id);
   if (status === 'valide') {
-    db.prepare("UPDATE missions SET status='payee' WHERE id=?").run(mission.id);
-    addEvent(mission.id, 'payee', req.user.id, 'Paiement validé par les deux parties');
+    db.prepare("UPDATE missions SET status='payee', conversation_locked_at=datetime('now'), conversation_lock_reason='Paiement validé' WHERE id=?").run(mission.id);
+    addEvent(mission.id, 'payee', req.user.id, 'Paiement validé par les deux parties — conversation clôturée');
     notify(mission.client_id, 'paiement', '💰 Paiement validé', 'Merci ! Vous pouvez maintenant évaluer le professionnel.', '#/mission/' + mission.id);
     notify(mission.pro_id, 'paiement', '💰 Paiement validé', `Montant reçu : ${p2.amount.toLocaleString('fr-FR')} FCFA — votre part : ${p2.pro_amount.toLocaleString('fr-FR')} FCFA (commission ${p2.commission_rate}%).`, '#/mission/' + mission.id);
     const cliV = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
@@ -1183,6 +1370,7 @@ app.post('/api/missions/:id/cancel', auth, (req, res) => {
   addEvent(mission.id, 'annulee', req.user.id, `Annulée par ${role === 'client' ? 'le client' : 'le professionnel'}${req.body.reason ? ' : ' + req.body.reason : ''}`);
   const other = role === 'client' ? mission.pro_id : mission.client_id;
   if (other) { notify(other, 'mission', 'Mission annulée', 'La mission a été annulée par l\u2019autre partie.', '#/mission/' + mission.id); push(other, 'mission', { id: mission.id, status: 'annulee' }); }
+  if (mission.pro_id) releaseProfessional(mission.pro_id, 'La mission annulée ne vous bloque plus.');
   res.json({ ok: true, status: 'annulee' });
 });
 
@@ -1225,7 +1413,13 @@ app.post('/api/signalements', auth, (req, res) => {
 // ============================================================
 function chatAccess(mission, user) {
   const role = missionAccess(mission, user);
-  return role && role !== 'admin' ? role : (isStaff(user) && hasPerm(user, 'missions') ? 'admin' : null);
+  if (role === 'admin') return isStaff(user) && hasPerm(user, 'missions') ? 'admin' : null;
+  // Avant l'attribution, aucun candidat ne peut ouvrir de conversation avec le client.
+  if (!mission || !mission.pro_id || !['client', 'pro'].includes(role)) return null;
+  return role;
+}
+function conversationIsLocked(mission) {
+  return !!(mission && (mission.status === 'payee' || mission.conversation_locked_at || ['annulee', 'litige'].includes(mission.status)));
 }
 app.get('/api/missions/:id/messages', auth, (req, res) => {
   const mission = db.prepare('SELECT * FROM missions WHERE id=?').get(req.params.id);
@@ -1234,25 +1428,42 @@ app.get('/api/missions/:id/messages', auth, (req, res) => {
   const msgs = db.prepare(`SELECT m.*, u.name sender_name, u.photo sender_photo FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.mission_id=? ORDER BY m.id`).all(mission.id);
   res.json(msgs);
 });
-app.post('/api/missions/:id/messages', auth, (req, res) => {
+app.post('/api/missions/:id/messages', auth, async (req, res) => {
   const mission = db.prepare('SELECT * FROM missions WHERE id=?').get(req.params.id);
   const role = chatAccess(mission, req.user);
   if (!mission || !role) return res.status(404).json({ error: 'Conversation introuvable.' });
+  if (role === 'admin') return res.status(403).json({ error: 'L’administration consulte cette conversation mais ne peut pas écrire à la place des parties.' });
+  if (conversationIsLocked(mission)) return res.status(409).json({ error: mission.status === 'payee' ? 'La prestation est payée : cette conversation est définitivement en lecture seule.' : 'Cette conversation est clôturée. Utilisez Contacter Klean Services pour toute demande de support.' });
   const { type, content, file } = req.body || {};
   if (!['text', 'photo', 'audio'].includes(type)) return res.status(400).json({ error: 'Type de message invalide.' });
   if (type === 'text' && (!content || !content.trim())) return res.status(400).json({ error: 'Message vide.' });
   if (type !== 'text' && !file) return res.status(400).json({ error: 'Fichier manquant.' });
+
+  const textLimit = settingInt('chat_text_limit', 30, 1, 500);
+  const imageLimit = settingInt('chat_image_limit', 3, 0, 30);
+  if (type === 'text') {
+    const used = db.prepare("SELECT COUNT(*) n FROM messages WHERE mission_id=? AND sender_id=? AND type='text'").get(mission.id, req.user.id).n;
+    if (used >= textLimit) return res.status(429).json({ error: `Votre quota de ${textLimit} message(s) texte pour cette conversation est atteint.` });
+  }
+  if (type === 'photo') {
+    if (getSetting('chat_image_enabled', '1') !== '1') return res.status(403).json({ error: 'L’envoi d’images est temporairement suspendu par Klean Services.' });
+    const used = db.prepare("SELECT COUNT(*) n FROM messages WHERE mission_id=? AND sender_id=? AND type='photo'").get(mission.id, req.user.id).n;
+    if (used >= imageLimit) return res.status(429).json({ error: `Votre quota de ${imageLimit} image(s) pour cette conversation est atteint.` });
+    try { assertOwnUploadedFile(req.user, file, 'photo'); } catch (err) { return res.status(400).json({ error: err.message }); }
+  }
+  if (type === 'audio') {
+    if (getSetting('chat_audio_enabled', '1') !== '1') return res.status(403).json({ error: 'Les messages vocaux sont temporairement suspendus par Klean Services.' });
+    try { assertOwnUploadedFile(req.user, file, 'audio'); } catch (err) { return res.status(400).json({ error: err.message }); }
+    const max = settingInt('chat_audio_max_seconds', 20, 1, 120), seconds = await audioDurationSeconds(file);
+    if (seconds === null) return res.status(400).json({ error: 'La durée de cette note vocale ne peut pas être vérifiée. Réenregistrez-la depuis l’application.' });
+    if (seconds > max + 0.25) return res.status(400).json({ error: `La note vocale dépasse la limite autorisée (${max} secondes).` });
+  }
   const info = db.prepare('INSERT INTO messages(mission_id, sender_id, type, content, file) VALUES(?,?,?,?,?)')
-    .run(mission.id, req.user.id, type, (content || '').slice(0, 2000), file || null);
+    .run(mission.id, req.user.id, type, (content || '').trim().slice(0, 2000), file || null);
   const msg = db.prepare('SELECT m.*, u.name sender_name, u.photo sender_photo FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.id=?').get(info.lastInsertRowid);
-  // Destinataires : l'autre partie (client ↔ pro assigné ou candidats actifs)
-  let recipients = [];
-  if (req.user.id === mission.client_id) {
-    if (mission.pro_id) recipients = [mission.pro_id];
-    else recipients = db.prepare("SELECT pro_id FROM mission_candidates WHERE mission_id=? AND status='offered'").all(mission.id).map(r => r.pro_id);
-  } else recipients = [mission.client_id];
+  const recipients = req.user.id === mission.client_id ? [mission.pro_id] : [mission.client_id];
   const svc = db.prepare('SELECT name FROM services WHERE id=?').get(mission.service_id);
-  for (const rid of recipients) {
+  for (const rid of recipients.filter(Boolean)) {
     push(rid, 'message', msg);
     notify(rid, 'message', '💬 ' + req.user.name, type === 'text' ? content.slice(0, 80) : (type === 'photo' ? '📷 Photo' : '🎤 Message vocal') + ' — ' + svc.name, '#/chat/' + mission.id);
   }
@@ -1467,22 +1678,9 @@ app.get('/api/games/config', (req, res) => {
   res.json({ quiz: getSetting('quiz_enabled') === '1', flipfizz: getSetting('flipfizz_enabled') === '1', kdo: getSetting('kdo_enabled') === '1',
     views: { quiz: gv('quiz'), flipfizz: gv('flipfizz'), kdo: gv('kdo') } });
 });
-app.get('/api/games/quiz', auth, (req, res) => {
-  if (getSetting('quiz_enabled') !== '1') return res.status(403).json({ error: 'Le quiz est désactivé.' });
-  const qs = db.prepare('SELECT id, question, options FROM quiz_questions WHERE active=1 ORDER BY RANDOM() LIMIT 5').all();
-  res.json(qs.map(q => ({ ...q, options: JSON.parse(q.options) })));
-});
-app.post('/api/games/quiz', auth, (req, res) => {
-  if (getSetting('quiz_enabled') !== '1') return res.status(403).json({ error: 'Le quiz est désactivé.' });
-  const answers = req.body.answers || {};
-  let score = 0, total = 0;
-  for (const [qid, ans] of Object.entries(answers)) {
-    const q = db.prepare('SELECT answer FROM quiz_questions WHERE id=?').get(qid);
-    if (q) { total++; if (q.answer === parseInt(ans, 10)) score++; }
-  }
-  db.prepare("INSERT INTO game_plays(user_id, game, score, result) VALUES(?,'quiz',?,?)").run(req.user.id, score, `${score}/${total}`);
-  res.json({ score, total });
-});
+// Le QCM autonome est fusionné dans les sessions concours synchronisées.
+app.get('/api/games/quiz', auth, (req, res) => res.status(410).json({ error: 'Le QCM est intégré aux sessions Quiz en direct. Attendez le prochain lancement.' }));
+app.post('/api/games/quiz', auth, (req, res) => res.status(410).json({ error: 'Le QCM est intégré aux sessions Quiz en direct.' }));
 
 // ----- QUIZ CONCOURS : sessions animées depuis le tableau de bord -----
 function quizAudienceOk(user) {
@@ -1520,12 +1718,13 @@ function quizTimeline(s) {
   const n = JSON.parse(s.qids || '[]').length;
   const startMs = s.started_ms || Date.parse(String(s.started_at || '').replace(' ', 'T') + 'Z') || Date.now();
   const q = s.time_per_q * 1000, pause = (s.interval_s == null ? 30 : s.interval_s) * 1000, C = q + pause;
-  const el = Date.now() - startMs;
-  const endMs = (n - 1) * C + q; // fermeture de la dernière question (pas de pause après)
-  if (!n || el >= endMs) return { over: true, n };
+  // Une pause fige une référence de temps serveur : aucun navigateur ne peut créer de dérive.
+  const el = s.paused_at ? Math.max(0, Number(s.paused_elapsed_ms || 0)) : Math.max(0, Date.now() - startMs);
+  const endMs = (n - 1) * C + q;
+  if (!n || el >= endMs) return { over: true, n, paused: !!s.paused_at };
   const i = Math.floor(el / C), t = el % C;
-  if (t < q) return { over: false, n, phase: 'question', index: i, remaining_ms: q - t, qStartMs: startMs + i * C };
-  return { over: false, n, phase: 'pause', index: i, next_in_ms: C - t };
+  if (t < q) return { over: false, n, paused: !!s.paused_at, phase: 'question', index: i, remaining_ms: q - t, qStartMs: startMs + i * C };
+  return { over: false, n, paused: !!s.paused_at, phase: 'pause', index: i, next_in_ms: C - t };
 }
 // Finalisation automatique (une seule fois) quand la série est finie
 function quizFinalize(s) {
@@ -1556,7 +1755,7 @@ function quizLiveFor(s, userId) {
   const mine = getAns(tl.index);
   const prev = tl.index > 0 ? getAns(tl.index - 1) : null;
   const okPrev = tl.index === 0 || !s.elimination || !!(prev && prev.correct === 1);
-  const base = { phase: tl.phase, index: tl.index, total: tl.n, time_per_q: s.time_per_q, interval_s: s.interval_s };
+  const base = { phase: tl.phase, index: tl.index, total: tl.n, time_per_q: s.time_per_q, interval_s: s.interval_s, paused: !!tl.paused };
   if (tl.phase === 'question') {
     const q = db.prepare('SELECT id, question, options FROM quiz_questions WHERE id=?').get(qids[tl.index]);
     return { ...base, remaining_ms: tl.remaining_ms,
@@ -1571,6 +1770,22 @@ function quizLiveFor(s, userId) {
     spectator_next: s.elimination ? !(mine && mine.correct === 1) : false };
 }
 
+function quizRecordView(sid, uid) {
+  db.prepare("INSERT INTO quiz_views(session_id,user_id,updated_at) VALUES(?,?,datetime('now')) ON CONFLICT(session_id,user_id) DO UPDATE SET updated_at=datetime('now')").run(sid, uid);
+}
+function quizLiveCounts(sid) {
+  const participants = db.prepare('SELECT COUNT(*) n FROM quiz_participants WHERE session_id=?').get(sid).n;
+  const watchers = db.prepare("SELECT COUNT(*) n FROM quiz_views v WHERE v.session_id=? AND v.updated_at >= datetime('now','-20 seconds')").get(sid).n;
+  const spectators = db.prepare("SELECT COUNT(*) n FROM quiz_views v LEFT JOIN quiz_participants p ON p.session_id=v.session_id AND p.user_id=v.user_id WHERE v.session_id=? AND v.updated_at >= datetime('now','-20 seconds') AND (p.id IS NULL OR p.status='elimine')").get(sid).n;
+  return { participants, spectators, watchers };
+}
+function archiveQuizSession(s, userId, reason) {
+  const participants = db.prepare('SELECT user_id,status,score,total_ms,current_q,finished_at FROM quiz_participants WHERE session_id=? ORDER BY id').all(s.id);
+  const answers = db.prepare('SELECT user_id,question_id,answer,correct,ms FROM quiz_answers WHERE session_id=? ORDER BY id').all(s.id);
+  const messages = db.prepare('SELECT user_id,from_admin,body,created_at FROM quiz_messages WHERE session_id=? ORDER BY id').all(s.id);
+  const snapshot = JSON.stringify({ reason, session: s, participants, answers, messages, archived_server_ms: Date.now() });
+  db.prepare('INSERT INTO quiz_archives(source_session_id,title,snapshot,archived_by) VALUES(?,?,?,?)').run(s.id, s.title, snapshot, userId || null);
+}
 // État du concours pour l'utilisateur connecté
 app.get('/api/games/concours', auth, (req, res) => {
   if (getSetting('quiz_enabled') !== '1') return res.json({ enabled: false });
@@ -1579,7 +1794,7 @@ app.get('/api/games/concours', auth, (req, res) => {
   let s = db.prepare("SELECT * FROM quiz_sessions WHERE status='en_cours' ORDER BY id DESC LIMIT 1").get();
   if (s && quizTimeline(s).over) { quizFinalize(s); s = null; } // série finie -> finalisation auto
   let p = null;
-  if (s) p = quizParticipant(s.id, req.user.id);
+  if (s) { if (s.status === 'en_cours') quizRecordView(s.id, req.user.id); p = quizParticipant(s.id, req.user.id); }
   else {
     // dernière session terminée à laquelle l'utilisateur a participé (résultats, gagnant…)
     s = db.prepare(`SELECT s.* FROM quiz_sessions s JOIN quiz_participants pp ON pp.session_id=s.id
@@ -1592,7 +1807,8 @@ app.get('/api/games/concours', auth, (req, res) => {
     enabled: true, allowed, audience,
     session: {
       id: s.id, title: s.title, status: s.status, nb_questions: JSON.parse(s.qids || '[]').length || s.nb_questions,
-      time_per_q: s.time_per_q, interval_s: s.interval_s, elimination: !!s.elimination, nb_winners: s.nb_winners, winners_designated: winnersDone
+      time_per_q: s.time_per_q, interval_s: s.interval_s, elimination: !!s.elimination, nb_winners: s.nb_winners, winners_designated: winnersDone,
+      paused: !!s.paused_at, counts: s.status === 'en_cours' ? quizLiveCounts(s.id) : { participants: db.prepare('SELECT COUNT(*) n FROM quiz_participants WHERE session_id=?').get(s.id).n, spectators: 0, watchers: 0 }
     },
     participant: p ? { status: p.status, score: p.score, current_q: p.current_q, photo_asked: !!p.photo_asked, photo_consent: p.photo_consent } : null,
     est_gagnant: !!(p && p.status === 'gagnant')
@@ -1615,29 +1831,15 @@ app.post('/api/games/concours/:id/rejoindre', auth, (req, res) => {
   res.json({ ok: true });
 });
 
-// Question en cours (le chrono est contrôlé côté serveur)
+// Compatibilité : la question renvoyée est la même pour tout le monde, basée sur la chronologie serveur.
 app.get('/api/games/concours/:id/question', auth, (req, res) => {
   const s = db.prepare("SELECT * FROM quiz_sessions WHERE id=? AND status='en_cours'").get(req.params.id);
-  if (!s) return res.status(404).json({ error: 'Ce quiz n\u2019est pas (ou plus) en cours.' });
-  let p = quizParticipant(s.id, req.user.id);
-  if (!p) return res.status(400).json({ error: 'Rejoignez d\u2019abord le quiz.' });
-  const limitMs = s.time_per_q * 1000;
-  // temps écoulé sur une question laissée ouverte -> fermeture automatique, enregistrée comme non répondue
-  if (p.status === 'en_lice' && p.q_started_at && Date.now() - p.q_started_at > limitMs + 2000)
-    p = quizRecord(s, p, -1, limitMs);
-  if (p.status !== 'en_lice')
-    return res.json({ done: true, status: p.status, score: p.score });
-  const qids = JSON.parse(s.qids || '[]');
-  if (!p.q_started_at) {
-    db.prepare('UPDATE quiz_participants SET q_started_at=? WHERE id=?').run(Date.now(), p.id);
-    p.q_started_at = Date.now();
-  }
-  const q = db.prepare('SELECT id, question, options FROM quiz_questions WHERE id=?').get(qids[p.current_q]);
-  res.json({
-    done: false, index: p.current_q, total: qids.length, time_per_q: s.time_per_q,
-    remaining_ms: Math.max(0, limitMs - (Date.now() - p.q_started_at)),
-    question: { id: q.id, question: q.question, options: JSON.parse(q.options).slice(0, 4) }
-  });
+  if (!s) return res.status(404).json({ error: 'Ce quiz n’est pas (ou plus) en cours.' });
+  quizRecordView(s.id, req.user.id);
+  const live = quizLiveFor(s, req.user.id);
+  if (!live || live.paused) return res.json({ done: false, paused: !!(live && live.paused), live });
+  if (live.phase !== 'question') return res.json({ done: false, waiting: true, ...live });
+  res.json({ done: false, ...live });
 });
 
 // Réponse : UNE seule par compte et par quiz, acceptée uniquement pendant la fenêtre de la question
@@ -1647,6 +1849,7 @@ app.post('/api/games/concours/:id/repondre', auth, (req, res) => {
   const s = db.prepare("SELECT * FROM quiz_sessions WHERE id=? AND status='en_cours'").get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Ce quiz n\u2019est pas (ou plus) en cours.' });
   const tl = quizTimeline(s);
+  if (tl.paused) return res.status(409).json({ error: 'Le quiz est momentanément en pause par l’administration.' });
   if (tl.over) { quizFinalize(s); return res.status(400).json({ error: 'Cette série de quiz est terminée.' }); }
   if (tl.phase !== 'question') return res.status(400).json({ error: 'Patientez : le prochain quiz arrive (décompte à l\u2019écran).' });
   const index = parseInt(req.body.index, 10);
@@ -1788,6 +1991,7 @@ A.use(auth, admin);
 // Chaque section du tableau de bord correspond à une permission (le PDG a toujours tout)
 const PERM_ROUTES = [
   [/^\/staff/, 'PDG'], // gestion de l'équipe : réservé au PDG
+  [/^\/pro-options/, 'PDG'], // options professionnelles : choix de direction
   [/^\/maintenance/, 'PDG'], // mode maintenance : réservé au PDG
   [/^\/journal/, 'journal'],
   [/^\/users\/\d+$/, 'comptes'], [/^\/users/, 'comptes'],
@@ -2205,6 +2409,32 @@ A.post('/pros/:id/reject', (req, res) => {
 });
 
 // SERVICES / CATÉGORIES / QUESTIONS
+// Options de compte professionnel — gestion exclusivement PDG, sans jeu de démonstration imposé.
+A.get('/pro-options', (req, res) => res.json(db.prepare('SELECT * FROM pro_account_options ORDER BY sort,id').all().map(parseOption)));
+A.post('/pro-options', (req, res) => {
+  const b = req.body || {}, key = String(b.opt_key || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 60);
+  const name = String(b.name || '').trim().slice(0, 120);
+  if (!key || !name) return res.status(400).json({ error: 'Clé technique et nom de l’option requis.' });
+  if (!['tous','particulier','entreprise'].includes(b.pro_type || 'tous')) return res.status(400).json({ error: 'Cible professionnelle invalide.' });
+  const cats = Array.isArray(b.categories) ? b.categories.map(Number).filter(Number.isInteger) : [];
+  const info = db.prepare('INSERT INTO pro_account_options(opt_key,name,description,categories,pro_type,required,active,suspended,sort) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(key, name, String(b.description || '').trim().slice(0, 1000), JSON.stringify(cats), b.pro_type || 'tous', b.required ? 1 : 0, b.active === false ? 0 : 1, b.suspended ? 1 : 0, Number.isFinite(Number(b.sort)) ? Number(b.sort) : 0);
+  res.status(201).json(parseOption(db.prepare('SELECT * FROM pro_account_options WHERE id=?').get(info.lastInsertRowid)));
+});
+A.put('/pro-options/:id', (req, res) => {
+  const old = db.prepare('SELECT * FROM pro_account_options WHERE id=?').get(req.params.id); if (!old) return res.status(404).json({ error: 'Option introuvable.' });
+  const b = req.body || {}, key = b.opt_key === undefined ? old.opt_key : String(b.opt_key).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 60);
+  const name = b.name === undefined ? old.name : String(b.name).trim().slice(0, 120);
+  if (!key || !name || !['tous','particulier','entreprise'].includes(b.pro_type === undefined ? old.pro_type : b.pro_type)) return res.status(400).json({ error: 'Option invalide.' });
+  const cats = b.categories === undefined ? old.categories : JSON.stringify(Array.isArray(b.categories) ? b.categories.map(Number).filter(Number.isInteger) : []);
+  try { db.prepare('UPDATE pro_account_options SET opt_key=?,name=?,description=?,categories=?,pro_type=?,required=?,active=?,suspended=?,sort=?,updated_at=datetime(\'now\') WHERE id=?')
+    .run(key, name, b.description === undefined ? old.description : String(b.description).trim().slice(0,1000), cats, b.pro_type === undefined ? old.pro_type : b.pro_type, b.required === undefined ? old.required : (b.required ? 1 : 0), b.active === undefined ? old.active : (b.active ? 1 : 0), b.suspended === undefined ? old.suspended : (b.suspended ? 1 : 0), b.sort === undefined ? old.sort : (Number(b.sort) || 0), old.id); }
+  catch (e) { if (/UNIQUE/.test(e.message)) return res.status(409).json({ error: 'Cette clé technique existe déjà.' }); throw e; }
+  res.json(parseOption(db.prepare('SELECT * FROM pro_account_options WHERE id=?').get(old.id)));
+});
+A.delete('/pro-options/:id', (req, res) => { const r = db.prepare('DELETE FROM pro_account_options WHERE id=?').run(req.params.id); if (!r.changes) return res.status(404).json({ error: 'Option introuvable.' }); res.json({ ok: true }); });
+
+// Catalogue complet (catégories + sous-catégories + services + tâches)
 A.get('/catalog', (req, res) => {
   const cats = db.prepare('SELECT * FROM service_categories ORDER BY sort,id').all();
   const subs = db.prepare('SELECT * FROM sous_categories ORDER BY sort,id').all();
@@ -2280,11 +2510,12 @@ A.post('/services', (req, res) => {
 A.put('/services/:id', (req, res) => {
   db.prepare(`UPDATE services SET name=COALESCE(?,name), keywords=COALESCE(?,keywords), active=COALESCE(?,active), sort=COALESCE(?,sort),
     category_id=COALESCE(?,category_id), sub_id=COALESCE(?,sub_id), popular=COALESCE(?,popular), seasonal=COALESCE(?,seasonal), cities=COALESCE(?,cities),
-    price_from=COALESCE(?,price_from), price_prefix=COALESCE(?,price_prefix), price_show=COALESCE(?,price_show) WHERE id=?`)
+    price_from=COALESCE(?,price_from), price_prefix=COALESCE(?,price_prefix), price_show=COALESCE(?,price_show), price_updated_at=CASE WHEN ? IS NOT NULL OR ? IS NOT NULL OR ? IS NOT NULL THEN datetime('now') ELSE price_updated_at END WHERE id=?`)
     .run(req.body.name || null, req.body.keywords ?? null, req.body.active ?? null, req.body.sort ?? null,
       req.body.category_id || null, req.body.sub_id || null, req.body.popular ?? null, req.body.seasonal ?? null,
       req.body.cities !== undefined ? JSON.stringify(req.body.cities) : null,
-      req.body.price_from ?? null, req.body.price_prefix || null, req.body.price_show ?? null, req.params.id);
+      req.body.price_from ?? null, req.body.price_prefix || null, req.body.price_show ?? null,
+      req.body.price_from ?? null, req.body.price_prefix ?? null, req.body.price_show ?? null, req.params.id);
   // Cohérence de l'ordre des populaires : ajout → en fin de liste ; retrait → ordre effacé
   if (req.body.popular === 1) {
     const s = db.prepare('SELECT popular_sort FROM services WHERE id=?').get(req.params.id);
@@ -2559,7 +2790,9 @@ A.get('/settings', (req, res) => {
   const keys = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
     'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
     'pro_doc_particulier', 'pro_doc_entreprise',
-    'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise'];
+    'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise',
+    'dispatch_initial_alert_count', 'dispatch_expand_alert_count', 'dispatch_expand_strategy',
+    'chat_text_limit', 'chat_audio_max_seconds', 'chat_image_limit', 'chat_audio_enabled', 'chat_image_enabled', 'file_recovery_days'];
   const out = {};
   keys.forEach(k => out[k] = getSetting(k));
   res.json(out);
@@ -2568,7 +2801,9 @@ A.put('/settings', (req, res) => {
   const allowed = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
     'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
     'pro_doc_particulier', 'pro_doc_entreprise',
-    'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise'];
+    'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise',
+    'dispatch_initial_alert_count', 'dispatch_expand_alert_count', 'dispatch_expand_strategy',
+    'chat_text_limit', 'chat_audio_max_seconds', 'chat_image_limit', 'chat_audio_enabled', 'chat_image_enabled', 'file_recovery_days'];
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!allowed.includes(k)) continue;
     if (k === 'admin_font_size') { // taille du tableau de bord : réservée au PDG
@@ -2577,6 +2812,11 @@ A.put('/settings', (req, res) => {
     }
     if (k === 'commission_rate') { const r = parseFloat(v); if (isNaN(r) || r < 0 || r > 100) return res.status(400).json({ error: 'Taux de commission invalide (0 à 100).' }); }
     if (k === 'dispatch_wait_seconds') { const s = parseInt(v, 10); if (isNaN(s) || s < 15 || s > 3600) return res.status(400).json({ error: 'Délai d\u2019attente invalide (15 à 3600 secondes).' }); }
+    if (['dispatch_initial_alert_count', 'dispatch_expand_alert_count'].includes(k)) { const n = parseInt(v, 10); if (isNaN(n) || n < 1 || n > 50) return res.status(400).json({ error: 'Taille de vague invalide (1 à 50 professionnels).' }); }
+    if (k === 'dispatch_expand_strategy' && !['vagues'].includes(String(v))) return res.status(400).json({ error: 'Stratégie d\u2019alerte invalide.' });
+    if (['chat_text_limit', 'chat_image_limit'].includes(k)) { const n = parseInt(v, 10); if (isNaN(n) || n < 0 || n > 500) return res.status(400).json({ error: 'Limite de messagerie invalide.' }); }
+    if (k === 'chat_audio_max_seconds') { const n = parseInt(v, 10); if (isNaN(n) || n < 1 || n > 120) return res.status(400).json({ error: 'Durée vocale invalide (1 à 120 secondes).' }); }
+    if (k === 'file_recovery_days') { const n = parseInt(v, 10); if (isNaN(n) || n < 0 || n > 365) return res.status(400).json({ error: 'Délai de récupération invalide (0 à 365 jours).' }); }
     if (k === 'pub_max_actives') { const n = parseInt(v, 10); if (isNaN(n) || n < 1 || n > 200) return res.status(400).json({ error: 'Nombre d\u2019emplacements publicitaires invalide (1 à 200).' }); }
     const ancienneValeur = getSetting(k);
     setSetting(k, v);
@@ -2733,7 +2973,8 @@ A.delete('/quiz/:id', (req, res) => { db.prepare('DELETE FROM quiz_questions WHE
 // ----- Sessions de quiz (concours) : tout est piloté ici -----
 A.get('/quiz-sessions', (req, res) => {
   const list = db.prepare(`SELECT s.*, (SELECT COUNT(*) FROM quiz_participants p WHERE p.session_id=s.id) AS participants,
-    (SELECT COUNT(*) FROM quiz_participants p WHERE p.session_id=s.id AND p.status='gagnant') AS gagnants
+    (SELECT COUNT(*) FROM quiz_participants p WHERE p.session_id=s.id AND p.status='gagnant') AS gagnants,
+    (SELECT COUNT(*) FROM quiz_views v LEFT JOIN quiz_participants p ON p.session_id=v.session_id AND p.user_id=v.user_id WHERE v.session_id=s.id AND v.updated_at >= datetime('now','-20 seconds') AND (p.id IS NULL OR p.status='elimine')) AS spectators
     FROM quiz_sessions s ORDER BY s.id DESC`).all();
   res.json(list);
 });
@@ -2769,7 +3010,7 @@ A.put('/quiz-sessions/:id', (req, res) => {
 A.delete('/quiz-sessions/:id', (req, res) => {
   const s = db.prepare('SELECT * FROM quiz_sessions WHERE id=?').get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Session introuvable.' });
-  if (s.status === 'en_cours') return res.status(400).json({ error: 'Arrêtez d\u2019abord ce quiz avant de le supprimer.' });
+  if (s.status !== 'brouillon') return res.status(400).json({ error: 'Les sessions déjà lancées sont conservées dans l’historique. Utilisez « Rejouer » pour archiver et réinitialiser.' });
   db.prepare('DELETE FROM quiz_answers WHERE session_id=?').run(s.id);
   db.prepare('DELETE FROM quiz_participants WHERE session_id=?').run(s.id);
   db.prepare('DELETE FROM quiz_messages WHERE session_id=?').run(s.id);
@@ -2786,21 +3027,40 @@ A.post('/quiz-sessions/:id/lancer', (req, res) => {
   const qids = db.prepare('SELECT id FROM quiz_questions WHERE active=1 ORDER BY RANDOM() LIMIT ?').all(s.nb_questions).map(q => q.id);
   if (qids.length < s.nb_questions)
     return res.status(400).json({ error: `Pas assez de questions actives (${qids.length} disponibles, ${s.nb_questions} demandées). Ajoutez des questions.` });
-  db.prepare("UPDATE quiz_sessions SET status='en_cours', qids=?, started_at=datetime('now'), started_ms=? WHERE id=?").run(JSON.stringify(qids), Date.now(), s.id);
+  db.prepare("UPDATE quiz_sessions SET status='en_cours', qids=?, started_at=datetime('now'), started_ms=?, paused_elapsed_ms=NULL, paused_at=NULL WHERE id=?").run(JSON.stringify(qids), Date.now(), s.id);
   res.json({ ok: true });
 });
 // Rejouer / Reprendre : réinitialise les réponses et les statuts, et relance la même série
 A.post('/quiz-sessions/:id/rejouer', (req, res) => {
   const s = db.prepare('SELECT * FROM quiz_sessions WHERE id=?').get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Session introuvable.' });
-  if (s.status === 'brouillon') return res.status(400).json({ error: 'Lancez d\u2019abord cette session.' });
-  if (db.prepare("SELECT COUNT(*) n FROM quiz_sessions WHERE status='en_cours' AND id!=?").get(s.id).n)
-    return res.status(400).json({ error: 'Un autre quiz est déjà en cours. Arrêtez-le d\u2019abord.' });
-  if (getSetting('quiz_enabled') !== '1') return res.status(400).json({ error: 'Activez d\u2019abord le quiz (bouton Activation ci-dessus).' });
+  if (s.status === 'brouillon') return res.status(400).json({ error: 'Lancez d’abord cette session.' });
+  if (!(req.body || {}).confirmed) return res.status(400).json({ error: 'Confirmez la réinitialisation : l’historique sera archivé avant le redémarrage.' });
+  if (db.prepare("SELECT COUNT(*) n FROM quiz_sessions WHERE status='en_cours' AND id!=?").get(s.id).n) return res.status(400).json({ error: 'Un autre quiz est déjà en cours. Arrêtez-le d’abord.' });
+  if (getSetting('quiz_enabled') !== '1') return res.status(400).json({ error: 'Activez d’abord le quiz (bouton Activation ci-dessus).' });
+  archiveQuizSession(s, req.user.id, 'Réinitialisation confirmée');
   db.prepare('DELETE FROM quiz_answers WHERE session_id=?').run(s.id);
   db.prepare('DELETE FROM quiz_participants WHERE session_id=?').run(s.id);
-  db.prepare("UPDATE quiz_sessions SET status='en_cours', started_at=datetime('now'), started_ms=?, ended_at=NULL WHERE id=?").run(Date.now(), s.id);
-  res.json({ ok: true });
+  db.prepare('DELETE FROM quiz_messages WHERE session_id=?').run(s.id);
+  db.prepare('DELETE FROM quiz_views WHERE session_id=?').run(s.id);
+  db.prepare("UPDATE quiz_sessions SET status='en_cours', started_at=datetime('now'), started_ms=?, ended_at=NULL, paused_elapsed_ms=NULL, paused_at=NULL WHERE id=?").run(Date.now(), s.id);
+  res.json({ ok: true, archived: true });
+});
+A.post('/quiz-sessions/:id/pause', (req, res) => {
+  const s = db.prepare("SELECT * FROM quiz_sessions WHERE id=? AND status='en_cours'").get(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Quiz en cours introuvable.' });
+  if (s.paused_at) return res.status(409).json({ error: 'Le quiz est déjà en pause.' });
+  const elapsed = Math.max(0, Date.now() - Number(s.started_ms || Date.now()));
+  db.prepare("UPDATE quiz_sessions SET paused_elapsed_ms=?, paused_at=datetime('now') WHERE id=?").run(elapsed, s.id);
+  res.json({ ok: true, paused: true });
+});
+A.post('/quiz-sessions/:id/reprendre', (req, res) => {
+  const s = db.prepare("SELECT * FROM quiz_sessions WHERE id=? AND status='en_cours'").get(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Quiz en cours introuvable.' });
+  if (!s.paused_at) return res.status(409).json({ error: 'Le quiz n’est pas en pause.' });
+  const elapsed = Math.max(0, Number(s.paused_elapsed_ms || 0));
+  db.prepare('UPDATE quiz_sessions SET started_ms=?, paused_elapsed_ms=NULL, paused_at=NULL WHERE id=?').run(Date.now() - elapsed, s.id);
+  res.json({ ok: true, paused: false });
 });
 A.post('/quiz-sessions/:id/arreter', (req, res) => {
   const s = db.prepare('SELECT * FROM quiz_sessions WHERE id=?').get(req.params.id);
@@ -2834,9 +3094,11 @@ A.get('/quiz-sessions/:id', (req, res) => {
     const stats = db.prepare('SELECT COUNT(*) n, SUM(correct) ok FROM quiz_answers WHERE session_id=? AND question_id=?').get(s.id, qid);
     return { ...q, options: JSON.parse(q.options), reponses: stats.n || 0, bonnes: stats.ok || 0 };
   }).filter(Boolean);
-  res.json({ ...s, elimination: !!s.elimination, participants, messages, questions });
+  res.json({ ...s, elimination: !!s.elimination, counts: s.status === 'en_cours' ? quizLiveCounts(s.id) : { participants: participants.length, spectators: 0, watchers: 0 }, participants, messages, questions });
 });
-A.post('/quiz-sessions/:id/gagnants', (req, res) => {
+A.get('/quiz-archives', (req, res) => res.json(db.prepare('SELECT id,source_session_id,title,archived_at,archived_by FROM quiz_archives ORDER BY id DESC LIMIT 200').all()));
+A.get('/quiz-archives/:id', (req, res) => { const a = db.prepare('SELECT * FROM quiz_archives WHERE id=?').get(req.params.id); if (!a) return res.status(404).json({ error: 'Archive introuvable.' }); res.json({ ...a, snapshot: JSON.parse(a.snapshot) }); });
+A.post('/quiz-sessions/:id/gagnants',  (req, res) => {
   const s = db.prepare('SELECT * FROM quiz_sessions WHERE id=?').get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Session introuvable.' });
   if (s.status !== 'terminee') return res.status(400).json({ error: 'Arrêtez d\u2019abord la session.' });
@@ -3050,23 +3312,88 @@ ${texts || 'Aucun texte.'}
   }
   sendDownload(res, zipStore(entries), `klean-services_${safeDownloadStem(client.name)}_echanges.zip`, 'application/zip');
 });
+// Cycle de vie vérifiable des fichiers : les références DB restent conservées, seul le binaire est
+// réellement purgé après la période de récupération. Toutes ces routes sont derrière permission « sécurité ».
+function fileRecord(name) { return db.prepare('SELECT * FROM file_records WHERE name=?').get(name); }
+function ensureFileRecord(name) {
+  let r = fileRecord(name); if (r) return r;
+  const disk = path.join(UPLOAD_DIR, name); const size = fs.existsSync(disk) ? fs.statSync(disk).size : 0;
+  db.prepare("INSERT OR IGNORE INTO file_records(name, size, state, note) VALUES(?,?,'active','Référencé avant l’activation du registre')").run(name, size);
+  return fileRecord(name);
+}
+async function purgeStoredFile(name, note) {
+  const clean = uploadName('/uploads/' + name); if (!clean) throw new Error('Nom de fichier invalide.');
+  try { fs.unlinkSync(path.join(UPLOAD_DIR, clean)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (persist.enabled()) await persist.deleteFile(clean).catch(() => {});
+  db.prepare("UPDATE file_records SET state='purged', deleted_at=datetime('now'), delete_after=NULL, note=COALESCE(?,note), updated_at=datetime('now') WHERE name=?").run(note || null, clean);
+}
+A.get('/files/records', (req, res) => {
+  const state = ['all','active','hidden','archived','recovery','purged'].includes(String(req.query.state || 'all')) ? String(req.query.state || 'all') : 'all';
+  const q = String(req.query.q || '').trim().slice(0, 120);
+  const where = [], args = [];
+  if (state !== 'all') where.push('f.state=?'), args.push(state);
+  if (q) { where.push("(lower(f.name) LIKE ? OR lower(COALESCE(u.name,'')) LIKE ?)"), args.push('%' + q.toLowerCase() + '%', '%' + q.toLowerCase() + '%'); }
+  const sql = `SELECT f.*, u.name uploader_name FROM file_records f LEFT JOIN users u ON u.id=f.uploaded_by ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY f.id DESC LIMIT 300`;
+  res.json({ records: db.prepare(sql).all(...args), recovery_days: settingInt('file_recovery_days', 7, 0, 365) });
+});
+A.post('/files/:name/state', async (req, res) => {
+  const name = uploadName('/uploads/' + req.params.name);
+  const state = String((req.body || {}).state || '');
+  const note = String((req.body || {}).note || '').trim().slice(0, 500) || null;
+  if (!name || !['active','hidden','archived','recovery','purged'].includes(state)) return res.status(400).json({ error: 'État de fichier invalide.' });
+  const current = ensureFileRecord(name);
+  if (state === 'purged') { await purgeStoredFile(name, note || 'Suppression demandée depuis le tableau de bord'); return res.json({ ok: true, state: 'purged' }); }
+  if (state === 'recovery') {
+    const days = settingInt('file_recovery_days', 7, 0, 365);
+    const after = new Date(Date.now() + days * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+    db.prepare("UPDATE file_records SET state='recovery', archived_at=COALESCE(archived_at,datetime('now')), delete_after=?, note=?, updated_at=datetime('now') WHERE name=?").run(after, note, name);
+  } else {
+    db.prepare("UPDATE file_records SET state=?, hidden_at=CASE WHEN ?='hidden' THEN datetime('now') ELSE hidden_at END, archived_at=CASE WHEN ?='archived' THEN datetime('now') ELSE archived_at END, delete_after=NULL, note=?, updated_at=datetime('now') WHERE name=?").run(state, state, state, note, name);
+  }
+  res.json({ ok: true, state, record: fileRecord(name), previous_state: current.state });
+});
+A.get('/files/records/download', async (req, res) => {
+  const requested = String(req.query.names || '').split(',').map(n => uploadName('/uploads/' + n)).filter(Boolean);
+  const all = String(req.query.all || '') === '1';
+  const names = all ? db.prepare("SELECT name FROM file_records WHERE state!='purged' ORDER BY id DESC LIMIT 300").all().map(r => r.name) : [...new Set(requested)].slice(0, 200);
+  if (!names.length) return res.status(400).json({ error: 'Sélectionnez au moins un fichier disponible.' });
+  const entries = []; let bytes = 0;
+  for (const name of names) {
+    const r = fileRecord(name); if (!r || r.state === 'purged') continue;
+    const data = await storedUpload(name); if (!data) continue;
+    bytes += data.length; if (bytes > 200 * 1024 * 1024) return res.status(413).json({ error: 'Archive trop volumineuse (maximum 200 Mo). Réduisez la sélection.' });
+    entries.push({ name, data });
+  }
+  if (!entries.length) return res.status(404).json({ error: 'Aucun binaire disponible dans cette sélection.' });
+  sendDownload(res, zipStore(entries), 'klean-services-fichiers-selection.zip', 'application/zip');
+});
+async function purgeRecoveryFiles() {
+  const due = db.prepare("SELECT name FROM file_records WHERE state='recovery' AND delete_after IS NOT NULL AND delete_after <= datetime('now')").all();
+  for (const r of due) await purgeStoredFile(r.name, 'Délai de récupération expiré');
+  return due.length;
+}
+
 // Compatibilité API : l'ancien inventaire technique reste disponible, même si le dashboard utilise désormais le classement par client.
 A.get('/files', (req, res) => { const files = physicalFilesList(); res.json({ files: files.slice(0, 300), total: files.length, total_size: files.reduce((s, f) => s + f.size, 0), retention_days: parseInt(getSetting('file_retention_days', '90'), 10) }); });
-A.post('/files/cleanup', (req, res) => res.json({ deleted: cleanupFiles() }));
+A.post('/files/cleanup', async (req, res) => res.json({ deleted: await purgeRecoveryFiles(), legacy_deleted: cleanupFiles() }));
 
 app.use('/api/admin', A);
 
 // Nettoyage automatique des fichiers (durée configurable par l'administration)
 function cleanupFiles() {
+  // Compatibilité : les anciens fichiers non encore inscrits restent soumis à la durée historique.
+  // Les fichiers inscrits suivent le cycle active/archived/recovery et ne sont jamais supprimés sans délai.
   const days = parseInt(getSetting('file_retention_days', '90'), 10);
   if (!days || days < 1) return 0;
-  const cutoff = Date.now() - days * 86400000;
-  let deleted = 0;
+  const cutoff = Date.now() - days * 86400000; let deleted = 0;
   for (const f of fs.readdirSync(UPLOAD_DIR)) {
+    const tracked = fileRecord(f); if (tracked) continue;
     const fp = path.join(UPLOAD_DIR, f);
     try { if (fs.statSync(fp).mtimeMs < cutoff) { fs.unlinkSync(fp); deleted++; } } catch {}
   }
-  if (persist.enabled()) persist.deleteFilesOlderThan(days).catch(() => { });
+  purgeRecoveryFiles().catch(() => {});
+  // Les binaires PostgreSQL inscrits sont supprimés individuellement par purgeStoredFile après récupération.
+  // On ne lance pas de purge globale distante, afin de ne pas contourner l’archive/récupération.
   return deleted;
 }
 setInterval(cleanupFiles, 12 * 3600 * 1000);
@@ -3077,7 +3404,9 @@ for (const m of db.prepare("SELECT id FROM missions WHERE status='recherche'").a
   if (offered) {
     const wait = Math.max(15, parseInt(getSetting('dispatch_wait_seconds', '60'), 10)) * 1000;
     dispatchTimers.set(m.id, setTimeout(() => {
+      const stale = db.prepare("SELECT pro_id FROM mission_candidates WHERE mission_id=? AND status='offered'").all(m.id);
       db.prepare("UPDATE mission_candidates SET status='expired' WHERE mission_id=? AND status='offered'").run(m.id);
+      stale.forEach(row => clearAlertStatus(row.pro_id));
       offerNext(m.id);
     }, wait));
   } else offerNext(m.id);

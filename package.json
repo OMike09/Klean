@@ -3,17 +3,20 @@
   "version": "2.0.0",
   "main": "start.js",
   "scripts": {
-    "start": "node start.js"
+    "start": "node start.js",
+    "test:update10": "node test-update-10.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "Klean-Services CI — plateforme de mise en relation de services",
+  "description": "Klean Services — plateforme de mise en relation de services",
   "dependencies": {
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
     "multer": "^2.4.0",
-    "pg": "^8.23.1"
+    "music-metadata": "^11.16.1",
+    "pg": "^8.23.1",
+    "web-push": "^3.6.7"
   },
   "engines": {
     "node": ">=18"

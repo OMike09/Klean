@@ -67,7 +67,8 @@ async function deleteFilesOlderThan(days) {
   const r = await pool.query("DELETE FROM ks_files WHERE created_at < now() - ($1 || ' days')::interval", [String(days)]);
   return r.rowCount;
 }
+async function deleteFile(name) { const r = await pool.query('DELETE FROM ks_files WHERE name=$1', [name]); return r.rowCount; }
 
 async function query(sql, params) { return pool.query(sql, params); }
 
-module.exports = { init, enabled, restoreDb, backupDb, saveFile, loadFile, deleteFilesOlderThan, query };
+module.exports = { init, enabled, restoreDb, backupDb, saveFile, loadFile, deleteFile, deleteFilesOlderThan, query };

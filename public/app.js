@@ -20,10 +20,16 @@ let currentSupport = null;  // conversation directe avec Klean Services
 
 /* ---------- Utilitaires ---------- */
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// Les fichiers privés sont demandés avec la session courante : une URL /uploads connue seule ne suffit pas.
+function mediaUrl(src) {
+  const s = String(src || '');
+  if (!s || !s.startsWith('/uploads/') || !TOKEN) return s;
+  return s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+}
 function fmtDate(s) { if (!s) return ''; const d = new Date(s.replace(' ', 'T') + (s.includes('Z') || s.includes('+') ? '' : 'Z')); return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function fmtFCFA(n) { return (n ?? 0).toLocaleString('fr-FR') + ' FCFA'; }
 function initials(name) { return (name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(); }
-function avatar(u, cls) { return `<div class="avatar ${cls || ''}">${u && u.photo ? `<img src="${esc(u.photo)}" alt="">` : esc(initials(u && u.name))}</div>`; }
+function avatar(u, cls) { return `<div class="avatar ${cls || ''}">${u && u.photo ? `<img src="${esc(mediaUrl(u.photo))}" alt="">` : esc(initials(u && u.name))}</div>`; }
 // iPhone Safari and Android do not necessarily record in the same container.
 // Prefer a format the browser explicitly supports instead of forcing WebM.
 function audioRecorderOptions() {
@@ -327,7 +333,7 @@ function adCardHtml(a) {
     ? `<video src="${esc(a.file)}" autoplay muted loop playsinline controls preload="metadata"
          style="display:block;width:100%;max-height:150px;border-radius:8px;margin-top:6px;background:#000;object-fit:contain"></video>`
     : a.file && a.type === 'image'
-      ? `<img src="${esc(a.file)}" alt="" style="display:block;width:100%;max-height:120px;border-radius:8px;margin-top:6px;object-fit:cover">`
+      ? `<img src="${esc(mediaUrl(a.file))}" alt="" style="display:block;width:100%;max-height:120px;border-radius:8px;margin-top:6px;object-fit:cover">`
       : '';
   return `<div>
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -659,7 +665,7 @@ routes.mission = async (id) => {
         <div class="muted small">${other.rating ? `<span class="star-inline">★ ${other.rating}</span> (${other.reviews_count} avis)` : 'Nouveau'}
         ${other.phone ? ` • 📞 <a href="tel:${esc(other.phone)}">${esc(other.phone)}</a>` : ''}</div></div>
       ${isClient && m.pro ? '<span class="mi-arr">›</span>' : ''}</div>
-      ${(m.pro || isPro) && !['annulee'].includes(m.status) ? `<button class="btn sec sm mt" onclick="nav('#/chat/${m.id}')">💬 Ouvrir la discussion ${m.unread_messages ? `<span class="badge">${m.unread_messages}</span>` : ''}</button>` : ''}
+      ${(m.pro || isPro) && !['annulee','payee','litige'].includes(m.status) ? `<button class="btn sec sm mt" onclick="nav('#/chat/${m.id}')">💬 Ouvrir la discussion ${m.unread_messages ? `<span class="badge">${m.unread_messages}</span>` : ''}</button>` : (m.status === 'payee' ? '<div class="small muted mt">🔒 Conversation clôturée après validation du paiement. Pour toute question, utilisez Contacter Klean Services.</div>' : '')}
     </div>` : '';
 
   /* Candidats (client, pendant la recherche) */
@@ -763,8 +769,8 @@ routes.mission = async (id) => {
       <div class="small mt">📍 ${esc(m.address || '')}</div>
       ${m.detail.length ? `<div class="sec-title" style="margin-top:14px">Détails</div>` + m.detail.map(d => `<div class="small"><b>${esc(d.label)} :</b> ${esc(d.value)}</div>`).join('') : ''}
       ${m.description ? `<div class="small mt"><b>Message :</b> ${esc(m.description)}</div>` : ''}
-      ${m.photos.length ? `<div class="photo-strip">${m.photos.map(p => `<img src="${esc(p)}" onclick="A.viewPhoto('${esc(p)}')" onerror="this.classList.add('msg-missing')">`).join('')}</div>` : ''}
-      ${m.audio ? `<div class="mt"><audio controls src="${esc(m.audio)}"></audio></div>` : ''}
+      ${m.photos.length ? `<div class="photo-strip">${m.photos.map(p => `<img src="${esc(mediaUrl(p))}" onclick="A.viewPhoto('${esc(p)}')" onerror="this.classList.add('msg-missing')">`).join('')}</div>` : ''}
+      ${m.audio ? `<div class="mt"><audio controls src="${esc(mediaUrl(m.audio))}"></audio></div>` : ''}
     </div>
     ${actions}
     ${contactCard}
@@ -793,19 +799,25 @@ routes.chat = async (id) => {
   catch (e) { toast(e.message, 'err'); back(); return; }
   currentChat = parseInt(id, 10);
   const other = m.role === 'client' ? (m.pro ? m.pro.name : 'Professionnel') : m.client.name;
+  const chat = m.chat || { locked: false, text_limit: 30, image_limit: 3, audio_max_seconds: 20, audio_enabled: true, image_enabled: true, used_text: 0, used_images: 0 };
+  A._audioMaxSec = chat.audio_max_seconds || 20;
+  const readonly = !!chat.locked;
   $app.innerHTML = `
   ${header(other + ' — ' + m.service, { bell: false })}
   <div class="chat-wrap">
     <div class="chat-msgs" id="chat-msgs">
       <div class="center muted small">Conversation liée à la mission n° ${esc(m.code)}</div>
+      ${readonly ? '<div class="status-banner info">🔒 Cette conversation est en lecture seule. La prestation est clôturée ; contactez Klean Services en cas de besoin.</div>' : ''}
       ${msgs.map(x => chatBubble(x)).join('')}
     </div>
+    ${readonly ? `<div class="chat-input"><button class="btn sec" onclick="nav('#/contact')">📩 Contacter Klean Services</button></div>` : `<div class="small muted" style="padding:4px 14px 0">Texte : ${chat.used_text || 0}/${chat.text_limit} • Images : ${chat.used_images || 0}/${chat.image_limit} • Vocal : ${chat.audio_max_seconds}s max</div>
+    <div class="chat-presets"><button type="button" onclick="A.chatPreset('Bonjour, je suis en route.')">Je suis en route</button><button type="button" onclick="A.chatPreset('Je suis bien arrivé(e).')">Je suis arrivé(e)</button><button type="button" onclick="A.chatPreset('Merci, à bientôt.')">Merci</button></div>
     <div class="chat-input">
-      <button class="icon-btn" onclick="A.chatPhoto(${m.id})" title="Envoyer une photo">📷</button>
-      <button class="icon-btn" id="chat-rec" onclick="A.chatAudio(${m.id})" title="Message vocal">🎤</button>
-      <textarea id="chat-text" rows="1" placeholder="Votre message…"></textarea>
+      ${chat.image_enabled ? `<button class="icon-btn" onclick="A.chatPhoto(${m.id})" title="Envoyer une photo">📷</button>` : ''}
+      ${chat.audio_enabled ? `<button class="icon-btn" id="chat-rec" onclick="A.chatAudio(${m.id})" title="Message vocal">🎤</button>` : ''}
+      <textarea id="chat-text" rows="1" maxlength="2000" placeholder="Votre message…"></textarea>
       <button class="icon-btn main" onclick="A.chatSend(${m.id})">➤</button>
-    </div>
+    </div>`}
     <input type="file" id="file-input" accept="image/*" style="display:none">
   </div>`;
   const box = document.getElementById('chat-msgs');
@@ -818,8 +830,8 @@ function chatBubble(x) {
   const me = USER && x.sender_id === USER.id;
   let inner = '';
   if (x.type === 'text') inner = esc(x.content);
-  if (x.type === 'photo') inner = `<img src="${esc(x.file)}" onclick="A.viewPhoto('${esc(x.file)}')" onerror="this.outerHTML='<i>📷 Photo expirée</i>'">` + (x.content ? `<div>${esc(x.content)}</div>` : '');
-  if (x.type === 'audio') inner = `<audio controls src="${esc(x.file)}"></audio>`;
+  if (x.type === 'photo') inner = `<img src="${esc(mediaUrl(x.file))}" onclick="A.viewPhoto('${esc(x.file)}')" onerror="this.outerHTML='<i>📷 Photo expirée</i>'">` + (x.content ? `<div>${esc(x.content)}</div>` : '');
+  if (x.type === 'audio') inner = `<audio controls src="${esc(mediaUrl(x.file))}"></audio>`;
   return `<div class="bubble ${me ? 'me' : 'them'}">${inner}<div class="b-time">${fmtDate(x.created_at)}</div></div>`;
 }
 function appendChatMsg(x) {
@@ -833,7 +845,7 @@ function appendChatMsg(x) {
 function supportBubble(x) {
   const mine = USER && x.sender_id === USER.id;
   const label = mine ? 'Vous' : 'Klean Services';
-  const body = x.type === 'audio' ? `<audio controls src="${esc(x.file)}"></audio>` : esc(x.content || '');
+  const body = x.type === 'audio' ? `<audio controls src="${esc(mediaUrl(x.file))}"></audio>` : esc(x.content || '');
   return `<div class="bubble ${mine ? 'me' : 'them'}"><div class="small" style="font-weight:700;margin-bottom:3px">${label}${x.is_auto ? ' • réponse automatique' : ''}</div>${body}<div class="b-time">${fmtDate(x.created_at)}</div></div>`;
 }
 function appendSupportMsg(x) {
@@ -957,6 +969,7 @@ routes.account = async () => {
         <div class="menu-item" onclick="nav('#/addresses')"><span class="mi-ic">📍</span>Mes adresses<span class="mi-arr">›</span></div>
         <div class="menu-item" onclick="nav('#/payments')"><span class="mi-ic">💳</span>Paiements<span class="mi-arr">›</span></div>
         <div class="menu-item" onclick="nav('#/notifications')"><span class="mi-ic">🔔</span>Notifications<span class="mi-arr">›</span></div>
+        <div class="menu-item" onclick="A.enablePush()"><span class="mi-ic">📲</span>Notifications sur cet appareil<span class="mi-arr">›</span></div>
         <div class="menu-item" onclick="nav('#/security')"><span class="mi-ic">🔒</span>Sécurité<span class="mi-arr">›</span></div>
         <div class="menu-item" onclick="nav('#/settings')"><span class="mi-ic">⚙️</span>Paramètres<span class="mi-arr">›</span></div>
       </div>
@@ -1069,17 +1082,20 @@ routes.pro = async () => {
 };
 
 async function renderProDashboard() {
-  let d, cc = null;
+  let d, cc = null, proOptions = [];
   try { d = await api('/pro/dashboard'); } catch (e) { toast(e.message, 'err'); return; }
   try { cc = await api('/commerce/config'); } catch { } // une option désactivée n'est pas proposée
+  try { proOptions = await api('/pro-options'); } catch { }
   const upcoming = d.missions.filter(m => ['confirmee', 'acceptee'].includes(m.status));
+  const avState = d.availability_status || (d.available ? 'disponible' : 'indisponible');
+  const avLabel = { disponible: '🟢 Disponible', alerte: '🔔 Alerté — demande à traiter', en_mission: '🧰 En mission', indisponible: '⚪ Indisponible', suspendu: '🚫 Suspendu' }[avState] || avState;
   $app.innerHTML = `${header('Mon espace professionnel')}
   <div class="content">
     ${USER.kp_code ? `<div class="card" style="text-align:center;padding:10px"><span class="muted small">Votre code professionnel</span><div class="bold" style="font-size:20px;letter-spacing:2px">${esc(USER.kp_code)}</div></div>` : ''}
     <div class="avail-toggle" onclick="A.toggleAvail(${d.available ? 0 : 1})">
       <div class="dot ${d.available ? 'on' : ''}"></div>
-      <div class="grow"><div class="bold">${d.available ? '🟢 Disponible' : '⚪ Indisponible'}</div>
-      <div class="muted small">${d.available ? 'Vous recevez les nouvelles missions.' : 'Touchez pour redevenir disponible et recevoir des missions.'}</div></div>
+      <div class="grow"><div class="bold">${avLabel}</div>
+      <div class="muted small">${avState === 'en_mission' ? 'Vous ne recevrez aucune nouvelle demande jusqu’à la clôture de votre mission.' : d.available ? 'Vous recevez les nouvelles missions.' : 'Touchez pour redevenir disponible et recevoir des missions.'}</div></div>
     </div>
     <div class="stat-grid">
       <div class="stat"><div class="v">${d.stats.en_cours}</div><div class="l">Missions en cours</div></div>
@@ -1088,6 +1104,7 @@ async function renderProDashboard() {
       <div class="stat"><div class="v">${d.stats.rating ? d.stats.rating + ' ★' : '—'}</div><div class="l">${d.stats.reviews} évaluation(s)</div></div>
     </div>
     <div class="muted small center mb">Commission Klean Services : ${d.stats.commission_rate}% par mission</div>
+    ${proOptions.length ? `<div class="sec-title">🧩 Mes options professionnelles</div><div class="card">${proOptions.map(o => `<div class="option-pro"><div class="grow"><div class="bold">${esc(o.name)} ${o.required ? '<span class="req">Obligatoire</span>' : '<span class="muted small">Facultative</span>'}</div><div class="small muted">${esc(o.description || 'Option proposée par Klean Services.')}</div><textarea id="pro-opt-${o.id}" rows="2" placeholder="Votre réponse / confirmation…">${esc(o.usage && o.usage.payload || '')}</textarea></div><button class="btn sm" onclick="A.saveProOption(${o.id},${o.required ? 1 : 0})">Enregistrer</button></div>`).join('')}</div>` : ''}
     ${d.offers.length ? `<div class="sec-title">🔔 Missions à traiter (${d.offers.length})</div>` + d.offers.map(m => `
       <div class="card tap" onclick="nav('#/mission/${m.id}')"><div class="row"><div class="grow">
         <div class="bold">${esc(m.service_name)}</div><div class="muted small">📍 ${esc(m.address || '')} ${m.urgence ? ' • 🔥 Urgent' : ''}</div></div>
@@ -1259,7 +1276,7 @@ routes['avis-recherche'] = async () => {
     ${list.length ? list.map(a => `<div class="card" ${a.paid && a.formule === 'urgent' ? 'style="border:2px solid #dc2626"' : ''}>
       ${a.status === 'pending' && a.publisher ? '<span class="pill warn">En attente de validation</span>' : ''}
       ${a.paid && a.formule === 'urgent' ? '<span class="pill bad">🚨 URGENT</span>' : a.paid && a.formule === 'avant' ? '<span class="pill ok">⭐ Mis en avant</span>' : ''}
-      <div class="row">${a.photo ? `<img src="${esc(a.photo)}" style="width:72px;height:72px;border-radius:10px;object-fit:cover">` : ''}
+      <div class="row">${a.photo ? `<img src="${esc(mediaUrl(a.photo))}" style="width:72px;height:72px;border-radius:10px;object-fit:cover">` : ''}
         <div class="grow"><div class="bold">${esc(a.nom)}</div>
         ${a.date_disparition ? `<div class="small">Disparu(e) le : ${esc(a.date_disparition)} ${esc(a.heure_disparition || '')}</div>` : ''}
         ${a.dernier_lieu ? `<div class="small">Dernier lieu connu : ${esc(a.dernier_lieu)}</div>` : ''}</div></div>
@@ -1552,7 +1569,7 @@ async function quizLiveMount() {
     if (!document.getElementById('quiz-live')) { qlStop(); return; } // on a quitté l'accueil
     QL_TICK++;
     const live = QL_ETAT && QL_ETAT.live;
-    if (live) { // décompte local seconde par seconde
+    if (live && !live.paused) { // décompte local seconde par seconde
       if (live.phase === 'question') { live.remaining_ms -= 1000; if (live.remaining_ms <= 300) { qlSync(); return; } }
       else { live.next_in_ms -= 1000; if (live.next_in_ms <= 300) { qlSync(); return; } }
     }
@@ -1579,6 +1596,7 @@ function qlRender() {
   }
   const live = e.live;
   if (!live) { box.innerHTML = ''; return; }
+  if (live.paused) { box.innerHTML = carte(`<div class="center"><div style="font-size:32px">⏸️</div><b>Quiz en pause</b><div class="small muted mt">La chronologie est figée par l’administration. Restez sur l’accueil : le quiz reprendra automatiquement.</div><div class="small muted mt">👥 ${s.counts ? s.counts.participants : 0} participant(s) • 👁️ ${s.counts ? s.counts.spectators : 0} spectateur(s)</div></div>`); return; }
   const letters = ['A', 'B', 'C', 'D'];
   if (live.phase === 'question') {
     const secs = Math.max(0, Math.ceil(live.remaining_ms / 1000));
@@ -1588,7 +1606,7 @@ function qlRender() {
         ? '<div class="small center bold" style="color:#6b7280">👁️ Mode spectateur — vous ne pouvez plus répondre, mais vous suivez tout.</div>'
         : '<div class="small muted center">Une seule réponse possible — elle sera verrouillée.</div>';
     box.innerHTML = carte(`
-      <div class="small muted center">🧠 QUIZ EN DIRECT • « ${esc(s.title)} » • Question ${live.index + 1} / ${live.total}</div>
+      <div class="small muted center">🧠 QUIZ EN DIRECT • « ${esc(s.title)} » • Question ${live.index + 1} / ${live.total}<br>👥 ${s.counts ? s.counts.participants : 0} participant(s) • 👁️ ${s.counts ? s.counts.spectators : 0} spectateur(s)</div>
       <div class="center" style="margin:2px 0">
         <span style="font-size:38px;font-weight:800;line-height:1;color:${secs <= 5 ? '#dc2626' : '#16a34a'}">${secs}</span>
         <span class="small muted"> seconde(s)</span></div>
@@ -1638,8 +1656,8 @@ routes.quiz = async () => {
   try { etat = await api('/games/concours'); } catch (e) { toast(e.message, 'err'); back(); return; }
   if (!etat.enabled) { toast('Le quiz est désactivé.', 'err'); back(); return; }
 
-  // Pas de concours : quiz d'entraînement classique
-  if (!etat.session) { await quizClassique(); return; }
+  // Le QCM et le concours sont un seul système : hors session, il n'existe pas de quiz parallèle.
+  if (!etat.session) { $app.innerHTML = `${header('Quiz')}<div class="content"><div class="card center"><div style="font-size:42px">🧠</div><div class="bold mb">Aucun quiz en direct pour le moment.</div><div class="small muted mb">Les questions QCM sont utilisées dans les sessions synchronisées lancées par Klean Services. Revenez bientôt !</div><button class="btn sec" onclick="back()">Retour</button></div></div>${bottomNav('home')}`; return; }
   const s = etat.session, p = etat.participant;
 
   // Public non autorisé
@@ -1988,6 +2006,11 @@ const A = {
     const list = el.parentElement.querySelector('.pro-cat-services');
     const open = list.classList.toggle('open'); el.setAttribute('aria-expanded', open ? 'true' : 'false');
   },
+  async saveProOption(id, required) {
+    const el = document.getElementById('pro-opt-' + id); const payload = (el && el.value || '').trim();
+    if (required && !payload) return toast('Cette option obligatoire doit être renseignée.', 'err');
+    try { await api('/pro-options/' + id + '/use', { method: 'POST', body: { payload } }); toast('Option professionnelle enregistrée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
   async changeServiceCity() {
     let cities = []; try { cities = await api('/villes'); } catch (e) { toast(e.message, 'err'); return; }
     const current = (USER.pro && USER.pro.service_city) || USER.ville || '';
@@ -2017,7 +2040,7 @@ const A = {
     localStorage.setItem('ks_sound', now ? '0' : '1');
     render();
   },
-  viewPhoto(src) { openModal(`<img src="${esc(src)}" style="width:100%;border-radius:12px"><button class="btn mt" onclick="closeModal()">Fermer</button>`); },
+  viewPhoto(src) { openModal(`<img src="${esc(mediaUrl(src))}" style="width:100%;border-radius:12px"><button class="btn mt" onclick="closeModal()">Fermer</button>`); },
 
   /* Photos */
   pickPhotos(zoneId) {
@@ -2031,7 +2054,7 @@ const A = {
         const r = await api('/upload', { method: 'POST', body: fd });
         REQ.photos.push(...r.files);
         const zone = document.getElementById(zoneId);
-        r.files.forEach(f => zone.insertAdjacentHTML('afterbegin', `<img src="${esc(f)}">`));
+        r.files.forEach(f => zone.insertAdjacentHTML('afterbegin', `<img src="${esc(mediaUrl(f))}">`));
         toast('Fichier(s) ajouté(s) ✓', 'ok');
       } catch (e) { toast(e.message, 'err'); }
       input.value = '';
@@ -2053,7 +2076,7 @@ const A = {
   },
 
   /* Audio — enregistre, arrête, puis affiche une écoute avant l'envoi de la demande. */
-  _rec: null, _recChunks: [], _pendingChatAudio: null,
+  _rec: null, _recChunks: [], _pendingChatAudio: null, _recTimer: null, _recLimitTimer: null, _audioMaxSec: 20,
   async toggleRec(zoneId) {
     const btn = document.getElementById('r-rec');
     if (A._rec && A._rec.state === 'recording') { A._rec.stop(); return; }
@@ -2064,6 +2087,7 @@ const A = {
       A._recChunks = []; A._rec = new MediaRecorder(stream, options);
       A._rec.ondataavailable = e => { if (e.data && e.data.size) A._recChunks.push(e.data); };
       A._rec.onstop = async () => {
+        A.stopRecClock();
         stream.getTracks().forEach(t => t.stop());
         const mime = A._rec && A._rec.mimeType || (options && options.mimeType) || 'audio/webm'; A._rec = null;
         const blob = new Blob(A._recChunks, { type: mime });
@@ -2072,11 +2096,11 @@ const A = {
         try {
           const r = await api('/upload', { method: 'POST', body: fd }); REQ.audio = r.files[0];
           const zone = document.getElementById(zoneId); if (!zone) return;
-          zone.innerHTML = `<audio controls preload="metadata" src="${esc(REQ.audio)}"></audio><div class="small muted">Écoutez puis envoyez votre demande.</div><button class="btn ghost sm" onclick="A.clearRequestAudio('${zoneId}')">🗑️ Supprimer</button>`;
+          zone.innerHTML = `<audio controls preload="metadata" src="${esc(mediaUrl(REQ.audio))}"></audio><div class="small muted">Écoutez puis envoyez votre demande.</div><button class="btn ghost sm" onclick="A.clearRequestAudio('${zoneId}')">🗑️ Supprimer</button>`;
           toast('Message vocal enregistré. Vous pouvez l’écouter avant l’envoi ✓', 'ok');
         } catch (e) { toast(e.message, 'err'); }
       };
-      A._rec.start(250); btn.textContent = '⏹️ Arrêter l’enregistrement'; btn.classList.add('warn');
+      A._rec.start(250); A.startRecClock(btn, 20); btn.classList.add('warn');
     } catch (e) { if (stream) stream.getTracks().forEach(t => t.stop()); toast(microphoneError(e), 'err'); }
   },
   clearRequestAudio(zoneId) {
@@ -2231,6 +2255,14 @@ const A = {
   },
 
   /* Chat */
+  startRecClock(btn, max) {
+    A.stopRecClock(); const started = Date.now();
+    const paint = () => { const sec = Math.min(max, Math.floor((Date.now() - started) / 1000)); if (btn) btn.textContent = '⏹️ ' + sec + 's/' + max + 's'; };
+    paint(); A._recTimer = setInterval(paint, 250);
+    A._recLimitTimer = setTimeout(() => { if (A._rec && A._rec.state === 'recording') { toast('Durée maximale atteinte : l’enregistrement s’arrête.', 'ok'); A._rec.stop(); } }, max * 1000);
+  },
+  stopRecClock() { if (A._recTimer) clearInterval(A._recTimer); if (A._recLimitTimer) clearTimeout(A._recLimitTimer); A._recTimer = null; A._recLimitTimer = null; },
+  chatPreset(text) { const ta = document.getElementById('chat-text'); if (ta) { ta.value = text; ta.focus(); } },
   async chatSend(id) {
     const ta = document.getElementById('chat-text');
     const v = ta.value.trim();
@@ -2263,17 +2295,18 @@ const A = {
       A._recChunks = []; A._rec = new MediaRecorder(stream, options);
       A._rec.ondataavailable = e => { if (e.data && e.data.size) A._recChunks.push(e.data); };
       A._rec.onstop = async () => {
+        A.stopRecClock();
         stream.getTracks().forEach(t => t.stop());
         const mime = A._rec && A._rec.mimeType || (options && options.mimeType) || 'audio/webm'; A._rec = null;
         const blob = new Blob(A._recChunks, { type: mime }); if (!blob.size) return toast('Aucun son n’a été enregistré. Réessayez.', 'err');
         const fd = new FormData(); fd.append('files', blob, 'vocal.' + audioExtension(mime));
         try {
           const r = await api('/upload', { method: 'POST', body: fd }); A._pendingChatAudio = { id, file: r.files[0] };
-          openModal(`<h3>🎤 Note vocale prête</h3><audio controls preload="metadata" style="width:100%" src="${esc(r.files[0])}"></audio><p class="small muted">Écoutez-la avant l’envoi.</p><button class="btn" onclick="A.sendPendingChatAudio()">Envoyer la note vocale</button><button class="btn sec mt" onclick="A.cancelPendingChatAudio()">Supprimer</button>`);
+          openModal(`<h3>🎤 Note vocale prête</h3><audio controls preload="metadata" style="width:100%" src="${esc(mediaUrl(r.files[0]))}"></audio><p class="small muted">Écoutez-la avant l’envoi.</p><button class="btn" onclick="A.sendPendingChatAudio()">Envoyer la note vocale</button><button class="btn sec mt" onclick="A.cancelPendingChatAudio()">Supprimer</button>`);
         } catch (e) { toast(e.message, 'err'); }
       };
-      A._rec.start(250); if (btn) { btn.classList.add('rec'); btn.textContent = '⏹️'; }
-      toast('Enregistrement en cours… touchez ⏹️ pour arrêter.');
+      A._rec.start(250); if (btn) { btn.classList.add('rec'); A.startRecClock(btn, A._audioMaxSec || 20); }
+      toast('Enregistrement en cours… arrêt automatique à ' + (A._audioMaxSec || 20) + ' secondes.');
     } catch (e) { if (stream) stream.getTracks().forEach(t => t.stop()); toast(microphoneError(e), 'err'); }
   },
   async sendPendingChatAudio() {
@@ -2289,6 +2322,22 @@ const A = {
   },
   async readAll() {
     try { await api('/notifications/read', { method: 'POST', body: {} }); refreshBadges(); render(); } catch (e) { toast(e.message, 'err'); }
+  },
+
+  async enablePush() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return toast('Les notifications de cet appareil ne sont pas prises en charge par ce navigateur.', 'err');
+    try {
+      const cfg = await api('/push/config');
+      if (!cfg.enabled || !cfg.public_key) return toast('Les notifications Web Push ne sont pas encore configurées par Klean Services.', 'err');
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') return toast('Autorisation refusée. Vous pouvez l’activer dans les réglages du navigateur.', 'err');
+      const reg = await navigator.serviceWorker.ready;
+      const b64 = cfg.public_key.replace(/-/g, '+').replace(/_/g, '/'); const raw = atob(b64 + '='.repeat((4 - b64.length % 4) % 4));
+      const key = Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      await api('/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
+      toast('Notifications activées sur cet appareil ✓', 'ok');
+    } catch (e) { toast(e.message || 'Impossible d’activer les notifications.', 'err'); }
   },
 
   /* Pro */
@@ -2574,8 +2623,11 @@ function render() {
 
 /* ---------- Démarrage ---------- */
 (async function init() {
-  const splashUntil = Date.now() + 1000;
-  if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('/sw.js'); } catch { } }
+  const splashUntil = Date.now() + 3000;
+  if ('serviceWorker' in navigator) {
+    try { navigator.serviceWorker.register('/sw.js'); } catch { }
+    navigator.serviceWorker.addEventListener('message', event => { const d = event.data || {}; if (d.type === 'navigate' && d.link && d.link.startsWith('#/')) nav(d.link); });
+  }
   applyFont(localStorage.getItem('ks_font') || 16);
   await checkMaintenance();
   setInterval(async () => { const was = MAINT.active; await checkMaintenance(); if (was !== MAINT.active) render(); }, 60000);
