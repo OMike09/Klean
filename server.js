@@ -253,7 +253,9 @@ function sendWebPush(userId, payload) {
 function notify(userId, category, title, body, link) {
   const info = db.prepare('INSERT INTO notifications(user_id, category, title, body, link) VALUES(?,?,?,?,?)').run(userId, category, title, body || '', link || '');
   const unread = db.prepare('SELECT COUNT(*) n FROM notifications WHERE user_id=? AND read=0').get(userId).n;
-  const payload = { id: info.lastInsertRowid, category, title, body, link, unread };
+  const payload = { id: info.lastInsertRowid, category, title, body, link, unread,
+    // Le navigateur/OS décide du rendu final ; ce flag respecte le réglage PDG pour les missions.
+    sound: category === 'mission' ? getSetting('dispatch_alert_sound', '1') === '1' : true };
   push(userId, 'notification', payload);
   sendWebPush(userId, payload);
   return info.lastInsertRowid;
@@ -554,10 +556,13 @@ app.get('/api/rules', (req, res) => res.json({ client: getSetting('rules_client'
 function normalize(s) {
   return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ');
 }
+// Tri francophone insensible aux accents, appliqué aux listes de consultation sans priorité métier.
+const frenchCollator = new Intl.Collator('fr', { sensitivity: 'base', numeric: true });
+function frenchSort(rows, field = 'name') { return [...rows].sort((a, b) => frenchCollator.compare(String(a[field] || ''), String(b[field] || ''))); }
 app.get('/api/services', (req, res) => {
-  const cats = db.prepare('SELECT * FROM service_categories WHERE active=1 ORDER BY sort,id').all();
-  const svcs = db.prepare('SELECT id, category_id, sub_id, name, sort, popular, seasonal, cities, price_from, price_prefix, price_show FROM services WHERE active=1 ORDER BY sort,id').all()
-    .filter(s => villeOk(s, req.query.ville));
+  const cats = frenchSort(db.prepare('SELECT * FROM service_categories WHERE active=1').all());
+  const svcs = frenchSort(db.prepare('SELECT id, category_id, sub_id, name, sort, popular, seasonal, cities, price_from, price_prefix, price_show FROM services WHERE active=1').all()
+    .filter(s => villeOk(s, req.query.ville)));
   res.json(cats.map(c => ({ ...c, services: svcs.filter(s => s.category_id === c.id) })).filter(c => c.services.length));
 });
 // Correspondance géographique : les communes restent bien distinctes. Une ancienne
@@ -576,9 +581,9 @@ function villeOk(s, ville) {
 }
 // Catalogue complet : CATÉGORIES → SERVICES (avec leurs tâches)
 app.get('/api/catalogue', (req, res) => {
-  const cats = db.prepare('SELECT * FROM service_categories WHERE active=1 ORDER BY sort,id').all();
-  const svcs = db.prepare('SELECT * FROM services WHERE active=1 ORDER BY sort,id').all().filter(s => villeOk(s, req.query.ville));
-  const tas = db.prepare('SELECT * FROM taches WHERE active=1 ORDER BY sort,id').all();
+  const cats = frenchSort(db.prepare('SELECT * FROM service_categories WHERE active=1').all());
+  const svcs = frenchSort(db.prepare('SELECT * FROM services WHERE active=1').all().filter(s => villeOk(s, req.query.ville)));
+  const tas = frenchSort(db.prepare('SELECT * FROM taches WHERE active=1').all());
   res.json(cats.map(c => ({
     id: c.id, name: c.name, icon: c.icon,
     services: svcs.filter(s => s.category_id === c.id).map(s => ({
@@ -600,14 +605,14 @@ app.get('/api/services/populaires', (req, res) => {
 });
 // Villes de Côte d'Ivoire (liste sélectionnable, avec recherche côté application)
 app.get('/api/villes', (req, res) => {
-  res.json(db.prepare('SELECT name FROM villes WHERE active=1 ORDER BY name').all().map(v => v.name));
+  res.json(frenchSort(db.prepare('SELECT name FROM villes WHERE active=1').all()).map(v => v.name));
 });
 app.get('/api/services/:id/questions', (req, res) => {
   const svc = db.prepare('SELECT s.*, c.name cat FROM services s JOIN service_categories c ON c.id=s.category_id WHERE s.id=? AND s.active=1').get(req.params.id);
   if (!svc) return res.status(404).json({ error: 'Service introuvable.' });
   const questions = db.prepare('SELECT * FROM service_questions WHERE service_id=? AND active=1 ORDER BY sort,id').all(svc.id)
     .map(q => ({ ...q, options: JSON.parse(q.options) }));
-  const taches = db.prepare('SELECT id, name FROM taches WHERE service_id=? AND active=1 ORDER BY sort,id').all(svc.id);
+  const taches = frenchSort(db.prepare('SELECT id, name FROM taches WHERE service_id=? AND active=1').all(svc.id));
   res.json({ service: { id: svc.id, name: svc.name, category: svc.cat, price_from: svc.price_from, price_prefix: svc.price_prefix, price_show: svc.price_show }, questions, taches });
 });
 const STOPWORDS = new Set(['je', 'cherche', 'un', 'une', 'des', 'le', 'la', 'les', 'de', 'du', 'mon', 'ma', 'mes', 'pour', 'a', 'au', 'en', 'et', 'faire', 'veux', 'voudrais', 'besoin', 'il', 'me', 'faut', 'quelqu', 'qui', 'peut', 'sait']);
@@ -656,13 +661,13 @@ app.post('/api/pro/apply', auth, (req, res) => {
     return res.status(400).json({ error: proType === 'entreprise'
       ? 'Un document justificatif est requis pour un compte Entreprise (registre de commerce, pièce du responsable…).'
       : 'Un document justificatif est requis (CNI, attestation…).' });
-  db.prepare(`INSERT INTO pro_profiles(user_id, profession, description, experience, zone, services, documents, pro_type, company_name, company_rccm, company_size)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?)
+  db.prepare(`INSERT INTO pro_profiles(user_id, profession, description, experience, zone, services, authorized_services, documents, pro_type, company_name, company_rccm, company_size)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(user_id) DO UPDATE SET profession=excluded.profession, description=excluded.description,
                 experience=excluded.experience, zone=excluded.zone, services=excluded.services, documents=excluded.documents,
                 pro_type=excluded.pro_type, company_name=excluded.company_name, company_rccm=excluded.company_rccm,
                 company_size=excluded.company_size, rejected_reason=NULL`)
-    .run(req.user.id, profession.trim(), description || '', experience || '', zone.trim(), JSON.stringify(services), JSON.stringify(documents || []),
+    .run(req.user.id, profession.trim(), description || '', experience || '', zone.trim(), JSON.stringify(services), JSON.stringify(services), JSON.stringify(documents || []),
       proType, companyName || null, (req.body.company_rccm || '').trim() || null, (req.body.company_size || '').trim() || null);
   db.prepare(`UPDATE users SET pro_status='pending', pro_rules_accepted_at=datetime('now') WHERE id=?`).run(req.user.id);
   notifyAdmins('compte', 'Nouvelle demande professionnelle', `${req.user.name} souhaite devenir professionnel (${proType === 'entreprise' ? '🏢 Entreprise « ' + companyName + ' » — ' : '👤 Particulier — '}${profession}).`, 'admin:pros');
@@ -738,7 +743,7 @@ app.get('/api/pro/dashboard', auth, (req, res) => {
   const missions = db.prepare(`SELECT m.*, s.name service_name FROM missions m JOIN services s ON s.id=m.service_id WHERE m.pro_id=? ORDER BY m.updated_at DESC`).all(uid);
   const offers = db.prepare(`SELECT m.*, s.name service_name, mc.offered_at FROM mission_candidates mc
     JOIN missions m ON m.id=mc.mission_id JOIN services s ON s.id=m.service_id
-    WHERE mc.pro_id=? AND mc.status='offered' AND m.status='recherche' ORDER BY mc.offered_at DESC`).all(uid);
+    WHERE mc.pro_id=? AND mc.status='offered' AND m.status='recherche' ORDER BY mc.offered_at DESC`).all(uid).filter(m => candidateStillEligible(m, uid));
   const pays = db.prepare(`SELECT p.* FROM payments p JOIN missions m ON m.id=p.mission_id WHERE m.pro_id=? AND p.status='valide'`).all(uid);
   const revenus = pays.reduce((s, p) => s + p.pro_amount, 0);
   const r = db.prepare('SELECT AVG(rating) avg, COUNT(*) n FROM reviews WHERE target_id=?').get(uid);
@@ -765,7 +770,7 @@ app.get('/api/pros/:id', auth, (req, res) => {
   const reviews = db.prepare(`SELECT r.rating, r.comment, r.created_at, u.name author FROM reviews r JOIN users u ON u.id=r.author_id WHERE r.target_id=? ORDER BY r.id DESC LIMIT 20`).all(u.id);
   res.json({
     ...publicUser(u), profession: p.profession, description: p.description, experience: p.experience,
-    zone: p.zone, service_city: p.service_city || null, available: p.available, services: svcNames, missions_done: missionsDone,
+    zone: p.zone, service_city: p.service_city || null, pro_type: p.pro_type === 'entreprise' ? 'entreprise' : 'particulier', capacity_level: p.capacity_level || 1, available: p.available, services: svcNames, missions_done: missionsDone,
     documents_valides: JSON.parse(p.documents).length > 0, mis_en_avant: visibiliteNiveau(u.id) > 0, reviews
   });
 });
@@ -773,7 +778,31 @@ app.get('/api/pros/:id', auth, (req, res) => {
 // ============================================================
 // MISSIONS — cycle complet + moteur de mise en relation
 // ============================================================
-const dispatchTimers = new Map(); // missionId -> timeout
+const dispatchTimers = new Map(); // missionId -> délai de la vague
+const dispatchReminderTimers = new Map(); // missionId -> rappels sonores / Push persistants
+
+function clearDispatchTimers(missionId) {
+  clearTimeout(dispatchTimers.get(missionId)); dispatchTimers.delete(missionId);
+  clearInterval(dispatchReminderTimers.get(missionId)); dispatchReminderTimers.delete(missionId);
+}
+function startDispatchReminders(missionId) {
+  clearInterval(dispatchReminderTimers.get(missionId));
+  const seconds = settingInt('dispatch_reminder_seconds', 20, 5, 600);
+  const maximum = settingInt('dispatch_max_reminders', 6, 0, 100);
+  const timer = setInterval(() => {
+    const mission = db.prepare("SELECT * FROM missions WHERE id=? AND status='recherche'").get(missionId);
+    const offered = db.prepare("SELECT * FROM mission_candidates WHERE mission_id=? AND status='offered'").all(missionId);
+    if (!mission || !offered.length) return clearDispatchTimers(missionId);
+    const svc = db.prepare('SELECT name FROM services WHERE id=?').get(mission.service_id);
+    // Les rappels sont bornés par le réglage PDG : ils ne sonnent jamais indéfiniment.
+    offered.filter(o => o.reminder_count < maximum).forEach(o => {
+      db.prepare("UPDATE mission_candidates SET reminder_count=reminder_count+1 WHERE id=? AND status='offered'").run(o.id);
+      // notify() alimente SSE (son/badge au premier plan) et Web Push si VAPID est configuré.
+      notify(o.pro_id, 'mission', '🔔 Rappel : mission disponible', `La demande « ${svc.name} » attend toujours votre réponse. Touchez pour accepter ou refuser.`, '#/mission/' + missionId);
+    });
+  }, seconds * 1000);
+  dispatchReminderTimers.set(missionId, timer);
+}
 
 function haversine(lat1, lng1, lat2, lng2) {
   if ([lat1, lng1, lat2, lng2].some(v => v == null)) return 99999;
@@ -801,17 +830,51 @@ function releaseProfessional(proId, reason) {
     .run(can ? 1 : 0, can ? 'disponible' : 'suspendu', proId);
   if (reason) notify(proId, 'mission', '🟢 Vous êtes de nouveau disponible', reason, '#/pro');
 }
+function jsonNumberIds(value) { try { const a = JSON.parse(value || '[]'); return Array.isArray(a) ? a.map(Number).filter(Number.isFinite) : []; } catch { return []; } }
+function providerTypeEnabled(type) { return getSetting('dispatch_allow_' + type, '1') === '1'; }
+function proMatchesMission(p, mission, client) {
+  const wantedType = mission.provider_type === 'entreprise' ? 'entreprise' : 'particulier';
+  const profileType = p.pro_type === 'entreprise' ? 'entreprise' : 'particulier';
+  if (wantedType !== profileType || !providerTypeEnabled(wantedType)) return false;
+  // Les services autorisés par le PDG priment. Sans restriction explicite, les services déclarés restent la référence.
+  const declared = jsonNumberIds(p.svc || p.services);
+  const authorized = jsonNumberIds(p.authorized_services);
+  const usable = authorized.length ? authorized : declared;
+  if (!declared.includes(Number(mission.service_id)) || !usable.includes(Number(mission.service_id))) return false;
+  if (Number(p.capacity_level || 1) < Number(mission.capacity_required || 1)) return false;
+  if (!p.available || ['indisponible', 'en_mission', 'suspendu'].includes(p.availability_status || '') || proHasActiveMission(p.id)) return false;
+  const dist = haversine(mission.lat, mission.lng, p.lat, p.lng);
+  if (getSetting('dispatch_geo_enabled', '1') === '1' && p.service_city && client && client.ville && !cityMatches(p.service_city, client.ville) && dist > 50) return false;
+  return true;
+}
 function findMatchingPros(mission) {
-  const pros = db.prepare(`SELECT u.*, p.services svc, p.available, p.zone, p.service_city, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id
+  const pros = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id
     WHERE u.pro_status='approved' AND u.suspended=0 AND COALESCE(u.blocked,0)=0 AND u.id != ?`).all(mission.client_id);
   const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
-  return pros
-    .filter(p => { try { return JSON.parse(p.svc || '[]').map(Number).includes(Number(mission.service_id)); } catch { return false; } })
-    .filter(p => p.available && !['indisponible', 'en_mission', 'suspendu'].includes(p.availability_status || '') && !proHasActiveMission(p.id))
+  return pros.filter(p => proMatchesMission(p, mission, client))
     .map(p => ({ ...p, dist: haversine(mission.lat, mission.lng, p.lat, p.lng) }))
-    .filter(p => !p.service_city || !client || !client.ville || cityMatches(p.service_city, client.ville) || p.dist <= 50)
     .sort((a, b) => (a.dist - b.dist) || (visibiliteNiveau(b.id) - visibiliteNiveau(a.id)) || a.id - b.id);
 }
+function candidateStillEligible(mission, proId) {
+  const p = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(proId);
+  const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
+  return !!(p && proMatchesMission(p, mission, client));
+}
+function revokeIneligibleOffers(mission) {
+  const offered = db.prepare("SELECT pro_id FROM mission_candidates WHERE mission_id=? AND status='offered'").all(mission.id);
+  offered.forEach(row => {
+    if (candidateStillEligible(mission, row.pro_id)) return;
+    db.prepare("UPDATE mission_candidates SET status='expired', responded_at=datetime('now') WHERE mission_id=? AND pro_id=? AND status='offered'").run(mission.id, row.pro_id);
+    clearAlertStatus(row.pro_id);
+    notify(row.pro_id, 'mission', 'Mission retirée', 'Cette demande ne correspond plus à votre disponibilité ou à vos autorisations.', '#/pro');
+    push(row.pro_id, 'mission', { id: mission.id, status: 'retiree' });
+  });
+}
+
+function revokeProfessionalOffers(proId) {
+  db.prepare("SELECT m.* FROM missions m JOIN mission_candidates mc ON mc.mission_id=m.id WHERE mc.pro_id=? AND mc.status='offered' AND m.status='recherche'").all(proId).forEach(revokeIneligibleOffers);
+}
+
 function addEvent(missionId, status, actorId, note) {
   db.prepare('INSERT INTO mission_events(mission_id,status,actor_id,note) VALUES(?,?,?,?)').run(missionId, status, actorId || null, note || null);
   db.prepare("UPDATE missions SET updated_at=datetime('now') WHERE id=?").run(missionId);
@@ -830,33 +893,50 @@ function expireOfferedWave(missionId) {
 function offerNext(missionId) {
   const mission = db.prepare('SELECT * FROM missions WHERE id=?').get(missionId);
   if (!mission || mission.status !== 'recherche') return;
+  if (getSetting('dispatch_auto_enabled', '1') !== '1') return;
+  revokeIneligibleOffers(mission);
+  if (mission.search_expires_at && db.prepare("SELECT 1 FROM missions WHERE id=? AND search_expires_at <= datetime('now')").get(missionId)) {
+    db.prepare("UPDATE missions SET status='sans_pro' WHERE id=? AND status='recherche'").run(missionId);
+    addEvent(missionId, 'sans_pro', null, 'Délai maximal de recherche atteint');
+    notify(mission.client_id, 'mission', 'Recherche arrivée à son délai maximal', 'Aucun prestataire n’a accepté dans le délai prévu. Vous pouvez modifier votre choix Particulier / Entreprise et relancer.', '#/mission/' + missionId);
+    push(mission.client_id, 'mission', { id: missionId, status: 'sans_pro' }); return;
+  }
   if (db.prepare("SELECT 1 FROM mission_candidates WHERE mission_id=? AND status='offered'").get(missionId)) return;
-  const pending = db.prepare(`SELECT mc.* FROM mission_candidates mc JOIN pro_profiles p ON p.user_id=mc.pro_id JOIN users u ON u.id=mc.pro_id
-    WHERE mc.mission_id=? AND mc.status='pending' AND p.available=1 AND COALESCE(p.availability_status,'disponible') NOT IN ('indisponible','en_mission','suspendu')
-      AND u.pro_status='approved' AND u.suspended=0 AND COALESCE(u.blocked,0)=0
-      AND NOT EXISTS (SELECT 1 FROM missions busy WHERE busy.pro_id=mc.pro_id AND busy.status IN ('acceptee','confirmee','en_cours'))
-    ORDER BY mc.rank ASC LIMIT ?`).all(missionId, alertWaveSize(missionId));
+  const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
+  const allPending = db.prepare(`SELECT mc.id AS candidate_id, mc.*, u.*, p.services svc, p.authorized_services, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.availability_status FROM mission_candidates mc
+    JOIN pro_profiles p ON p.user_id=mc.pro_id JOIN users u ON u.id=mc.pro_id WHERE mc.mission_id=? AND mc.status='pending' ORDER BY mc.rank ASC`).all(missionId);
+  const pending = allPending.filter(c => proMatchesMission(c, mission, client)).slice(0, alertWaveSize(missionId));
   if (!pending.length) {
     db.prepare("UPDATE missions SET status='sans_pro' WHERE id=? AND status='recherche'").run(missionId);
     addEvent(missionId, 'sans_pro', null, 'Aucun professionnel disponible après les vagues d’alerte');
-    notify(mission.client_id, 'mission', 'Aucun professionnel disponible pour le moment', 'Aucun professionnel n’a répondu. Vous pouvez relancer la recherche ; Klean Services garde votre demande dans l’historique.', '#/mission/' + missionId);
+    notify(mission.client_id, 'mission', 'Aucun professionnel disponible pour le moment', `Aucun ${mission.provider_type === 'entreprise' ? 'entreprise' : 'particulier'} n’est disponible. Vous pouvez modifier votre choix puis relancer la recherche ; Klean Services garde votre demande dans l’historique.`, '#/mission/' + missionId);
     push(mission.client_id, 'mission', { id: missionId, status: 'sans_pro' }); return;
   }
   const svc = db.prepare('SELECT name FROM services WHERE id=?').get(mission.service_id);
-  const tx = db.transaction(() => pending.forEach(c => db.prepare("UPDATE mission_candidates SET status='offered', offered_at=datetime('now') WHERE id=? AND status='pending'").run(c.id))); tx();
+  const tx = db.transaction(() => pending.forEach(c => db.prepare("UPDATE mission_candidates SET status='offered', offered_at=datetime('now') WHERE id=? AND status='pending'").run(c.candidate_id))); tx();
   pending.forEach(c => { setAlertStatus(c.pro_id); notify(c.pro_id, 'mission', '🔔 Nouvelle mission : ' + svc.name, (mission.urgence ? 'URGENT — ' : '') + (mission.address || 'Localisation fournie') + '. Touchez pour voir et accepter la mission.', '#/mission/' + missionId); push(c.pro_id, 'mission', { id: missionId, status: 'offre', persistent: true }); });
   const wait = Math.max(15, parseInt(getSetting('dispatch_wait_seconds', '60'), 10)) * 1000;
-  clearTimeout(dispatchTimers.get(missionId));
-  dispatchTimers.set(missionId, setTimeout(() => { expireOfferedWave(missionId); offerNext(missionId); }, wait));
+  clearDispatchTimers(missionId);
+  startDispatchReminders(missionId);
+  dispatchTimers.set(missionId, setTimeout(() => { expireOfferedWave(missionId); clearDispatchTimers(missionId); offerNext(missionId); }, wait));
 }
 function startDispatch(missionId) {
   const mission = db.prepare('SELECT * FROM missions WHERE id=?').get(missionId);
   if (!mission || mission.status !== 'recherche') return;
+  const maxSeconds = settingInt('dispatch_search_max_seconds', 3600, 60, 86400);
+  db.prepare("UPDATE missions SET search_started_at=COALESCE(search_started_at,datetime('now')), search_expires_at=COALESCE(search_expires_at,datetime('now','+' || ? || ' seconds')) WHERE id=?").run(maxSeconds, missionId);
+  mission.search_started_at = mission.search_started_at || new Date().toISOString();
+  mission.search_expires_at = mission.search_expires_at || new Date(Date.now() + maxSeconds * 1000).toISOString();
+  if (getSetting('dispatch_auto_enabled', '1') !== '1') {
+    addEvent(missionId, 'recherche', null, 'Attribution automatique temporairement désactivée par la direction');
+    notify(mission.client_id, 'mission', 'Demande enregistrée', 'Votre demande est enregistrée. La mise en relation automatique est temporairement désactivée ; elle sera reprise par Klean Services.', '#/mission/' + missionId);
+    return;
+  }
   const pros = findMatchingPros(mission), ins = db.prepare('INSERT OR IGNORE INTO mission_candidates(mission_id, pro_id, rank) VALUES(?,?,?)');
   pros.forEach((p, i) => ins.run(missionId, p.id, i));
   if (!pros.length) {
     db.prepare("UPDATE missions SET status='sans_pro' WHERE id=?").run(missionId); addEvent(missionId, 'sans_pro', null, 'Aucun professionnel compatible et disponible trouvé');
-    notify(mission.client_id, 'mission', 'Recherche sans résultat', 'Aucun professionnel disponible ne propose ce service dans votre zone. Vous pourrez relancer la recherche.', '#/mission/' + missionId); notifyAdmins('mission', 'Demande sans professionnel', `Demande #${mission.code} : aucun professionnel compatible disponible.`, 'admin:missions'); return;
+    notify(mission.client_id, 'mission', 'Recherche sans résultat', `Aucun ${mission.provider_type === 'entreprise' ? 'entreprise' : 'particulier'} admissible ne propose ce service dans votre zone. Vous pouvez modifier votre choix puis relancer la recherche.`, '#/mission/' + missionId); notifyAdmins('mission', 'Demande sans professionnel', `Demande #${mission.code} : aucun professionnel compatible disponible.`, 'admin:missions'); return;
   }
   offerNext(missionId);
 }
@@ -1016,6 +1096,8 @@ app.post('/api/pub/campagnes', auth, (req, res) => {
 // Créer une demande
 app.post('/api/missions', auth, async (req, res) => {
   const { service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache, taches } = req.body || {};
+  const provider_type = req.body && req.body.provider_type === 'entreprise' ? 'entreprise' : 'particulier';
+  if (!providerTypeEnabled(provider_type)) return res.status(409).json({ error: `Les demandes destinées aux ${provider_type === 'entreprise' ? 'entreprises' : 'particuliers'} sont temporairement désactivées par Klean Services.` });
   const svc = db.prepare('SELECT * FROM services WHERE id=? AND active=1').get(service_id);
   if (!svc) return res.status(400).json({ error: 'Service invalide.' });
   if (!address || !address.trim()) return res.status(400).json({ error: 'Indiquez votre localisation (GPS ou saisie manuelle).' });
@@ -1033,10 +1115,10 @@ app.post('/api/missions', auth, async (req, res) => {
     const v = (answers || {})[rq.id];
     if (v === undefined || v === null || String(v).trim() === '') return res.status(400).json({ error: `Veuillez répondre à : « ${rq.label} »` });
   }
-  // Anti-doublon : même service, même client, demande active récente
-  const dup = db.prepare(`SELECT id FROM missions WHERE client_id=? AND service_id=? AND status IN ('recherche','sans_pro','acceptee','confirmee')
-    AND created_at > datetime('now','-2 hours')`).get(req.user.id, service_id);
-  if (dup) return res.status(409).json({ error: 'Vous avez déjà une demande en cours pour ce service. Consultez-la dans « Demandes ».', mission_id: dup.id });
+  // Anti-doublon souple : on avertit, mais le client peut confirmer un besoin réellement distinct.
+  const dup = db.prepare(`SELECT id, code FROM missions WHERE client_id=? AND service_id=? AND provider_type=? AND status IN ('recherche','sans_pro','acceptee','confirmee')
+    AND created_at > datetime('now','-2 hours') ORDER BY id DESC LIMIT 1`).get(req.user.id, service_id, provider_type);
+  if (dup && !(req.body || {}).duplicate_confirmed) return res.status(409).json({ error: 'Une demande semblable est déjà en cours. Voulez-vous vraiment créer une nouvelle demande indépendante ?', duplicate: true, mission_id: dup.id, mission_code: dup.code });
 
   // Une demande peut regrouper plusieurs tâches du MÊME service. Les noms viennent de la base,
   // et chaque précision est bornée : un client ne peut pas injecter une tâche d'un autre service.
@@ -1058,14 +1140,17 @@ app.post('/api/missions', auth, async (req, res) => {
     const task = allowedTasks.find(t => t.name === String(tache)); selected.push({ id: task.id, name: task.name, detail: null });
   }
   const legacyTask = selected.length ? selected.map(t => t.name).join(' • ') : null;
+  // Les détails déjà saisis sont utilisés sans imposer un écran supplémentaire au client.
+  const scopeText = [description, legacyTask, ...Object.values(answers || {})].join(' ').toLowerCase();
+  const capacityRequired = /chantier|industriel|immeuble|plusieurs|grande?\s+(maison|surface|quantit)|gros travaux|équipe|volume important/.test(scopeText) ? 2 : 1;
   const code = 'KS' + Date.now().toString(36).toUpperCase() + Math.floor(Math.random() * 90 + 10);
-  const info = db.prepare(`INSERT INTO missions(code, client_id, service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache, taches)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(code, req.user.id, service_id, JSON.stringify(answers || {}), description || '', address.trim(), lat || null, lng || null,
+  const info = db.prepare(`INSERT INTO missions(code, client_id, service_id, provider_type, capacity_required, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache, taches, search_started_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`)
+    .run(code, req.user.id, service_id, provider_type, capacityRequired, JSON.stringify(answers || {}), description || '', address.trim(), lat || null, lng || null,
          urgence ? 1 : 0, date_souhaitee || null, JSON.stringify(photos || []), audio || null, legacyTask, JSON.stringify(selected));
-  addEvent(info.lastInsertRowid, 'recherche', req.user.id, 'Demande créée');
+  addEvent(info.lastInsertRowid, 'recherche', req.user.id, `Demande créée — prestataire souhaité : ${provider_type}`);
   startDispatch(info.lastInsertRowid);
-  res.json({ id: info.lastInsertRowid, code, status: 'recherche' });
+  res.json({ id: info.lastInsertRowid, code, status: db.prepare('SELECT status FROM missions WHERE id=?').get(info.lastInsertRowid).status, provider_type });
 });
 
 function missionAccess(mission, user) {
@@ -1074,7 +1159,7 @@ function missionAccess(mission, user) {
   if (mission.client_id === user.id) return 'client';
   if (mission.pro_id === user.id) return 'pro';
   const cand = db.prepare("SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=? AND status IN ('offered','accepted')").get(mission.id, user.id);
-  if (cand) return 'candidat';
+  if (cand && candidateStillEligible(mission, user.id)) return 'candidat';
   return null;
 }
 function missionFull(mission, role, user) {
@@ -1115,6 +1200,7 @@ function missionFull(mission, role, user) {
   };
   return {
     id: mission.id, code: mission.code, status: mission.status, role,
+    provider_type: mission.provider_type === 'entreprise' ? 'entreprise' : 'particulier', capacity_required: mission.capacity_required || 1,
     service: svc.name, icon: svc.icon, tache: mission.tache || null, taches: missionTasks, detail, description: mission.description,
     address: mission.address, lat: mission.lat, lng: mission.lng,
     urgence: mission.urgence, date_souhaitee: mission.date_souhaitee,
@@ -1141,9 +1227,9 @@ app.get('/api/missions', auth, (req, res) => {
       JOIN service_categories c ON c.id=s.category_id WHERE m.pro_id=? ORDER BY m.updated_at DESC`).all(req.user.id);
     offers = db.prepare(`SELECT m.*, s.name service_name, c.icon FROM mission_candidates mc JOIN missions m ON m.id=mc.mission_id
       JOIN services s ON s.id=m.service_id JOIN service_categories c ON c.id=s.category_id
-      WHERE mc.pro_id=? AND mc.status='offered' AND m.status='recherche' ORDER BY mc.offered_at DESC`).all(req.user.id);
+      WHERE mc.pro_id=? AND mc.status='offered' AND m.status='recherche' ORDER BY mc.offered_at DESC`).all(req.user.id).filter(m => candidateStillEligible(m, req.user.id));
   }
-  const strip = m => ({ id: m.id, code: m.code, status: m.status, service: m.service_name, icon: m.icon, tache: m.tache || null, address: m.address, urgence: m.urgence, amount: m.amount, created_at: m.created_at, updated_at: m.updated_at });
+  const strip = m => ({ id: m.id, code: m.code, status: m.status, provider_type: m.provider_type === 'entreprise' ? 'entreprise' : 'particulier', service: m.service_name, icon: m.icon, tache: m.tache || null, address: m.address, urgence: m.urgence, amount: m.amount, created_at: m.created_at, updated_at: m.updated_at });
   res.json({ client: asClient.map(strip), pro: asPro.map(strip), offers: offers.map(strip) });
 });
 
@@ -1163,6 +1249,9 @@ app.post('/api/missions/:id/accept', auth, (req, res) => {
       if (!mission) throw new Error('NOT_FOUND');
       if (mission.status !== 'recherche') throw new Error('TAKEN');
       if (!proCanReceiveMission(req.user.id)) throw new Error('BUSY');
+      const profile = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(req.user.id);
+      const clientForMatch = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
+      if (!profile || !proMatchesMission(profile, mission, clientForMatch)) throw new Error('INELIGIBLE');
       const cand = db.prepare("SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=? AND status='offered'").get(mission.id, req.user.id);
       if (!cand) throw new Error('NOT_OFFERED');
       const won = db.prepare("UPDATE missions SET status='acceptee', pro_id=?, updated_at=datetime('now') WHERE id=? AND status='recherche'").run(req.user.id, mission.id);
@@ -1175,10 +1264,12 @@ app.post('/api/missions/:id/accept', auth, (req, res) => {
       return { mission, others };
     })();
   } catch (err) {
-    const errMap = { NOT_FOUND: ['Demande introuvable.', 404], BUSY: ['Vous êtes indisponible ou déjà en mission : vous ne pouvez pas accepter une nouvelle demande.', 409], NOT_OFFERED: ['Cette mission ne vous est plus proposée.', 403], TAKEN: ['Cette demande a déjà été attribuée à un autre professionnel.', 409] };
+    const errMap = { NOT_FOUND: ['Demande introuvable.', 404], BUSY: ['Vous êtes indisponible ou déjà en mission : vous ne pouvez pas accepter une nouvelle demande.', 409], INELIGIBLE: ['Vous ne correspondez plus aux critères de cette demande ; elle vous a été retirée.', 403], NOT_OFFERED: ['Cette mission ne vous est plus proposée.', 403], TAKEN: ['Cette demande a déjà été attribuée à un autre professionnel.', 409] };
     const out = errMap[err.message] || ['Attribution impossible.', 409]; return res.status(out[1]).json({ error: out[0] });
   }
-  clearTimeout(dispatchTimers.get(result.mission.id)); dispatchTimers.delete(result.mission.id);
+  clearDispatchTimers(result.mission.id);
+  // Le professionnel devenu « en mission » perd immédiatement toute autre offre encore affichée.
+  revokeProfessionalOffers(req.user.id);
   result.others.forEach(o => { clearAlertStatus(o.pro_id); notify(o.pro_id, 'mission', 'Mission déjà attribuée', 'Un autre professionnel a accepté cette demande avant vous.', '#/pro'); push(o.pro_id, 'mission', { id: result.mission.id, status: 'attribuee' }); });
   const svc = db.prepare('SELECT name FROM services WHERE id=?').get(result.mission.service_id);
   notify(result.mission.client_id, 'mission', '✅ Un professionnel a accepté votre demande', `${req.user.name} a accepté « ${svc.name} ». Votre commande est attribuée ; vous pouvez consulter son profil et poursuivre la mission.`, '#/mission/' + result.mission.id);
@@ -1194,7 +1285,7 @@ app.post('/api/missions/:id/refuse', auth, (req, res) => {
   if (!cand) return res.status(409).json({ error: 'Aucune offre en attente pour cette mission.' });
   db.prepare("UPDATE mission_candidates SET status='refused', responded_at=datetime('now') WHERE id=?").run(cand.id);
   clearAlertStatus(req.user.id);
-  clearTimeout(dispatchTimers.get(mission.id));
+  clearDispatchTimers(mission.id);
   offerNext(mission.id);
   res.json({ ok: true });
 });
@@ -1202,13 +1293,28 @@ app.post('/api/missions/:id/refuse', auth, (req, res) => {
 // L’attribution est automatique : le client ne sélectionne plus de professionnel.
 app.post('/api/missions/:id/choisir/:proId', auth, (req, res) => res.status(410).json({ error: 'L’attribution est désormais automatique : attendez qu’un professionnel disponible accepte la demande.' }));
 
+// Modifier le type de prestataire après une recherche sans résultat : aucun détail de la demande n’est perdu.
+app.put('/api/missions/:id/provider-type', auth, (req, res) => {
+  const mission = db.prepare('SELECT * FROM missions WHERE id=? AND client_id=?').get(req.params.id, req.user.id);
+  if (!mission) return res.status(404).json({ error: 'Demande introuvable.' });
+  if (!['recherche', 'sans_pro'].includes(mission.status)) return res.status(409).json({ error: 'Le type de prestataire ne peut plus être modifié après l’attribution.' });
+  const providerType = (req.body || {}).provider_type === 'entreprise' ? 'entreprise' : 'particulier';
+  if (!providerTypeEnabled(providerType)) return res.status(409).json({ error: 'Ce type de prestataire est temporairement indisponible.' });
+  clearDispatchTimers(mission.id);
+  db.prepare('DELETE FROM mission_candidates WHERE mission_id=?').run(mission.id);
+  db.prepare("UPDATE missions SET provider_type=?, status='recherche', search_started_at=datetime('now'), search_expires_at=NULL, updated_at=datetime('now') WHERE id=?").run(providerType, mission.id);
+  addEvent(mission.id, 'recherche', req.user.id, 'Choix prestataire modifié : ' + providerType);
+  startDispatch(mission.id);
+  res.json({ ok: true, provider_type: providerType, status: db.prepare('SELECT status FROM missions WHERE id=?').get(mission.id).status });
+});
+
 // Relancer la recherche
 app.post('/api/missions/:id/relancer', auth, (req, res) => {
   const mission = db.prepare('SELECT * FROM missions WHERE id=? AND client_id=?').get(req.params.id, req.user.id);
   if (!mission) return res.status(404).json({ error: 'Demande introuvable.' });
   if (mission.status !== 'sans_pro') return res.status(409).json({ error: 'La recherche est déjà en cours.' });
-  db.prepare("UPDATE missions SET status='recherche' WHERE id=?").run(mission.id);
-  db.prepare("UPDATE mission_candidates SET status='pending', offered_at=NULL, responded_at=NULL WHERE mission_id=? AND status IN ('expired','refused')").run(mission.id);
+  db.prepare("UPDATE missions SET status='recherche', search_started_at=datetime('now'), search_expires_at=NULL WHERE id=?").run(mission.id);
+  clearDispatchTimers(mission.id);
   db.prepare('DELETE FROM mission_candidates WHERE mission_id=?').run(mission.id);
   addEvent(mission.id, 'recherche', req.user.id, 'Recherche relancée');
   startDispatch(mission.id);
@@ -1370,6 +1476,7 @@ app.post('/api/missions/:id/cancel', auth, (req, res) => {
   addEvent(mission.id, 'annulee', req.user.id, `Annulée par ${role === 'client' ? 'le client' : 'le professionnel'}${req.body.reason ? ' : ' + req.body.reason : ''}`);
   const other = role === 'client' ? mission.pro_id : mission.client_id;
   if (other) { notify(other, 'mission', 'Mission annulée', 'La mission a été annulée par l\u2019autre partie.', '#/mission/' + mission.id); push(other, 'mission', { id: mission.id, status: 'annulee' }); }
+  clearDispatchTimers(mission.id);
   if (mission.pro_id) releaseProfessional(mission.pro_id, 'La mission annulée ne vous bloque plus.');
   res.json({ ok: true, status: 'annulee' });
 });
@@ -2010,6 +2117,7 @@ const PERM_ROUTES = [
   [/^\/payments/, 'paiements'],
   [/^\/(finances|transactions|prix-modifs|visibilite|pub)/, 'paiements'],
   [/^\/commissions/, 'parametres'],
+  [/^\/dispatch/, 'parametres'],
   [/^\/(ads|broadcast|annonces|support)/, 'communication'],
   [/^\/(signalements|urgences|files|rules)/, 'securite'],
   [/^\/(avis-recherche|jobs|ecole-famille|quiz|kdo|game-plays|quiz-sessions)/, 'contenu'],
@@ -2135,7 +2243,7 @@ A.get('/users/:id', (req, res) => {
   const missions = db.prepare('SELECT COUNT(*) n FROM missions WHERE client_id=? OR pro_id=?').get(u.id, u.id).n;
   const history = db.prepare("SELECT admin_name, admin_role, action, details, reason, created_at FROM admin_log WHERE target_type='users' AND target_id=? ORDER BY id DESC LIMIT 50").all(u.id);
   delete u.password_hash; delete u.salt; delete u.perms;
-  res.json({ ...u, pro: pro ? { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents) } : null, missions, history });
+  res.json({ ...u, pro: pro ? { ...pro, services: JSON.parse(pro.services), authorized_services: jsonNumberIds(pro.authorized_services || pro.services), documents: JSON.parse(pro.documents) } : null, missions, history });
 });
 
 // Garde-fou : un membre de l'équipe ne peut pas agir sur un compte de l'équipe (sauf le PDG, et jamais sur le PDG)
@@ -2189,12 +2297,14 @@ A.put('/users/:id', (req, res) => {
 A.post('/users/:id/suspend', (req, res) => {
   const u = cibleUtilisateur(req, res); if (!u) return;
   db.prepare('UPDATE users SET suspended=? WHERE id=?').run(req.body.suspended ? 1 : 0, u.id);
+  if (req.body.suspended) revokeProfessionalOffers(u.id);
   if (!req.body.suspended) notify(u.id, 'compte', 'Compte réactivé', 'Votre compte a été réactivé par l\u2019administration.', '#/home');
   res.json({ ok: true });
 });
 A.post('/users/:id/block', (req, res) => {
   const u = cibleUtilisateur(req, res); if (!u) return;
   db.prepare('UPDATE users SET blocked=? WHERE id=?').run(req.body.blocked ? 1 : 0, u.id);
+  if (req.body.blocked) revokeProfessionalOffers(u.id);
   if (!req.body.blocked) notify(u.id, 'compte', 'Compte débloqué', 'Votre compte a été débloqué par l\u2019administration.', '#/home');
   res.json({ ok: true });
 });
@@ -2203,6 +2313,7 @@ A.post('/users/:id/disable-temp', (req, res) => {
   const { until } = req.body || {}; // date/heure ISO, ou null pour réactiver
   if (until && isNaN(Date.parse(until))) return res.status(400).json({ error: 'Date invalide.' });
   db.prepare('UPDATE users SET disabled_until=? WHERE id=?').run(until ? until.replace('T', ' ').slice(0, 19) : null, u.id);
+  if (until) revokeProfessionalOffers(u.id);
   res.json({ ok: true });
 });
 // Réinitialiser l'accès : nouveau mot de passe temporaire (l'admin ne voit JAMAIS l'ancien mot de passe)
@@ -2390,6 +2501,23 @@ A.get('/pros/pending', (req, res) => {
   const rows = db.prepare(`SELECT u.id, u.name, u.phone, u.address, u.created_at, p.* FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.pro_status='pending' ORDER BY u.id DESC`).all();
   res.json(rows.map(r => ({ ...r, services: JSON.parse(r.services), documents: JSON.parse(r.documents) })));
 });
+A.put('/pros/:id/eligibility', (req, res) => {
+  const u = db.prepare("SELECT * FROM users WHERE id=? AND pro_status='approved'").get(req.params.id);
+  const profile = db.prepare('SELECT * FROM pro_profiles WHERE user_id=?').get(req.params.id);
+  if (!u || !profile) return res.status(404).json({ error: 'Professionnel validé introuvable.' });
+  const requested = Array.isArray((req.body || {}).authorized_services) ? [...new Set(req.body.authorized_services.map(Number).filter(Number.isFinite))].slice(0, 200) : jsonNumberIds(profile.authorized_services || profile.services);
+  const declared = jsonNumberIds(profile.services);
+  if (requested.some(id => !declared.includes(id))) return res.status(400).json({ error: 'Un service autorisé doit d’abord être déclaré dans le profil du professionnel.' });
+  const found = requested.length ? db.prepare(`SELECT COUNT(*) n FROM services WHERE active=1 AND id IN (${requested.map(() => '?').join(',')})`).get(...requested).n : 0;
+  if (found !== requested.length) return res.status(400).json({ error: 'Un ou plusieurs services sélectionnés sont invalides ou inactifs.' });
+  const type = (req.body || {}).pro_type === 'entreprise' ? 'entreprise' : 'particulier';
+  const capacity = Math.max(1, Math.min(3, parseInt((req.body || {}).capacity_level, 10) || 1));
+  db.prepare('UPDATE pro_profiles SET authorized_services=?, pro_type=?, capacity_level=? WHERE user_id=?').run(JSON.stringify(requested), type, capacity, u.id);
+  db.prepare("SELECT * FROM missions WHERE status='recherche' AND id IN (SELECT mission_id FROM mission_candidates WHERE pro_id=? AND status='offered')").all(u.id).forEach(revokeIneligibleOffers);
+  notify(u.id, 'compte', 'Autorisation professionnelle mise à jour', 'La direction a actualisé vos services autorisés et votre capacité de mission.', '#/pro');
+  push(u.id, 'account', { pro_status: 'approved' });
+  res.json({ ok: true, authorized_services: requested, pro_type: type, capacity_level: capacity });
+});
 A.post('/pros/:id/approve', (req, res) => {
   const u = db.prepare("SELECT * FROM users WHERE id=? AND pro_status='pending'").get(req.params.id);
   if (!u) return res.status(404).json({ error: 'Demande introuvable.' });
@@ -2444,10 +2572,10 @@ A.delete('/pro-options/:id', (req, res) => { const r = db.prepare('DELETE FROM p
 
 // Catalogue complet (catégories + sous-catégories + services + tâches)
 A.get('/catalog', (req, res) => {
-  const cats = db.prepare('SELECT * FROM service_categories ORDER BY sort,id').all();
-  const subs = db.prepare('SELECT * FROM sous_categories ORDER BY sort,id').all();
-  const svcs = db.prepare('SELECT * FROM services ORDER BY sort,id').all().map(s => ({ ...s, cities: JSON.parse(s.cities || '[]') }));
-  const tas = db.prepare('SELECT * FROM taches ORDER BY sort,id').all();
+  const cats = frenchSort(db.prepare('SELECT * FROM service_categories').all());
+  const subs = frenchSort(db.prepare('SELECT * FROM sous_categories').all());
+  const svcs = frenchSort(db.prepare('SELECT * FROM services').all()).map(s => ({ ...s, cities: JSON.parse(s.cities || '[]') }));
+  const tas = frenchSort(db.prepare('SELECT * FROM taches').all());
   const qs = db.prepare('SELECT * FROM service_questions ORDER BY sort,id').all().map(q => ({ ...q, options: JSON.parse(q.options) }));
   res.json({ categories: cats, sous_categories: subs, services: svcs, taches: tas, questions: qs });
 });
@@ -2487,7 +2615,7 @@ A.put('/taches/:id', (req, res) => {
 });
 A.delete('/taches/:id', (req, res) => { db.prepare('DELETE FROM taches WHERE id=?').run(req.params.id); res.json({ ok: true }); });
 // VILLES
-A.get('/villes', (req, res) => res.json(db.prepare('SELECT * FROM villes ORDER BY name').all()));
+A.get('/villes', (req, res) => res.json(frenchSort(db.prepare('SELECT * FROM villes').all())));
 A.post('/villes', (req, res) => {
   if (!req.body.name) return res.status(400).json({ error: 'Nom requis.' });
   try { const info = db.prepare('INSERT INTO villes(name) VALUES(?)').run(req.body.name.trim()); res.json({ id: info.lastInsertRowid }); }
@@ -2581,6 +2709,16 @@ A.get('/missions', (req, res) => {
     FROM missions m JOIN services s ON s.id=m.service_id JOIN users uc ON uc.id=m.client_id
     LEFT JOIN users up ON up.id=m.pro_id WHERE ${where} ORDER BY m.updated_at DESC LIMIT 300`).all();
   res.json(rows);
+});
+A.post('/missions/:id/conversation-lock', (req, res) => {
+  const m = db.prepare('SELECT * FROM missions WHERE id=?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Mission introuvable.' });
+  const locked = !!(req.body || {}).locked;
+  const reason = String((req.body || {}).reason || '').trim().slice(0, 300);
+  if (locked) db.prepare("UPDATE missions SET conversation_locked_at=datetime('now'), conversation_lock_reason=? WHERE id=?").run(reason || 'Échanges suspendus par l’administration', m.id);
+  else db.prepare('UPDATE missions SET conversation_locked_at=NULL, conversation_lock_reason=NULL WHERE id=?').run(m.id);
+  [m.client_id, m.pro_id].filter(Boolean).forEach(uid => notify(uid, 'mission', locked ? '🔒 Échanges suspendus' : '🔓 Échanges rétablis', locked ? (reason || 'L’administration a temporairement suspendu les échanges liés à cette mission.') : 'L’administration a rétabli les échanges liés à cette mission.', '#/mission/' + m.id));
+  res.json({ ok: true, locked });
 });
 A.post('/missions/:id/litige', (req, res) => {
   const m = db.prepare('SELECT * FROM missions WHERE id=?').get(req.params.id);
@@ -2793,13 +2931,26 @@ A.get('/finances', (req, res) => {
   });
 });
 
+// VUE OPÉRATIONNELLE DES DEMANDES : chiffres DB, sans donnée de démonstration.
+A.get('/dispatch/overview', (req, res) => {
+  const count = q => db.prepare(q).get().n;
+  const byState = db.prepare(`SELECT COALESCE(availability_status, CASE WHEN available=1 THEN 'disponible' ELSE 'indisponible' END) state, COUNT(*) n
+    FROM pro_profiles p JOIN users u ON u.id=p.user_id WHERE u.pro_status='approved' GROUP BY state`).all();
+  res.json({
+    searching: count("SELECT COUNT(*) n FROM missions WHERE status='recherche'"),
+    unanswered: count("SELECT COUNT(*) n FROM missions WHERE status='sans_pro'"),
+    assigned: count("SELECT COUNT(*) n FROM missions WHERE status IN ('acceptee','confirmee','en_cours')"),
+    professionals: Object.fromEntries(byState.map(r => [r.state, r.n]))
+  });
+});
+
 // PARAMÈTRES
 A.get('/settings', (req, res) => {
   const keys = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
     'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
     'pro_doc_particulier', 'pro_doc_entreprise',
     'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise',
-    'dispatch_initial_alert_count', 'dispatch_expand_alert_count', 'dispatch_expand_strategy',
+    'dispatch_initial_alert_count', 'dispatch_expand_alert_count', 'dispatch_expand_strategy', 'dispatch_reminder_seconds', 'dispatch_auto_enabled', 'dispatch_geo_enabled', 'dispatch_alert_sound', 'dispatch_max_reminders', 'dispatch_search_max_seconds', 'dispatch_allow_particulier', 'dispatch_allow_entreprise',
     'chat_text_limit', 'chat_audio_max_seconds', 'chat_image_limit', 'chat_audio_enabled', 'chat_image_enabled', 'file_recovery_days'];
   const out = {};
   keys.forEach(k => out[k] = getSetting(k));
@@ -2810,7 +2961,7 @@ A.put('/settings', (req, res) => {
     'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
     'pro_doc_particulier', 'pro_doc_entreprise',
     'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise',
-    'dispatch_initial_alert_count', 'dispatch_expand_alert_count', 'dispatch_expand_strategy',
+    'dispatch_initial_alert_count', 'dispatch_expand_alert_count', 'dispatch_expand_strategy', 'dispatch_reminder_seconds', 'dispatch_auto_enabled', 'dispatch_geo_enabled', 'dispatch_alert_sound', 'dispatch_max_reminders', 'dispatch_search_max_seconds', 'dispatch_allow_particulier', 'dispatch_allow_entreprise',
     'chat_text_limit', 'chat_audio_max_seconds', 'chat_image_limit', 'chat_audio_enabled', 'chat_image_enabled', 'file_recovery_days'];
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!allowed.includes(k)) continue;
@@ -2821,6 +2972,10 @@ A.put('/settings', (req, res) => {
     if (k === 'commission_rate') { const r = parseFloat(v); if (isNaN(r) || r < 0 || r > 100) return res.status(400).json({ error: 'Taux de commission invalide (0 à 100).' }); }
     if (k === 'dispatch_wait_seconds') { const s = parseInt(v, 10); if (isNaN(s) || s < 15 || s > 3600) return res.status(400).json({ error: 'Délai d\u2019attente invalide (15 à 3600 secondes).' }); }
     if (['dispatch_initial_alert_count', 'dispatch_expand_alert_count'].includes(k)) { const n = parseInt(v, 10); if (isNaN(n) || n < 1 || n > 50) return res.status(400).json({ error: 'Taille de vague invalide (1 à 50 professionnels).' }); }
+    if (k === 'dispatch_reminder_seconds') { const n = parseInt(v, 10); if (isNaN(n) || n < 5 || n > 600) return res.status(400).json({ error: 'Délai de rappel invalide (5 à 600 secondes).' }); }
+    if (k === 'dispatch_max_reminders') { const n = parseInt(v, 10); if (isNaN(n) || n < 0 || n > 100) return res.status(400).json({ error: 'Nombre maximal de rappels invalide (0 à 100).' }); }
+    if (k === 'dispatch_search_max_seconds') { const n = parseInt(v, 10); if (isNaN(n) || n < 60 || n > 86400) return res.status(400).json({ error: 'Délai maximal de recherche invalide (60 à 86400 secondes).' }); }
+    if (['dispatch_auto_enabled', 'dispatch_geo_enabled', 'dispatch_alert_sound', 'dispatch_allow_particulier', 'dispatch_allow_entreprise'].includes(k) && !['0','1',0,1,true,false].includes(v)) return res.status(400).json({ error: 'Paramètre d’activation invalide.' });
     if (k === 'dispatch_expand_strategy' && !['vagues'].includes(String(v))) return res.status(400).json({ error: 'Stratégie d\u2019alerte invalide.' });
     if (['chat_text_limit', 'chat_image_limit'].includes(k)) { const n = parseInt(v, 10); if (isNaN(n) || n < 0 || n > 500) return res.status(400).json({ error: 'Limite de messagerie invalide.' }); }
     if (k === 'chat_audio_max_seconds') { const n = parseInt(v, 10); if (isNaN(n) || n < 1 || n > 120) return res.status(400).json({ error: 'Durée vocale invalide (1 à 120 secondes).' }); }
@@ -2830,6 +2985,24 @@ A.put('/settings', (req, res) => {
     setSetting(k, v);
     // Sécurité financière : chaque modification de paramètre est journalisée (qui, ancienne valeur, nouvelle valeur, quand)
     if (String(ancienneValeur) !== String(v)) logAction(req.user, 'Paramètre « ' + k + ' » modifié', { details: `Ancienne valeur : ${ancienneValeur === null ? '(vide)' : ancienneValeur} → Nouvelle valeur : ${v}` });
+  }
+  const changedDispatch = Object.keys(req.body || {}).some(k => ['dispatch_auto_enabled', 'dispatch_geo_enabled', 'dispatch_alert_sound', 'dispatch_allow_particulier', 'dispatch_allow_entreprise', 'dispatch_search_max_seconds', 'dispatch_wait_seconds', 'dispatch_reminder_seconds', 'dispatch_max_reminders', 'dispatch_initial_alert_count', 'dispatch_expand_alert_count'].includes(k));
+  if (changedDispatch) {
+    const activeSearches = db.prepare("SELECT * FROM missions WHERE status='recherche'").all();
+    if (getSetting('dispatch_auto_enabled', '1') === '1') {
+      activeSearches.forEach(m => {
+        clearDispatchTimers(m.id);
+        db.prepare("DELETE FROM mission_candidates WHERE mission_id=? AND status IN ('pending','offered','expired','refused')").run(m.id);
+        db.prepare("UPDATE missions SET search_started_at=datetime('now'), search_expires_at=NULL WHERE id=?").run(m.id);
+        addEvent(m.id, 'recherche', req.user.id, 'Recherche recalculée après modification des paramètres PDG');
+        startDispatch(m.id);
+      });
+    } else activeSearches.forEach(m => {
+      clearDispatchTimers(m.id);
+      const offered = db.prepare("SELECT pro_id FROM mission_candidates WHERE mission_id=? AND status='offered'").all(m.id);
+      db.prepare("UPDATE mission_candidates SET status='expired', responded_at=datetime('now') WHERE mission_id=? AND status='offered'").run(m.id);
+      offered.forEach(o => clearAlertStatus(o.pro_id));
+    });
   }
   res.json({ ok: true });
 });
@@ -3330,6 +3503,16 @@ function ensureFileRecord(name) {
   db.prepare("INSERT OR IGNORE INTO file_records(name, size, state, note) VALUES(?,?,'active','Référencé avant l’activation du registre')").run(name, size);
   return fileRecord(name);
 }
+function fileProtectedReferences(name) {
+  const active = ['acceptee', 'confirmee', 'en_cours', 'terminee', 'litige'];
+  const marks = active.map(() => '?').join(',');
+  const missions = db.prepare(`SELECT id, code, photos, audio FROM missions WHERE status IN (${marks}) AND (photos LIKE ? OR audio LIKE ?)`).all(...active, '%/uploads/' + name, '%/uploads/' + name)
+    .filter(m => fileHasName(m.photos, name) || path.basename(m.audio || '') === name)
+    .map(m => 'mission ' + m.code);
+  const messages = db.prepare(`SELECT m.id, m.code FROM messages msg JOIN missions m ON m.id=msg.mission_id WHERE m.status IN (${marks}) AND msg.file LIKE ?`).all(...active, '%/uploads/' + name)
+    .filter(m => !!m).map(m => 'conversation de la mission ' + m.code);
+  return [...new Set([...missions, ...messages])];
+}
 async function purgeStoredFile(name, note) {
   const clean = uploadName('/uploads/' + name); if (!clean) throw new Error('Nom de fichier invalide.');
   try { fs.unlinkSync(path.join(UPLOAD_DIR, clean)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
@@ -3351,7 +3534,14 @@ A.post('/files/:name/state', async (req, res) => {
   const note = String((req.body || {}).note || '').trim().slice(0, 500) || null;
   if (!name || !['active','hidden','archived','recovery','purged'].includes(state)) return res.status(400).json({ error: 'État de fichier invalide.' });
   const current = ensureFileRecord(name);
-  if (state === 'purged') { await purgeStoredFile(name, note || 'Suppression demandée depuis le tableau de bord'); return res.json({ ok: true, state: 'purged' }); }
+  if (state === 'purged') {
+    if (!(req.body || {}).confirmed) return res.status(400).json({ error: 'Confirmez la suppression définitive : elle est irréversible.' });
+    if (!['recovery', 'archived'].includes(current.state)) return res.status(409).json({ error: 'Archivez ou placez d’abord ce fichier en récupération avant une suppression définitive.' });
+    const refs = fileProtectedReferences(name);
+    if (refs.length) return res.status(409).json({ error: 'Suppression refusée : ce fichier est encore requis par ' + refs.join(', ') + '.' });
+    await purgeStoredFile(name, note || 'Suppression définitive confirmée depuis le tableau de bord');
+    return res.json({ ok: true, state: 'purged' });
+  }
   if (state === 'recovery') {
     const days = settingInt('file_recovery_days', 7, 0, 365);
     const after = new Date(Date.now() + days * 86400000).toISOString().slice(0, 19).replace('T', ' ');
@@ -3378,8 +3568,16 @@ A.get('/files/records/download', async (req, res) => {
 });
 async function purgeRecoveryFiles() {
   const due = db.prepare("SELECT name FROM file_records WHERE state='recovery' AND delete_after IS NOT NULL AND delete_after <= datetime('now')").all();
-  for (const r of due) await purgeStoredFile(r.name, 'Délai de récupération expiré');
-  return due.length;
+  let purged = 0;
+  for (const r of due) {
+    const refs = fileProtectedReferences(r.name);
+    if (refs.length) { // une mission/litige devenu actif protège à nouveau le fichier ; on reporte la purge.
+      db.prepare("UPDATE file_records SET delete_after=datetime('now','+1 day'), note=? WHERE name=?").run('Purge reportée : fichier encore requis par ' + refs.join(', '), r.name);
+      continue;
+    }
+    await purgeStoredFile(r.name, 'Délai de récupération expiré'); purged++;
+  }
+  return purged;
 }
 
 // Compatibilité API : l'ancien inventaire technique reste disponible, même si le dashboard utilise désormais le classement par client.
@@ -3412,10 +3610,12 @@ for (const m of db.prepare("SELECT id FROM missions WHERE status='recherche'").a
   const offered = db.prepare("SELECT 1 FROM mission_candidates WHERE mission_id=? AND status='offered'").get(m.id);
   if (offered) {
     const wait = Math.max(15, parseInt(getSetting('dispatch_wait_seconds', '60'), 10)) * 1000;
+    startDispatchReminders(m.id);
     dispatchTimers.set(m.id, setTimeout(() => {
       const stale = db.prepare("SELECT pro_id FROM mission_candidates WHERE mission_id=? AND status='offered'").all(m.id);
       db.prepare("UPDATE mission_candidates SET status='expired' WHERE mission_id=? AND status='offered'").run(m.id);
       stale.forEach(row => clearAlertStatus(row.pro_id));
+      clearDispatchTimers(m.id);
       offerNext(m.id);
     }, wait));
   } else offerNext(m.id);

@@ -12,7 +12,16 @@ self.addEventListener('activate', e => {
 self.addEventListener('push', event => {
   let data = {}; try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data && event.data.text() }; }
   const title = data.title || 'Klean Services';
-  event.waitUntil(self.registration.showNotification(title, { body: data.body || '', icon: '/icon-192.png', badge: '/icon-192.png', data: { link: data.link || '#/notifications' }, tag: data.id ? 'ks-' + data.id : undefined, renotify: false }));
+  const mission = data.category === 'mission';
+  const missionId = mission && String(data.link || '').match(/#\/mission\/(\d+)/);
+  event.waitUntil(self.registration.showNotification(title, {
+    body: data.body || '', icon: '/icon-192.png', badge: '/icon-192.png',
+    data: { link: data.link || '#/notifications' },
+    // Le même tag remplace une ancienne alerte lorsqu'une mission est attribuée ; renotify permet le rappel autorisé.
+    tag: missionId ? 'ks-mission-' + missionId[1] : (data.id ? 'ks-' + data.id : undefined),
+    renotify: mission && data.sound !== false, silent: data.sound === false,
+    requireInteraction: mission, vibrate: mission && data.sound !== false ? [120, 55, 120, 55, 180] : undefined
+  }));
 });
 self.addEventListener('notificationclick', event => {
   event.notification.close(); const link = event.notification.data && event.notification.data.link || '#/notifications';

@@ -72,7 +72,9 @@ async function api(path, opts = {}) {
   try { data = await res.json(); } catch { }
   if (!res.ok) {
     if (res.status === 401 && TOKEN) { logout(false); }
-    throw new Error(data.error || 'Une erreur est survenue. Veuillez réessayer.');
+    const err = new Error(data.error || 'Une erreur est survenue. Veuillez réessayer.');
+    err.status = res.status; err.data = data;
+    throw err;
   }
   return data;
 }
@@ -84,19 +86,21 @@ function busy(btn, on, label) {
 }
 
 /* ---------- Son + vibration de notification ---------- */
-function notifFeedback() {
-  if (localStorage.getItem('ks_sound') !== '0') {
+function notifFeedback(isMission, soundAllowed = true) {
+  if (soundAllowed && localStorage.getItem('ks_sound') !== '0') {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.connect(g); g.connect(ctx.destination);
-      o.frequency.value = 880; g.gain.setValueAtTime(.12, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + .4);
-      o.start(); o.stop(ctx.currentTime + .4);
-      setTimeout(() => ctx.close(), 600);
+      // Deux notes brèves rendent l'alerte mission reconnaissable au premier plan.
+      o.frequency.setValueAtTime(isMission ? 740 : 880, ctx.currentTime);
+      if (isMission) o.frequency.setValueAtTime(988, ctx.currentTime + .18);
+      g.gain.setValueAtTime(.13, ctx.currentTime); g.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + (isMission ? .62 : .4));
+      o.start(); o.stop(ctx.currentTime + (isMission ? .62 : .4));
+      setTimeout(() => ctx.close(), 850);
     } catch { }
   }
-  if (navigator.vibrate) try { navigator.vibrate([120, 60, 120]); } catch { }
+  if (soundAllowed && navigator.vibrate) try { navigator.vibrate(isMission ? [120, 55, 120, 55, 180] : [120, 60, 120]); } catch { }
 }
 
 /* ---------- SSE temps réel ---------- */
@@ -108,7 +112,7 @@ function connectSSE() {
     const n = JSON.parse(e.data);
     BADGES.notifications = n.unread;
     updateBadges();
-    notifFeedback();
+    notifFeedback(n.category === 'mission', n.sound !== false);
     if (n.category !== 'message' || currentChat === null) {
       const t = document.createElement('div');
       t.className = 'toast notif';
@@ -560,28 +564,20 @@ routes.request = async (serviceId) => {
     if (missing) { toast('Veuillez répondre à : « ' + missing + ' »', 'err'); return; }
     const addr = document.getElementById('r-addr').value;
     if (!addr.trim()) { toast('Indiquez votre localisation (bouton GPS ou saisie manuelle).', 'err'); return; }
-    busy(e.target, true, 'Envoi en cours…');
-    try {
-      const selectedTasks = [...document.querySelectorAll('#r-taches .task-chip.on')].map(chip => ({
-        id: Number(chip.dataset.taskId), name: chip.dataset.taskName,
-        detail: (document.getElementById('r-task-detail-' + chip.dataset.taskId) || {}).value || ''
-      }));
-      const r = await api('/missions', {
-        method: 'POST', body: {
-          service_id: REQ.service_id, answers, taches: selectedTasks,
-          description: document.getElementById('r-desc').value,
-          address: addr, lat: REQ.lat, lng: REQ.lng,
-          urgence: document.getElementById('r-urgent').checked,
-          date_souhaitee: document.getElementById('r-date').value || null,
-          photos: REQ.photos, audio: REQ.audio
-        }
-      });
-      toast('Demande envoyée ! Recherche de professionnels en cours…', 'ok');
-      navStack = ['#/home', '#/missions'];
-      nav('#/mission/' + r.id);
-    } catch (err) {
-      toast(err.message, 'err'); busy(e.target, false);
-    }
+    const selectedTasks = [...document.querySelectorAll('#r-taches .task-chip.on')].map(chip => ({
+      id: Number(chip.dataset.taskId), name: chip.dataset.taskName,
+      detail: (document.getElementById('r-task-detail-' + chip.dataset.taskId) || {}).value || ''
+    }));
+    // Les informations restent en mémoire pendant le choix très simple du prestataire.
+    REQ.draft = {
+      service_id: REQ.service_id, answers, taches: selectedTasks,
+      description: document.getElementById('r-desc').value,
+      address: addr, lat: REQ.lat, lng: REQ.lng,
+      urgence: document.getElementById('r-urgent').checked,
+      date_souhaitee: document.getElementById('r-date').value || null,
+      photos: REQ.photos, audio: REQ.audio
+    };
+    A.chooseProviderForRequest();
   };
 };
 function renderQuestion(q) {
@@ -607,6 +603,7 @@ routes.missions = async () => {
     <div class="card tap" onclick="nav('#/mission/${m.id}')">
       <div class="row"><span class="mi-ic" style="font-size:24px">${esc(m.icon || '📋')}</span>
         <div class="grow"><div class="bold">${esc(m.service)}</div>
+        <div class="small muted">${m.provider_type === 'entreprise' ? '🏢 Entreprise recherchée' : '👤 Particulier recherché'}</div>
         ${m.taches && m.taches.length ? `<div class="small">🛠️ ${m.taches.map(t => esc(t.name)).join(' • ')}</div>` : (m.tache ? `<div class="small">🛠️ ${esc(m.tache)}</div>` : '')}
         <div class="muted small">${esc(m.address || '')} • ${fmtDate(m.created_at)}</div></div>
         ${statusPill(m.status)}</div>
@@ -624,6 +621,7 @@ routes.missions = async () => {
       ${d.offers.length ? `<div class="sec-title">🔔 Nouvelles missions à traiter</div>` + d.offers.map(missionCard).join('') : ''}
       ${d.pro.length ? `<div class="sec-title">Mes missions</div>` + d.pro.map(missionCard).join('') : (!d.offers.length ? emptyState('🧰', 'Aucune mission pour le moment. Restez disponible pour en recevoir !') : '')}
     ` : `
+      <button class="btn sec mb" onclick="nav('#/home')">＋ Nouvelle demande</button>
       ${d.client.length ? d.client.map(missionCard).join('') : emptyState('📋', 'Aucune demande pour le moment.') + `<button class="btn" onclick="nav('#/home')">Faire une demande</button>`}
     `}
     </div>
@@ -645,7 +643,9 @@ routes.mission = async (id) => {
   if (m.status === 'recherche') banner = isClient
     ? `<div class="status-banner search"><div class="spinner"></div>Recherche de professionnels disponibles… Vous serez notifié dès qu'un professionnel accepte.</div>`
     : (isCand && m.offer_pending ? `<div class="status-banner info">🔔 Cette mission vous est proposée. Répondez rapidement !</div>` : `<div class="status-banner search"><div class="spinner"></div>En attente de réponse…</div>`);
-  if (m.status === 'sans_pro') banner = `<div class="status-banner bad">😕 Aucun professionnel n'a répondu pour le moment.</div>`;
+  if (m.status === 'sans_pro') banner = isClient
+    ? `<div class="status-banner bad">😕 Aucun ${m.provider_type === 'entreprise' ? 'entreprise' : 'particulier'} admissible n'est disponible pour le moment.<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn sm" onclick="A.changeMissionProvider(${m.id})">Changer le type</button><button class="btn sm sec" onclick="A.relancerMission(${m.id})">Relancer</button></div></div>`
+    : `<div class="status-banner bad">😕 Cette demande n'est plus disponible.</div>`;
   if (m.status === 'acceptee') banner = isClient
     ? `<div class="status-banner ok">✅ ${esc(m.pro ? m.pro.name : 'Un professionnel')} a accepté ! Consultez son profil puis confirmez.</div>`
     : `<div class="status-banner info">En attente de la confirmation du client.</div>`;
@@ -763,6 +763,7 @@ routes.mission = async (id) => {
       <div class="row"><span style="font-size:26px">${esc(m.icon || '📋')}</span>
         <div class="grow"><div class="bold">${esc(m.service)}</div><div class="muted small">N° ${esc(m.code)} • ${fmtDate(m.created_at)}</div></div>
         ${statusPill(m.status)}</div>
+      <div class="small muted mt">Prestataire recherché : <b>${m.provider_type === 'entreprise' ? '🏢 Une entreprise' : '👤 Un particulier'}</b>${m.capacity_required > 1 ? ' • capacité renforcée requise' : ''}</div>
       ${m.taches && m.taches.length ? `<div class="small mt"><b>🛠️ Tâches demandées :</b>${m.taches.map(t => `<div>• ${esc(t.name)}${t.detail ? ` — ${esc(t.detail)}` : ''}</div>`).join('')}</div>` : (m.tache ? `<div class="small mt"><b>🛠️ Tâche demandée :</b> ${esc(m.tache)}</div>` : '')}
       ${m.urgence ? '<div class="small mt" style="color:var(--danger);font-weight:700">🔥 Demande urgente</div>' : ''}
       ${m.date_souhaitee ? `<div class="small mt">📅 Souhaité : ${fmtDate(m.date_souhaitee)}</div>` : ''}
@@ -1105,7 +1106,7 @@ async function renderProDashboard() {
     </div>
     <div class="muted small center mb">Commission Klean Services : ${d.stats.commission_rate}% par mission</div>
     ${proOptions.length ? `<div class="sec-title">🧩 Mes options professionnelles</div><div class="card">${proOptions.map(o => `<div class="option-pro"><div class="grow"><div class="bold">${esc(o.name)} ${o.required ? '<span class="req">Obligatoire</span>' : '<span class="muted small">Facultative</span>'}</div><div class="small muted">${esc(o.description || 'Option proposée par Klean Services.')}</div><textarea id="pro-opt-${o.id}" rows="2" placeholder="Votre réponse / confirmation…">${esc(o.usage && o.usage.payload || '')}</textarea></div><button class="btn sm" onclick="A.saveProOption(${o.id},${o.required ? 1 : 0})">Enregistrer</button></div>`).join('')}</div>` : ''}
-    ${d.offers.length ? `<div class="sec-title">🔔 Missions à traiter (${d.offers.length})</div>` + d.offers.map(m => `
+    ${d.offers.length ? `<button class="card tap" style="width:100%;border:2px solid var(--accent,#0b7a75);text-align:left" onclick="sessionStorage.setItem('ks_mtab','pro');nav('#/missions')"><div class="row"><span style="font-size:25px">🔔</span><div class="grow"><b>Demandes disponibles</b><div class="small muted">Ouvrir les demandes auxquelles vous pouvez réellement répondre</div></div><span class="badge">${d.offers.length}</span></div></button><div class="sec-title">🔔 Missions à traiter (${d.offers.length})</div>` + d.offers.map(m => `
       <div class="card tap" onclick="nav('#/mission/${m.id}')"><div class="row"><div class="grow">
         <div class="bold">${esc(m.service_name)}</div><div class="muted small">📍 ${esc(m.address || '')} ${m.urgence ? ' • 🔥 Urgent' : ''}</div></div>
         <span class="pill recherche">À traiter</span></div></div>`).join('') : ''}
@@ -1997,6 +1998,35 @@ const A = {
     el.classList.add('on');
     el.parentElement.dataset.val = val;
   },
+  chooseProviderForRequest() {
+    if (!REQ.draft) return toast('Les informations de votre demande ne sont plus disponibles. Veuillez réessayer.', 'err');
+    openModal(`<h3>Choisissez un prestataire</h3>
+      <button class="btn" style="width:100%;margin-bottom:10px" onclick="A.sendRequestWithProvider('particulier')">👤 Un particulier</button>
+      <button class="btn sec" style="width:100%" onclick="A.sendRequestWithProvider('entreprise')">🏢 Une entreprise</button>`);
+  },
+  async sendRequestWithProvider(provider_type, duplicate_confirmed) {
+    if (!REQ.draft) return;
+    try {
+      const r = await api('/missions', { method: 'POST', body: { ...REQ.draft, provider_type, duplicate_confirmed: !!duplicate_confirmed } });
+      closeModal(); delete REQ.draft;
+      toast('Demande envoyée ! Recherche de prestataires en cours…', 'ok');
+      navStack = ['#/home', '#/missions']; nav('#/mission/' + r.id);
+    } catch (err) {
+      if (err.status === 409 && err.data && err.data.duplicate && !duplicate_confirmed) {
+        openModal(`<h3>Demande semblable détectée</h3><p class="small muted">Une demande récente de ce service existe déjà. Souhaitez-vous tout de même créer une demande indépendante ?</p><button class="btn" onclick="A.sendRequestWithProvider('${provider_type}',true)">Créer quand même</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+      } else toast(err.message, 'err');
+    }
+  },
+  changeMissionProvider(id) {
+    openModal(`<h3>Choisissez un prestataire</h3><button class="btn" style="width:100%;margin-bottom:10px" onclick="A.saveMissionProvider(${id},'particulier')">👤 Un particulier</button><button class="btn sec" style="width:100%" onclick="A.saveMissionProvider(${id},'entreprise')">🏢 Une entreprise</button>`);
+  },
+  async saveMissionProvider(id, provider_type) {
+    try { await api('/missions/' + id + '/provider-type', { method: 'PUT', body: { provider_type } }); closeModal(); toast('Choix mis à jour. Nouvelle recherche en cours.', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  async relancerMission(id) {
+    try { await api('/missions/' + id + '/relancer', { method: 'POST', body: {} }); toast('Recherche relancée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+  },
   toggleTask(el, forceOn) {
     if (forceOn === true) el.classList.add('on'); else el.classList.toggle('on');
     el.textContent = (el.classList.contains('on') ? '☑ ' : '☐ ') + el.dataset.taskName;
@@ -2625,7 +2655,11 @@ function render() {
 
 /* ---------- Démarrage ---------- */
 (async function init() {
-  const splashUntil = Date.now() + 3000;
+  const splashStartedAt = Date.now();
+  let splashReleased = false;
+  // La sortie est planifiée indépendamment du réseau : un API lent ne laisse jamais le splash bloqué.
+  const releaseSplash = () => { if (splashReleased) return; splashReleased = true; render(); };
+  const splashTimer = setTimeout(releaseSplash, 3000);
   if ('serviceWorker' in navigator) {
     try { navigator.serviceWorker.register('/sw.js'); } catch { }
     navigator.serviceWorker.addEventListener('message', event => { const d = event.data || {}; if (d.type === 'navigate' && d.link && d.link.startsWith('#/')) nav(d.link); });
@@ -2652,7 +2686,11 @@ function render() {
   }
   if (!location.hash) location.hash = TOKEN ? '#/home' : '#/login';
   navStack = [location.hash];
-  const splashWait = splashUntil - Date.now();
-  if (splashWait > 0) await new Promise(resolve => setTimeout(resolve, splashWait));
-  render();
+  const releasedBeforeBoot = splashReleased;
+  const splashWait = Math.max(0, 3000 - (Date.now() - splashStartedAt));
+  if (!splashReleased && splashWait) await new Promise(resolve => setTimeout(resolve, splashWait));
+  clearTimeout(splashTimer);
+  releaseSplash();
+  // Si les données de session ont fini de se charger après l'affichage initial, on rafraîchit l'écran.
+  if (releasedBeforeBoot) render();
 })();

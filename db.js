@@ -688,6 +688,15 @@ function migrate() {
   // Paiement / conversation : valeur utile au contrôle serveur et à l'audit.
   ensureColumn('missions', 'conversation_locked_at', 'TEXT');
   ensureColumn('missions', 'conversation_lock_reason', 'TEXT');
+  // Demandes : choix explicite du client et garde-fous de distribution.
+  ensureColumn('missions', 'provider_type', "TEXT NOT NULL DEFAULT 'particulier'"); // particulier | entreprise
+  ensureColumn('missions', 'capacity_required', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn('missions', 'search_started_at', 'TEXT');
+  ensureColumn('missions', 'search_expires_at', 'TEXT');
+  ensureColumn('mission_candidates', 'reminder_count', 'INTEGER NOT NULL DEFAULT 0');
+  // Le professionnel déclare ses services ; le PDG peut en outre les autoriser explicitement.
+  ensureColumn('pro_profiles', 'authorized_services', "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn('pro_profiles', 'capacity_level', 'INTEGER NOT NULL DEFAULT 1');
   // Chronologie d'un concours synchronisé (pause/reprise sans dérive locale).
   ensureColumn('quiz_sessions', 'started_ms', 'INTEGER');
   ensureColumn('quiz_sessions', 'interval_s', 'INTEGER NOT NULL DEFAULT 30');
@@ -814,13 +823,18 @@ function migrate() {
 
   // Paramètres ajoutés après la première version : uniquement si absents, sans écraser les choix du PDG.
   const newDefaults = {
-    dispatch_initial_alert_count: '3', dispatch_expand_alert_count: '3', dispatch_expand_strategy: 'vagues',
+    dispatch_initial_alert_count: '3', dispatch_expand_alert_count: '3', dispatch_expand_strategy: 'vagues', dispatch_reminder_seconds: '20',
+    dispatch_auto_enabled: '1', dispatch_geo_enabled: '1', dispatch_alert_sound: '1', dispatch_max_reminders: '6', dispatch_search_max_seconds: '3600',
+    dispatch_allow_particulier: '1', dispatch_allow_entreprise: '1',
     chat_text_limit: '30', chat_audio_max_seconds: '20', chat_image_limit: '3',
     chat_audio_enabled: '1', chat_image_enabled: '1', file_recovery_days: '7'
   };
   for (const [key, value] of Object.entries(newDefaults)) if (getSetting(key) === null) setSetting(key, value);
   // Cohérence des profils déjà existants.
   db.prepare("UPDATE pro_profiles SET availability_status=CASE WHEN available=1 THEN 'disponible' ELSE 'indisponible' END WHERE availability_status IS NULL OR availability_status='' ").run();
+  // Les profils existants conservent exactement leurs services actuels comme autorisations initiales.
+  db.prepare("UPDATE pro_profiles SET authorized_services=services WHERE authorized_services IS NULL OR authorized_services='' OR authorized_services='[]'").run();
+  db.exec('CREATE INDEX IF NOT EXISTS idx_missions_provider_status ON missions(provider_type, status, created_at);');
 }
 migrate();
 

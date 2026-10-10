@@ -503,7 +503,8 @@ views.missions = async () => {
     <td class="small">${fmtD(m.created_at)}</td>
     <td>${m.status === 'litige'
       ? `<button class="btn sm" onclick="A.litige(${m.id},false)">Résoudre</button>`
-      : `<button class="btn sm warn" onclick="A.litige(${m.id},true)">Litige</button>`}</td></tr>`; }).join('')}
+      : `<button class="btn sm warn" onclick="A.litige(${m.id},true)">Litige</button>`}
+      <button class="btn sm sec" onclick="A.conversationLock(${m.id},${m.conversation_locked_at ? 0 : 1})">${m.conversation_locked_at ? '🔓 Réactiver échanges' : '🔒 Suspendre échanges'}</button></td></tr>`; }).join('')}
   ${!list.length ? '<tr><td colspan="8" class="muted">Aucune mission.</td></tr>' : ''}</table></div>`);
 };
 
@@ -1032,9 +1033,11 @@ views.prooptions = async () => {
 
 /* ---------- Paramètres ---------- */
 views.settings = async () => {
-  const s = await api('/admin/settings');
+  const [s, dispatch] = await Promise.all([api('/admin/settings'), api('/admin/dispatch/overview')]);
   const contacts = JSON.parse(s.urgence_contacts || '[]');
+  const ps = dispatch.professionals || {};
   shell(`<h1>⚙️ Paramètres généraux</h1>
+  <div class="panel"><h2 style="margin-top:0">Suivi des demandes</h2><div class="cards"><div class="kpi"><div class="v">${dispatch.searching || 0}</div><div class="l">Recherches en cours</div></div><div class="kpi"><div class="v">${dispatch.unanswered || 0}</div><div class="l">Sans réponse</div></div><div class="kpi"><div class="v">${ps.disponible || 0}</div><div class="l">Pros disponibles</div></div><div class="kpi"><div class="v">${ps.en_mission || 0}</div><div class="l">Pros en mission</div></div></div><div class="small muted">Les demandes sans réponse sont aussi consultables dans Demandes & missions. Les services et capacités autorisés d’un professionnel se règlent dans Utilisateurs → Fiche → Autorisations pro.</div></div>
   <div class="panel">
     <h2 style="margin-top:0">Missions & paiements</h2>
     <div class="frow">
@@ -1042,12 +1045,22 @@ views.settings = async () => {
       <div><label>Délai de réponse d'un professionnel (secondes)</label><input type="number" id="st-wait" value="${esc(s.dispatch_wait_seconds)}" min="15" max="3600" style="width:130px"></div>
       <div><label>Conservation des fichiers (jours)</label><input type="number" id="st-ret" value="${esc(s.file_retention_days)}" min="1" style="width:110px"></div>
     </div>
-    <h3 style="margin:18px 0 8px">Attribution automatique</h3>
+    <h3 style="margin:18px 0 8px">Paramètres des demandes et des alertes</h3>
+    <div class="frow" style="margin-bottom:10px">
+      <label class="check-line"><input type="checkbox" id="st-auto" ${s.dispatch_auto_enabled !== '0' ? 'checked' : ''}> Attribution automatique</label>
+      <label class="check-line"><input type="checkbox" id="st-geo" ${s.dispatch_geo_enabled !== '0' ? 'checked' : ''}> Priorité géographique</label>
+      <label class="check-line"><input type="checkbox" id="st-sound" ${s.dispatch_alert_sound !== '0' ? 'checked' : ''}> Son d’alerte mission</label>
+      <label class="check-line"><input type="checkbox" id="st-particulier" ${s.dispatch_allow_particulier !== '0' ? 'checked' : ''}> Particuliers autorisés</label>
+      <label class="check-line"><input type="checkbox" id="st-entreprise" ${s.dispatch_allow_entreprise !== '0' ? 'checked' : ''}> Entreprises autorisées</label>
+    </div>
     <div class="frow">
       <div><label>1re vague (professionnels)</label><input type="number" id="st-wave1" value="${esc(s.dispatch_initial_alert_count || '3')}" min="1" max="50" style="width:110px"></div>
       <div><label>Vagues suivantes</label><input type="number" id="st-wave2" value="${esc(s.dispatch_expand_alert_count || '5')}" min="1" max="50" style="width:110px"></div>
+      <div><label>Rappel d’alerte (secondes)</label><input type="number" id="st-reminder" value="${esc(s.dispatch_reminder_seconds || '20')}" min="5" max="600" style="width:130px"></div>
+      <div><label>Rappels max. / offre</label><input type="number" id="st-maxrem" value="${esc(s.dispatch_max_reminders || '6')}" min="0" max="100" style="width:120px"></div>
+      <div><label>Recherche max. (secondes)</label><input type="number" id="st-searchmax" value="${esc(s.dispatch_search_max_seconds || '3600')}" min="60" max="86400" style="width:130px"></div>
     </div>
-    <div class="small muted">Les professionnels sont classés par compatibilité, disponibilité, distance GPS et visibilité facultative. Chaque vague part seulement après expiration/refus de la précédente.</div>
+    <div class="small muted">Le moteur compare le type choisi, les services déclarés et autorisés, l’état du compte, la capacité, la ville/zone et la disponibilité. Chaque vague part seulement après expiration ou refus de la précédente. Les rappels alimentent badge, son et Web Push quand l’appareil l’autorise.</div>
     <h3 style="margin:18px 0 8px">Messagerie mission</h3>
     <div class="frow">
       <div><label>Textes / personne</label><input type="number" id="st-chattext" value="${esc(s.chat_text_limit || '30')}" min="1" max="500" style="width:110px"></div>
@@ -1100,6 +1113,7 @@ const A = {
         Documents : ${u.pro.documents.length ? u.pro.documents.map(d => `<a href="${esc(d)}" target="_blank">📄</a>`).join(' ') : 'Aucun'}</p>` : ''}
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
           <button class="btn sm sec" onclick="A.userEdit(${u.id})">✏️ Modifier</button>
+          ${u.pro && u.pro_status === 'approved' ? `<button class="btn sm sec" onclick="A.proEligibility(${u.id})">🧰 Autorisations pro</button>` : ''}
           <button class="btn sm ${u.suspended ? '' : 'warn'}" onclick="A.suspend(${u.id},${u.suspended ? 0 : 1})">${u.suspended ? '▶️ Réactiver' : '⏸ Suspendre'}</button>
           <button class="btn sm ${u.blocked ? '' : 'warn'}" onclick="A.userBlock(${u.id},${u.blocked ? 0 : 1})">${u.blocked ? '🔓 Débloquer' : '🚫 Bloquer'}</button>
           ${tempDis ? `<button class="btn sm" onclick="A.userDisableTemp(${u.id},true)">▶️ Fin de désactivation</button>` : `<button class="btn sm sec" onclick="A.userDisableTemp(${u.id})">⏱ Désactiver temporairement</button>`}
@@ -1135,6 +1149,25 @@ const A = {
         <p class="small muted">Ce mot de passe ne sera plus jamais affiché.</p>
         <button class="btn" onclick="closeModal();render()">Terminé</button>`);
     } catch (e) { toast(e.message, 'err'); }
+  },
+  async proEligibility(id) {
+    try {
+      const [u, catalog] = await Promise.all([api('/admin/users/' + id), api('/admin/catalog')]);
+      if (!u.pro) return toast('Ce compte ne possède pas de profil professionnel.', 'err');
+      const declared = (u.pro.services || []).map(Number), allowed = (u.pro.authorized_services || declared).map(Number);
+      const flat = (catalog.services || []).filter(s => declared.includes(+s.id));
+      openModal(`<h3>🧰 Autorisations de ${esc(u.name)}</h3>
+        <p class="small muted">Seuls les services cochés peuvent recevoir une demande. Cette règle est contrôlée par le backend avant l’alerte et l’acceptation.</p>
+        <label class="small muted">Type de prestataire</label><select id="pe-type" style="width:100%;margin-bottom:10px"><option value="particulier" ${u.pro.pro_type !== 'entreprise' ? 'selected' : ''}>Un particulier</option><option value="entreprise" ${u.pro.pro_type === 'entreprise' ? 'selected' : ''}>Une entreprise</option></select>
+        <label class="small muted">Capacité de mission</label><select id="pe-cap" style="width:100%;margin-bottom:10px"><option value="1" ${(+u.pro.capacity_level || 1) === 1 ? 'selected' : ''}>Standard</option><option value="2" ${(+u.pro.capacity_level || 1) === 2 ? 'selected' : ''}>Renforcée / gros travaux</option><option value="3" ${(+u.pro.capacity_level || 1) >= 3 ? 'selected' : ''}>Grande capacité</option></select>
+        <label class="small muted">Services autorisés</label><div style="max-height:260px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${flat.map(s => `<label style="display:block;padding:5px 0"><input class="pe-service" type="checkbox" value="${s.id}" ${allowed.includes(+s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('') || '<span class="small muted">Aucun service déclaré dans le profil. Le professionnel doit d’abord compléter son profil.</span>'}</div>
+        <button class="btn" onclick="A.saveProEligibility(${id})">Enregistrer</button><button class="btn sec mt" onclick="A.userDetail(${id})">Annuler</button>`);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+  async saveProEligibility(id) {
+    const authorized_services = [...document.querySelectorAll('.pe-service:checked')].map(el => +el.value);
+    try { await api('/admin/pros/' + id + '/eligibility', { method: 'PUT', body: { authorized_services, pro_type: document.getElementById('pe-type').value, capacity_level: +document.getElementById('pe-cap').value } }); toast('Autorisations professionnelles enregistrées ✓', 'ok'); A.userDetail(id); }
+    catch (e) { toast(e.message, 'err'); }
   },
   async userEdit(id) {
     const u = await api('/admin/users/' + id);
@@ -1548,6 +1581,7 @@ const A = {
     } catch (e) { toast(e.message, 'err'); }
   },
 
+  async conversationLock(id, locked) { const reason = locked ? prompt('Motif de suspension des échanges :') : ''; if (locked && reason === null) return; try { await api(`/admin/missions/${id}/conversation-lock`, { method: 'POST', body: { locked: !!locked, reason: reason || '' } }); toast(locked ? 'Échanges suspendus.' : 'Échanges rétablis.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async litige(id, open) { try { await api(`/admin/missions/${id}/litige`, { method: 'POST', body: { open } }); toast(open ? 'Litige ouvert.' : 'Litige résolu.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
 
   supportFilter(v) { window._supportFilter = v; render(); },
@@ -1843,7 +1877,7 @@ const A = {
       const d = await api('/admin/files/records');
       const fmtBytes = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' Mo' : n > 1024 ? (n / 1024).toFixed(1) + ' Ko' : (n || 0) + ' o';
       const stateLabel = { active: 'Actif', hidden: 'Masqué', archived: 'Archivé', recovery: 'Récupération', purged: 'Supprimé' };
-      const rows = d.records.map(f => `<tr><td><input type="checkbox" class="fr-check" value="${esc(f.name)}" ${f.state === 'purged' ? 'disabled' : ''}></td><td class="small" style="max-width:180px;word-break:break-all"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.uploader_name || 'Ancien fichier')} • ${fmtBytes(f.size)} • ${esc(f.mime || 'type inconnu')}</span></td><td><span class="pill ${f.state === 'purged' ? 'bad' : f.state === 'recovery' ? 'warn' : f.state === 'archived' ? 'info' : 'ok'}">${stateLabel[f.state] || f.state}</span>${f.delete_after ? `<br><span class="small muted">purge : ${fmtD(f.delete_after)}</span>` : ''}</td><td class="small">${fmtD(f.created_at)}</td><td style="white-space:nowrap">${f.state !== 'purged' ? `${f.state !== 'active' ? `<button class="btn sm" onclick="A.fileState('${esc(f.name)}','active')">Restaurer</button> ` : ''}<button class="btn sm sec" onclick="A.fileState('${esc(f.name)}','hidden')">Masquer</button> <button class="btn sm sec" onclick="A.fileState('${esc(f.name)}','archived')">Archiver</button> <button class="btn sm warn" onclick="A.fileState('${esc(f.name)}','recovery')">À supprimer</button>` : ''}</td></tr>`).join('');
+      const rows = d.records.map(f => `<tr><td><input type="checkbox" class="fr-check" value="${esc(f.name)}" ${f.state === 'purged' ? 'disabled' : ''}></td><td class="small" style="max-width:180px;word-break:break-all"><b>${esc(f.name)}</b><br><span class="muted">${esc(f.uploader_name || 'Ancien fichier')} • ${fmtBytes(f.size)} • ${esc(f.mime || 'type inconnu')}</span></td><td><span class="pill ${f.state === 'purged' ? 'bad' : f.state === 'recovery' ? 'warn' : f.state === 'archived' ? 'info' : 'ok'}">${stateLabel[f.state] || f.state}</span>${f.delete_after ? `<br><span class="small muted">purge : ${fmtD(f.delete_after)}</span>` : ''}</td><td class="small">${fmtD(f.created_at)}</td><td style="white-space:nowrap">${f.state !== 'purged' ? `${f.state !== 'active' ? `<button class="btn sm" onclick="A.fileState('${esc(f.name)}','active')">Restaurer</button> ` : ''}<button class="btn sm sec" onclick="A.fileState('${esc(f.name)}','hidden')">Masquer</button> <button class="btn sm sec" onclick="A.fileState('${esc(f.name)}','archived')">Archiver</button> <button class="btn sm warn" onclick="A.fileState('${esc(f.name)}','recovery')">À supprimer</button>${f.state === 'recovery' ? ` <button class="btn sm warn" onclick="A.filePermanentDelete('${esc(f.name)}')">Purger définitivement</button>` : ''}` : ''}</td></tr>`).join('');
       openModal(`<h3>🗃️ Registre des fichiers</h3><p class="small muted">Cochez les fichiers pour télécharger une sélection ZIP. « À supprimer » les rend récupérables pendant ${d.recovery_days} jour(s), puis la purge retire réellement le binaire local et Render/PostgreSQL.</p><div class="frow"><button class="btn sm" onclick="A.fileDownload(false)">⬇ Télécharger la sélection</button><button class="btn sm sec" onclick="A.fileDownload(true)">⬇ Tous les fichiers disponibles</button><button class="btn sm warn" onclick="A.fileBulkRecovery()">Mettre la sélection à supprimer</button></div><div style="max-height:55vh;overflow:auto"><table><tr><th></th><th>Fichier</th><th>État</th><th>Date</th><th>Actions</th></tr>${rows || '<tr><td colspan="5" class="muted">Aucun fichier enregistré.</td></tr>'}</table></div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`);
     } catch (e) { toast(e.message, 'err'); }
   },
@@ -1854,6 +1888,12 @@ const A = {
     if (note === null) return;
     if (isPurge && !confirm('Placer ce fichier en récupération ? Il sera réellement supprimé après le délai configuré.')) return;
     try { await api('/admin/files/' + encodeURIComponent(name) + '/state', { method: 'POST', body: { state, note } }); toast(isPurge ? 'Fichier placé en récupération.' : 'État du fichier mis à jour.', 'ok'); A.fileRegistry(); } catch (e) { toast(e.message, 'err'); }
+  },
+  async filePermanentDelete(name) {
+    if (!confirm('SUPPRESSION DÉFINITIVE : « ' + name + ' » sera retiré du stockage serveur et ne pourra plus être récupéré. Continuer ?')) return;
+    const note = prompt('Motif de suppression définitive (facultatif) :'); if (note === null) return;
+    try { await api('/admin/files/' + encodeURIComponent(name) + '/state', { method: 'POST', body: { state: 'purged', confirmed: true, note } }); toast('Fichier supprimé définitivement du stockage.', 'ok'); A.fileRegistry(); }
+    catch (e) { toast(e.message, 'err'); }
   },
   async fileBulkRecovery() {
     const names = A._selectedRecords(); if (!names.length) return toast('Sélectionnez au moins un fichier.', 'err');
@@ -1991,6 +2031,14 @@ const A = {
           dispatch_wait_seconds: document.getElementById('st-wait').value,
           dispatch_initial_alert_count: document.getElementById('st-wave1').value,
           dispatch_expand_alert_count: document.getElementById('st-wave2').value,
+          dispatch_reminder_seconds: document.getElementById('st-reminder').value,
+          dispatch_auto_enabled: document.getElementById('st-auto').checked ? '1' : '0',
+          dispatch_geo_enabled: document.getElementById('st-geo').checked ? '1' : '0',
+          dispatch_alert_sound: document.getElementById('st-sound').checked ? '1' : '0',
+          dispatch_allow_particulier: document.getElementById('st-particulier').checked ? '1' : '0',
+          dispatch_allow_entreprise: document.getElementById('st-entreprise').checked ? '1' : '0',
+          dispatch_max_reminders: document.getElementById('st-maxrem').value,
+          dispatch_search_max_seconds: document.getElementById('st-searchmax').value,
           chat_text_limit: document.getElementById('st-chattext').value,
           chat_image_limit: document.getElementById('st-chatimages').value,
           chat_audio_max_seconds: document.getElementById('st-chataudio').value,
