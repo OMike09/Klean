@@ -68,11 +68,11 @@ function renderLogin() {
 /* ---------- Structure ---------- */
 // [vue, libellé, badge compteur, permission requise] — null = visible pour toute l'équipe
 const MENU = [
-  ['TABLEAU DE BORD', [['dashboard', '📊 Vue d\u2019ensemble', null, null]]],
+  ['TABLEAU DE BORD', [['dashboard', '📊 Vue d\u2019ensemble', null, null], ['frequentation', '📈 Statistiques de fréquentation', null, 'frequentation']]],
   ['UTILISATEURS', [['users', '👥 Tous les comptes', null, 'comptes'], ['pros', '✅ Validations pro', 'pros_pending', 'pros']]],
   ['SERVICES', [['catalog', '🗂️ Services & catégories', null, 'catalogue'], ['questions', '❓ Questions dynamiques', null, 'questions']]],
   ['MISSIONS', [['missions', '🧰 Demandes & missions', null, 'missions'], ['payments', '💰 Paiements & commissions', null, 'paiements'], ['finances', '📈 Finances & revenus', null, 'paiements']]],
-  ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['support', '📩 Messages Klean Services', null, 'communication'], ['broadcast', '📨 Message système', null, 'communication']]],
+  ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['support', '📩 Messages Klean Services', null, 'communication'], ['broadcast', '📨 Messages généraux', null, 'communication']]],
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
   ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Je cherche un job', null, 'contenu'], ['ecole', '🏫 École & famille', null, 'contenu'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
   ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
@@ -133,6 +133,21 @@ views.dashboard = async () => {
     <div class="kpi"><div class="v">${s.moderation ?? 0}</div><div class="l">Contenus à modérer</div></div>
   </div>
   <div class="panel small muted">Toute modification effectuée ici (commission, délais, questions, services, règles, publicités, jeux…) est appliquée immédiatement dans l'application utilisateur.</div>`);
+};
+
+/* ---------- Statistiques de fréquentation ---------- */
+let FREQ_DAYS = 30;
+views.frequentation = async () => {
+  const d = await api('/admin/frequentation?days=' + FREQ_DAYS);
+  const max = Math.max(1, ...d.series.map(x => x.active));
+  const fmt = n => Number(n || 0).toLocaleString('fr-FR');
+  shell(`<h1>📈 Statistiques de fréquentation</h1>
+  <div class="panel"><div class="frow"><button class="btn sm ${FREQ_DAYS===7?'':'sec'}" onclick="A.frequencyPeriod(7)">7 jours</button><button class="btn sm ${FREQ_DAYS===30?'':'sec'}" onclick="A.frequencyPeriod(30)">30 jours</button><button class="btn sm ${FREQ_DAYS===90?'':'sec'}" onclick="A.frequencyPeriod(90)">90 jours</button><span class="small muted">Période : ${esc(d.range.from)} → ${esc(d.range.to)}</span></div>
+  <div class="cards" style="margin-top:12px"><div class="kpi"><div class="v">${fmt(d.active)}</div><div class="l">Actifs période</div></div><div class="kpi"><div class="v">${fmt(d.dau)}</div><div class="l">Actifs jour</div></div><div class="kpi"><div class="v">${fmt(d.wau)}</div><div class="l">Actifs semaine</div></div><div class="kpi"><div class="v">${fmt(d.mau)}</div><div class="l">Actifs mois</div></div><div class="kpi"><div class="v">${fmt(d.registrations)}</div><div class="l">Inscriptions</div></div><div class="kpi"><div class="v">${fmt(d.returning)}</div><div class="l">Retours</div></div></div>
+  <div class="small muted mt">Clients actifs : <b>${fmt(d.clients)}</b> • Professionnels actifs : <b>${fmt(d.pros)}</b>. Une activité est enregistrée sur une interaction réelle (pas sur un simple rafraîchissement). Seuil courant : ${d.threshold_minutes} min.</div></div>
+  <div class="panel"><h2 style="margin-top:0">Activité quotidienne</h2><div style="display:flex;align-items:end;gap:3px;height:150px;border-bottom:1px solid #d8e5e2;padding:0 3px">${d.series.map(x=>`<div title="${esc(x.date)} : ${x.active} actif(s), ${x.registrations} inscription(s)" style="flex:1;min-width:3px;height:${Math.max(3,Math.round(x.active/max*125))}px;background:#0b7a6b;border-radius:3px 3px 0 0"></div>`).join('')}</div><div class="small muted" style="display:flex;justify-content:space-between"><span>${esc(d.series[0]?.date||'')}</span><span>${esc(d.series.at(-1)?.date||'')}</span></div></div>
+  <div class="panel"><h2 style="margin-top:0">Villes (actifs sur la période)</h2><table><tr><th>Ville</th><th>Utilisateurs actifs</th></tr>${d.cities.map(c=>`<tr><td>${esc(c.city)}</td><td><b>${fmt(c.n)}</b></td></tr>`).join('') || '<tr><td colspan="2" class="muted">Aucune interaction dans cette période.</td></tr>'}</table></div>
+  <div class="panel"><h2 style="margin-top:0">Utilisateurs récemment actifs <span class="small muted">(détail réservé aux personnes autorisées)</span></h2><div class="small muted mb">🟢 actif = interaction récente au premier plan ; 🟡 arrière-plan = l’application a signalé son passage en arrière-plan ; ⚪ inactif = aucune activité dans le seuil. L’état ne prétend pas connaître l’activité hors application.</div><table><tr><th>Compte</th><th>Type / ville</th><th>Dernière interaction</th><th>État</th></tr>${d.recent.slice(0,50).map(u=>`<tr><td><b>${esc(u.name)}</b><br><span class="small muted">${esc(u.phone)}</span></td><td>${u.pro_status==='approved'?'Pro':'Client'}<br><span class="small muted">${esc(u.ville||'—')}</span></td><td class="small">${fmtD(u.last_activity_at||u.last_background_at)}</td><td>${u.status==='actif'?'🟢 Actif':u.status==='arriere_plan'?'🟡 Arrière-plan':'⚪ Inactif'}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Aucune activité mesurée.</td></tr>'}</table></div>`);
 };
 
 /* ---------- Utilisateurs ---------- */
@@ -805,31 +820,32 @@ views.support = async () => {
       ${!rows.length ? '<tr><td colspan="6" class="muted">Aucune conversation.</td></tr>' : ''}</table></div>`);
 };
 
-/* ---------- Message système ---------- */
+/* ---------- Messages généraux ciblables ---------- */
 views.broadcast = async () => {
-  shell(`<h1>📨 Message système</h1>
-  <div class="panel">
-    <div class="small muted" style="margin-bottom:10px">Envoie une notification à tous les utilisateurs actifs de l'application.</div>
-    <div class="frow"><div style="flex:1"><label>Titre</label><input id="bc-title" style="width:100%"></div></div>
-    <div class="frow"><div style="flex:1"><label>Message</label><textarea id="bc-body"></textarea></div></div>
-    <button class="btn" onclick="A.broadcast()">📨 Envoyer à tous</button>
-  </div>`);
+  const [list, villes] = await Promise.all([api('/admin/general-messages'), api('/admin/villes')]);
+  const st = { draft:'Brouillon', scheduled:'Programmé', sent:'Envoyé', cancelled:'Annulé' };
+  shell(`<h1>📨 Messages généraux</h1>
+  <div class="panel"><div class="small muted mb">Les destinataires sont calculés et enregistrés côté serveur, sans doublon. « Notification enregistrée » signifie qu’elle est dans l’application ; la livraison système (push) dépend des autorisations de l’appareil.</div>
+    <div class="frow"><div style="flex:1"><label>Titre</label><input id="gm-title" maxlength="160" style="width:100%" placeholder="Ex : Information importante"></div></div>
+    <div class="frow"><div style="flex:1"><label>Message</label><textarea id="gm-body" maxlength="2000" placeholder="Votre message…"></textarea></div></div>
+    <div class="frow" style="align-items:flex-start"><div><label>Destinataires</label><label class="check-line"><input id="gm-clients" type="checkbox"> Clients</label><label class="check-line"><input id="gm-pros" type="checkbox"> Professionnels validés</label><div class="small muted">Aucune case : tous les comptes utilisateur.</div></div>
+    <div style="min-width:220px;flex:1"><label>Villes <span class="small muted">(aucune = toutes)</span></label><select id="gm-cities" multiple size="5" style="width:100%">${villes.map(v=>`<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('')}</select></div>
+    <div><label>Programmation</label><input type="datetime-local" id="gm-date"><div class="small muted">Heure locale du serveur</div></div></div>
+    <div class="btn-row"><button class="btn sec" onclick="A.generalMessage('draft')">💾 Enregistrer brouillon</button><button class="btn" onclick="A.generalMessage('immediate')">📨 Envoyer maintenant</button><button class="btn outline" onclick="A.generalMessage('scheduled')">🕒 Programmer</button></div></div>
+  <div class="panel"><h2 style="margin-top:0">Historique</h2><table><tr><th>Message</th><th>Ciblage</th><th>État / livraison</th><th>Date</th><th></th></tr>
+  ${list.map(m=>`<tr><td><b>${esc(m.title)}</b><br><span class="small muted">${esc((m.body||'').slice(0,120))}</span></td><td class="small">${m.account_types.length ? m.account_types.join(', ') : 'Tous'}<br>${m.cities.length ? m.cities.join(', ') : 'Toutes les villes'}</td><td><span class="pill ${m.status==='sent'?'ok':m.status==='draft'?'info':'warn'}">${st[m.status]||esc(m.status)}</span><br><span class="small muted">${m.status==='sent' ? `${m.delivered_count}/${m.target_count} notification(s) enregistrée(s) • lues : ${m.read_count}` : ''}</span></td><td class="small">${fmtD(m.sent_at||m.scheduled_at||m.created_at)}</td><td>${m.status==='draft'?`<button class="btn sm sec" onclick="A.editGeneralMessage(${m.id})">Modifier</button> <button class="btn sm" onclick="A.sendGeneralMessage(${m.id})">Envoyer</button> <button class="btn sm warn" onclick="A.deleteGeneralMessage(${m.id})">Supprimer</button>`:''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucun message général.</td></tr>'}</table></div>`);
 };
 
 /* ---------- Règles ---------- */
 views.rules = async () => {
-  const s = await api('/admin/settings');
+  const [s, about] = await Promise.all([api('/admin/settings'), ME && ME.role === 'pdg' ? api('/admin/about') : Promise.resolve(null)]);
   shell(`<h1>📜 Règles & conditions</h1>
-  <div class="panel"><h2 style="margin-top:0">Règles client</h2>
-    <textarea class="rules-ta" id="r-client">${esc(s.rules_client || '')}</textarea>
-    <button class="btn" style="margin-top:8px" onclick="A.saveRules('rules_client','r-client')">Enregistrer les règles client</button></div>
-  <div class="panel"><h2 style="margin-top:0">Règles professionnel</h2>
-    <textarea class="rules-ta" id="r-pro">${esc(s.rules_pro || '')}</textarea>
-    <button class="btn" style="margin-top:8px" onclick="A.saveRules('rules_pro','r-pro')">Enregistrer les règles professionnel</button></div>
+  <div class="panel"><h2 style="margin-top:0">Règles client</h2><textarea class="rules-ta" id="r-client">${esc(s.rules_client || '')}</textarea><button class="btn" style="margin-top:8px" onclick="A.saveRules('rules_client','r-client')">Enregistrer les règles client</button></div>
+  <div class="panel"><h2 style="margin-top:0">Règles professionnel</h2><textarea class="rules-ta" id="r-pro">${esc(s.rules_pro || '')}</textarea><button class="btn" style="margin-top:8px" onclick="A.saveRules('rules_pro','r-pro')">Enregistrer les règles professionnel</button></div>
+  ${about ? `<div class="panel"><h2 style="margin-top:0">ℹ️ À propos de Klean Services <span class="pill info">Paramètre PDG</span></h2><div class="small muted mb">Le brouillon n’est visible dans l’application qu’après publication. Ajoutez, modifiez ou supprimez des paragraphes avant l’aperçu.</div><label>Titre</label><input id="about-title" style="width:100%" value="${esc(about.title||'')}"><div id="about-paragraphs">${about.draft.map((p,i)=>aboutParagraphHtml(p,i)).join('')}</div><div class="btn-row mt"><button class="btn sec" onclick="A.addAboutParagraph()">＋ Paragraphe</button><button class="btn outline" onclick="A.previewAbout()">👁️ Aperçu du brouillon</button><button class="btn" onclick="A.saveAbout(false)">💾 Enregistrer le brouillon</button><button class="btn" onclick="A.saveAbout(true)">📢 Publier</button></div><div class="small muted mt">Dernière publication : ${about.published_at ? fmtD(about.published_at) : 'jamais'}</div><div style="border-top:1px solid #e4eeeb;margin-top:14px;padding-top:12px"><h3 style="margin:0 0 8px">↗️ Partager l’application</h3><label>Lien officiel (https://…)</label><input id="share-url" style="width:100%" value="${esc(s.share_official_url||'')}" placeholder="https://votre-domaine…"><label style="margin-top:8px">Texte de partage</label><textarea id="share-text" maxlength="500">${esc(s.share_text||'Découvrez Klean Services : exprimez votre besoin, un professionnel arrive.')}</textarea><button class="btn sec mt" onclick="A.saveShareSettings()">Enregistrer le partage</button></div></div>` : ''}
   <div class="panel small muted">Ces textes sont affichés et doivent être acceptés : à la création d'un compte (règles client) et lors de la demande professionnelle (règles professionnel). L'acceptation est enregistrée avec la date.</div>`);
 };
-
-/* ---------- Signalements ---------- */
+function aboutParagraphHtml(p = {}, i = 0) { return `<div class="about-row" style="border:1px solid #dce9e6;border-radius:10px;padding:10px;margin-top:9px"><div class="frow"><div style="flex:1"><label class="small">Intertitre (facultatif)</label><input class="about-heading" style="width:100%" value="${esc(p.heading||'')}" placeholder="Ex : Notre objectif"></div><button class="btn sm warn" style="align-self:end" onclick="this.closest('.about-row').remove()">Supprimer</button></div><label class="small">Paragraphe</label><textarea class="about-text" maxlength="4000">${esc(p.text||'')}</textarea></div>`; }
 views.reports = async () => {
   const list = await api('/admin/signalements');
   shell(`<h1>⚠️ Signalements</h1>
@@ -958,6 +974,9 @@ views.games = async () => {
           `<option value="${v}" ${(s.quiz_audience || 'tous') === v ? 'selected' : ''}>${lb}</option>`).join('')}
       </select>
       <span class="small muted">La désactivation totale se fait avec le bouton 🧠 Quiz ci-dessus.</span>
+    </div>
+    <div style="margin-top:14px;border-top:1px solid #e4eeeb;padding-top:10px"><b>Conditions cumulatives de participation</b><div class="small muted mb">Le clic « Partager » ne suffit jamais : seules l’ouverture mesurable d’un lien ou l’inscription attribuée au lien peuvent être exigées.</div>
+      ${[['quiz','🧠 Quiz'],['flipfizz','🎲 Flip Fizz'],['kdo','🎁 Kdo']].map(([g,lb])=>`<div class="frow" style="align-items:center;border-top:1px solid #edf3f1;padding:8px 0"><b style="min-width:100px">${lb}</b><select onchange="A.toggleSetting('game_${g}_account',this.value)">${[['tous','Tous comptes'],['clients','Clients'],['pros','Pros validés'],['clients_pros','Clients et pros']].map(([v,t])=>`<option value="${v}" ${(s['game_'+g+'_account']||'tous')===v?'selected':''}>${t}</option>`).join('')}</select><select onchange="A.toggleSetting('game_${g}_share',this.value)">${[['tous','Partage : sans condition'],['lien_ouvert','Partage : lien ouvert'],['inscription_acquise','Partage : inscription acquise']].map(([v,t])=>`<option value="${v}" ${(s['game_'+g+'_share']||'tous')===v?'selected':''}>${t}</option>`).join('')}</select><select onchange="A.toggleSetting('game_${g}_service',this.value)">${[['tous','Mission : sans condition'],['realisee','Mission réalisée'],['non_realisee','Mission non réalisée']].map(([v,t])=>`<option value="${v}" ${(s['game_'+g+'_service']||'tous')===v?'selected':''}>${t}</option>`).join('')}</select></div>`).join('')}
     </div></div>
 
   <div class="panel"><h2 style="margin-top:0">🏆 Quiz concours (sessions animées)</h2>
@@ -1044,6 +1063,9 @@ views.settings = async () => {
       <div><label>Commission Klean Services (%)</label><input type="number" id="st-comm" value="${esc(s.commission_rate)}" min="0" max="100" step="0.5" style="width:110px"></div>
       <div><label>Délai de réponse d'un professionnel (secondes)</label><input type="number" id="st-wait" value="${esc(s.dispatch_wait_seconds)}" min="15" max="3600" style="width:130px"></div>
       <div><label>Conservation des fichiers (jours)</label><input type="number" id="st-ret" value="${esc(s.file_retention_days)}" min="1" style="width:110px"></div>
+      <div><label>Photos / demande</label><input type="number" id="st-reqphotos" value="${esc(s.request_image_limit || '5')}" min="0" max="12" style="width:90px"></div>
+      <div><label>Vocal demande (max. s)</label><input type="number" id="st-reqaudio" value="${esc(s.request_audio_max_seconds || '20')}" min="1" max="20" style="width:100px"></div>
+      <div><label>Seuil « actif récemment » (min)</label><input type="number" id="st-activity" value="${esc(s.activity_active_minutes || '5')}" min="1" max="120" style="width:110px"></div>
     </div>
     <h3 style="margin:18px 0 8px">Paramètres des demandes et des alertes</h3>
     <div class="frow" style="margin-bottom:10px">
@@ -1056,11 +1078,11 @@ views.settings = async () => {
     <div class="frow">
       <div><label>1re vague (professionnels)</label><input type="number" id="st-wave1" value="${esc(s.dispatch_initial_alert_count || '3')}" min="1" max="50" style="width:110px"></div>
       <div><label>Vagues suivantes</label><input type="number" id="st-wave2" value="${esc(s.dispatch_expand_alert_count || '5')}" min="1" max="50" style="width:110px"></div>
-      <div><label>Rappel d’alerte (secondes)</label><input type="number" id="st-reminder" value="${esc(s.dispatch_reminder_seconds || '20')}" min="5" max="600" style="width:130px"></div>
+      <div><label>Rappel d’alerte (secondes)</label><input type="number" id="st-reminder" value="${esc(s.dispatch_reminder_seconds || '20')}" min="2" max="600" style="width:130px"></div>
       <div><label>Rappels max. / offre</label><input type="number" id="st-maxrem" value="${esc(s.dispatch_max_reminders || '6')}" min="0" max="100" style="width:120px"></div>
       <div><label>Recherche max. (secondes)</label><input type="number" id="st-searchmax" value="${esc(s.dispatch_search_max_seconds || '3600')}" min="60" max="86400" style="width:130px"></div>
     </div>
-    <div class="small muted">Le moteur compare le type choisi, les services déclarés et autorisés, l’état du compte, la capacité, la ville/zone et la disponibilité. Chaque vague part seulement après expiration ou refus de la précédente. Les rappels alimentent badge, son et Web Push quand l’appareil l’autorise.</div>
+    <div class="small muted">Le moteur compare le type choisi, les services déclarés et autorisés, l’état du compte, la capacité, la ville/zone et la disponibilité. Chaque vague part seulement après expiration ou refus de la précédente. À 2 s, le rappel est sonore/badge uniquement si l’application est au premier plan ; il ne force jamais une sonnerie verrouillée ni une rafale de Push iPhone/Android.</div>
     <h3 style="margin:18px 0 8px">Messagerie mission</h3>
     <div class="frow">
       <div><label>Textes / personne</label><input type="number" id="st-chattext" value="${esc(s.chat_text_limit || '30')}" min="1" max="500" style="width:110px"></div>
@@ -1114,6 +1136,7 @@ const A = {
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
           <button class="btn sm sec" onclick="A.userEdit(${u.id})">✏️ Modifier</button>
           ${u.pro && u.pro_status === 'approved' ? `<button class="btn sm sec" onclick="A.proEligibility(${u.id})">🧰 Autorisations pro</button>` : ''}
+          ${u.pro_status !== 'approved' ? `<button class="btn sm sec" onclick="A.convertUserPro(${u.id})">💼 Convertir en pro</button>` : ''}
           <button class="btn sm ${u.suspended ? '' : 'warn'}" onclick="A.suspend(${u.id},${u.suspended ? 0 : 1})">${u.suspended ? '▶️ Réactiver' : '⏸ Suspendre'}</button>
           <button class="btn sm ${u.blocked ? '' : 'warn'}" onclick="A.userBlock(${u.id},${u.blocked ? 0 : 1})">${u.blocked ? '🔓 Débloquer' : '🚫 Bloquer'}</button>
           ${tempDis ? `<button class="btn sm" onclick="A.userDisableTemp(${u.id},true)">▶️ Fin de désactivation</button>` : `<button class="btn sm sec" onclick="A.userDisableTemp(${u.id})">⏱ Désactiver temporairement</button>`}
@@ -1130,6 +1153,10 @@ const A = {
         <button class="btn sec" style="margin-top:12px" onclick="closeModal()">Fermer</button>`);
     } catch (e) { toast(e.message, 'err'); }
   },
+  async convertUserPro(id) {
+    try { const u=await api('/admin/users/'+id); openModal(`<h3>💼 Conversion professionnelle</h3><p class="small muted">Identité conservée : <b>${esc(u.name)}</b> • ${esc(u.phone)}. Aucune information professionnelle fictive n’est créée. Le profil sera marqué incomplet et restera indisponible tant que ses services ne sont pas autorisés.</p><label>Type</label><select id="cp-type" style="width:100%"><option value="particulier">Particulier</option><option value="entreprise">Entreprise</option></select><label class="check-line mt"><input id="cp-exception" type="checkbox"> Valider exceptionnellement tout de suite (réservé à une situation justifiée)</label><label>Motif <span class="small muted">(obligatoire pour validation exceptionnelle)</span></label><textarea id="cp-reason" maxlength="500" placeholder="Motif administratif…"></textarea><div class="btn-row mt"><button class="btn" onclick="A.saveConvertUserPro(${id})">Confirmer</button><button class="btn sec" onclick="closeModal()">Annuler</button></div>`); }catch(e){toast(e.message,'err');}
+  },
+  async saveConvertUserPro(id) { try { const exceptional=document.getElementById('cp-exception').checked; await api('/admin/users/'+id+'/convert-pro',{method:'POST',body:{pro_type:document.getElementById('cp-type').value,exceptional,reason:document.getElementById('cp-reason').value}});closeModal();toast(exceptional?'Professionnel exceptionnellement validé (profil incomplet).':'Conversion envoyée vers le parcours professionnel.','ok');A.userDetail(id);}catch(e){toast(e.message,'err');} },
   userQuickCreate() {
     openModal(`<h3>＋ Créer rapidement un compte</h3>
       <p class="small muted">Informations minimales. L\u2019utilisateur se connectera avec le mot de passe temporaire, devra en choisir un nouveau et compléter lui-même son profil. Aucune fausse information.</p>
@@ -1152,7 +1179,7 @@ const A = {
   },
   async proEligibility(id) {
     try {
-      const [u, catalog] = await Promise.all([api('/admin/users/' + id), api('/admin/catalog')]);
+      const [u, catalog, villes] = await Promise.all([api('/admin/users/' + id), api('/admin/catalog'), api('/admin/villes')]);
       if (!u.pro) return toast('Ce compte ne possède pas de profil professionnel.', 'err');
       const declared = (u.pro.services || []).map(Number), allowed = (u.pro.authorized_services || declared).map(Number);
       const flat = (catalog.services || []).filter(s => declared.includes(+s.id));
@@ -1161,12 +1188,14 @@ const A = {
         <label class="small muted">Type de prestataire</label><select id="pe-type" style="width:100%;margin-bottom:10px"><option value="particulier" ${u.pro.pro_type !== 'entreprise' ? 'selected' : ''}>Un particulier</option><option value="entreprise" ${u.pro.pro_type === 'entreprise' ? 'selected' : ''}>Une entreprise</option></select>
         <label class="small muted">Capacité de mission</label><select id="pe-cap" style="width:100%;margin-bottom:10px"><option value="1" ${(+u.pro.capacity_level || 1) === 1 ? 'selected' : ''}>Standard</option><option value="2" ${(+u.pro.capacity_level || 1) === 2 ? 'selected' : ''}>Renforcée / gros travaux</option><option value="3" ${(+u.pro.capacity_level || 1) >= 3 ? 'selected' : ''}>Grande capacité</option></select>
         <label class="small muted">Services autorisés</label><div style="max-height:260px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${flat.map(s => `<label style="display:block;padding:5px 0"><input class="pe-service" type="checkbox" value="${s.id}" ${allowed.includes(+s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('') || '<span class="small muted">Aucun service déclaré dans le profil. Le professionnel doit d’abord compléter son profil.</span>'}</div>
+        <label class="small muted">Villes d’intervention autorisées</label><div class="small muted">Une seule ville est la règle normale. Plusieurs villes ou « toutes » sont réservées à un administrateur / PDG et appliquées au matching.</div><div style="max-height:180px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${(['pdg','admin'].includes(ME.role) ? `<label style="display:block;padding:5px 0"><input class="pe-city" type="checkbox" value="*" ${(u.pro.service_cities||[]).includes('*')?'checked':''}> Toutes les villes actives</label>` : '')}${villes.map(v=>`<label style="display:block;padding:5px 0"><input class="pe-city" type="checkbox" value="${esc(v.name)}" ${(u.pro.service_cities||[]).includes(v.name)?'checked':''}> ${esc(v.name)}</label>`).join('')}</div>
         <button class="btn" onclick="A.saveProEligibility(${id})">Enregistrer</button><button class="btn sec mt" onclick="A.userDetail(${id})">Annuler</button>`);
     } catch (e) { toast(e.message, 'err'); }
   },
   async saveProEligibility(id) {
     const authorized_services = [...document.querySelectorAll('.pe-service:checked')].map(el => +el.value);
-    try { await api('/admin/pros/' + id + '/eligibility', { method: 'PUT', body: { authorized_services, pro_type: document.getElementById('pe-type').value, capacity_level: +document.getElementById('pe-cap').value } }); toast('Autorisations professionnelles enregistrées ✓', 'ok'); A.userDetail(id); }
+    const service_cities = [...document.querySelectorAll('.pe-city:checked')].map(el => el.value);
+    try { await api('/admin/pros/' + id + '/eligibility', { method: 'PUT', body: { authorized_services, service_cities, pro_type: document.getElementById('pe-type').value, capacity_level: +document.getElementById('pe-cap').value } }); toast('Autorisations professionnelles enregistrées ✓', 'ok'); A.userDetail(id); }
     catch (e) { toast(e.message, 'err'); }
   },
   async userEdit(id) {
@@ -1802,13 +1831,20 @@ const A = {
   },
   async toggleAd(id, v) { try { await api('/admin/ads/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
   async delAd(id) { if (!confirm('Supprimer cette publicité ?')) return; try { await api('/admin/ads/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
-  async broadcast() {
-    try {
-      const r = await api('/admin/broadcast', { method: 'POST', body: { title: document.getElementById('bc-title').value, body: document.getElementById('bc-body').value } });
-      toast(`Message envoyé à ${r.sent} utilisateur(s) ✓`, 'ok');
-      document.getElementById('bc-title').value = ''; document.getElementById('bc-body').value = '';
-    } catch (e) { toast(e.message, 'err'); }
+  async generalMessage(mode) {
+    const cities = [...document.getElementById('gm-cities').selectedOptions].map(o => o.value);
+    try { const r = await api('/admin/general-messages', { method:'POST', body:{ title:document.getElementById('gm-title').value, body:document.getElementById('gm-body').value, account_types:[...(document.getElementById('gm-clients').checked?['clients']:[]),...(document.getElementById('gm-pros').checked?['pros']:[])], cities, mode, scheduled_at:document.getElementById('gm-date').value } }); toast(mode==='immediate' ? `Message envoyé : ${r.sent||0} notification(s) enregistrée(s).` : mode==='scheduled' ? 'Message programmé ✓' : 'Brouillon enregistré ✓','ok'); render(); } catch(e){ toast(e.message,'err'); }
   },
+  async sendGeneralMessage(id) { if (!confirm('Envoyer ce brouillon maintenant ?')) return; try { const r=await api('/admin/general-messages/'+id+'/send',{method:'POST'}); toast(`${r.delivered} notification(s) enregistrée(s).`,'ok');render(); } catch(e){toast(e.message,'err');} },
+  async deleteGeneralMessage(id) { if (!confirm('Supprimer ce brouillon ?')) return; try { await api('/admin/general-messages/'+id,{method:'DELETE'});toast('Brouillon supprimé.','ok');render(); } catch(e){toast(e.message,'err');} },
+  async editGeneralMessage(id) { try { const [all,villes]=await Promise.all([api('/admin/general-messages'),api('/admin/villes')]); const m=all.find(x=>x.id===id); if(!m)return; openModal(`<h3>Modifier le brouillon</h3><label>Titre</label><input id="eg-title" style="width:100%" value="${esc(m.title)}"><label>Message</label><textarea id="eg-body">${esc(m.body||'')}</textarea><label class="check-line"><input id="eg-clients" type="checkbox" ${m.account_types.includes('clients')?'checked':''}> Clients</label><label class="check-line"><input id="eg-pros" type="checkbox" ${m.account_types.includes('pros')?'checked':''}> Professionnels validés</label><label>Villes</label><select id="eg-cities" multiple size="6" style="width:100%">${villes.map(v=>`<option value="${esc(v.name)}" ${m.cities.includes(v.name)?'selected':''}>${esc(v.name)}</option>`).join('')}</select><div class="btn-row mt"><button class="btn" onclick="A.updateGeneralMessage(${id})">Enregistrer</button><button class="btn sec" onclick="closeModal()">Annuler</button></div>`); } catch(e){toast(e.message,'err');} },
+  async updateGeneralMessage(id) { try { await api('/admin/general-messages/'+id,{method:'PUT',body:{title:document.getElementById('eg-title').value,body:document.getElementById('eg-body').value,account_types:[...(document.getElementById('eg-clients').checked?['clients']:[]),...(document.getElementById('eg-pros').checked?['pros']:[])],cities:[...document.getElementById('eg-cities').selectedOptions].map(o=>o.value)}});closeModal();toast('Brouillon modifié ✓','ok');render(); }catch(e){toast(e.message,'err');} },
+  addAboutParagraph() { const box=document.getElementById('about-paragraphs'); if(box) box.insertAdjacentHTML('beforeend',aboutParagraphHtml({},box.children.length)); },
+  aboutData() { return { title:(document.getElementById('about-title')||{}).value||'', paragraphs:[...document.querySelectorAll('.about-row')].map(r=>({heading:r.querySelector('.about-heading').value,text:r.querySelector('.about-text').value})).filter(p=>p.heading.trim()||p.text.trim()) }; },
+  async previewAbout() { const d=A.aboutData(); openModal(`<h3>${esc(d.title)}</h3>${d.paragraphs.map(p=>`<div class="mb"><b>${esc(p.heading)}</b><div class="small" style="white-space:pre-wrap">${esc(p.text)}</div></div>`).join('')}<button class="btn sec" onclick="closeModal()">Fermer</button>`); },
+  async saveAbout(publish) { try { await api('/admin/about',{method:'PUT',body:A.aboutData()}); if(publish){if(!confirm('Publier ce brouillon dans l’application ?'))return;await api('/admin/about/publish',{method:'POST'});}toast(publish?'Contenu publié ✓':'Brouillon enregistré ✓','ok');render(); }catch(e){toast(e.message,'err');} },
+  async saveShareSettings() { try { await api('/admin/settings',{method:'PUT',body:{share_official_url:document.getElementById('share-url').value,share_text:document.getElementById('share-text').value}});toast('Réglages de partage enregistrés ✓','ok'); }catch(e){toast(e.message,'err');} },
+  frequencyPeriod(days) { FREQ_DAYS=days; render(); },
   async saveRules(key, elId) { try { await api('/admin/settings', { method: 'PUT', body: { [key]: document.getElementById(elId).value } }); toast('Règles enregistrées ✓ (appliquées immédiatement dans l\u2019application)', 'ok'); } catch (e) { toast(e.message, 'err'); } },
   async treatReport(id) { try { await api(`/admin/signalements/${id}/traiter`, { method: 'POST' }); render(); } catch (e) { toast(e.message, 'err'); } },
   async treatUrg(id) { try { await api(`/admin/urgences/${id}/traiter`, { method: 'POST' }); render(); } catch (e) { toast(e.message, 'err'); } },
@@ -2043,7 +2079,10 @@ const A = {
           chat_image_limit: document.getElementById('st-chatimages').value,
           chat_audio_max_seconds: document.getElementById('st-chataudio').value,
           file_recovery_days: document.getElementById('st-recovery').value,
-          file_retention_days: document.getElementById('st-ret').value
+          file_retention_days: document.getElementById('st-ret').value,
+          request_image_limit: document.getElementById('st-reqphotos').value,
+          request_audio_max_seconds: document.getElementById('st-reqaudio').value,
+          activity_active_minutes: document.getElementById('st-activity').value
         }
       });
       toast('Paramètres enregistrés ✓ (appliqués immédiatement)', 'ok');

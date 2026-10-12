@@ -17,6 +17,26 @@ let suppressPush = false;
 let sse = null;
 let currentChat = null;     // mission id du chat ouvert
 let currentSupport = null;  // conversation directe avec Klean Services
+// Un lien d’invitation est conservé seulement jusqu’à l’inscription. Son ouverture est mesurée séparément d’un partage externe.
+const incomingReferral = (() => { try { return new URLSearchParams(location.search).get('ref') || ''; } catch { return ''; } })();
+if (/^[A-Za-z0-9_-]{12,100}$/.test(incomingReferral)) {
+  localStorage.setItem('ks_referral_token', incomingReferral);
+  fetch('/api/share/open/' + encodeURIComponent(incomingReferral), { method: 'POST' }).catch(() => {});
+  try { const u = new URL(location.href); u.searchParams.delete('ref'); history.replaceState({}, '', u.pathname + u.search + u.hash); } catch {}
+}
+let lastActivitySignal = 0;
+function signalRealActivity(state = 'active') {
+  if (!TOKEN) return;
+  const now = Date.now();
+  if (state === 'active' && now - lastActivitySignal < 60000) return;
+  if (state === 'active') lastActivitySignal = now;
+  const body = JSON.stringify({ state });
+  // API dédiée : aucune navigation ou actualisation automatique n’est comptée comme activité.
+  fetch('/api/activity', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN }, body, keepalive: true }).catch(() => {});
+}
+['pointerdown', 'keydown', 'touchstart'].forEach(ev => document.addEventListener(ev, () => signalRealActivity('active'), { passive: true }));
+document.addEventListener('visibilitychange', () => signalRealActivity(document.hidden ? 'background' : 'active'));
+window.addEventListener('focus', () => signalRealActivity('active'));
 
 /* ---------- Utilitaires ---------- */
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -206,7 +226,7 @@ function bottomNav(active) {
 }
 function emptyState(ic, msg) { return `<div class="empty"><div class="e-ic">${ic}</div>${esc(msg)}</div>`; }
 function statusPill(s) {
-  const L = { recherche: '🔎 Recherche en cours', sans_pro: 'Sans professionnel', acceptee: 'Acceptée', confirmee: 'Programmée', en_cours: 'En cours', terminee: 'Terminée', payee: 'Payée', annulee: 'Annulée', litige: 'Litige' };
+  const L = { recherche: '🔎 Recherche en cours', sans_pro: 'Sans professionnel', acceptee: 'Acceptée', confirmee: 'Programmée', demarrage_demande: 'Démarrage à confirmer', en_cours: 'En cours', fin_demande: 'Fin à confirmer', terminee: 'Terminée', payee: 'Payée', annulee: 'Annulée', litige: 'Litige' };
   return `<span class="pill ${s}">${L[s] || s}</span>`;
 }
 
@@ -288,11 +308,12 @@ routes.register = async () => {
           name: document.getElementById('f-name').value, phone: document.getElementById('f-phone').value,
           password: document.getElementById('f-pass').value,
           ville, quartier: document.getElementById('f-quartier').value,
-          accept_rules: document.getElementById('f-accept').checked
+          accept_rules: document.getElementById('f-accept').checked,
+          referral_token: localStorage.getItem('ks_referral_token') || undefined
         }
       });
-      TOKEN = r.token; USER = r.user; localStorage.setItem('ks_token', TOKEN);
-      connectSSE(); refreshBadges();
+      TOKEN = r.token; USER = r.user; localStorage.setItem('ks_token', TOKEN); localStorage.removeItem('ks_referral_token');
+      connectSSE(); refreshBadges(); signalRealActivity('active');
       toast('Bienvenue sur Klean Services !', 'ok');
       nav('#/home');
     } catch (err) {
@@ -511,7 +532,7 @@ routes.request = async (serviceId) => {
   let data;
   try { data = await api('/services/' + serviceId + '/questions'); }
   catch (e) { toast(e.message, 'err'); back(); return; }
-  REQ = { photos: [], audio: null, lat: USER.lat, lng: USER.lng, service_id: data.service.id };
+  REQ = { photos: [], audio: null, lat: USER.lat, lng: USER.lng, service_id: data.service.id, photo_limit: Number(data.limits && data.limits.photos || 5), audio_max: Number(data.limits && data.limits.audio_seconds || 20) };
   const taches = data.taches || [];
   const sug = sessionStorage.getItem('ks_sug_tache') || '';
   sessionStorage.removeItem('ks_sug_tache');
@@ -530,11 +551,11 @@ routes.request = async (serviceId) => {
         <div id="r-task-details" class="mt"></div></div>` : ''}
       ${data.questions.map(qst => renderQuestion(qst)).join('')}
       <div class="field"><label>Message (facultatif)</label><textarea id="r-desc" placeholder="Autre précision utile…"></textarea></div>
-      <div class="field"><label>Photos (facultatif)</label>
+      <div class="field"><label>Photos (facultatif) <span class="muted small">${Number(data.limits && data.limits.photos || 5)} maximum</span></label>
         <div class="photo-strip" id="r-photos"><button class="ph-add" onclick="A.pickPhotos('r-photos')">＋</button></div>
         <input type="file" id="file-input" accept="image/*" multiple style="display:none">
       </div>
-      <div class="field"><label>Message vocal (facultatif)</label>
+      <div class="field"><label>Message vocal (facultatif) <span class="muted small">${Number(data.limits && data.limits.audio_seconds || 20)} secondes maximum</span></label>
         <div id="r-audio-zone"><button class="btn sec sm" id="r-rec" onclick="A.toggleRec('r-audio-zone')">🎤 Enregistrer un message vocal</button></div>
       </div>
       <div class="sec-title">Localisation</div>
@@ -542,7 +563,7 @@ routes.request = async (serviceId) => {
         <button class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Utiliser ma position</button>
       </div>
       <div class="field"><label>Adresse / Quartier <span class="req">*</span></label><input type="text" id="r-addr" placeholder="Ex : Bouaké, quartier Air France, près de…" value="${esc(USER.address || '')}"></div>
-      <div class="field"><label>Date souhaitée</label><input type="datetime-local" id="r-date"></div>
+      <div class="field"><label>Disponibilité souhaitée</label><select id="r-schedule" onchange="A.requestSchedule()"><option value="asap">Dès que possible</option><option value="today">Aujourd’hui</option><option value="date">À une date précise</option></select><input type="datetime-local" id="r-date" style="display:none;margin-top:8px"></div>
       <label class="check-line"><input type="checkbox" id="r-urgent"> 🔥 C'est urgent</label>
       <button class="btn" id="b-send">Envoyer ma demande</button>
     </div>
@@ -574,6 +595,7 @@ routes.request = async (serviceId) => {
       description: document.getElementById('r-desc').value,
       address: addr, lat: REQ.lat, lng: REQ.lng,
       urgence: document.getElementById('r-urgent').checked,
+      schedule_type: document.getElementById('r-schedule').value,
       date_souhaitee: document.getElementById('r-date').value || null,
       photos: REQ.photos, audio: REQ.audio
     };
@@ -636,7 +658,7 @@ routes.mission = async (id) => {
   try { m = await api('/missions/' + id); } catch (e) { toast(e.message, 'err'); nav('#/missions'); return; }
   const isClient = m.role === 'client', isPro = m.role === 'pro', isCand = m.role === 'candidat';
   const STEPS = [['recherche', 'Demande créée'], ['acceptee', 'Professionnel trouvé'], ['confirmee', 'Mission programmée'], ['en_cours', 'Mission en cours'], ['terminee', 'Mission terminée'], ['payee', 'Paiement validé']];
-  const orderIdx = { recherche: 0, sans_pro: 0, acceptee: 1, confirmee: 2, en_cours: 3, terminee: 4, payee: 5 };
+  const orderIdx = { recherche: 0, sans_pro: 0, acceptee: 1, confirmee: 2, demarrage_demande: 2, en_cours: 3, fin_demande: 3, terminee: 4, payee: 5 };
   const curIdx = orderIdx[m.status] ?? -1;
 
   let banner = '';
@@ -649,9 +671,11 @@ routes.mission = async (id) => {
   if (m.status === 'acceptee') banner = isClient
     ? `<div class="status-banner ok">✅ ${esc(m.pro ? m.pro.name : 'Un professionnel')} a accepté ! Consultez son profil puis confirmez.</div>`
     : `<div class="status-banner info">En attente de la confirmation du client.</div>`;
-  if (m.status === 'confirmee') banner = `<div class="status-banner ok">📅 Mission programmée.${isPro ? ' Vous pouvez la démarrer le moment venu.' : ''}</div>`;
+  if (m.status === 'confirmee') banner = `<div class="status-banner ok">📅 Mission programmée.${isPro ? ' Vous pouvez demander le démarrage le moment venu.' : ''}</div>`;
+  if (m.status === 'demarrage_demande') banner = `<div class="status-banner info">🛠️ Le professionnel demande le démarrage. ${isClient ? 'Votre confirmation est requise.' : 'En attente de la confirmation du client.'}</div>`;
   if (m.status === 'en_cours') banner = `<div class="status-banner info">🛠️ Mission en cours de réalisation.</div>`;
-  if (m.status === 'terminee') banner = `<div class="status-banner search">💵 Mission terminée — paiement en attente de confirmation.</div>`;
+  if (m.status === 'fin_demande') banner = `<div class="status-banner info">✅ Le professionnel déclare la mission terminée. ${isClient ? 'Confirmez ou contestez la fin.' : 'En attente de la confirmation du client.'}</div>`;
+  if (m.status === 'terminee') banner = `<div class="status-banner search">💵 Fin confirmée — paiement déclaré, en attente des confirmations.</div>`;
   if (m.status === 'payee') banner = `<div class="status-banner ok">🎉 Mission terminée et payée. Merci !</div>`;
   if (m.status === 'annulee') banner = `<div class="status-banner bad">Cette mission a été annulée.</div>`;
   if (m.status === 'litige') banner = `<div class="status-banner bad">⚠️ Un litige est ouvert sur cette mission. L'administration vous contactera.</div>`;
@@ -751,9 +775,11 @@ routes.mission = async (id) => {
   if (isCand && m.offer_pending) actions = `<div class="btn-row mt"><button class="btn warn" onclick="A.refuseMission(${m.id},this)">Refuser</button><button class="btn" onclick="A.acceptMission(${m.id},this)">✅ Accepter la mission</button></div>`;
   if (isClient && m.status === 'acceptee') actions = `<button class="btn mt" onclick="A.confirmMission(${m.id},this)">✅ Confirmer ce professionnel</button>`;
   if (isClient && m.status === 'sans_pro') actions = `<button class="btn mt" onclick="A.relancer(${m.id},this)">🔄 Relancer la recherche</button>`;
-  if (isPro && m.status === 'confirmee') actions = `<button class="btn mt" onclick="A.startMission(${m.id},this)">🛠️ Démarrer la mission</button>`;
-  if (isPro && m.status === 'en_cours') actions = `<button class="btn mt" onclick="A.completeMission(${m.id},this)">✅ Terminer la mission</button>`;
-  const cancellable = ['recherche', 'sans_pro', 'acceptee', 'confirmee', 'en_cours'].includes(m.status) && (isClient || isPro);
+  if (isPro && m.status === 'confirmee') actions = `<button class="btn mt" onclick="A.startMission(${m.id},this)">🛠️ Demander le démarrage</button>`;
+  if (isClient && m.status === 'demarrage_demande') actions = `<div class="btn-row mt"><button class="btn warn" onclick="A.contestStage(${m.id},'start',this)">Contester</button><button class="btn" onclick="A.confirmStart(${m.id},this)">✅ Confirmer le démarrage</button></div>`;
+  if (isPro && m.status === 'en_cours') actions = `<button class="btn mt" onclick="A.completeMission(${m.id},this)">✅ Demander la confirmation de fin</button>`;
+  if (isClient && m.status === 'fin_demande') actions = `<div class="btn-row mt"><button class="btn warn" onclick="A.contestStage(${m.id},'complete',this)">Contester la fin</button><button class="btn" onclick="A.confirmEnd(${m.id},this)">✅ Confirmer la fin</button></div>`;
+  const cancellable = ['recherche', 'sans_pro', 'acceptee', 'confirmee', 'demarrage_demande', 'en_cours', 'fin_demande'].includes(m.status) && (isClient || isPro);
 
   $app.innerHTML = `
   ${header(m.service)}
@@ -975,10 +1001,25 @@ routes.account = async () => {
         <div class="menu-item" onclick="nav('#/settings')"><span class="mi-ic">⚙️</span>Paramètres<span class="mi-arr">›</span></div>
       </div>
     </div>
+    <div class="sec-title">Klean Services</div>
+    <div class="menu-item" onclick="nav('#/about')"><span class="mi-ic">ℹ️</span>À propos de Klean Services<span class="mi-arr">›</span></div>
+    <div class="menu-item" onclick="A.shareApp()"><span class="mi-ic">↗️</span>Partager l’application<span class="mi-arr">›</span></div>
     ${['pdg', 'admin', 'gestionnaire', 'agent'].includes(USER.role) ? `<a class="menu-item" href="/admin" style="text-decoration:none;color:inherit"><span class="mi-ic">🖥️</span>Tableau de bord administrateur<span class="mi-arr">›</span></a>` : ''}
     <button class="btn ghost mt" onclick="logout()">Se déconnecter</button>
   </div>${bottomNav('account')}`;
   updateBadges();
+};
+
+/* ---------- À propos & partage ---------- */
+routes.about = async () => {
+  let d;
+  try { d = await api('/about'); } catch (e) { toast(e.message, 'err'); back(); return; }
+  $app.innerHTML = `${header('À propos de Klean Services')}<div class="content">
+    <div class="card"><div class="bold" style="font-size:20px;margin-bottom:12px">${esc(d.title)}</div>
+      ${(d.paragraphs || []).map(p => `<div style="margin:0 0 16px"><div class="bold">${esc(p.heading || '')}</div><div class="small" style="white-space:pre-wrap;line-height:1.55">${esc(p.text || '')}</div></div>`).join('') || '<div class="muted">Le contenu est en cours de publication.</div>'}
+    </div>
+    <button class="btn sec" onclick="A.shareApp()">↗️ Partager l’application</button>
+  </div>${bottomNav('account')}`;
 };
 
 /* ---------- Espace professionnel ---------- */
@@ -1665,9 +1706,9 @@ routes.quiz = async () => {
 
   // Public non autorisé
   if (!etat.allowed && !p) {
-    const motif = etat.audience === 'clients_servis'
+    const motif = etat.reason || (etat.audience === 'clients_servis'
       ? 'Ce quiz est réservé aux clients ayant déjà bénéficié d\u2019un service sur Klean Services. Commandez votre premier service pour pouvoir participer !'
-      : 'Ce quiz est réservé aux clients.';
+      : 'Ce quiz est réservé aux clients.');
     $app.innerHTML = `${header('Quiz')}<div class="content"><div class="card center">
       <div style="font-size:44px">🔒</div><div class="bold mb">${motif}</div>
       <button class="btn sec" onclick="back()">Retour</button></div></div>${bottomNav('home')}`;
@@ -2066,6 +2107,7 @@ const A = {
     catch (e) { toast(e.message, 'err'); }
   },
   collap(id) { document.getElementById(id).classList.toggle('open'); },
+  requestSchedule() { const s=document.getElementById('r-schedule'), d=document.getElementById('r-date'); if (!s || !d) return; d.style.display=s.value==='date'?'block':'none'; if(s.value!=='date') d.value=''; },
   mTab(t) { sessionStorage.setItem('ks_mtab', t); render(); },
   toggleSound(el) {
     const now = localStorage.getItem('ks_sound') !== '0';
@@ -2079,8 +2121,14 @@ const A = {
     const input = document.getElementById('file-input');
     input.onchange = async () => {
       if (!input.files.length) return;
+      let files = [...input.files];
+      if (zoneId === 'r-photos') {
+        const remaining = Math.max(0, Number(REQ.photo_limit ?? 5) - REQ.photos.length);
+        if (!remaining) { toast('La limite de photos de cette demande est atteinte.', 'err'); input.value = ''; return; }
+        if (files.length > remaining) { files = files.slice(0, remaining); toast(`Seules ${remaining} photo(s) peuvent encore être ajoutées.`); }
+      }
       const fd = new FormData();
-      [...input.files].forEach(f => fd.append('files', f));
+      files.forEach(f => fd.append('files', f));
       toast('Envoi des fichiers…');
       try {
         const r = await api('/upload', { method: 'POST', body: fd });
@@ -2132,7 +2180,7 @@ const A = {
           toast('Message vocal enregistré. Vous pouvez l’écouter avant l’envoi ✓', 'ok');
         } catch (e) { toast(e.message, 'err'); }
       };
-      A._rec.start(250); A.startRecClock(btn, 20); btn.classList.add('warn');
+      A._rec.start(250); A.startRecClock(btn, Math.min(20, Number(REQ.audio_max || 20))); btn.classList.add('warn');
     } catch (e) { if (stream) stream.getTracks().forEach(t => t.stop()); toast(microphoneError(e), 'err'); }
   },
   clearRequestAudio(zoneId) {
@@ -2178,12 +2226,29 @@ const A = {
   },
   async startMission(id, btn) {
     busy(btn, true);
-    try { await api('/missions/' + id + '/start', { method: 'POST' }); toast('Mission démarrée.', 'ok'); render(); }
+    try { await api('/missions/' + id + '/start', { method: 'POST' }); toast('Demande de démarrage envoyée au client.', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); busy(btn, false); }
+  },
+  async confirmStart(id, btn) {
+    busy(btn, true);
+    try { await api('/missions/' + id + '/start/confirm', { method: 'POST' }); toast('Démarrage confirmé.', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); busy(btn, false); }
   },
   async completeMission(id, btn) {
     busy(btn, true);
-    try { await api('/missions/' + id + '/complete', { method: 'POST' }); toast('Mission terminée ! En attente du paiement.', 'ok'); render(); }
+    try { await api('/missions/' + id + '/complete', { method: 'POST' }); toast('Demande de confirmation de fin envoyée au client.', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); busy(btn, false); }
+  },
+  async confirmEnd(id, btn) {
+    busy(btn, true);
+    try { await api('/missions/' + id + '/complete/confirm', { method: 'POST' }); toast('Fin confirmée. Vous pouvez maintenant confirmer le paiement.', 'ok'); render(); }
+    catch (e) { toast(e.message, 'err'); busy(btn, false); }
+  },
+  async contestStage(id, stage, btn) {
+    const reason = prompt(stage === 'start' ? 'Pourquoi contestez-vous le démarrage ? (facultatif)' : 'Pourquoi contestez-vous la fin ? (facultatif)');
+    if (reason === null) return;
+    busy(btn, true);
+    try { await api('/missions/' + id + '/' + stage + '/contest', { method: 'POST', body: { reason } }); toast(stage === 'start' ? 'Démarrage contesté. Le professionnel a été notifié.' : 'Fin contestée. Un litige a été ouvert.', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); busy(btn, false); }
   },
   async setAmount(id, btn) {
@@ -2547,6 +2612,23 @@ const A = {
   },
   delAddr(id) { api('/addresses/' + id, { method: 'DELETE' }).then(() => { toast('Adresse supprimée.', 'ok'); render(); }).catch(e => toast(e.message, 'err')); },
   quizPick(el, qid, j) { A.pickChip(el, String(j)); window._quizAnswers[qid] = j; },
+  async shareApp() {
+    if (!USER) { nav('#/login'); return; }
+    try {
+      const d = await api('/share/prepare', { method: 'POST' });
+      const text = (d.text ? d.text + '\n' : '') + d.url;
+      if (navigator.share) {
+        try { await navigator.share({ title: 'Klean Services', text: d.text || 'Découvrez Klean Services', url: d.url });
+          toast('La feuille de partage a été ouverte. Nous ne pouvons pas savoir si le partage externe a été envoyé.', 'ok');
+        } catch (e) { if (e && e.name !== 'AbortError') throw e; }
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        openModal(`<h3>↗️ Partager l’application</h3><p class="small">Le lien a été copié. Collez-le dans WhatsApp, Messages, e-mail ou le réseau de votre choix.</p><textarea readonly style="width:100%;min-height:90px">${esc(text)}</textarea><button class="btn mt" onclick="closeModal()">Fermer</button>`);
+      } else {
+        openModal(`<h3>↗️ Partager l’application</h3><p class="small">Copiez ce lien et envoyez-le par le canal de votre choix.</p><textarea readonly style="width:100%;min-height:90px" onclick="this.select()">${esc(text)}</textarea><button class="btn mt" onclick="closeModal()">Fermer</button>`);
+      }
+    } catch (e) { toast(e.message, 'err'); }
+  },
   bandeauGo(link) {
     if (!link) return;
     if (link.startsWith('#')) nav(link);

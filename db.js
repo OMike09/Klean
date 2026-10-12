@@ -697,6 +697,19 @@ function migrate() {
   // Le professionnel déclare ses services ; le PDG peut en outre les autoriser explicitement.
   ensureColumn('pro_profiles', 'authorized_services', "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn('pro_profiles', 'capacity_level', 'INTEGER NOT NULL DEFAULT 1');
+  // Villes d'intervention : la première reste compatible avec service_city ; les autres sont explicitement autorisées par l'administration.
+  ensureColumn('pro_profiles', 'service_cities', "TEXT NOT NULL DEFAULT '[]'");
+  // Suivi transparent du cycle de prestation et du planning demandé.
+  ensureColumn('missions', 'schedule_type', "TEXT NOT NULL DEFAULT 'asap'");
+  ensureColumn('missions', 'start_requested_at', 'TEXT');
+  ensureColumn('missions', 'start_client_confirmed_at', 'TEXT');
+  ensureColumn('missions', 'completion_requested_at', 'TEXT');
+  ensureColumn('missions', 'completion_client_confirmed_at', 'TEXT');
+  // Activité réelle : alimentée uniquement par une interaction client explicite.
+  ensureColumn('users', 'last_activity_at', 'TEXT');
+  ensureColumn('users', 'last_background_at', 'TEXT');
+  ensureColumn('users', 'activity_state', "TEXT NOT NULL DEFAULT 'inactif'");
+  ensureColumn('users', 'referred_by_share_id', 'INTEGER');
   // Chronologie d'un concours synchronisé (pause/reprise sans dérive locale).
   ensureColumn('quiz_sessions', 'started_ms', 'INTEGER');
   ensureColumn('quiz_sessions', 'interval_s', 'INTEGER NOT NULL DEFAULT 30');
@@ -704,6 +717,63 @@ function migrate() {
   ensureColumn('quiz_sessions', 'paused_at', 'TEXT');
   ensureColumn('services', 'price_updated_at', 'TEXT');
 
+  db.exec(`CREATE TABLE IF NOT EXISTS app_about (
+    id INTEGER PRIMARY KEY CHECK (id=1),
+    title TEXT NOT NULL,
+    draft_title TEXT,
+    published_title TEXT,
+    draft TEXT NOT NULL DEFAULT '[]',
+    published TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    published_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS share_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    clicked_at TEXT NOT NULL DEFAULT (datetime('now')),
+    detected_at TEXT,
+    joined_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    joined_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_share_events_user ON share_events(user_id, clicked_at);
+  CREATE TABLE IF NOT EXISTS user_activity_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_activity_user_date ON user_activity_events(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_activity_date ON user_activity_events(created_at);
+  CREATE TABLE IF NOT EXISTS general_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    author_id INTEGER NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    account_types TEXT NOT NULL DEFAULT '[]',
+    cities TEXT NOT NULL DEFAULT '[]',
+    mode TEXT NOT NULL DEFAULT 'immediate', -- draft | immediate | scheduled
+    status TEXT NOT NULL DEFAULT 'draft', -- draft | scheduled | sent | cancelled
+    scheduled_at TEXT,
+    sent_at TEXT,
+    target_count INTEGER NOT NULL DEFAULT 0,
+    delivered_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS general_message_deliveries (
+    message_id INTEGER NOT NULL REFERENCES general_messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    notification_id INTEGER REFERENCES notifications(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY(message_id,user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_general_messages_status ON general_messages(status, scheduled_at);
+  `);
+  // Le titre publié est séparé du titre du brouillon : aucun changement ne fuit avant publication.
+  ensureColumn('app_about', 'draft_title', 'TEXT');
+  ensureColumn('app_about', 'published_title', 'TEXT');
+  db.prepare('UPDATE app_about SET draft_title=COALESCE(draft_title,title), published_title=COALESCE(published_title,title)').run();
   db.exec(`CREATE TABLE IF NOT EXISTS reset_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -823,14 +893,28 @@ function migrate() {
 
   // Paramètres ajoutés après la première version : uniquement si absents, sans écraser les choix du PDG.
   const newDefaults = {
-    dispatch_initial_alert_count: '3', dispatch_expand_alert_count: '3', dispatch_expand_strategy: 'vagues', dispatch_reminder_seconds: '20',
+    dispatch_initial_alert_count: '3', dispatch_expand_alert_count: '3', dispatch_expand_strategy: 'vagues', dispatch_reminder_seconds: '2',
     dispatch_auto_enabled: '1', dispatch_geo_enabled: '1', dispatch_alert_sound: '1', dispatch_max_reminders: '6', dispatch_search_max_seconds: '3600',
     dispatch_allow_particulier: '1', dispatch_allow_entreprise: '1',
+    request_image_limit: '5', request_audio_max_seconds: '20', activity_active_minutes: '5',
+    share_official_url: '',
+    game_quiz_account: 'tous', game_quiz_share: 'tous', game_quiz_service: 'tous',
+    game_flipfizz_account: 'tous', game_flipfizz_share: 'tous', game_flipfizz_service: 'tous',
+    game_kdo_account: 'tous', game_kdo_share: 'tous', game_kdo_service: 'tous',
     chat_text_limit: '30', chat_audio_max_seconds: '20', chat_image_limit: '3',
     chat_audio_enabled: '1', chat_image_enabled: '1', file_recovery_days: '7'
   };
   for (const [key, value] of Object.entries(newDefaults)) if (getSetting(key) === null) setSetting(key, value);
+  // Page À propos publiée par défaut, modifiable sans toucher aux conditions d'utilisation.
+  const defaultAbout = [
+    { heading: 'Notre objectif', text: 'Klean Services est une plateforme de mise en relation entre les clients et les professionnels de différents domaines. Notre objectif est de faciliter l’accès aux services en permettant à chacun d’exprimer ses besoins et de trouver plus facilement un professionnel adapté.' },
+    { heading: 'Comment cela fonctionne', text: 'Grâce à Klean Services, les particuliers et les entreprises peuvent rechercher des prestataires, demander des interventions et communiquer avec les professionnels pour leurs différents besoins, à domicile, au bureau ou sur d’autres lieux.' },
+    { heading: 'Nos engagements', text: 'Notre plateforme facilite la visibilité des professionnels, promeut leurs activités et développe les opportunités de collaboration entre clients et prestataires. Nous souhaitons proposer une expérience simple, accessible et transparente.' },
+    { heading: '', text: 'Avec Klean Services, exprimez votre besoin, un professionnel arrive.' }
+  ];
+  if (!db.prepare('SELECT 1 FROM app_about WHERE id=1').get()) db.prepare(`INSERT INTO app_about(id,title,draft_title,published_title,draft,published,published_at) VALUES(1,?,?,?,?,?,datetime('now'))`).run('À propos de Klean Services', 'À propos de Klean Services', 'À propos de Klean Services', JSON.stringify(defaultAbout), JSON.stringify(defaultAbout));
   // Cohérence des profils déjà existants.
+  db.prepare("UPDATE pro_profiles SET service_cities=json_array(service_city) WHERE (service_cities IS NULL OR service_cities='' OR service_cities='[]') AND service_city IS NOT NULL AND service_city!=''").run();
   db.prepare("UPDATE pro_profiles SET availability_status=CASE WHEN available=1 THEN 'disponible' ELSE 'indisponible' END WHERE availability_status IS NULL OR availability_status='' ").run();
   // Les profils existants conservent exactement leurs services actuels comme autorisations initiales.
   db.prepare("UPDATE pro_profiles SET authorized_services=services WHERE authorized_services IS NULL OR authorized_services='' OR authorized_services='[]'").run();

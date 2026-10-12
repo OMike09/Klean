@@ -143,6 +143,19 @@ function verifyToken(token) {
     return payload;
   } catch { return null; }
 }
+function recordRealActivity(userId, state = 'active') {
+  // Une interaction explicite est horodatée. Les rafraîchissements ou flux en arrière-plan ne l'appellent jamais.
+  const user = db.prepare('SELECT last_activity_at FROM users WHERE id=?').get(userId);
+  if (!user) return;
+  if (state === 'background') {
+    db.prepare("UPDATE users SET activity_state='background', last_background_at=datetime('now') WHERE id=?").run(userId);
+    return;
+  }
+  db.prepare("UPDATE users SET activity_state='active', last_activity_at=datetime('now') WHERE id=?").run(userId);
+  // Granularité volontairement limitée : au plus une trace active par quart d'heure, pour éviter le pistage fin.
+  const recent = db.prepare("SELECT id FROM user_activity_events WHERE user_id=? AND event_type='active' AND created_at>=datetime('now','-15 minutes') ORDER BY id DESC LIMIT 1").get(userId);
+  if (!recent) db.prepare("INSERT INTO user_activity_events(user_id,event_type) VALUES(?,'active')").run(userId);
+}
 function auth(req, res, next) {
   const token = (req.headers.authorization || '').replace('Bearer ', '') || req.query.token;
   const payload = verifyToken(token);
@@ -176,13 +189,14 @@ const PERM_KEYS = {
   securite: 'Signalements, urgences & fichiers',
   contenu: 'Avis de recherche, jobs, école, jeux',
   parametres: 'Paramètres généraux',
+  frequentation: 'Statistiques de fréquentation',
   journal: 'Journal des actions',
 };
 // Valeurs par défaut par rôle (modifiables par le PDG, compte par compte)
 const DEFAULT_PERMS = {
   pdg: Object.keys(PERM_KEYS),
   admin: Object.keys(PERM_KEYS).filter(k => k !== 'comptes_suppr'),
-  gestionnaire: ['comptes', 'pros', 'missions', 'contenu'],
+  gestionnaire: ['comptes', 'pros', 'missions', 'contenu', 'frequentation'],
   agent: ['missions'],
 };
 function effectivePerms(u) {
@@ -250,14 +264,15 @@ function sendWebPush(userId, payload) {
     });
   });
 }
-function notify(userId, category, title, body, link) {
+function notify(userId, category, title, body, link, options = {}) {
   const info = db.prepare('INSERT INTO notifications(user_id, category, title, body, link) VALUES(?,?,?,?,?)').run(userId, category, title, body || '', link || '');
   const unread = db.prepare('SELECT COUNT(*) n FROM notifications WHERE user_id=? AND read=0').get(userId).n;
   const payload = { id: info.lastInsertRowid, category, title, body, link, unread,
     // Le navigateur/OS décide du rendu final ; ce flag respecte le réglage PDG pour les missions.
     sound: category === 'mission' ? getSetting('dispatch_alert_sound', '1') === '1' : true };
-  push(userId, 'notification', payload);
-  sendWebPush(userId, payload);
+  push(userId, 'notification', { ...payload, reminder: !!options.reminder });
+  // Les rappels rapprochés sont sonores uniquement au premier plan (SSE). Ils ne déclenchent pas une rafale de Push/sonneries système.
+  if (!options.skipWebPush) sendWebPush(userId, payload);
   return info.lastInsertRowid;
 }
 function notifyAdmins(category, title, body, link) {
@@ -340,7 +355,7 @@ app.use((req, res, next) => {
 });
 
 app.post('/api/auth/register', (req, res) => {
-  const { name, phone, password, address, ville, quartier, lat, lng, accept_rules } = req.body || {};
+  const { name, phone, password, address, ville, quartier, lat, lng, accept_rules, referral_token } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Veuillez indiquer votre nom.' });
   if (!phone || !/^[+0-9 ]{8,20}$/.test(phone.trim())) return res.status(400).json({ error: 'Numéro de téléphone invalide.' });
   if (!password || password.length < 6) return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères.' });
@@ -353,6 +368,16 @@ app.post('/api/auth/register', (req, res) => {
   const info = db.prepare(`INSERT INTO users(name, phone, password_hash, salt, address, ville, quartier, lat, lng, rules_accepted_at) VALUES(?,?,?,?,?,?,?,?,?,datetime('now'))`)
     .run(name.trim(), p, hashPassword(password, salt), salt, adr, (ville || '').trim() || null, (quartier || '').trim() || null, lat || null, lng || null);
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(info.lastInsertRowid);
+  // Attribution vérifiable uniquement après l'inscription : jamais à partir d'un simple clic Partager.
+  const ref = String(referral_token || '').trim();
+  if (ref) {
+    const share = db.prepare('SELECT * FROM share_events WHERE token=? AND joined_user_id IS NULL').get(ref);
+    if (share && share.user_id !== user.id) {
+      db.prepare("UPDATE share_events SET joined_user_id=?, joined_at=datetime('now') WHERE id=? AND joined_user_id IS NULL").run(user.id, share.id);
+      db.prepare('UPDATE users SET referred_by_share_id=? WHERE id=?').run(share.id, user.id);
+    }
+  }
+  recordRealActivity(user.id, 'active');
   notify(user.id, 'compte', 'Bienvenue sur Klean Services 👋', 'Votre compte est créé. Recherchez un service ou devenez professionnel depuis Mon compte.', '#/home');
   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(user) });
 });
@@ -380,6 +405,7 @@ app.post('/api/auth/login', (req, res) => {
     if (user.disabled_until && user.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' '))
       return res.status(403).json({ error: 'Votre compte est temporairement désactivé jusqu\u2019au ' + user.disabled_until.slice(0, 16) + '.' });
   }
+  recordRealActivity(user.id, 'active');
   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(user) });
 });
 
@@ -396,6 +422,40 @@ function me(u) {
     perms: isStaff(u) ? effectivePerms(u) : undefined
   };
 }
+// ---------- À propos & partage traçable ----------
+function safeAbout(raw) {
+  let items; try { items = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { items = []; }
+  if (!Array.isArray(items)) items = [];
+  return items.slice(0, 20).map(v => ({ heading: String(v && v.heading || '').trim().slice(0, 120), text: String(v && v.text || '').trim().slice(0, 4000) })).filter(v => v.heading || v.text);
+}
+function publicBaseUrl(req) {
+  const configured = String(getSetting('share_official_url', '') || '').trim();
+  if (/^https?:\/\//i.test(configured)) return configured.replace(/\/$/, '');
+  return `${req.protocol}://${req.get('host')}`;
+}
+app.get('/api/about', (req, res) => {
+  const row = db.prepare('SELECT title,published,published_at FROM app_about WHERE id=1').get();
+  res.json({ title: row ? (row.published_title || row.title) : 'À propos de Klean Services', paragraphs: safeAbout(row && row.published), published_at: row && row.published_at });
+});
+app.get('/api/share/config', auth, (req, res) => res.json({ official_url: publicBaseUrl(req), text: String(getSetting('share_text', 'Découvrez Klean Services : exprimez votre besoin, un professionnel arrive.') || '').slice(0, 500) }));
+app.post('/api/share/prepare', auth, (req, res) => {
+  const token = crypto.randomBytes(18).toString('base64url');
+  const id = db.prepare('INSERT INTO share_events(user_id,token) VALUES(?,?)').run(req.user.id, token).lastInsertRowid;
+  const base = publicBaseUrl(req);
+  const sep = base.includes('?') ? '&' : '?';
+  res.json({ id, url: base + sep + 'ref=' + encodeURIComponent(token), text: String(getSetting('share_text', 'Découvrez Klean Services : exprimez votre besoin, un professionnel arrive.') || '').slice(0, 500), note: 'L’ouverture du partage ne prouve pas qu’un envoi externe a été effectué. Seuls un lien ouvert et une inscription par ce lien sont mesurables.' });
+});
+// Cette route est appelée à l'ouverture d'un lien : elle mesure l'arrivée, pas un partage externe.
+app.post('/api/share/open/:token', (req, res) => {
+  const r = db.prepare("UPDATE share_events SET detected_at=COALESCE(detected_at,datetime('now')) WHERE token=?").run(String(req.params.token || '').slice(0, 100));
+  res.json({ ok: !!r.changes });
+});
+app.post('/api/activity', auth, (req, res) => {
+  const state = req.body && req.body.state === 'background' ? 'background' : 'active';
+  recordRealActivity(req.user.id, state);
+  res.json({ ok: true, state });
+});
+
 app.get('/api/me', auth, (req, res) => res.json(me(req.user)));
 
 app.put('/api/me', auth, (req, res) => {
@@ -613,7 +673,8 @@ app.get('/api/services/:id/questions', (req, res) => {
   const questions = db.prepare('SELECT * FROM service_questions WHERE service_id=? AND active=1 ORDER BY sort,id').all(svc.id)
     .map(q => ({ ...q, options: JSON.parse(q.options) }));
   const taches = frenchSort(db.prepare('SELECT id, name FROM taches WHERE service_id=? AND active=1').all(svc.id));
-  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat, price_from: svc.price_from, price_prefix: svc.price_prefix, price_show: svc.price_show }, questions, taches });
+  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat, price_from: svc.price_from, price_prefix: svc.price_prefix, price_show: svc.price_show }, questions, taches,
+    limits: { photos: settingInt('request_image_limit', 5, 0, 12), audio_seconds: settingInt('request_audio_max_seconds', 20, 1, 20) } });
 });
 const STOPWORDS = new Set(['je', 'cherche', 'un', 'une', 'des', 'le', 'la', 'les', 'de', 'du', 'mon', 'ma', 'mes', 'pour', 'a', 'au', 'en', 'et', 'faire', 'veux', 'voudrais', 'besoin', 'il', 'me', 'faut', 'quelqu', 'qui', 'peut', 'sait']);
 app.get('/api/search', (req, res) => {
@@ -703,7 +764,7 @@ app.post('/api/pro-options/:id/use', auth, (req, res) => {
 
 app.put('/api/pro/availability', auth, (req, res) => {
   if (req.user.pro_status !== 'approved') return res.status(403).json({ error: 'Espace réservé aux professionnels validés.' });
-  const active = db.prepare("SELECT 1 FROM missions WHERE pro_id=? AND status IN ('acceptee','confirmee','en_cours') LIMIT 1").get(req.user.id);
+  const active = db.prepare("SELECT 1 FROM missions WHERE pro_id=? AND status IN ('acceptee','confirmee','demarrage_demande','en_cours','fin_demande') LIMIT 1").get(req.user.id);
   if (active && req.body.available) return res.status(409).json({ error: 'Vous êtes déjà en mission. Votre disponibilité sera rétablie à la clôture de celle-ci.' });
   const available = req.body.available ? 1 : 0;
   db.prepare('UPDATE pro_profiles SET available=?, availability_status=?, availability_before_mission=NULL WHERE user_id=?')
@@ -731,7 +792,10 @@ app.put('/api/pro/service-location', auth, (req, res) => {
   if (!city) return res.status(400).json({ error: 'Choisissez votre lieu de service actuel.' });
   const valid = db.prepare('SELECT 1 FROM villes WHERE active=1 AND lower(name)=lower(?)').get(city);
   if (!valid) return res.status(400).json({ error: 'Choisissez un lieu dans la liste proposée.' });
-  db.prepare('UPDATE pro_profiles SET service_city=? WHERE user_id=?').run(city, req.user.id);
+  const profile = db.prepare('SELECT service_cities FROM pro_profiles WHERE user_id=?').get(req.user.id);
+  let allowed = []; try { allowed = JSON.parse(profile && profile.service_cities || '[]'); } catch {}
+  if (allowed.length && !allowed.includes('*') && !allowed.some(v => cityMatches(v, city))) return res.status(403).json({ error: 'Cette ville n’est pas autorisée pour votre profil professionnel. Contactez l’administration.' });
+  db.prepare(`UPDATE pro_profiles SET service_city=?, service_cities=CASE WHEN service_cities IS NULL OR service_cities='[]' OR service_cities='' THEN ? ELSE service_cities END WHERE user_id=?`).run(city, JSON.stringify([city]), req.user.id);
   notify(req.user.id, 'compte', '📍 Lieu de service mis à jour', `Vous recevez désormais les demandes correspondant à ${city}.`, '#/pro');
   res.json(me(db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id)));
 });
@@ -787,7 +851,7 @@ function clearDispatchTimers(missionId) {
 }
 function startDispatchReminders(missionId) {
   clearInterval(dispatchReminderTimers.get(missionId));
-  const seconds = settingInt('dispatch_reminder_seconds', 20, 5, 600);
+  const seconds = settingInt('dispatch_reminder_seconds', 20, 2, 600);
   const maximum = settingInt('dispatch_max_reminders', 6, 0, 100);
   const timer = setInterval(() => {
     const mission = db.prepare("SELECT * FROM missions WHERE id=? AND status='recherche'").get(missionId);
@@ -798,7 +862,7 @@ function startDispatchReminders(missionId) {
     offered.filter(o => o.reminder_count < maximum).forEach(o => {
       db.prepare("UPDATE mission_candidates SET reminder_count=reminder_count+1 WHERE id=? AND status='offered'").run(o.id);
       // notify() alimente SSE (son/badge au premier plan) et Web Push si VAPID est configuré.
-      notify(o.pro_id, 'mission', '🔔 Rappel : mission disponible', `La demande « ${svc.name} » attend toujours votre réponse. Touchez pour accepter ou refuser.`, '#/mission/' + missionId);
+      notify(o.pro_id, 'mission', '🔔 Rappel : mission disponible', `La demande « ${svc.name} » attend toujours votre réponse. Touchez pour accepter ou refuser.`, '#/mission/' + missionId, { reminder: true, skipWebPush: true });
     });
   }, seconds * 1000);
   dispatchReminderTimers.set(missionId, timer);
@@ -811,7 +875,7 @@ function haversine(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 function proHasActiveMission(proId) {
-  return !!db.prepare("SELECT 1 FROM missions WHERE pro_id=? AND status IN ('acceptee','confirmee','en_cours') LIMIT 1").get(proId);
+  return !!db.prepare("SELECT 1 FROM missions WHERE pro_id=? AND status IN ('acceptee','confirmee','demarrage_demande','en_cours','fin_demande') LIMIT 1").get(proId);
 }
 function proCanReceiveMission(proId) {
   const p = db.prepare(`SELECT u.pro_status, u.suspended, u.blocked, p.available, p.availability_status
@@ -844,11 +908,14 @@ function proMatchesMission(p, mission, client) {
   if (Number(p.capacity_level || 1) < Number(mission.capacity_required || 1)) return false;
   if (!p.available || ['indisponible', 'en_mission', 'suspendu'].includes(p.availability_status || '') || proHasActiveMission(p.id)) return false;
   const dist = haversine(mission.lat, mission.lng, p.lat, p.lng);
-  if (getSetting('dispatch_geo_enabled', '1') === '1' && p.service_city && client && client.ville && !cityMatches(p.service_city, client.ville) && dist > 50) return false;
+  let cities = []; try { cities = JSON.parse(p.service_cities || '[]'); } catch {}
+  if (!cities.length && p.service_city) cities = [p.service_city];
+  const cityAllowed = cities.includes('*') || !client || !client.ville || cities.some(c => cityMatches(c, client.ville));
+  if (getSetting('dispatch_geo_enabled', '1') === '1' && cities.length && !cityAllowed && dist > 50) return false;
   return true;
 }
 function findMatchingPros(mission) {
-  const pros = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id
+  const pros = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id
     WHERE u.pro_status='approved' AND u.suspended=0 AND COALESCE(u.blocked,0)=0 AND u.id != ?`).all(mission.client_id);
   const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
   return pros.filter(p => proMatchesMission(p, mission, client))
@@ -856,7 +923,7 @@ function findMatchingPros(mission) {
     .sort((a, b) => (a.dist - b.dist) || (visibiliteNiveau(b.id) - visibiliteNiveau(a.id)) || a.id - b.id);
 }
 function candidateStillEligible(mission, proId) {
-  const p = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(proId);
+  const p = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(proId);
   const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
   return !!(p && proMatchesMission(p, mission, client));
 }
@@ -1096,16 +1163,22 @@ app.post('/api/pub/campagnes', auth, (req, res) => {
 // Créer une demande
 app.post('/api/missions', auth, async (req, res) => {
   const { service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache, taches } = req.body || {};
+  const schedule_type = ['asap', 'today', 'date'].includes((req.body || {}).schedule_type) ? (req.body || {}).schedule_type : 'asap';
   const provider_type = req.body && req.body.provider_type === 'entreprise' ? 'entreprise' : 'particulier';
   if (!providerTypeEnabled(provider_type)) return res.status(409).json({ error: `Les demandes destinées aux ${provider_type === 'entreprise' ? 'entreprises' : 'particuliers'} sont temporairement désactivées par Klean Services.` });
   const svc = db.prepare('SELECT * FROM services WHERE id=? AND active=1').get(service_id);
   if (!svc) return res.status(400).json({ error: 'Service invalide.' });
   if (!address || !address.trim()) return res.status(400).json({ error: 'Indiquez votre localisation (GPS ou saisie manuelle).' });
+  if (schedule_type === 'date' && !date_souhaitee) return res.status(400).json({ error: 'Choisissez la date souhaitée ou sélectionnez une autre disponibilité.' });
+  if (schedule_type === 'date' && Number.isNaN(Date.parse(date_souhaitee))) return res.status(400).json({ error: 'Date souhaitée invalide.' });
+  const requestPhotos = Array.isArray(photos) ? [...new Set(photos)].slice(0, 20) : [];
+  const maxPhotos = settingInt('request_image_limit', 5, 0, 12);
+  if (requestPhotos.length > maxPhotos) return res.status(400).json({ error: `Vous pouvez joindre au maximum ${maxPhotos} photo(s) à cette demande.` });
   // Les pièces jointes d'une demande doivent appartenir à son créateur.
-  for (const photo of (Array.isArray(photos) ? photos : [])) { try { assertOwnUploadedFile(req.user, photo, 'photo'); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  for (const photo of requestPhotos) { try { assertOwnUploadedFile(req.user, photo, 'photo'); } catch (e) { return res.status(400).json({ error: e.message }); } }
   if (audio) {
     try { assertOwnUploadedFile(req.user, audio, 'audio'); } catch (e) { return res.status(400).json({ error: e.message }); }
-    const seconds = await audioDurationSeconds(audio), max = settingInt('chat_audio_max_seconds', 20, 1, 120);
+    const seconds = await audioDurationSeconds(audio), max = settingInt('request_audio_max_seconds', 20, 1, 20);
     if (seconds === null) return res.status(400).json({ error: 'La durée de cette note vocale ne peut pas être vérifiée. Réenregistrez-la depuis l’application.' });
     if (seconds > max + 0.25) return res.status(400).json({ error: `La note vocale dépasse la limite autorisée (${max} secondes).` });
   }
@@ -1116,7 +1189,7 @@ app.post('/api/missions', auth, async (req, res) => {
     if (v === undefined || v === null || String(v).trim() === '') return res.status(400).json({ error: `Veuillez répondre à : « ${rq.label} »` });
   }
   // Anti-doublon souple : on avertit, mais le client peut confirmer un besoin réellement distinct.
-  const dup = db.prepare(`SELECT id, code FROM missions WHERE client_id=? AND service_id=? AND provider_type=? AND status IN ('recherche','sans_pro','acceptee','confirmee')
+  const dup = db.prepare(`SELECT id, code FROM missions WHERE client_id=? AND service_id=? AND provider_type=? AND status IN ('recherche','sans_pro','acceptee','confirmee','demarrage_demande','en_cours','fin_demande')
     AND created_at > datetime('now','-2 hours') ORDER BY id DESC LIMIT 1`).get(req.user.id, service_id, provider_type);
   if (dup && !(req.body || {}).duplicate_confirmed) return res.status(409).json({ error: 'Une demande semblable est déjà en cours. Voulez-vous vraiment créer une nouvelle demande indépendante ?', duplicate: true, mission_id: dup.id, mission_code: dup.code });
 
@@ -1144,10 +1217,10 @@ app.post('/api/missions', auth, async (req, res) => {
   const scopeText = [description, legacyTask, ...Object.values(answers || {})].join(' ').toLowerCase();
   const capacityRequired = /chantier|industriel|immeuble|plusieurs|grande?\s+(maison|surface|quantit)|gros travaux|équipe|volume important/.test(scopeText) ? 2 : 1;
   const code = 'KS' + Date.now().toString(36).toUpperCase() + Math.floor(Math.random() * 90 + 10);
-  const info = db.prepare(`INSERT INTO missions(code, client_id, service_id, provider_type, capacity_required, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache, taches, search_started_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`)
+  const info = db.prepare(`INSERT INTO missions(code, client_id, service_id, provider_type, capacity_required, answers, description, address, lat, lng, urgence, date_souhaitee, schedule_type, photos, audio, tache, taches, search_started_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`)
     .run(code, req.user.id, service_id, provider_type, capacityRequired, JSON.stringify(answers || {}), description || '', address.trim(), lat || null, lng || null,
-         urgence ? 1 : 0, date_souhaitee || null, JSON.stringify(photos || []), audio || null, legacyTask, JSON.stringify(selected));
+         urgence ? 1 : 0, schedule_type === 'date' ? date_souhaitee : null, schedule_type, JSON.stringify(requestPhotos), audio || null, legacyTask, JSON.stringify(selected));
   addEvent(info.lastInsertRowid, 'recherche', req.user.id, `Demande créée — prestataire souhaité : ${provider_type}`);
   startDispatch(info.lastInsertRowid);
   res.json({ id: info.lastInsertRowid, code, status: db.prepare('SELECT status FROM missions WHERE id=?').get(info.lastInsertRowid).status, provider_type });
@@ -1249,7 +1322,7 @@ app.post('/api/missions/:id/accept', auth, (req, res) => {
       if (!mission) throw new Error('NOT_FOUND');
       if (mission.status !== 'recherche') throw new Error('TAKEN');
       if (!proCanReceiveMission(req.user.id)) throw new Error('BUSY');
-      const profile = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(req.user.id);
+      const profile = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(req.user.id);
       const clientForMatch = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
       if (!profile || !proMatchesMission(profile, mission, clientForMatch)) throw new Error('INELIGIBLE');
       const cand = db.prepare("SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=? AND status='offered'").get(mission.id, req.user.id);
@@ -1395,37 +1468,85 @@ app.post('/api/missions/:id/prix-modif/:pcid/reponse', auth, (req, res) => {
   res.json({ ok: true, status: accepte ? 'accepte' : 'refuse' });
 });
 
-// Démarrer la mission
+// Chronologie contrôlée : le professionnel formule une demande, le client confirme ou conteste.
 app.post('/api/missions/:id/start', auth, (req, res) => {
   const mission = db.prepare('SELECT * FROM missions WHERE id=? AND pro_id=?').get(req.params.id, req.user.id);
   if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
-  if (mission.status !== 'confirmee') return res.status(409).json({ error: 'La mission doit d\u2019abord être confirmée par le client.' });
-  db.prepare("UPDATE missions SET status='en_cours' WHERE id=?").run(mission.id);
-  addEvent(mission.id, 'en_cours', req.user.id, 'Mission démarrée');
-  notify(mission.client_id, 'mission', '🛠️ Mission en cours', 'Le professionnel a démarré la mission.', '#/mission/' + mission.id);
-  push(mission.client_id, 'mission', { id: mission.id, status: 'en_cours' });
+  if (mission.status !== 'confirmee') return res.status(409).json({ error: 'La mission doit être confirmée avant la demande de démarrage.' });
+  db.prepare("UPDATE missions SET status='demarrage_demande', start_requested_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status='confirmee'").run(mission.id);
+  addEvent(mission.id, 'demarrage_demande', req.user.id, 'Le professionnel demande le démarrage de la mission');
+  notify(mission.client_id, 'mission', '🛠️ Démarrage à confirmer', 'Le professionnel demande à démarrer la mission. Confirmez ou contestez dans la mission.', '#/mission/' + mission.id);
+  push(mission.client_id, 'mission', { id: mission.id, status: 'demarrage_demande' });
+  res.json({ ok: true, status: 'demarrage_demande' });
+});
+app.post('/api/missions/:id/start/confirm', auth, (req, res) => {
+  const mission = db.prepare('SELECT * FROM missions WHERE id=? AND client_id=?').get(req.params.id, req.user.id);
+  if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
+  if (mission.status !== 'demarrage_demande') return res.status(409).json({ error: 'Aucune demande de démarrage à confirmer.' });
+  db.prepare("UPDATE missions SET status='en_cours', start_client_confirmed_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status='demarrage_demande'").run(mission.id);
+  addEvent(mission.id, 'en_cours', req.user.id, 'Client a confirmé le démarrage');
+  notify(mission.pro_id, 'mission', '✅ Démarrage confirmé', 'Le client a confirmé le démarrage. La mission est maintenant en cours.', '#/mission/' + mission.id);
+  push(mission.pro_id, 'mission', { id: mission.id, status: 'en_cours' });
   res.json({ ok: true, status: 'en_cours' });
 });
+app.post('/api/missions/:id/start/contest', auth, (req, res) => {
+  const mission = db.prepare('SELECT * FROM missions WHERE id=? AND client_id=?').get(req.params.id, req.user.id);
+  if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
+  if (mission.status !== 'demarrage_demande') return res.status(409).json({ error: 'Aucune demande de démarrage à contester.' });
+  const reason = String(req.body && req.body.reason || '').trim().slice(0, 500);
+  db.prepare("UPDATE missions SET status='confirmee', updated_at=datetime('now') WHERE id=? AND status='demarrage_demande'").run(mission.id);
+  addEvent(mission.id, 'demarrage_conteste', req.user.id, 'Client a contesté le démarrage' + (reason ? ' : ' + reason : ''));
+  notify(mission.pro_id, 'mission', 'Démarrage contesté', 'Le client n’a pas confirmé le démarrage' + (reason ? ' : ' + reason : '.') + ' Contactez-le avant de refaire une demande.', '#/mission/' + mission.id);
+  push(mission.pro_id, 'mission', { id: mission.id, status: 'confirmee' });
+  res.json({ ok: true, status: 'confirmee' });
+});
 
-// Terminer la mission → création du paiement (jamais payé automatiquement)
+// Terminer : le paiement ne peut être créé qu'après confirmation client de fin.
 app.post('/api/missions/:id/complete', auth, (req, res) => {
   const mission = db.prepare('SELECT * FROM missions WHERE id=? AND pro_id=?').get(req.params.id, req.user.id);
   if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
-  if (mission.status !== 'en_cours') return res.status(409).json({ error: 'La mission doit être en cours pour être terminée.' });
-  if (!mission.amount) return res.status(400).json({ error: 'Fixez d\u2019abord le montant de la mission avant de la terminer.' });
-  if (db.prepare(`SELECT 1 FROM mission_price_changes WHERE mission_id=? AND status='en_attente'`).get(mission.id))
-    return res.status(409).json({ error: 'Une modification de prix attend la réponse du client. Attendez sa décision avant de terminer la mission.' });
-  const fin = missionFinance(mission); // commission calculée côté serveur (règles par type de pro / catégorie / zone), impossible à contourner
-  db.prepare("UPDATE missions SET status='terminee' WHERE id=?").run(mission.id);
-  db.prepare(`INSERT INTO payments(mission_id, amount, method, commission_rate, commission_amount, pro_amount)
-              VALUES(?,?,?,?,?,?) ON CONFLICT(mission_id) DO NOTHING`)
-    .run(mission.id, mission.amount, 'especes', fin.commission_rate, fin.commission, fin.pro_amount);
-  addEvent(mission.id, 'terminee', req.user.id, 'Mission terminée — en attente de paiement');
-  notify(mission.client_id, 'paiement', '✅ Mission terminée — paiement attendu',
-    `Montant : ${mission.amount.toLocaleString('fr-FR')} FCFA (espèces). Confirmez le paiement une fois effectué.`, '#/mission/' + mission.id);
-  push(mission.client_id, 'mission', { id: mission.id, status: 'terminee' });
-  releaseProfessional(mission.pro_id, 'La prestation est terminée : vous pouvez recevoir de nouvelles demandes.');
-  res.json({ ok: true, status: 'terminee' });
+  if (mission.status !== 'en_cours') return res.status(409).json({ error: 'La mission doit être en cours avant la demande de fin.' });
+  if (!mission.amount) return res.status(400).json({ error: 'Fixez d’abord le montant de la mission avant de demander la fin.' });
+  if (db.prepare("SELECT 1 FROM mission_price_changes WHERE mission_id=? AND status='en_attente'").get(mission.id)) return res.status(409).json({ error: 'Une modification de prix attend la réponse du client.' });
+  db.prepare("UPDATE missions SET status='fin_demande', completion_requested_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status='en_cours'").run(mission.id);
+  addEvent(mission.id, 'fin_demande', req.user.id, 'Le professionnel demande la confirmation de fin');
+  notify(mission.client_id, 'mission', '✅ Fin de mission à confirmer', 'Le professionnel déclare la mission terminée. Confirmez ou contestez dans la mission.', '#/mission/' + mission.id);
+  push(mission.client_id, 'mission', { id: mission.id, status: 'fin_demande' });
+  res.json({ ok: true, status: 'fin_demande' });
+});
+function completeMissionAfterClientConfirmation(mission, actorId) {
+  const fin = missionFinance(mission);
+  const tx = db.transaction(() => {
+    const won = db.prepare("UPDATE missions SET status='terminee', completion_client_confirmed_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status='fin_demande'").run(mission.id);
+    if (!won.changes) throw new Error('STATE');
+    db.prepare(`INSERT INTO payments(mission_id, amount, method, commission_rate, commission_amount, pro_amount) VALUES(?,?,?,?,?,?) ON CONFLICT(mission_id) DO NOTHING`).run(mission.id, mission.amount, 'especes', fin.commission_rate, fin.commission, fin.pro_amount);
+  });
+  tx();
+  addEvent(mission.id, 'terminee', actorId, 'Client a confirmé la fin — paiement déclaré en attente');
+  releaseProfessional(mission.pro_id, 'La prestation est confirmée terminée : vous pouvez recevoir de nouvelles demandes.');
+  return fin;
+}
+app.post('/api/missions/:id/complete/confirm', auth, (req, res) => {
+  const mission = db.prepare('SELECT * FROM missions WHERE id=? AND client_id=?').get(req.params.id, req.user.id);
+  if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
+  if (mission.status !== 'fin_demande') return res.status(409).json({ error: 'Aucune fin de mission à confirmer.' });
+  try { completeMissionAfterClientConfirmation(mission, req.user.id); } catch { return res.status(409).json({ error: 'Cette confirmation a déjà été traitée.' }); }
+  notify(mission.pro_id, 'paiement', '✅ Fin de mission confirmée', 'Le client a confirmé la fin. Déclarez ensuite la réception du paiement.', '#/mission/' + mission.id);
+  notify(mission.client_id, 'paiement', '💵 Paiement à confirmer', `Montant : ${mission.amount.toLocaleString('fr-FR')} FCFA. Confirmez le paiement après l’avoir effectué.`, '#/mission/' + mission.id);
+  push(mission.pro_id, 'mission', { id:mission.id,status:'terminee' }); push(mission.client_id, 'mission', { id:mission.id,status:'terminee' });
+  res.json({ ok:true, status:'terminee' });
+});
+app.post('/api/missions/:id/complete/contest', auth, (req, res) => {
+  const mission = db.prepare('SELECT * FROM missions WHERE id=? AND client_id=?').get(req.params.id, req.user.id);
+  if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
+  if (mission.status !== 'fin_demande') return res.status(409).json({ error: 'Aucune fin de mission à contester.' });
+  const reason = String(req.body && req.body.reason || '').trim().slice(0, 500);
+  db.prepare("UPDATE missions SET status='litige', updated_at=datetime('now') WHERE id=? AND status='fin_demande'").run(mission.id);
+  addEvent(mission.id, 'fin_contestee', req.user.id, 'Client a contesté la fin' + (reason ? ' : ' + reason : ''));
+  notify(mission.pro_id, 'mission', '⚠️ Fin de mission contestée', 'Le client a contesté la fin' + (reason ? ' : ' + reason : '.') + ' L’administration est informée.', '#/mission/' + mission.id);
+  notifyAdmins('securite', '⚠️ Fin de mission contestée', `Mission ${mission.code} : ${reason || 'motif non renseigné'}`, 'admin:missions');
+  push(mission.pro_id, 'mission', { id:mission.id,status:'litige' });
+  res.json({ ok:true, status:'litige' });
 });
 
 // Confirmation du paiement en espèces par les deux parties
@@ -1790,13 +1911,37 @@ app.get('/api/games/quiz', auth, (req, res) => res.status(410).json({ error: 'Le
 app.post('/api/games/quiz', auth, (req, res) => res.status(410).json({ error: 'Le QCM est intégré aux sessions Quiz en direct.' }));
 
 // ----- QUIZ CONCOURS : sessions animées depuis le tableau de bord -----
-function quizAudienceOk(user) {
-  const aud = getSetting('quiz_audience') || 'tous';
-  if (aud === 'clients') return user.pro_status !== 'approved';
-  if (aud === 'clients_servis') // réservé aux clients ayant déjà bénéficié d'un service (mission terminée ou payée)
-    return db.prepare("SELECT COUNT(*) n FROM missions WHERE client_id=? AND status IN ('terminee','payee')").get(user.id).n > 0;
-  return true; // 'tous' et 'clients_pros' : tout compte connecté
+function hasCompletedService(userId) {
+  return db.prepare("SELECT 1 FROM missions WHERE client_id=? AND status IN ('terminee','payee') LIMIT 1").get(userId) ? true : false;
 }
+function hasMeasuredShare(userId, level) {
+  if (level === 'lien_ouvert') return !!db.prepare('SELECT 1 FROM share_events WHERE user_id=? AND detected_at IS NOT NULL LIMIT 1').get(userId);
+  if (level === 'inscription_acquise') return !!db.prepare('SELECT 1 FROM share_events WHERE user_id=? AND joined_user_id IS NOT NULL LIMIT 1').get(userId);
+  return true;
+}
+function gameEligibility(user, game) {
+  // Les trois critères sont indépendants et tous vérifiés côté serveur.
+  const legacy = game === 'quiz' ? (getSetting('quiz_audience') || 'tous') : 'tous';
+  const account = getSetting('game_' + game + '_account', legacy) || legacy;
+  const share = getSetting('game_' + game + '_share', 'tous') || 'tous';
+  const service = getSetting('game_' + game + '_service', 'tous') || 'tous';
+  const isPro = user.pro_status === 'approved';
+  const done = hasCompletedService(user.id);
+  const accountOK = account === 'tous' || account === 'clients_pros' || (account === 'clients' && !isPro) || (account === 'pros' && isPro);
+  const shareOK = share === 'tous' || hasMeasuredShare(user.id, share);
+  const serviceOK = service === 'tous' || (service === 'realisee' && done) || (service === 'non_realisee' && !done);
+  return { ok: accountOK && shareOK && serviceOK, account, share, service, done };
+}
+function gameEligibilityMessage(g) {
+  if (g.account === 'clients') return 'Ce jeu est réservé aux clients.';
+  if (g.account === 'pros') return 'Ce jeu est réservé aux professionnels validés.';
+  if (g.share === 'lien_ouvert') return 'Ce jeu nécessite au moins une ouverture mesurable de votre lien de partage.';
+  if (g.share === 'inscription_acquise') return 'Ce jeu nécessite une inscription attribuée à votre lien de partage.';
+  if (g.service === 'realisee') return 'Ce jeu est réservé aux clients ayant réalisé une mission.';
+  if (g.service === 'non_realisee') return 'Ce jeu est réservé aux comptes sans mission réalisée.';
+  return 'Vous ne remplissez pas les conditions de participation à ce jeu.';
+}
+function quizAudienceOk(user) { return gameEligibility(user, 'quiz').ok; }
 function quizParticipant(sid, uid) {
   return db.prepare('SELECT * FROM quiz_participants WHERE session_id=? AND user_id=?').get(sid, uid);
 }
@@ -1901,8 +2046,9 @@ function archiveQuizSession(s, userId, reason) {
 // État du concours pour l'utilisateur connecté
 app.get('/api/games/concours', auth, (req, res) => {
   if (getSetting('quiz_enabled') !== '1') return res.json({ enabled: false });
-  const audience = getSetting('quiz_audience') || 'tous';
-  const allowed = quizAudienceOk(req.user);
+  const criteria = gameEligibility(req.user, 'quiz');
+  const audience = criteria.account; // compatibilité d’affichage
+  const allowed = criteria.ok;
   let s = db.prepare("SELECT * FROM quiz_sessions WHERE status='en_cours' ORDER BY id DESC LIMIT 1").get();
   if (s && quizTimeline(s).over) { quizFinalize(s); s = null; } // série finie -> finalisation auto
   let p = null;
@@ -1913,10 +2059,10 @@ app.get('/api/games/concours', auth, (req, res) => {
                     WHERE s.status='terminee' AND pp.user_id=? ORDER BY s.id DESC LIMIT 1`).get(req.user.id);
     if (s) p = quizParticipant(s.id, req.user.id);
   }
-  if (!s) return res.json({ enabled: true, allowed, audience, session: null });
+  if (!s) return res.json({ enabled: true, allowed, audience, criteria, reason: allowed ? null : gameEligibilityMessage(criteria), session: null });
   const winnersDone = db.prepare("SELECT COUNT(*) n FROM quiz_participants WHERE session_id=? AND status='gagnant'").get(s.id).n > 0;
   const out = {
-    enabled: true, allowed, audience,
+    enabled: true, allowed, audience, criteria, reason: allowed ? null : gameEligibilityMessage(criteria),
     session: {
       id: s.id, title: s.title, status: s.status, nb_questions: JSON.parse(s.qids || '[]').length || s.nb_questions,
       time_per_q: s.time_per_q, interval_s: s.interval_s, elimination: !!s.elimination, nb_winners: s.nb_winners, winners_designated: winnersDone,
@@ -1933,9 +2079,7 @@ app.get('/api/games/concours', auth, (req, res) => {
 
 app.post('/api/games/concours/:id/rejoindre', auth, (req, res) => {
   if (getSetting('quiz_enabled') !== '1') return res.status(403).json({ error: 'Le quiz est désactivé.' });
-  if (!quizAudienceOk(req.user)) return res.status(403).json({ error: (getSetting('quiz_audience') === 'clients_servis')
-    ? 'Ce quiz est réservé aux clients ayant déjà bénéficié d\u2019un service sur Klean Services.'
-    : 'Ce quiz est réservé aux clients.' });
+  if (!quizAudienceOk(req.user)) return res.status(403).json({ error: gameEligibilityMessage(gameEligibility(req.user, 'quiz')) });
   const s = db.prepare("SELECT * FROM quiz_sessions WHERE id=? AND status='en_cours'").get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Ce quiz n\u2019est pas (ou plus) en cours.' });
   if (quizParticipant(s.id, req.user.id)) return res.status(400).json({ error: 'Vous participez déjà à ce quiz.' });
@@ -1957,7 +2101,7 @@ app.get('/api/games/concours/:id/question', auth, (req, res) => {
 // Réponse : UNE seule par compte et par quiz, acceptée uniquement pendant la fenêtre de la question
 app.post('/api/games/concours/:id/repondre', auth, (req, res) => {
   if (getSetting('quiz_enabled') !== '1') return res.status(403).json({ error: 'Le quiz est désactivé.' });
-  if (!quizAudienceOk(req.user)) return res.status(403).json({ error: 'Ce quiz ne vous est pas ouvert.' });
+  if (!quizAudienceOk(req.user)) return res.status(403).json({ error: gameEligibilityMessage(gameEligibility(req.user, 'quiz')) });
   const s = db.prepare("SELECT * FROM quiz_sessions WHERE id=? AND status='en_cours'").get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Ce quiz n\u2019est pas (ou plus) en cours.' });
   const tl = quizTimeline(s);
@@ -2017,6 +2161,8 @@ app.post('/api/games/concours/:id/message', auth, (req, res) => {
 });
 app.post('/api/games/flipfizz', auth, (req, res) => {
   if (getSetting('flipfizz_enabled') !== '1') return res.status(403).json({ error: 'Flip Fizz est désactivé.' });
+  const eligible = gameEligibility(req.user, 'flipfizz');
+  if (!eligible.ok) return res.status(403).json({ error: gameEligibilityMessage(eligible) });
   const today = db.prepare("SELECT COUNT(*) n FROM game_plays WHERE user_id=? AND game='flipfizz' AND date(created_at)=date('now')").get(req.user.id).n;
   if (today >= 3) return res.status(429).json({ error: 'Vous avez atteint vos 3 essais du jour. Revenez demain !' });
   const win = Math.random() < 0.15;
@@ -2027,6 +2173,8 @@ app.post('/api/games/flipfizz', auth, (req, res) => {
 });
 app.post('/api/games/kdo', auth, (req, res) => {
   if (getSetting('kdo_enabled') !== '1') return res.status(403).json({ error: 'Kdo est désactivé.' });
+  const eligible = gameEligibility(req.user, 'kdo');
+  if (!eligible.ok) return res.status(403).json({ error: gameEligibilityMessage(eligible) });
   const code = (req.body.code || '').trim().toUpperCase();
   const row = db.prepare('SELECT * FROM kdo_codes WHERE code=? AND active=1').get(code);
   if (!row) return res.status(404).json({ error: 'Code invalide.' });
@@ -2118,7 +2266,9 @@ const PERM_ROUTES = [
   [/^\/(finances|transactions|prix-modifs|visibilite|pub)/, 'paiements'],
   [/^\/commissions/, 'parametres'],
   [/^\/dispatch/, 'parametres'],
-  [/^\/(ads|broadcast|annonces|support)/, 'communication'],
+  [/^\/(ads|broadcast|general-messages|annonces|support)/, 'communication'],
+  [/^\/frequentation/, 'frequentation'],
+  [/^\/about/, 'PDG'],
   [/^\/(signalements|urgences|files|rules)/, 'securite'],
   [/^\/(avis-recherche|jobs|ecole-famille|quiz|kdo|game-plays|quiz-sessions)/, 'contenu'],
   [/^\/settings/, 'parametres'],
@@ -2144,6 +2294,8 @@ const ACTION_LABELS = [
   [/^(POST|PUT|DELETE) \/questions/, 'Question dynamique'],
   [/^PUT \/settings/, 'Modification des paramètres'],
   [/^POST \/broadcast/, 'Message système envoyé'],
+  [/^(POST|PUT|DELETE) \/general-messages/, 'Message général ciblé'],
+  [/^(POST|PUT) \/about/, 'Contenu À propos modifié'],
   [/^POST \/support\/conversations\/\d+\/messages/, 'Réponse à un client'],
   [/^(POST|PUT|DELETE) \/ads/, 'Publicité / information'],
   [/^PUT \/rules/, 'Modification des règles'],
@@ -2211,6 +2363,43 @@ A.get('/stats', (req, res) => {
   });
 });
 
+// STATISTIQUES DE FRÉQUENTATION — données d'interaction, séparées des simples connexions techniques.
+function frequencyRange(q) {
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  let to = iso.test(String(q.to || '')) ? String(q.to) : new Date().toISOString().slice(0, 10);
+  let from;
+  if (iso.test(String(q.from || ''))) from = String(q.from);
+  else { const days = Math.max(1, Math.min(366, parseInt(q.days || '30', 10) || 30)); const d = new Date(to + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - days + 1); from = d.toISOString().slice(0, 10); }
+  if (from > to) [from, to] = [to, from];
+  const start = new Date(from + 'T00:00:00Z'), end = new Date(to + 'T00:00:00Z');
+  if ((end - start) / 86400000 > 365) { const d = new Date(end); d.setUTCDate(d.getUTCDate() - 365); from = d.toISOString().slice(0,10); }
+  return { from, to, until: to + ' 23:59:59' };
+}
+function activityStatus(u, thresholdMin) {
+  const now = Date.now(), last = u.last_activity_at ? Date.parse(String(u.last_activity_at).replace(' ', 'T') + 'Z') : 0;
+  const back = u.last_background_at ? Date.parse(String(u.last_background_at).replace(' ', 'T') + 'Z') : 0;
+  if (u.activity_state === 'background' && back && now - back <= thresholdMin * 60000) return 'arriere_plan';
+  if (u.activity_state === 'active' && last && now - last <= thresholdMin * 60000) return 'actif';
+  return 'inactif';
+}
+A.get('/frequentation', (req, res) => {
+  const r = frequencyRange(req.query || {}), threshold = Math.max(1, Math.min(120, parseInt(getSetting('activity_active_minutes','5'), 10) || 5));
+  const activeWhere = "e.event_type='active' AND e.created_at>=? AND e.created_at<=?";
+  const rangeArgs = [r.from + ' 00:00:00', r.until];
+  const active = db.prepare(`SELECT COUNT(DISTINCT e.user_id) n FROM user_activity_events e JOIN users u ON u.id=e.user_id WHERE ${activeWhere} AND u.role='user'`).get(...rangeArgs).n;
+  const clients = db.prepare(`SELECT COUNT(DISTINCT e.user_id) n FROM user_activity_events e JOIN users u ON u.id=e.user_id WHERE ${activeWhere} AND u.role='user' AND u.pro_status!='approved'`).get(...rangeArgs).n;
+  const pros = db.prepare(`SELECT COUNT(DISTINCT e.user_id) n FROM user_activity_events e JOIN users u ON u.id=e.user_id WHERE ${activeWhere} AND u.role='user' AND u.pro_status='approved'`).get(...rangeArgs).n;
+  const registrations = db.prepare("SELECT COUNT(*) n FROM users WHERE role='user' AND created_at>=? AND created_at<=?").get(...rangeArgs).n;
+  const returning = db.prepare(`SELECT COUNT(DISTINCT e.user_id) n FROM user_activity_events e WHERE ${activeWhere} AND EXISTS (SELECT 1 FROM user_activity_events prior WHERE prior.user_id=e.user_id AND prior.event_type='active' AND prior.created_at<?)`).get(...rangeArgs, r.from+' 00:00:00').n;
+  const cities = db.prepare(`SELECT COALESCE(NULLIF(TRIM(u.ville),''),'Non renseignée') city, COUNT(DISTINCT e.user_id) n FROM user_activity_events e JOIN users u ON u.id=e.user_id WHERE ${activeWhere} AND u.role='user' GROUP BY city ORDER BY n DESC, city COLLATE NOCASE LIMIT 100`).all(...rangeArgs);
+  const series = [];
+  for (let d = new Date(r.from+'T00:00:00Z'), e = new Date(r.to+'T00:00:00Z'); d <= e; d.setUTCDate(d.getUTCDate()+1)) { const day = d.toISOString().slice(0,10); series.push({ date:day, active:db.prepare("SELECT COUNT(DISTINCT user_id) n FROM user_activity_events WHERE event_type='active' AND date(created_at)=?").get(day).n, registrations:db.prepare("SELECT COUNT(*) n FROM users WHERE role='user' AND date(created_at)=?").get(day).n }); }
+  const recentRaw = db.prepare("SELECT id,name,phone,photo,ville,pro_status,last_activity_at,last_background_at,activity_state FROM users WHERE role='user' AND (last_activity_at IS NOT NULL OR last_background_at IS NOT NULL) ORDER BY COALESCE(last_activity_at,last_background_at) DESC LIMIT 100").all();
+  const recent = recentRaw.map(u => ({id:u.id,name:u.name,phone:u.phone,photo:u.photo,ville:u.ville,pro_status:u.pro_status,last_activity_at:u.last_activity_at,last_background_at:u.last_background_at,status:activityStatus(u,threshold)}));
+  const since = m => db.prepare("SELECT COUNT(DISTINCT user_id) n FROM user_activity_events WHERE event_type='active' AND created_at>=datetime('now',?)").get('-'+m+' days').n;
+  res.json({range:r,threshold_minutes:threshold,active,clients,pros,registrations,returning,dau:since(1),wau:since(7),mau:since(30),cities,series,recent});
+});
+
 // UTILISATEURS
 A.get('/users', (req, res) => {
   const f = req.query.filter || 'all';
@@ -2243,7 +2432,7 @@ A.get('/users/:id', (req, res) => {
   const missions = db.prepare('SELECT COUNT(*) n FROM missions WHERE client_id=? OR pro_id=?').get(u.id, u.id).n;
   const history = db.prepare("SELECT admin_name, admin_role, action, details, reason, created_at FROM admin_log WHERE target_type='users' AND target_id=? ORDER BY id DESC LIMIT 50").all(u.id);
   delete u.password_hash; delete u.salt; delete u.perms;
-  res.json({ ...u, pro: pro ? { ...pro, services: JSON.parse(pro.services), authorized_services: jsonNumberIds(pro.authorized_services || pro.services), documents: JSON.parse(pro.documents) } : null, missions, history });
+  res.json({ ...u, pro: pro ? { ...pro, services: JSON.parse(pro.services), authorized_services: jsonNumberIds(pro.authorized_services || pro.services), service_cities: (() => { try { return JSON.parse(pro.service_cities || '[]'); } catch { return []; } })(), documents: JSON.parse(pro.documents) } : null, missions, history });
 });
 
 // Garde-fou : un membre de l'équipe ne peut pas agir sur un compte de l'équipe (sauf le PDG, et jamais sur le PDG)
@@ -2275,6 +2464,27 @@ A.post('/users', (req, res) => {
     'Votre compte a été créé par notre équipe. Connectez-vous, choisissez votre mot de passe et complétez votre profil.' +
     (type === 'pro' ? ' Pour devenir professionnel, faites votre demande depuis Mon compte (validation normale).' : ''), '#/account');
   res.json({ id: info.lastInsertRowid, temp_password: temp });
+});
+
+// Conversion contrôlée d’un client : identité minimale conservée, aucune donnée inventée.
+A.post('/users/:id/convert-pro', (req, res) => {
+  const u = cibleUtilisateur(req, res); if (!u) return;
+  if (!hasPerm(req.user, 'pros')) return res.status(403).json({ error: 'La permission de validation des professionnels est requise.' });
+  if (!u.name || !u.phone) return res.status(400).json({ error: 'Nom et téléphone sont indispensables avant toute conversion professionnelle.' });
+  const b = req.body || {}, exceptional = !!b.exceptional, reason = String(b.reason || '').trim().slice(0, 500), type = b.pro_type === 'entreprise' ? 'entreprise' : 'particulier';
+  if (exceptional && !reason) return res.status(400).json({ error: 'Le motif de validation exceptionnelle est obligatoire.' });
+  const existing = db.prepare('SELECT * FROM pro_profiles WHERE user_id=?').get(u.id);
+  if (!existing) db.prepare(`INSERT INTO pro_profiles(user_id,profession,description,experience,zone,services,authorized_services,documents,pro_type,available,availability_status)
+    VALUES(?,?,?,?,?,'[]','[]','[]',?,0,'indisponible')`).run(u.id, 'À compléter', '', '', u.ville || '', type);
+  const next = exceptional ? 'approved' : 'pending';
+  db.prepare("UPDATE users SET is_pro=1, pro_status=?, profile_incomplete=1, verified=CASE WHEN ? THEN verified ELSE 0 END WHERE id=?").run(next, exceptional ? 1 : 0, u.id);
+  if (exceptional) {
+    db.prepare("UPDATE pro_profiles SET pro_type=?, validated_at=datetime('now'), available=0, availability_status='indisponible' WHERE user_id=?").run(type, u.id);
+    let kp = u.kp_code; if (!kp) { do { kp = 'KP' + String(Math.floor(100000 + Math.random() * 900000)); } while (db.prepare('SELECT 1 FROM users WHERE kp_code=?').get(kp)); db.prepare('UPDATE users SET kp_code=? WHERE id=?').run(kp, u.id); }
+    notify(u.id, 'compte', 'Profil professionnel exceptionnellement validé', 'Votre profil professionnel est activé mais incomplet. Complétez vos informations et attendez l’activation de vos services par l’administration.', '#/pro');
+  } else notify(u.id, 'compte', 'Conversion en professionnel en attente', 'Votre compte est maintenant en parcours professionnel. Complétez votre profil ; l’administration le validera.', '#/pro');
+  logAction(req.user, exceptional ? 'Validation exceptionnelle d’un professionnel incomplet' : 'Conversion client vers parcours professionnel', { target_type:'users', target_id:u.id, target_name:u.name, reason, details:`type=${type}; état=${next}; données minimales conservées` });
+  res.json({ ok:true, pro_status:next, profile_incomplete:true });
 });
 
 // Modification rapide du compte depuis la fiche
@@ -2512,11 +2722,21 @@ A.put('/pros/:id/eligibility', (req, res) => {
   if (found !== requested.length) return res.status(400).json({ error: 'Un ou plusieurs services sélectionnés sont invalides ou inactifs.' });
   const type = (req.body || {}).pro_type === 'entreprise' ? 'entreprise' : 'particulier';
   const capacity = Math.max(1, Math.min(3, parseInt((req.body || {}).capacity_level, 10) || 1));
-  db.prepare('UPDATE pro_profiles SET authorized_services=?, pro_type=?, capacity_level=? WHERE user_id=?').run(JSON.stringify(requested), type, capacity, u.id);
+  let serviceCities = Array.isArray((req.body || {}).service_cities) ? [...new Set(req.body.service_cities.map(v => String(v || '').trim()).filter(Boolean))].slice(0, 100) : [];
+  if (serviceCities.includes('*')) serviceCities = ['*'];
+  else {
+    const activeCities = new Set(db.prepare('SELECT name FROM villes WHERE active=1').all().map(r => r.name));
+    if (serviceCities.some(c => !activeCities.has(c))) return res.status(400).json({ error: 'Une ville d’intervention est inactive ou inconnue.' });
+  }
+  const oldCities = (() => { try { return JSON.parse(profile.service_cities || '[]'); } catch { return []; } })();
+  if ((serviceCities.length > 1 || serviceCities.includes('*')) && !['pdg','admin'].includes(req.user.role)) return res.status(403).json({ error: 'Seul un administrateur ou le PDG peut autoriser plusieurs villes ou toutes les villes.' });
+  if (!serviceCities.length) serviceCities = oldCities.length ? oldCities : (profile.service_city ? [profile.service_city] : []);
+  const defaultCity = serviceCities.includes('*') ? profile.service_city : (serviceCities.includes(profile.service_city) ? profile.service_city : serviceCities[0] || null);
+  db.prepare('UPDATE pro_profiles SET authorized_services=?, pro_type=?, capacity_level=?, service_cities=?, service_city=? WHERE user_id=?').run(JSON.stringify(requested), type, capacity, JSON.stringify(serviceCities), defaultCity, u.id);
   db.prepare("SELECT * FROM missions WHERE status='recherche' AND id IN (SELECT mission_id FROM mission_candidates WHERE pro_id=? AND status='offered')").all(u.id).forEach(revokeIneligibleOffers);
   notify(u.id, 'compte', 'Autorisation professionnelle mise à jour', 'La direction a actualisé vos services autorisés et votre capacité de mission.', '#/pro');
   push(u.id, 'account', { pro_status: 'approved' });
-  res.json({ ok: true, authorized_services: requested, pro_type: type, capacity_level: capacity });
+  res.json({ ok: true, authorized_services: requested, pro_type: type, capacity_level: capacity, service_cities: serviceCities, service_city: defaultCity });
 });
 A.post('/pros/:id/approve', (req, res) => {
   const u = db.prepare("SELECT * FROM users WHERE id=? AND pro_status='pending'").get(req.params.id);
@@ -2939,19 +3159,38 @@ A.get('/dispatch/overview', (req, res) => {
   res.json({
     searching: count("SELECT COUNT(*) n FROM missions WHERE status='recherche'"),
     unanswered: count("SELECT COUNT(*) n FROM missions WHERE status='sans_pro'"),
-    assigned: count("SELECT COUNT(*) n FROM missions WHERE status IN ('acceptee','confirmee','en_cours')"),
+    assigned: count("SELECT COUNT(*) n FROM missions WHERE status IN ('acceptee','confirmee','demarrage_demande','en_cours','fin_demande')"),
     professionals: Object.fromEntries(byState.map(r => [r.state, r.n]))
   });
 });
 
 // PARAMÈTRES
+A.get('/about', (req, res) => {
+  const r = db.prepare('SELECT * FROM app_about WHERE id=1').get();
+  res.json({ title: r.draft_title || r.title, published_title: r.published_title || r.title, draft: safeAbout(r.draft), published: safeAbout(r.published), updated_at: r.updated_at, published_at: r.published_at });
+});
+A.put('/about', (req, res) => {
+  const title = String(req.body && req.body.title || '').trim();
+  const paragraphs = safeAbout(req.body && req.body.paragraphs);
+  if (!title || !paragraphs.length) return res.status(400).json({ error: 'Un titre et au moins un paragraphe sont requis.' });
+  db.prepare("UPDATE app_about SET draft_title=?,draft=?,updated_at=datetime('now') WHERE id=1").run(title.slice(0, 120), JSON.stringify(paragraphs));
+  res.json({ ok: true, title: title.slice(0,120), draft: paragraphs });
+});
+A.post('/about/publish', (req, res) => {
+  const r = db.prepare('SELECT * FROM app_about WHERE id=1').get();
+  const draft = safeAbout(r.draft);
+  if (!draft.length) return res.status(400).json({ error: 'Le brouillon est vide.' });
+  db.prepare("UPDATE app_about SET published=draft,published_title=COALESCE(draft_title,title),title=COALESCE(draft_title,title),published_at=datetime('now') WHERE id=1").run();
+  res.json({ ok: true });
+});
+
 A.get('/settings', (req, res) => {
   const keys = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
     'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
     'pro_doc_particulier', 'pro_doc_entreprise',
     'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise',
     'dispatch_initial_alert_count', 'dispatch_expand_alert_count', 'dispatch_expand_strategy', 'dispatch_reminder_seconds', 'dispatch_auto_enabled', 'dispatch_geo_enabled', 'dispatch_alert_sound', 'dispatch_max_reminders', 'dispatch_search_max_seconds', 'dispatch_allow_particulier', 'dispatch_allow_entreprise',
-    'chat_text_limit', 'chat_audio_max_seconds', 'chat_image_limit', 'chat_audio_enabled', 'chat_image_enabled', 'file_recovery_days'];
+    'chat_text_limit', 'chat_audio_max_seconds', 'chat_image_limit', 'chat_audio_enabled', 'chat_image_enabled', 'file_recovery_days', 'request_image_limit', 'request_audio_max_seconds', 'activity_active_minutes', 'share_official_url', 'share_text', 'game_quiz_account', 'game_quiz_share', 'game_quiz_service', 'game_flipfizz_account', 'game_flipfizz_share', 'game_flipfizz_service', 'game_kdo_account', 'game_kdo_share', 'game_kdo_service'];
   const out = {};
   keys.forEach(k => out[k] = getSetting(k));
   res.json(out);
@@ -2962,9 +3201,10 @@ A.put('/settings', (req, res) => {
     'pro_doc_particulier', 'pro_doc_entreprise',
     'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise',
     'dispatch_initial_alert_count', 'dispatch_expand_alert_count', 'dispatch_expand_strategy', 'dispatch_reminder_seconds', 'dispatch_auto_enabled', 'dispatch_geo_enabled', 'dispatch_alert_sound', 'dispatch_max_reminders', 'dispatch_search_max_seconds', 'dispatch_allow_particulier', 'dispatch_allow_entreprise',
-    'chat_text_limit', 'chat_audio_max_seconds', 'chat_image_limit', 'chat_audio_enabled', 'chat_image_enabled', 'file_recovery_days'];
+    'chat_text_limit', 'chat_audio_max_seconds', 'chat_image_limit', 'chat_audio_enabled', 'chat_image_enabled', 'file_recovery_days', 'request_image_limit', 'request_audio_max_seconds', 'activity_active_minutes', 'share_official_url', 'share_text', 'game_quiz_account', 'game_quiz_share', 'game_quiz_service', 'game_flipfizz_account', 'game_flipfizz_share', 'game_flipfizz_service', 'game_kdo_account', 'game_kdo_share', 'game_kdo_service'];
   for (const [k, v] of Object.entries(req.body || {})) {
     if (!allowed.includes(k)) continue;
+    if (['share_official_url','share_text'].includes(k) && req.user.role !== 'pdg') return res.status(403).json({ error: 'Le partage officiel est configuré par le PDG uniquement.' });
     if (k === 'admin_font_size') { // taille du tableau de bord : réservée au PDG
       if (req.user.role !== 'pdg') return res.status(403).json({ error: 'La taille du tableau de bord est définie par le PDG uniquement.' });
       const f = parseInt(v, 10); if (isNaN(f) || f < 14 || f > 26) return res.status(400).json({ error: 'Taille invalide (14 à 26).' });
@@ -2972,7 +3212,7 @@ A.put('/settings', (req, res) => {
     if (k === 'commission_rate') { const r = parseFloat(v); if (isNaN(r) || r < 0 || r > 100) return res.status(400).json({ error: 'Taux de commission invalide (0 à 100).' }); }
     if (k === 'dispatch_wait_seconds') { const s = parseInt(v, 10); if (isNaN(s) || s < 15 || s > 3600) return res.status(400).json({ error: 'Délai d\u2019attente invalide (15 à 3600 secondes).' }); }
     if (['dispatch_initial_alert_count', 'dispatch_expand_alert_count'].includes(k)) { const n = parseInt(v, 10); if (isNaN(n) || n < 1 || n > 50) return res.status(400).json({ error: 'Taille de vague invalide (1 à 50 professionnels).' }); }
-    if (k === 'dispatch_reminder_seconds') { const n = parseInt(v, 10); if (isNaN(n) || n < 5 || n > 600) return res.status(400).json({ error: 'Délai de rappel invalide (5 à 600 secondes).' }); }
+    if (k === 'dispatch_reminder_seconds') { const n = parseInt(v, 10); if (isNaN(n) || n < 2 || n > 600) return res.status(400).json({ error: 'Délai de rappel invalide (2 à 600 secondes).' }); }
     if (k === 'dispatch_max_reminders') { const n = parseInt(v, 10); if (isNaN(n) || n < 0 || n > 100) return res.status(400).json({ error: 'Nombre maximal de rappels invalide (0 à 100).' }); }
     if (k === 'dispatch_search_max_seconds') { const n = parseInt(v, 10); if (isNaN(n) || n < 60 || n > 86400) return res.status(400).json({ error: 'Délai maximal de recherche invalide (60 à 86400 secondes).' }); }
     if (['dispatch_auto_enabled', 'dispatch_geo_enabled', 'dispatch_alert_sound', 'dispatch_allow_particulier', 'dispatch_allow_entreprise'].includes(k) && !['0','1',0,1,true,false].includes(v)) return res.status(400).json({ error: 'Paramètre d’activation invalide.' });
@@ -2981,6 +3221,11 @@ A.put('/settings', (req, res) => {
     if (k === 'chat_audio_max_seconds') { const n = parseInt(v, 10); if (isNaN(n) || n < 1 || n > 120) return res.status(400).json({ error: 'Durée vocale invalide (1 à 120 secondes).' }); }
     if (k === 'file_recovery_days') { const n = parseInt(v, 10); if (isNaN(n) || n < 0 || n > 365) return res.status(400).json({ error: 'Délai de récupération invalide (0 à 365 jours).' }); }
     if (k === 'pub_max_actives') { const n = parseInt(v, 10); if (isNaN(n) || n < 1 || n > 200) return res.status(400).json({ error: 'Nombre d\u2019emplacements publicitaires invalide (1 à 200).' }); }
+    if (k === 'request_image_limit') { const n=parseInt(v,10); if (isNaN(n)||n<0||n>12) return res.status(400).json({ error: 'Limite de photos invalide (0 à 12).' }); }
+    if (k === 'request_audio_max_seconds') { const n=parseInt(v,10); if (isNaN(n)||n<1||n>20) return res.status(400).json({ error: 'La durée vocale doit être comprise entre 1 et 20 secondes.' }); }
+    if (k === 'activity_active_minutes') { const n=parseInt(v,10); if (isNaN(n)||n<1||n>120) return res.status(400).json({ error: 'Seuil d’activité invalide (1 à 120 minutes).' }); }
+    if (k === 'share_official_url' && String(v||'').trim() && !/^https:\/\//i.test(String(v).trim())) return res.status(400).json({ error: 'Le lien officiel doit commencer par https://.' });
+    if (/^game_(quiz|flipfizz|kdo)_(account|share|service)$/.test(k)) { const type=k.split('_').pop(); const ok=type==='account'?['tous','clients','pros','clients_pros'].includes(v):type==='share'?['tous','lien_ouvert','inscription_acquise'].includes(v):['tous','realisee','non_realisee'].includes(v); if (!ok) return res.status(400).json({ error: 'Condition de jeu invalide.' }); }
     const ancienneValeur = getSetting(k);
     setSetting(k, v);
     // Sécurité financière : chaque modification de paramètre est journalisée (qui, ancienne valeur, nouvelle valeur, quand)
@@ -3092,12 +3337,110 @@ A.put('/annonces/:id', (req, res) => {
   res.json({ ok: true });
 });
 A.delete('/annonces/:id', (req, res) => { db.prepare('DELETE FROM annonces WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+// L'ancien endpoint est conservé, mais passe par le système ciblé et historisé.
 A.post('/broadcast', (req, res) => {
-  const { title, body } = req.body || {};
+  const title = String(req.body && req.body.title || '').trim();
+  const body = String(req.body && req.body.body || '').trim();
   if (!title) return res.status(400).json({ error: 'Titre requis.' });
-  const users = db.prepare("SELECT id FROM users WHERE role='user' AND suspended=0").all();
-  users.forEach(u => notify(u.id, 'information', title, body || '', '#/notifications'));
-  res.json({ ok: true, sent: users.length });
+  const info = db.prepare(`INSERT INTO general_messages(author_id,title,body,account_types,cities,mode,status)
+    VALUES(?,?,?,'[]','[]','immediate','draft')`).run(req.user.id, title.slice(0, 160), body.slice(0, 2000));
+  const result = deliverGeneralMessage(info.lastInsertRowid);
+  res.json({ ok: true, sent: result.delivered, id: info.lastInsertRowid, migrated: true });
+});
+function listStrings(raw, allowed, max = 100) {
+  const a = Array.isArray(raw) ? raw : [];
+  return [...new Set(a.map(v => String(v || '').trim()).filter(v => allowed ? allowed.includes(v) : !!v))].slice(0, max);
+}
+function generalTargetUsers(msg) {
+  let types = []; let cities = [];
+  try { types = JSON.parse(msg.account_types || '[]'); } catch {}
+  try { cities = JSON.parse(msg.cities || '[]'); } catch {}
+  const args = [];
+  let where = "role='user' AND suspended=0 AND blocked=0";
+  if (types.includes('clients') && !types.includes('pros')) where += " AND pro_status!='approved'";
+  if (types.includes('pros') && !types.includes('clients')) where += " AND pro_status='approved'";
+  if (cities.length) { where += ` AND ville IN (${cities.map(() => '?').join(',')})`; args.push(...cities); }
+  return db.prepare('SELECT id FROM users WHERE ' + where).all(...args);
+}
+function deliverGeneralMessage(id) {
+  const msg = db.prepare('SELECT * FROM general_messages WHERE id=?').get(id);
+  if (!msg || ['sent', 'cancelled'].includes(msg.status)) return { delivered: msg ? msg.delivered_count : 0, ignored: true };
+  const lock = db.prepare("UPDATE general_messages SET status='sending', updated_at=datetime('now') WHERE id=? AND status IN ('draft','scheduled')").run(id);
+  if (!lock.changes) return { delivered: msg.delivered_count || 0, ignored: true };
+  let delivered = 0;
+  const tx = db.transaction(() => {
+    generalTargetUsers(msg).forEach(u => {
+      // Une contrainte primaire garantit qu'une personne ne reçoit jamais deux fois le même message.
+      const exists = db.prepare('SELECT 1 FROM general_message_deliveries WHERE message_id=? AND user_id=?').get(id, u.id);
+      if (exists) return;
+      const notificationId = notify(u.id, 'information', msg.title, msg.body, '#/notifications');
+      db.prepare('INSERT INTO general_message_deliveries(message_id,user_id,notification_id) VALUES(?,?,?)').run(id, u.id, notificationId);
+      delivered++;
+    });
+    db.prepare("UPDATE general_messages SET status='sent', sent_at=datetime('now'), target_count=?, delivered_count=?, updated_at=datetime('now') WHERE id=?")
+      .run(generalTargetUsers(msg).length, delivered, id);
+  });
+  tx();
+  return { delivered };
+}
+function generalMessageRow(m) {
+  let account_types = [], cities = [];
+  try { account_types = JSON.parse(m.account_types || '[]'); } catch {}
+  try { cities = JSON.parse(m.cities || '[]'); } catch {}
+  const read = db.prepare(`SELECT COUNT(*) n FROM general_message_deliveries d JOIN notifications n ON n.id=d.notification_id WHERE d.message_id=? AND n.read=1`).get(m.id).n;
+  return { ...m, account_types, cities, read_count: read, delivery_state: m.status === 'sent' ? 'Notification enregistrée dans l’application' : '—' };
+}
+function runDueGeneralMessages() {
+  const due = db.prepare("SELECT id FROM general_messages WHERE status='scheduled' AND scheduled_at<=datetime('now') ORDER BY id LIMIT 30").all();
+  due.forEach(m => { try { deliverGeneralMessage(m.id); } catch (e) { console.error('Message programmé non envoyé', m.id, e.message); } });
+}
+setInterval(runDueGeneralMessages, 30000).unref();
+runDueGeneralMessages();
+A.get('/general-messages', (req, res) => res.json(db.prepare('SELECT * FROM general_messages ORDER BY id DESC LIMIT 200').all().map(generalMessageRow)));
+A.post('/general-messages', (req, res) => {
+  const b = req.body || {}, title = String(b.title || '').trim(), body = String(b.body || '').trim();
+  if (!title) return res.status(400).json({ error: 'Donnez un titre au message.' });
+  const types = listStrings(b.account_types, ['clients', 'pros'], 2);
+  const existingCities = new Set(db.prepare('SELECT name FROM villes WHERE active=1').all().map(v => v.name));
+  const cities = listStrings(b.cities, null).filter(c => existingCities.has(c));
+  if (Array.isArray(b.cities) && cities.length !== listStrings(b.cities).length) return res.status(400).json({ error: 'Une ville sélectionnée n’existe plus ou est inactive.' });
+  const mode = ['draft', 'immediate', 'scheduled'].includes(b.mode) ? b.mode : 'draft';
+  let scheduledAt = null;
+  if (mode === 'scheduled') {
+    scheduledAt = String(b.scheduled_at || '').trim().replace('T', ' ');
+    if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(scheduledAt) || scheduledAt <= new Date().toISOString().slice(0, 16).replace('T', ' ')) return res.status(400).json({ error: 'Choisissez une date de programmation future.' });
+    scheduledAt += scheduledAt.length === 16 ? ':00' : '';
+  }
+  const status = mode === 'draft' ? 'draft' : mode === 'scheduled' ? 'scheduled' : 'draft';
+  const info = db.prepare(`INSERT INTO general_messages(author_id,title,body,account_types,cities,mode,status,scheduled_at)
+    VALUES(?,?,?,?,?,?,?,?)`).run(req.user.id, title.slice(0, 160), body.slice(0, 2000), JSON.stringify(types), JSON.stringify(cities), mode, status, scheduledAt);
+  const sent = mode === 'immediate' ? deliverGeneralMessage(info.lastInsertRowid) : null;
+  res.status(201).json({ ...generalMessageRow(db.prepare('SELECT * FROM general_messages WHERE id=?').get(info.lastInsertRowid)), sent: sent && sent.delivered });
+});
+A.put('/general-messages/:id', (req, res) => {
+  const m = db.prepare('SELECT * FROM general_messages WHERE id=?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Message introuvable.' });
+  if (m.status !== 'draft') return res.status(409).json({ error: 'Seul un brouillon peut être modifié.' });
+  const title = String(req.body && req.body.title || '').trim(), body = String(req.body && req.body.body || '').trim();
+  if (!title) return res.status(400).json({ error: 'Donnez un titre au message.' });
+  const types = listStrings(req.body.account_types, ['clients', 'pros'], 2);
+  const cities = listStrings(req.body.cities, null).filter(c => db.prepare('SELECT 1 FROM villes WHERE name=? AND active=1').get(c));
+  db.prepare("UPDATE general_messages SET title=?,body=?,account_types=?,cities=?,updated_at=datetime('now') WHERE id=?").run(title.slice(0,160), body.slice(0,2000), JSON.stringify(types), JSON.stringify(cities), m.id);
+  res.json(generalMessageRow(db.prepare('SELECT * FROM general_messages WHERE id=?').get(m.id)));
+});
+A.post('/general-messages/:id/send', (req, res) => {
+  const m = db.prepare('SELECT * FROM general_messages WHERE id=?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Message introuvable.' });
+  if (!['draft', 'scheduled'].includes(m.status)) return res.status(409).json({ error: 'Ce message a déjà été traité.' });
+  const out = deliverGeneralMessage(m.id);
+  res.json({ ok: true, delivered: out.delivered });
+});
+A.delete('/general-messages/:id', (req, res) => {
+  const m = db.prepare('SELECT * FROM general_messages WHERE id=?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Message introuvable.' });
+  if (m.status === 'sent') return res.status(409).json({ error: 'Un message envoyé reste dans l’historique.' });
+  db.prepare("UPDATE general_messages SET status='cancelled',updated_at=datetime('now') WHERE id=?").run(m.id);
+  res.json({ ok: true });
 });
 
 // SÉCURITÉ : signalements, urgences
