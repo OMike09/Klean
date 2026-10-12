@@ -29,13 +29,15 @@ function yes(ok, message) { n++; if (ok) console.log('OK ', message); else { fai
   r = await api(client.token, '/share/prepare', 'POST'); const share = r.d;
   yes(r.r.status === 200 && /^https?:/.test(share.url) && share.note.includes('ne prouve pas'), 'préparation partage avec limite de mesure honnête');
   r = await api(null, '/share/open/' + encodeURIComponent(share.url.split('ref=').pop()), 'POST');
-  yes(r.r.status === 200 && r.d.ok, 'ouverture de lien d’invitation mesurée');
+  const shareStats = await api(admin.token, '/admin/shares/stats');
+  yes(r.r.status === 200 && r.d.ok && shareStats.r.status === 200 && shareStats.d.clicks >= 1 && shareStats.d.opened >= 1, 'ouverture de lien et métriques de partage mesurées distinctement');
   const referred = (await api(null, '/auth/register', 'POST', { name: 'Filleul suivi', phone: '08' + suffix, password: 'abcd1234', ville: 'Abidjan', accept_rules: true, referral_token: share.url.split('ref=').pop() })).d;
   yes(!!referred.token, 'inscription depuis lien suivi');
 
   r = await api(client.token, '/activity', 'POST', { state: 'active' });
   const frequency = await api(admin.token, '/admin/frequentation?days=7');
-  yes(r.r.status === 200 && frequency.r.status === 200 && frequency.d.active >= 1 && Array.isArray(frequency.d.series) && Array.isArray(frequency.d.recent), 'fréquentation issue d’interactions réelles et détail autorisé');
+  const frequencyCustom = await api(admin.token, '/admin/frequentation?from=2026-10-01&to=2026-10-13');
+  yes(r.r.status === 200 && frequency.r.status === 200 && frequency.d.active >= 1 && Array.isArray(frequency.d.series) && Array.isArray(frequency.d.recent) && frequencyCustom.r.status === 200 && frequencyCustom.d.range.from === '2026-10-01', 'fréquentation issue d’interactions réelles, période personnalisée et détail autorisé');
 
   r = await api(admin.token, '/admin/general-messages', 'POST', { title: 'Contrôle ciblage', body: 'Message destiné aux comptes clients.', account_types: ['clients'], cities: [], mode: 'draft' });
   const draft = r.d;
@@ -48,11 +50,22 @@ function yes(ok, message) { n++; if (ok) console.log('OK ', message); else { fai
   r = await api(admin.token, '/admin/users/' + client.user.id + '/convert-pro', 'POST', { pro_type: 'particulier', exceptional: true, reason: 'Contrôle exceptionnel documenté' });
   const converted = await api(admin.token, '/admin/users/' + client.user.id);
   yes(r.r.status === 200 && converted.d.pro_status === 'approved' && converted.d.profile_incomplete && converted.d.pro, 'conversion exceptionnelle pro garde identité minimale et profil incomplet');
+  const cities = (await api(null, '/villes')).d;
+  const ownCity = await api(client.token, '/pro/service-location', 'PUT', { service_city: cities[0] });
+  const blockedCity = await api(client.token, '/pro/service-location', 'PUT', { service_city: cities[1] });
+  const adminCities = await api(admin.token, '/admin/pros/' + client.user.id + '/eligibility', 'PUT', { authorized_services: [], pro_type: 'particulier', capacity_level: 1, service_cities: [cities[0], cities[1]] });
+  const extraCity = await api(client.token, '/pro/service-location', 'PUT', { service_city: cities[1] });
+  yes(ownCity.r.status === 200 && blockedCity.r.status === 403 && adminCities.r.status === 200 && extraCity.r.status === 200, 'ville pro unique puis villes supplémentaires administrées appliquées côté serveur');
 
   r = await api(admin.token, '/admin/settings', 'PUT', { request_image_limit: '2', request_audio_max_seconds: '20', activity_active_minutes: '5', game_quiz_share: 'lien_ouvert' });
   const settings = await api(admin.token, '/admin/settings');
   yes(r.r.status === 200 && settings.d.request_image_limit === '2' && settings.d.game_quiz_share === 'lien_ouvert', 'réglages demande, activité et jeux enregistrés côté serveur');
-  await api(admin.token, '/admin/settings', 'PUT', { game_quiz_share: 'tous' });
+  await api(admin.token, '/admin/settings', 'PUT', { flipfizz_enabled: '1', game_flipfizz_share: 'sans_partage' });
+  const deniedGame = await api(client.token, '/games/flipfizz', 'POST', {});
+  await api(admin.token, '/admin/settings', 'PUT', { game_flipfizz_share: 'lien_ouvert' });
+  const allowedGame = await api(client.token, '/games/flipfizz', 'POST', {});
+  yes(deniedGame.r.status === 403 && allowedGame.r.status === 200, 'critère jeu sans partage / lien mesuré contrôlé par le serveur');
+  await api(admin.token, '/admin/settings', 'PUT', { game_quiz_share: 'tous', game_flipfizz_share: 'tous', flipfizz_enabled: '0' });
 
   console.log(`RESULT ${n - fail}/${n}, failed=${fail}`); process.exitCode = fail ? 1 : 0;
 } catch (e) { console.error(e); process.exitCode = 1; } })();

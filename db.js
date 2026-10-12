@@ -699,6 +699,8 @@ function migrate() {
   ensureColumn('pro_profiles', 'capacity_level', 'INTEGER NOT NULL DEFAULT 1');
   // Villes d'intervention : la première reste compatible avec service_city ; les autres sont explicitement autorisées par l'administration.
   ensureColumn('pro_profiles', 'service_cities', "TEXT NOT NULL DEFAULT '[]'");
+  // Migration des profils existants : leur ville unique historique devient une autorisation explicite.
+  db.prepare("UPDATE pro_profiles SET service_cities=json_array(service_city) WHERE (service_cities IS NULL OR service_cities='' OR service_cities='[]') AND service_city IS NOT NULL AND service_city!=''").run();
   // Suivi transparent du cycle de prestation et du planning demandé.
   ensureColumn('missions', 'schedule_type', "TEXT NOT NULL DEFAULT 'asap'");
   ensureColumn('missions', 'start_requested_at', 'TEXT');

@@ -136,13 +136,13 @@ views.dashboard = async () => {
 };
 
 /* ---------- Statistiques de fréquentation ---------- */
-let FREQ_DAYS = 30;
+let FREQ_QUERY = 'days=30', FREQ_PRESET = '30jours';
 views.frequentation = async () => {
-  const d = await api('/admin/frequentation?days=' + FREQ_DAYS);
+  const d = await api('/admin/frequentation?' + FREQ_QUERY);
   const max = Math.max(1, ...d.series.map(x => x.active));
   const fmt = n => Number(n || 0).toLocaleString('fr-FR');
   shell(`<h1>📈 Statistiques de fréquentation</h1>
-  <div class="panel"><div class="frow"><button class="btn sm ${FREQ_DAYS===7?'':'sec'}" onclick="A.frequencyPeriod(7)">7 jours</button><button class="btn sm ${FREQ_DAYS===30?'':'sec'}" onclick="A.frequencyPeriod(30)">30 jours</button><button class="btn sm ${FREQ_DAYS===90?'':'sec'}" onclick="A.frequencyPeriod(90)">90 jours</button><span class="small muted">Période : ${esc(d.range.from)} → ${esc(d.range.to)}</span></div>
+  <div class="panel"><div class="frow"><button class="btn sm ${FREQ_PRESET==='today'?'':'sec'}" onclick="A.frequencyPreset('today')">Aujourd’hui</button><button class="btn sm ${FREQ_PRESET==='yesterday'?'':'sec'}" onclick="A.frequencyPreset('yesterday')">Hier</button><button class="btn sm ${FREQ_PRESET==='week'?'':'sec'}" onclick="A.frequencyPreset('week')">Cette semaine</button><button class="btn sm ${FREQ_PRESET==='lastweek'?'':'sec'}" onclick="A.frequencyPreset('lastweek')">Semaine dernière</button><button class="btn sm ${FREQ_PRESET==='month'?'':'sec'}" onclick="A.frequencyPreset('month')">Ce mois</button><button class="btn sm ${FREQ_PRESET==='lastmonth'?'':'sec'}" onclick="A.frequencyPreset('lastmonth')">Mois dernier</button><button class="btn sm ${FREQ_PRESET==='30jours'?'':'sec'}" onclick="A.frequencyPeriod(30)">30 jours</button></div><div class="frow" style="margin-top:8px"><div><label class="small">Du</label><input type="date" id="fq-from" value="${esc(d.range.from)}"></div><div><label class="small">Au</label><input type="date" id="fq-to" value="${esc(d.range.to)}"></div><button class="btn sm sec" style="align-self:end" onclick="A.frequencyCustom()">Période personnalisée</button><span class="small muted" style="align-self:end">Période : ${esc(d.range.from)} → ${esc(d.range.to)}</span></div>
   <div class="cards" style="margin-top:12px"><div class="kpi"><div class="v">${fmt(d.active)}</div><div class="l">Actifs période</div></div><div class="kpi"><div class="v">${fmt(d.dau)}</div><div class="l">Actifs jour</div></div><div class="kpi"><div class="v">${fmt(d.wau)}</div><div class="l">Actifs semaine</div></div><div class="kpi"><div class="v">${fmt(d.mau)}</div><div class="l">Actifs mois</div></div><div class="kpi"><div class="v">${fmt(d.registrations)}</div><div class="l">Inscriptions</div></div><div class="kpi"><div class="v">${fmt(d.returning)}</div><div class="l">Retours</div></div></div>
   <div class="small muted mt">Clients actifs : <b>${fmt(d.clients)}</b> • Professionnels actifs : <b>${fmt(d.pros)}</b>. Une activité est enregistrée sur une interaction réelle (pas sur un simple rafraîchissement). Seuil courant : ${d.threshold_minutes} min.</div></div>
   <div class="panel"><h2 style="margin-top:0">Activité quotidienne</h2><div style="display:flex;align-items:end;gap:3px;height:150px;border-bottom:1px solid #d8e5e2;padding:0 3px">${d.series.map(x=>`<div title="${esc(x.date)} : ${x.active} actif(s), ${x.registrations} inscription(s)" style="flex:1;min-width:3px;height:${Math.max(3,Math.round(x.active/max*125))}px;background:#0b7a6b;border-radius:3px 3px 0 0"></div>`).join('')}</div><div class="small muted" style="display:flex;justify-content:space-between"><span>${esc(d.series[0]?.date||'')}</span><span>${esc(d.series.at(-1)?.date||'')}</span></div></div>
@@ -831,7 +831,7 @@ views.broadcast = async () => {
     <div class="frow" style="align-items:flex-start"><div><label>Destinataires</label><label class="check-line"><input id="gm-clients" type="checkbox"> Clients</label><label class="check-line"><input id="gm-pros" type="checkbox"> Professionnels validés</label><div class="small muted">Aucune case : tous les comptes utilisateur.</div></div>
     <div style="min-width:220px;flex:1"><label>Villes <span class="small muted">(aucune = toutes)</span></label><select id="gm-cities" multiple size="5" style="width:100%">${villes.map(v=>`<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('')}</select></div>
     <div><label>Programmation</label><input type="datetime-local" id="gm-date"><div class="small muted">Heure locale du serveur</div></div></div>
-    <div class="btn-row"><button class="btn sec" onclick="A.generalMessage('draft')">💾 Enregistrer brouillon</button><button class="btn" onclick="A.generalMessage('immediate')">📨 Envoyer maintenant</button><button class="btn outline" onclick="A.generalMessage('scheduled')">🕒 Programmer</button></div></div>
+    <div class="btn-row"><button class="btn sec" onclick="A.generalMessage('draft')">💾 Enregistrer brouillon</button><button class="btn outline" onclick="A.previewGeneralMessage()">👁️ Prévisualiser</button><button class="btn" onclick="A.generalMessage('immediate')">📨 Envoyer maintenant</button><button class="btn outline" onclick="A.generalMessage('scheduled')">🕒 Programmer</button></div></div>
   <div class="panel"><h2 style="margin-top:0">Historique</h2><table><tr><th>Message</th><th>Ciblage</th><th>État / livraison</th><th>Date</th><th></th></tr>
   ${list.map(m=>`<tr><td><b>${esc(m.title)}</b><br><span class="small muted">${esc((m.body||'').slice(0,120))}</span></td><td class="small">${m.account_types.length ? m.account_types.join(', ') : 'Tous'}<br>${m.cities.length ? m.cities.join(', ') : 'Toutes les villes'}</td><td><span class="pill ${m.status==='sent'?'ok':m.status==='draft'?'info':'warn'}">${st[m.status]||esc(m.status)}</span><br><span class="small muted">${m.status==='sent' ? `${m.delivered_count}/${m.target_count} notification(s) enregistrée(s) • lues : ${m.read_count}` : ''}</span></td><td class="small">${fmtD(m.sent_at||m.scheduled_at||m.created_at)}</td><td>${m.status==='draft'?`<button class="btn sm sec" onclick="A.editGeneralMessage(${m.id})">Modifier</button> <button class="btn sm" onclick="A.sendGeneralMessage(${m.id})">Envoyer</button> <button class="btn sm warn" onclick="A.deleteGeneralMessage(${m.id})">Supprimer</button>`:''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucun message général.</td></tr>'}</table></div>`);
 };
@@ -955,6 +955,8 @@ views.games = async () => {
   const plays = await api('/admin/game-plays');
   const sessions = await api('/admin/quiz-sessions');
   const archives = await api('/admin/quiz-archives');
+  let shares = { clicks: 0, opened: 0, joined: 0 };
+  try { shares = await api('/admin/shares/stats'); } catch { }
   let gvues = { quiz: 0, flipfizz: 0, kdo: 0 };
   try { gvues = await api('/admin/game-plays/vues'); } catch { }
   const enCours = sessions.find(x => x.status === 'en_cours');
@@ -976,7 +978,8 @@ views.games = async () => {
       <span class="small muted">La désactivation totale se fait avec le bouton 🧠 Quiz ci-dessus.</span>
     </div>
     <div style="margin-top:14px;border-top:1px solid #e4eeeb;padding-top:10px"><b>Conditions cumulatives de participation</b><div class="small muted mb">Le clic « Partager » ne suffit jamais : seules l’ouverture mesurable d’un lien ou l’inscription attribuée au lien peuvent être exigées.</div>
-      ${[['quiz','🧠 Quiz'],['flipfizz','🎲 Flip Fizz'],['kdo','🎁 Kdo']].map(([g,lb])=>`<div class="frow" style="align-items:center;border-top:1px solid #edf3f1;padding:8px 0"><b style="min-width:100px">${lb}</b><select onchange="A.toggleSetting('game_${g}_account',this.value)">${[['tous','Tous comptes'],['clients','Clients'],['pros','Pros validés'],['clients_pros','Clients et pros']].map(([v,t])=>`<option value="${v}" ${(s['game_'+g+'_account']||'tous')===v?'selected':''}>${t}</option>`).join('')}</select><select onchange="A.toggleSetting('game_${g}_share',this.value)">${[['tous','Partage : sans condition'],['lien_ouvert','Partage : lien ouvert'],['inscription_acquise','Partage : inscription acquise']].map(([v,t])=>`<option value="${v}" ${(s['game_'+g+'_share']||'tous')===v?'selected':''}>${t}</option>`).join('')}</select><select onchange="A.toggleSetting('game_${g}_service',this.value)">${[['tous','Mission : sans condition'],['realisee','Mission réalisée'],['non_realisee','Mission non réalisée']].map(([v,t])=>`<option value="${v}" ${(s['game_'+g+'_service']||'tous')===v?'selected':''}>${t}</option>`).join('')}</select></div>`).join('')}
+      ${[['quiz','🧠 Quiz'],['flipfizz','🎲 Flip Fizz'],['kdo','🎁 Kdo']].map(([g,lb])=>`<div class="frow" style="align-items:center;border-top:1px solid #edf3f1;padding:8px 0"><b style="min-width:100px">${lb}</b><select onchange="A.toggleSetting('game_${g}_account',this.value)">${[['tous','Tous comptes'],['clients','Clients'],['pros','Pros validés'],['clients_pros','Clients et pros']].map(([v,t])=>`<option value="${v}" ${(s['game_'+g+'_account']||'tous')===v?'selected':''}>${t}</option>`).join('')}</select><select onchange="A.toggleSetting('game_${g}_share',this.value)">${[['tous','Partage : sans condition'],['lien_ouvert','Partage : lien ouvert'],['inscription_acquise','Partage : inscription acquise'],['sans_partage','Partage : aucun partage mesuré']].map(([v,t])=>`<option value="${v}" ${(s['game_'+g+'_share']||'tous')===v?'selected':''}>${t}</option>`).join('')}</select><select onchange="A.toggleSetting('game_${g}_service',this.value)">${[['tous','Mission : sans condition'],['realisee','Mission réalisée'],['non_realisee','Mission non réalisée']].map(([v,t])=>`<option value="${v}" ${(s['game_'+g+'_service']||'tous')===v?'selected':''}>${t}</option>`).join('')}</select></div>`).join('')}
+      <div class="cards" style="margin-top:10px"><div class="kpi"><div class="v">${Number(shares.clicks || 0).toLocaleString('fr-FR')}</div><div class="l">Menus Partager ouverts</div></div><div class="kpi"><div class="v">${Number(shares.opened || 0).toLocaleString('fr-FR')}</div><div class="l">Liens ouverts (mesurés)</div></div><div class="kpi"><div class="v">${Number(shares.joined || 0).toLocaleString('fr-FR')}</div><div class="l">Inscriptions attribuées</div></div></div><div class="small muted mt">Un menu ouvert n’est pas un partage confirmé. Une ouverture de lien ou une inscription est la seule information mesurable ici.</div>
     </div></div>
 
   <div class="panel"><h2 style="margin-top:0">🏆 Quiz concours (sessions animées)</h2>
@@ -1831,6 +1834,12 @@ const A = {
   },
   async toggleAd(id, v) { try { await api('/admin/ads/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
   async delAd(id) { if (!confirm('Supprimer cette publicité ?')) return; try { await api('/admin/ads/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
+  previewGeneralMessage() {
+    const title=(document.getElementById('gm-title')||{}).value||'', body=(document.getElementById('gm-body')||{}).value||'';
+    const types=[...(document.getElementById('gm-clients')?.checked?['Clients']:[]),...(document.getElementById('gm-pros')?.checked?['Professionnels validés']:[])];
+    const cities=[...((document.getElementById('gm-cities')||{}).selectedOptions||[])].map(o=>o.value);
+    openModal(`<h3>👁️ Aperçu du message</h3><div class="card"><b>${esc(title || 'Sans titre')}</b><div class="small" style="white-space:pre-wrap;margin-top:8px">${esc(body || 'Sans contenu')}</div></div><p class="small muted">Destinataires : ${esc(types.join(' et ') || 'Tous les utilisateurs')}<br>Villes : ${esc(cities.join(', ') || 'Toutes les villes')}</p><button class="btn sec" onclick="closeModal()">Fermer</button>`);
+  },
   async generalMessage(mode) {
     const cities = [...document.getElementById('gm-cities').selectedOptions].map(o => o.value);
     try { const r = await api('/admin/general-messages', { method:'POST', body:{ title:document.getElementById('gm-title').value, body:document.getElementById('gm-body').value, account_types:[...(document.getElementById('gm-clients').checked?['clients']:[]),...(document.getElementById('gm-pros').checked?['pros']:[])], cities, mode, scheduled_at:document.getElementById('gm-date').value } }); toast(mode==='immediate' ? `Message envoyé : ${r.sent||0} notification(s) enregistrée(s).` : mode==='scheduled' ? 'Message programmé ✓' : 'Brouillon enregistré ✓','ok'); render(); } catch(e){ toast(e.message,'err'); }
@@ -1844,7 +1853,19 @@ const A = {
   async previewAbout() { const d=A.aboutData(); openModal(`<h3>${esc(d.title)}</h3>${d.paragraphs.map(p=>`<div class="mb"><b>${esc(p.heading)}</b><div class="small" style="white-space:pre-wrap">${esc(p.text)}</div></div>`).join('')}<button class="btn sec" onclick="closeModal()">Fermer</button>`); },
   async saveAbout(publish) { try { await api('/admin/about',{method:'PUT',body:A.aboutData()}); if(publish){if(!confirm('Publier ce brouillon dans l’application ?'))return;await api('/admin/about/publish',{method:'POST'});}toast(publish?'Contenu publié ✓':'Brouillon enregistré ✓','ok');render(); }catch(e){toast(e.message,'err');} },
   async saveShareSettings() { try { await api('/admin/settings',{method:'PUT',body:{share_official_url:document.getElementById('share-url').value,share_text:document.getElementById('share-text').value}});toast('Réglages de partage enregistrés ✓','ok'); }catch(e){toast(e.message,'err');} },
-  frequencyPeriod(days) { FREQ_DAYS=days; render(); },
+  frequencyPeriod(days) { FREQ_QUERY='days='+days; FREQ_PRESET=String(days)+'jours'; render(); },
+  frequencyPreset(name) {
+    const today = new Date(), iso = d => { const x = new Date(d); x.setMinutes(x.getMinutes() - x.getTimezoneOffset()); return x.toISOString().slice(0,10); };
+    const shift = (d,n) => { const x=new Date(d); x.setDate(x.getDate()+n); return x; };
+    let from, to;
+    if (name==='today') from=to=iso(today);
+    else if (name==='yesterday') from=to=iso(shift(today,-1));
+    else if (name==='week' || name==='lastweek') { const day=(today.getDay()+6)%7; const monday=shift(today,-day-(name==='lastweek'?7:0)); from=iso(monday); to=iso(shift(monday,name==='lastweek'?6:0)); }
+    else if (name==='month') { from=iso(new Date(today.getFullYear(),today.getMonth(),1)); to=iso(today); }
+    else { const first=new Date(today.getFullYear(),today.getMonth()-1,1), last=new Date(today.getFullYear(),today.getMonth(),0); from=iso(first); to=iso(last); }
+    FREQ_QUERY='from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to); FREQ_PRESET=name; render();
+  },
+  frequencyCustom() { const from=(document.getElementById('fq-from')||{}).value, to=(document.getElementById('fq-to')||{}).value; if(!from||!to) return toast('Choisissez les deux dates.','err'); FREQ_QUERY='from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to); FREQ_PRESET='custom'; render(); },
   async saveRules(key, elId) { try { await api('/admin/settings', { method: 'PUT', body: { [key]: document.getElementById(elId).value } }); toast('Règles enregistrées ✓ (appliquées immédiatement dans l\u2019application)', 'ok'); } catch (e) { toast(e.message, 'err'); } },
   async treatReport(id) { try { await api(`/admin/signalements/${id}/traiter`, { method: 'POST' }); render(); } catch (e) { toast(e.message, 'err'); } },
   async treatUrg(id) { try { await api(`/admin/urgences/${id}/traiter`, { method: 'POST' }); render(); } catch (e) { toast(e.message, 'err'); } },

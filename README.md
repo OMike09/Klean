@@ -1,4 +1,4 @@
-# Klean-Services CI — Version 2.0 (refonte complète)
+# Klean Services — Version 2.0 (refonte complète)
 
 Plateforme complète de mise en relation clients ↔ professionnels pour la Côte d'Ivoire.
 **Un seul écosystème** : application utilisateur (PWA) + espace professionnel + backend + base de données + notifications temps réel + paiements + tableau de bord administrateur.

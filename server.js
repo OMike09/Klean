@@ -418,7 +418,7 @@ function me(u) {
     role: u.role, is_pro: u.is_pro, pro_status: u.pro_status, verified: u.verified,
     must_change_password: !!u.must_change_password, profile_incomplete: !!u.profile_incomplete, font_size: u.font_size || null,
     rating: r.avg ? Math.round(r.avg * 10) / 10 : null, reviews_count: r.n,
-    pro: pro ? { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents) } : null,
+    pro: pro ? { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents), service_cities: (() => { try { const v = JSON.parse(pro.service_cities || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })() } : null,
     perms: isStaff(u) ? effectivePerms(u) : undefined
   };
 }
@@ -812,7 +812,7 @@ app.get('/api/pro/dashboard', auth, (req, res) => {
   const revenus = pays.reduce((s, p) => s + p.pro_amount, 0);
   const r = db.prepare('SELECT AVG(rating) avg, COUNT(*) n FROM reviews WHERE target_id=?').get(uid);
   res.json({
-    available: pro.available, availability_status: pro.availability_status || (pro.available ? 'disponible' : 'indisponible'), profile: { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents) },
+    available: pro.available, availability_status: pro.availability_status || (pro.available ? 'disponible' : 'indisponible'), profile: { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents), service_cities: (() => { try { const v = JSON.parse(pro.service_cities || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })() },
     offers, missions,
     stats: {
       en_cours: missions.filter(m => ['acceptee', 'confirmee', 'en_cours'].includes(m.status)).length,
@@ -1917,6 +1917,7 @@ function hasCompletedService(userId) {
 function hasMeasuredShare(userId, level) {
   if (level === 'lien_ouvert') return !!db.prepare('SELECT 1 FROM share_events WHERE user_id=? AND detected_at IS NOT NULL LIMIT 1').get(userId);
   if (level === 'inscription_acquise') return !!db.prepare('SELECT 1 FROM share_events WHERE user_id=? AND joined_user_id IS NOT NULL LIMIT 1').get(userId);
+  if (level === 'sans_partage') return !db.prepare('SELECT 1 FROM share_events WHERE user_id=? AND (detected_at IS NOT NULL OR joined_user_id IS NOT NULL) LIMIT 1').get(userId);
   return true;
 }
 function gameEligibility(user, game) {
@@ -1937,6 +1938,7 @@ function gameEligibilityMessage(g) {
   if (g.account === 'pros') return 'Ce jeu est réservé aux professionnels validés.';
   if (g.share === 'lien_ouvert') return 'Ce jeu nécessite au moins une ouverture mesurable de votre lien de partage.';
   if (g.share === 'inscription_acquise') return 'Ce jeu nécessite une inscription attribuée à votre lien de partage.';
+  if (g.share === 'sans_partage') return 'Ce jeu est réservé aux comptes sans partage mesurable.';
   if (g.service === 'realisee') return 'Ce jeu est réservé aux clients ayant réalisé une mission.';
   if (g.service === 'non_realisee') return 'Ce jeu est réservé aux comptes sans mission réalisée.';
   return 'Vous ne remplissez pas les conditions de participation à ce jeu.';
@@ -2270,7 +2272,7 @@ const PERM_ROUTES = [
   [/^\/frequentation/, 'frequentation'],
   [/^\/about/, 'PDG'],
   [/^\/(signalements|urgences|files|rules)/, 'securite'],
-  [/^\/(avis-recherche|jobs|ecole-famille|quiz|kdo|game-plays|quiz-sessions)/, 'contenu'],
+  [/^\/(avis-recherche|jobs|ecole-famille|quiz|kdo|game-plays|quiz-sessions|shares)/, 'contenu'],
   [/^\/settings/, 'parametres'],
 ];
 // Libellés lisibles pour le journal automatique
@@ -3225,7 +3227,7 @@ A.put('/settings', (req, res) => {
     if (k === 'request_audio_max_seconds') { const n=parseInt(v,10); if (isNaN(n)||n<1||n>20) return res.status(400).json({ error: 'La durée vocale doit être comprise entre 1 et 20 secondes.' }); }
     if (k === 'activity_active_minutes') { const n=parseInt(v,10); if (isNaN(n)||n<1||n>120) return res.status(400).json({ error: 'Seuil d’activité invalide (1 à 120 minutes).' }); }
     if (k === 'share_official_url' && String(v||'').trim() && !/^https:\/\//i.test(String(v).trim())) return res.status(400).json({ error: 'Le lien officiel doit commencer par https://.' });
-    if (/^game_(quiz|flipfizz|kdo)_(account|share|service)$/.test(k)) { const type=k.split('_').pop(); const ok=type==='account'?['tous','clients','pros','clients_pros'].includes(v):type==='share'?['tous','lien_ouvert','inscription_acquise'].includes(v):['tous','realisee','non_realisee'].includes(v); if (!ok) return res.status(400).json({ error: 'Condition de jeu invalide.' }); }
+    if (/^game_(quiz|flipfizz|kdo)_(account|share|service)$/.test(k)) { const type=k.split('_').pop(); const ok=type==='account'?['tous','clients','pros','clients_pros'].includes(v):type==='share'?['tous','lien_ouvert','inscription_acquise','sans_partage'].includes(v):['tous','realisee','non_realisee'].includes(v); if (!ok) return res.status(400).json({ error: 'Condition de jeu invalide.' }); }
     const ancienneValeur = getSetting(k);
     setSetting(k, v);
     // Sécurité financière : chaque modification de paramètre est journalisée (qui, ancienne valeur, nouvelle valeur, quand)
@@ -3455,6 +3457,15 @@ A.get('/urgences', (req, res) => {
 A.post('/urgences/:id/traiter', (req, res) => { db.prepare('UPDATE urgences SET handled=1 WHERE id=?').run(req.params.id); res.json({ ok: true }); });
 
 // CONTENU : avis de recherche, jobs, école & famille, quiz, kdo
+A.get('/shares/stats', (req, res) => {
+  const total = q => db.prepare(q).get().n;
+  res.json({
+    clicks: total('SELECT COUNT(*) n FROM share_events'),
+    opened: total('SELECT COUNT(*) n FROM share_events WHERE detected_at IS NOT NULL'),
+    joined: total('SELECT COUNT(*) n FROM share_events WHERE joined_user_id IS NOT NULL'),
+    recent: db.prepare(`SELECT s.clicked_at,s.detected_at,s.joined_at,u.name,u.phone FROM share_events s JOIN users u ON u.id=s.user_id ORDER BY s.id DESC LIMIT 20`).all()
+  });
+});
 A.get('/avis-recherche', (req, res) => res.json(db.prepare('SELECT a.*, u.name publisher, u.phone FROM avis_recherche a JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 200').all()));
 A.post('/avis-recherche/:id/status', (req, res) => {
   const a = db.prepare('SELECT * FROM avis_recherche WHERE id=?').get(req.params.id);

@@ -1128,7 +1128,7 @@ async function renderProDashboard() {
   try { d = await api('/pro/dashboard'); } catch (e) { toast(e.message, 'err'); return; }
   try { cc = await api('/commerce/config'); } catch { } // une option désactivée n'est pas proposée
   try { proOptions = await api('/pro-options'); } catch { }
-  const upcoming = d.missions.filter(m => ['confirmee', 'acceptee'].includes(m.status));
+  const upcoming = d.missions.filter(m => ['confirmee', 'acceptee', 'demarrage_demande', 'en_cours', 'fin_demande'].includes(m.status));
   const avState = d.availability_status || (d.available ? 'disponible' : 'indisponible');
   const avLabel = { disponible: '🟢 Disponible', alerte: '🔔 Alerté — demande à traiter', en_mission: '🧰 En mission', indisponible: '⚪ Indisponible', suspendu: '🚫 Suspendu' }[avState] || avState;
   $app.innerHTML = `${header('Mon espace professionnel')}
@@ -1160,7 +1160,7 @@ async function renderProDashboard() {
     <div class="menu-item" onclick="nav('#/messages')"><span class="mi-ic">💬</span>Messages<span class="mi-arr">›</span></div>
     <div class="menu-item" onclick="nav('#/pro-revenus')"><span class="mi-ic">💰</span>Mes revenus<span class="mi-arr">›</span></div>
     <div class="menu-item" onclick="nav('#/my-reviews')"><span class="mi-ic">⭐</span>Mes évaluations<span class="mi-arr">›</span></div>
-    <div class="menu-item" onclick="A.changeServiceCity()"><span class="mi-ic">📍</span><div class="grow">Changer mon lieu de service<div class="muted small">${esc(d.profile.service_city || USER.ville || 'Non renseigné')}</div></div><span class="mi-arr">›</span></div>
+    <div class="menu-item" onclick="A.changeServiceCity()"><span class="mi-ic">📍</span><div class="grow">Ma ville d’intervention<div class="muted small">${(d.profile.service_cities || []).includes('*') ? 'Toutes les villes autorisées par l’administration' : esc((d.profile.service_cities || []).join(' • ') || d.profile.service_city || USER.ville || 'À choisir')}</div></div><span class="mi-arr">›</span></div>
     <div class="menu-item" onclick="nav('#/pro-edit')"><span class="mi-ic">✏️</span>Mon profil professionnel<span class="mi-arr">›</span></div>
     ${cc && cc.visibilite.enabled ? `<div class="menu-item" onclick="nav('#/visibilite')"><span class="mi-ic">⭐</span>Améliorer ma visibilité <span class="muted small">(facultatif)</span><span class="mi-arr">›</span></div>` : ''}
     ${cc && cc.pub.enabled ? `<div class="menu-item" onclick="nav('#/pub')"><span class="mi-ic">📣</span>Promouvoir mon activité (publicité)<span class="mi-arr">›</span></div>` : ''}
@@ -2087,12 +2087,29 @@ const A = {
   async changeServiceCity() {
     let cities = []; try { cities = await api('/villes'); } catch (e) { toast(e.message, 'err'); return; }
     const current = (USER.pro && USER.pro.service_city) || USER.ville || '';
-    openModal(`<h3>📍 Changer mon lieu de service</h3><p class="small muted">Votre ville d'inscription ne change pas. Ce choix indique simplement où vous souhaitez recevoir des opportunités actuellement.</p>
-      <label class="small muted">Lieu de service actuel</label><select id="pro-service-city" style="width:100%;margin-bottom:14px">${cities.map(v => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
+    const allowed = Array.isArray(USER.pro && USER.pro.service_cities) ? USER.pro.service_cities : [];
+    const allAllowed = allowed.includes('*');
+    // Sans autorisation encore enregistrée, le professionnel peut choisir UNE première ville. Après cela,
+    // le serveur verrouille toute ville non autorisée par l’administration.
+    const selectable = allAllowed || !allowed.length ? cities : cities.filter(c => allowed.includes(c));
+    if (current && !selectable.includes(current)) selectable.unshift(current);
+    const assigned = allAllowed ? 'Toutes les villes actives sont autorisées par l’administration.' : allowed.length ? allowed.join(' • ') : 'Aucune ville n’est encore attribuée : choisissez votre ville principale.';
+    openModal(`<h3>📍 Ma ville d’intervention</h3>
+      <p class="small muted">Votre ville d’inscription ne change pas. Cette ville sert au matching et aux alertes de nouvelles demandes.</p>
+      <div class="small" style="background:#f0f8f6;border-radius:8px;padding:8px;margin-bottom:10px"><b>Villes autorisées :</b><br>${esc(assigned)}</div>
+      <label class="small muted">Rechercher une ville</label><input id="pro-city-search" style="width:100%;margin-bottom:8px" placeholder="Tapez les premières lettres…" oninput="A.filterServiceCities()">
+      <label class="small muted">Ville principale d’intervention</label><select id="pro-service-city" style="width:100%;margin-bottom:10px">${selectable.map(v => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
+      <p class="small muted">Vous souhaitez intervenir dans d’autres villes ? Contactez l’administration de Klean Services. Seule l’administration peut autoriser des villes supplémentaires.</p>
       <button class="btn" onclick="A.saveServiceCity()">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
+  filterServiceCities() {
+    const q = ((document.getElementById('pro-city-search') || {}).value || '').trim().toLocaleLowerCase('fr');
+    const sel = document.getElementById('pro-service-city'); if (!sel) return;
+    [...sel.options].forEach(o => { o.hidden = !!q && !o.text.toLocaleLowerCase('fr').includes(q); });
+    const first = [...sel.options].find(o => !o.hidden); if (first) sel.value = first.value;
+  },
   async saveServiceCity() {
-    try { USER = await api('/pro/service-location', { method: 'PUT', body: { service_city: document.getElementById('pro-service-city').value } }); closeModal(); toast('Lieu de service mis à jour ✓', 'ok'); render(); }
+    try { USER = await api('/pro/service-location', { method: 'PUT', body: { service_city: document.getElementById('pro-service-city').value } }); closeModal(); toast('Ville d’intervention mise à jour ✓', 'ok'); render(); }
     catch (e) { toast(e.message, 'err'); }
   },
   startContact(subject) { sessionStorage.setItem('ks_contact_subject', subject); nav('#/contact/new'); },
