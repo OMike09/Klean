@@ -9,6 +9,7 @@ let BADGES = { notifications: 0, messages: 0 };
 let SERVICES = null;        // cache catalogue
 let POPULAIRES = [];        // services populaires (accueil)
 let CATALOGUE = null;       // catalogue complet métiers → sous-catégories → services → tâches
+let GRAND_CATEGORIES = [];   // domaines professionnels centraux
 let GAMES = { quiz: false, flipfizz: false, kdo: false };
 let MAINT = { active: false }; // état de maintenance de la plateforme
 let ADS = [];
@@ -339,17 +340,20 @@ function prixHtml(s, small) {
 
 /* Choix des services d'un professionnel : mêmes catégories et services que
    partout ailleurs. Un professionnel peut sélectionner plusieurs catégories. */
+function proDomainChips(selectedIds) {
+  const selected = new Set((selectedIds || []).map(Number));
+  return GRAND_CATEGORIES.filter(c => c.active !== 0).map(c => `
+    <label class="check-line" style="align-items:flex-start;margin:0 0 9px;padding:10px;border:1px solid #e4ecea;border-radius:10px">
+      <input class="domain-chip" type="checkbox" value="${c.id}" ${selected.has(Number(c.id)) ? 'checked' : ''}>
+      <span><b>${esc(c.icon || '🧩')} ${esc(c.name)}</b>${c.description ? `<span class="muted small" style="display:block;margin-top:2px">${esc(c.description)}</span>` : ''}</span>
+    </label>`).join('');
+}
+/* Ancienne aide conservée pour les écrans historiques non encore concernés. */
 function proServiceChips(selectedIds) {
   const sel = selectedIds || [];
   return SERVICES.filter(c => c.services.length).map((c, i) => `
-    <div class="pro-service-category">
-      <button type="button" class="pro-service-head" onclick="A.toggleProCategory(this)" aria-expanded="${i === 0 ? 'true' : 'false'}">
-        <span>${esc(c.icon || '🔹')} ${esc(c.name)}</span><span>⌄</span>
-      </button>
-      <div class="choices pro-cat-services ${i === 0 ? 'open' : ''}">
-        ${c.services.map(s => `<button type="button" class="chip ${sel.includes(s.id) ? 'on' : ''}" data-sid="${s.id}" onclick="this.classList.toggle('on')">${esc(s.name)}</button>`).join('')}
-      </div>
-    </div>`).join('');
+    <div class="pro-service-category"><button type="button" class="pro-service-head" onclick="A.toggleProCategory(this)" aria-expanded="${i === 0 ? 'true' : 'false'}"><span>${esc(c.icon || '🔹')} ${esc(c.name)}</span><span>⌄</span></button>
+      <div class="choices pro-cat-services ${i === 0 ? 'open' : ''}">${c.services.map(s => `<button type="button" class="chip ${sel.includes(s.id) ? 'on' : ''}" data-sid="${s.id}" onclick="this.classList.toggle('on')">${esc(s.name)}</button>`).join('')}</div></div>`).join('');
 }
 
 /* Carte publicité / info : la vidéo s'affiche en grand et démarre automatiquement (muette) */
@@ -408,13 +412,15 @@ routes.home = async () => {
   <div class="content" style="padding-top:0">
     <div id="home-fixe" style="position:sticky;top:calc(58px + var(--safe-t));z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
       ${adsBandHtml(topZone)}
+      <div class="home-hero"><div>Klean Services - Tout commence par une mise en relation.</div><small>Décrivez votre besoin simplement : nous proposons les prestations correspondantes.</small></div>
       <div class="searchbar" style="margin:0 2px">
-        <input type="text" id="home-q" placeholder="🔎 Que recherchez-vous ?" enterkeyhint="search">
+        <input type="text" id="home-q" placeholder="🔎 Décrivez votre besoin…" enterkeyhint="search" autocomplete="off">
         <button onclick="A.goSearch()" aria-label="Rechercher">🔍</button>
       </div>
+      <div id="home-search-results" class="live-search-results"></div>
     </div>
     <div id="quiz-live"></div>
-    <div class="hint">Ex : « Je cherche un plombier », « Nettoyer mon fauteuil », « Cours d'anglais à domicile »…</div>
+    <div class="hint">Ex : « mon eau coule », « ma clime est gâtée », « je veux laver ma maison »…</div>
     ${POPULAIRES.length ? `<div class="sec-title">Services populaires</div>
     <div class="svc-grid">
       ${POPULAIRES.map(s => `<div class="svc-card" onclick="nav('#/request/${s.id}')"><span class="ic">${esc(s.icon || '🔹')}</span><span class="nm">${esc(s.name)}</span>${prixHtml(s, true)}</div>`).join('')}
@@ -437,6 +443,7 @@ routes.home = async () => {
   if (GAMES.kdo) vues.push('game:kdo');
   if (vues.length && USER) api('/vues', { method: 'POST', body: { keys: vues } }).catch(() => { });
   const q = document.getElementById('home-q');
+  q.addEventListener('input', () => A.liveSearch('home-q', 'home-search-results', true));
   q.addEventListener('keydown', e => { if (e.key === 'Enter') A.goSearch(); });
 };
 
@@ -453,6 +460,7 @@ routes.search = async (params) => {
     <div id="s-results"><div class="hint">Décrivez simplement votre besoin : « réparer ma télévision », « un électricien », « je cherche un employé »…</div></div>
   </div>${bottomNav('search')}`;
   const inp = document.getElementById('s-q');
+  inp.addEventListener('input', () => A.liveSearch('s-q', 's-results', false));
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') A.doSearch(); });
   if (q) A.doSearch(); else inp.focus();
   updateBadges();
@@ -478,7 +486,8 @@ routes.services = async (params) => {
     ${header(((c.icon || '') + ' ' + c.name).trim())}
     <div class="content">
       ${bandePub}
-      <div class="hint">Choisissez le service dont vous avez besoin — vous préciserez votre demande à l'étape suivante.</div>
+      ${c.grand_category ? `<div class="small muted mb">${esc(c.grand_icon || '🧩')} ${esc(c.grand_category)} › ${esc(c.name)}</div>` : ''}
+      <div class="hint">Choisissez la prestation dont vous avez besoin — vous pourrez la décrire librement à l'étape suivante.</div>
       ${c.services.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')">
         <span class="mi-ic">${esc(c.icon || '🔹')}</span><div><div>${esc(s.name)}</div>
         ${prixHtml(s)}
@@ -501,11 +510,17 @@ routes.services = async (params) => {
       ? out.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')"><span class="mi-ic">${esc(s.icon || '🔹')}</span><div><div>${esc(s.name)}</div>${prixHtml(s)}<div class="muted small">${esc(s.path)}</div></div><span class="mi-arr">›</span></div>`).join('')
       : emptyState('🔍', 'Aucun service trouvé pour « ' + esc(q) + ' ».');
   } else {
-    listHtml = CATALOGUE.map(c => `
+    const groups = new Map();
+    CATALOGUE.forEach(c => {
+      const key = c.grand_category_id || ('legacy-' + c.id);
+      if (!groups.has(key)) groups.set(key, { name: c.grand_category || 'Autres services', icon: c.grand_icon || '🧩', categories: [] });
+      groups.get(key).categories.push(c);
+    });
+    listHtml = [...groups.values()].map(g => `<div class="sec-title">${esc(g.icon)} ${esc(g.name)}</div>${g.categories.map(c => `
       <div class="menu-item" onclick="nav('#/services/${c.id}')">
         <span class="mi-ic">${esc(c.icon || '🔹')}</span><div><div style="font-weight:700">${esc(c.name)}</div>
-        <div class="muted small">${c.services.length} service${c.services.length > 1 ? 's' : ''}</div></div>
-        <span class="mi-arr">›</span></div>`).join('');
+        <div class="muted small">${c.services.length} prestation${c.services.length > 1 ? 's' : ''}</div></div>
+        <span class="mi-arr">›</span></div>`).join('')}`).join('');
   }
 
   $app.innerHTML = `
@@ -532,72 +547,51 @@ routes.request = async (serviceId) => {
   let data;
   try { data = await api('/services/' + serviceId + '/questions'); }
   catch (e) { toast(e.message, 'err'); back(); return; }
-  REQ = { photos: [], audio: null, lat: USER.lat, lng: USER.lng, service_id: data.service.id, photo_limit: Number(data.limits && data.limits.photos || 5), audio_max: Number(data.limits && data.limits.audio_seconds || 20) };
-  const taches = data.taches || [];
-  const sug = sessionStorage.getItem('ks_sug_tache') || '';
-  sessionStorage.removeItem('ks_sug_tache');
+  let selection = {}; try { selection = JSON.parse(sessionStorage.getItem('ks_search_selection') || '{}'); } catch { selection = {}; }
+  if (Number(selection.service_id) !== Number(data.service.id)) selection = {};
+  sessionStorage.removeItem('ks_search_selection');
+  const selectedTask = (data.taches || []).find(t => Number(t.id) === Number(selection.task_id));
+  REQ = { photos: [], audio: null, lat: USER.lat, lng: USER.lng, service_id: data.service.id, task_id: selectedTask ? selectedTask.id : null,
+    photo_limit: Math.min(3, Number(data.limits && data.limits.photos || 3)), audio_max: Math.min(25, Number(data.limits && data.limits.audio_seconds || 25)) };
+  const initialCity = USER.ville || '';
   $app.innerHTML = `
   ${header(data.service.name)}
   <div class="content">
     <div class="card">
-      ${data.service.price_show && data.service.price_from ? `<div style="margin-bottom:8px">
-        <span style="color:#dc2626;font-weight:800;font-size:15px">${esc(data.service.price_prefix || 'Dès')} ${Number(data.service.price_from).toLocaleString('fr-FR')} FCFA</span>
-        <div class="muted small">Prix de départ indicatif — le montant final dépend de votre demande (quantité, difficulté, déplacement…) et sera proposé par le professionnel.</div>
-      </div>` : ''}
-      <div class="muted small mb">Répondez à ces quelques questions pour que le professionnel comprenne bien votre besoin.</div>
-      ${taches.length ? `<div class="field"><label>Une ou plusieurs tâches à réaliser</label>
-        <div class="muted small mb">Vous pouvez sélectionner plusieurs tâches dans cette même demande.</div>
-        <div class="choices" id="r-taches">${taches.map(t => `<button type="button" class="chip task-chip ${sug && t.name === sug ? 'on' : ''}" data-task-id="${t.id}" data-task-name="${esc(t.name)}" onclick="A.toggleTask(this)">☐ ${esc(t.name)}</button>`).join('')}</div>
-        <div id="r-task-details" class="mt"></div></div>` : ''}
-      ${data.questions.map(qst => renderQuestion(qst)).join('')}
-      <div class="field"><label>Message (facultatif)</label><textarea id="r-desc" placeholder="Autre précision utile…"></textarea></div>
-      <div class="field"><label>Photos (facultatif) <span class="muted small">${Number(data.limits && data.limits.photos || 5)} maximum</span></label>
+      <div class="small muted mb">${esc(data.service.grand_category || data.service.category || '')}${data.service.category && data.service.grand_category ? ' › ' + esc(data.service.category) : ''}${selectedTask ? ' › ' + esc(selectedTask.name) : ''}</div>
+      <div class="field"><label>Ville réelle d’intervention <span class="req">*</span></label>
+        <input type="text" id="r-city" placeholder="👆 Choisir la ville de l’intervention" readonly style="cursor:pointer;background:#fff" value="${esc(initialCity)}" onclick="A.villePick('r-city')">
+        <div class="small muted">La position GPS aide à localiser, mais ne remplace jamais le lieu réel de l’intervention.</div>
+      </div>
+      <div id="r-estimate" class="estimate-box"><div class="muted small">Choisissez la ville réelle d’intervention pour obtenir une estimation de départ.</div></div>
+      <div class="field"><label>Décrivez ce que vous souhaitez faire. Expliquez votre problème ou le travail à réaliser.</label>
+        <textarea id="r-desc" maxlength="5000" placeholder="Ex : Le robinet de ma cuisine coule depuis ce matin…">${esc(selection.query || '')}</textarea></div>
+      <div class="field"><label>Photos (facultatif) <span class="muted small">3 maximum</span></label>
         <div class="photo-strip" id="r-photos"><button class="ph-add" onclick="A.pickPhotos('r-photos')">＋</button></div>
         <input type="file" id="file-input" accept="image/*" multiple style="display:none">
       </div>
-      <div class="field"><label>Message vocal (facultatif) <span class="muted small">${Number(data.limits && data.limits.audio_seconds || 20)} secondes maximum</span></label>
-        <div id="r-audio-zone"><button class="btn sec sm" id="r-rec" onclick="A.toggleRec('r-audio-zone')">🎤 Enregistrer un message vocal</button></div>
+      <div class="field"><label>Note vocale (facultatif) <span class="muted small">${REQ.audio_max} secondes maximum</span></label>
+        <div id="r-audio-zone"><button class="btn sec sm" id="r-rec" onclick="A.toggleRec('r-audio-zone')">🎤 Enregistrer une note vocale</button></div>
       </div>
-      <div class="sec-title">Localisation</div>
-      <div class="gps-row mb">
-        <button class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Utiliser ma position</button>
-      </div>
-      <div class="field"><label>Adresse / Quartier <span class="req">*</span></label><input type="text" id="r-addr" placeholder="Ex : Bouaké, quartier Air France, près de…" value="${esc(USER.address || '')}"></div>
+      <div class="sec-title">Localisation précise</div>
+      <div class="gps-row mb"><button class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Utiliser ma position GPS</button></div>
+      <div class="field"><label>Adresse / Quartier <span class="req">*</span></label><input type="text" id="r-addr" placeholder="Ex : quartier Air France, près de…" value="${esc(USER.address || '')}"></div>
       <div class="field"><label>Disponibilité souhaitée</label><select id="r-schedule" onchange="A.requestSchedule()"><option value="asap">Dès que possible</option><option value="today">Aujourd’hui</option><option value="date">À une date précise</option></select><input type="datetime-local" id="r-date" style="display:none;margin-top:8px"></div>
       <label class="check-line"><input type="checkbox" id="r-urgent"> 🔥 C'est urgent</label>
       <button class="btn" id="b-send">Envoyer ma demande</button>
     </div>
   </div>${bottomNav('search')}`;
   updateBadges();
-  if (sug && taches.some(t => t.name === sug)) { const chip = [...document.querySelectorAll('#r-taches .task-chip')].find(c => c.dataset.taskName === sug); if (chip) A.toggleTask(chip, true); }
+  if (initialCity) A.requestEstimate();
   document.getElementById('b-send').onclick = async e => {
-    const answers = {};
-    let missing = null;
-    document.querySelectorAll('[data-q]').forEach(el => {
-      const id = el.dataset.q;
-      let v = '';
-      if (el.dataset.type === 'bool') v = el.dataset.val || '';
-      else if (el.dataset.type === 'select') v = el.dataset.val || '';
-      else v = el.value;
-      if (el.dataset.req === '1' && !String(v).trim() && !missing) missing = el.dataset.label;
-      if (String(v).trim()) answers[id] = el.dataset.type === 'bool' ? (v === '1') : v;
-    });
-    if (missing) { toast('Veuillez répondre à : « ' + missing + ' »', 'err'); return; }
-    const addr = document.getElementById('r-addr').value;
-    if (!addr.trim()) { toast('Indiquez votre localisation (bouton GPS ou saisie manuelle).', 'err'); return; }
-    const selectedTasks = [...document.querySelectorAll('#r-taches .task-chip.on')].map(chip => ({
-      id: Number(chip.dataset.taskId), name: chip.dataset.taskName,
-      detail: (document.getElementById('r-task-detail-' + chip.dataset.taskId) || {}).value || ''
-    }));
-    // Les informations restent en mémoire pendant le choix très simple du prestataire.
+    const addr = document.getElementById('r-addr').value, interventionCity = document.getElementById('r-city').value;
+    if (!interventionCity.trim()) { toast('Choisissez la ville réelle d’intervention.', 'err'); return; }
+    if (!addr.trim()) { toast('Indiquez l’adresse ou le quartier de l’intervention.', 'err'); return; }
     REQ.draft = {
-      service_id: REQ.service_id, answers, taches: selectedTasks,
-      description: document.getElementById('r-desc').value,
-      address: addr, lat: REQ.lat, lng: REQ.lng,
-      urgence: document.getElementById('r-urgent').checked,
-      schedule_type: document.getElementById('r-schedule').value,
-      date_souhaitee: document.getElementById('r-date').value || null,
-      photos: REQ.photos, audio: REQ.audio
+      service_id: REQ.service_id, task_id: REQ.task_id, answers: {}, description: document.getElementById('r-desc').value,
+      address: addr, intervention_city: interventionCity, lat: REQ.lat, lng: REQ.lng,
+      urgence: document.getElementById('r-urgent').checked, schedule_type: document.getElementById('r-schedule').value,
+      date_souhaitee: document.getElementById('r-date').value || null, photos: REQ.photos, audio: REQ.audio
     };
     A.chooseProviderForRequest();
   };
@@ -1039,6 +1033,7 @@ routes.pro = async () => {
   }
   // Devenir professionnel
   SERVICES = await api('/services' + (USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : ''));
+  try { GRAND_CATEGORIES = await api('/grand-categories'); } catch { GRAND_CATEGORIES = []; }
   let rules = { pro: '' };
   try { rules = await api('/rules'); } catch { }
   const rejected = USER.pro_status === 'rejected';
@@ -1082,10 +1077,9 @@ routes.pro = async () => {
         ${['','2 à 5 personnes','6 à 10 personnes','11 à 50 personnes','Plus de 50 personnes'].map(v => `<option value="${esc(v)}" ${USER.pro && USER.pro.company_size === v ? 'selected' : ''}>${v || 'Choisir…'}</option>`).join('')}
       </select></div>` : ''}
       <div class="field"><label>${estEnt ? "Domaine d'activité de l'entreprise" : 'Votre profession'} <span class="req">*</span></label><input type="text" id="p-prof" placeholder="${estEnt ? 'Ex : Bâtiment, nettoyage industriel, événementiel…' : "Ex : Plombier, Électricien, Agent d'entretien…"}" value="${esc(USER.pro ? USER.pro.profession : '')}"></div>
-      <div class="field"><label>Services que vous proposez <span class="req">*</span></label>
-        <div class="choices" id="p-services">
-          ${proServiceChips(USER.pro ? USER.pro.services : [])}
-        </div></div>
+      <div class="field"><label>Sélectionnez votre ou vos domaines d’activité <span class="req">*</span></label>
+        <div class="muted small mb">Choisissez seulement les grandes catégories que vous maîtrisez. Les prestations actives rattachées à ces domaines seront automatiquement prises en compte après validation.</div>
+        <div id="p-domains">${proDomainChips(USER.pro ? USER.pro.domain_categories : [])}</div></div>
       <div class="field"><label>Zone d'intervention <span class="req">*</span></label><input type="text" id="p-zone" placeholder="Ex : Bouaké et environs" value="${esc(USER.pro ? USER.pro.zone : '')}"></div>
       <div class="field"><label>Expérience</label><input type="text" id="p-exp" placeholder="Ex : 5 ans d'expérience" value="${esc(USER.pro ? USER.pro.experience : '')}"></div>
       <div class="field"><label>Description</label><textarea id="p-desc" placeholder="Présentez-vous en quelques lignes…">${esc(USER.pro ? USER.pro.description : '')}</textarea></div>
@@ -1101,12 +1095,12 @@ routes.pro = async () => {
   </div>${bottomNav('account')}`;
   REQ = { photos: [] };
   document.getElementById('b-apply').onclick = async e => {
-    const services = [...document.querySelectorAll('#p-services .chip.on')].map(c => parseInt(c.dataset.sid, 10));
+    const domain_categories = [...document.querySelectorAll('#p-domains .domain-chip:checked')].map(c => parseInt(c.value, 10));
     busy(e.target, true);
     try {
       await api('/pro/apply', {
         method: 'POST', body: {
-          profession: document.getElementById('p-prof').value, services,
+          profession: document.getElementById('p-prof').value, domain_categories,
           zone: document.getElementById('p-zone').value, experience: document.getElementById('p-exp').value,
           description: document.getElementById('p-desc').value, documents: REQ.photos,
           accept_rules: document.getElementById('p-accept').checked,
@@ -1171,6 +1165,7 @@ async function renderProDashboard() {
 routes['pro-edit'] = async () => {
   if (!USER || USER.pro_status !== 'approved') { nav('#/pro'); return; }
   SERVICES = await api('/services' + (USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : ''));
+  try { GRAND_CATEGORIES = await api('/grand-categories'); } catch { GRAND_CATEGORIES = []; }
   const p = USER.pro;
   const estEnt = p.pro_type === 'entreprise';
   $app.innerHTML = `${header('Mon profil professionnel')}
@@ -1183,8 +1178,9 @@ routes['pro-edit'] = async () => {
       ${['','2 à 5 personnes','6 à 10 personnes','11 à 50 personnes','Plus de 50 personnes'].map(v => `<option value="${esc(v)}" ${p.company_size === v ? 'selected' : ''}>${v || 'Choisir…'}</option>`).join('')}
     </select></div>` : ''}
     <div class="field"><label>${estEnt ? "Domaine d'activité" : 'Profession'}</label><input type="text" id="p-prof" value="${esc(p.profession)}"></div>
-    <div class="field"><label>Mes services</label><div class="choices" id="p-services">
-      ${proServiceChips(p.services)}</div></div>
+    <div class="field"><label>Mes domaines d’activité</label>
+      <div class="muted small mb">Toute modification est envoyée à l’administration pour validation. Les domaines déjà autorisés restent actifs jusque-là.</div>
+      <div id="p-domains">${proDomainChips(p.authorized_domain_categories || p.domain_categories || [])}</div></div>
     <div class="field"><label>Zone d'intervention</label><input type="text" id="p-zone" value="${esc(p.zone)}"></div>
     <div class="field"><label>Expérience</label><input type="text" id="p-exp" value="${esc(p.experience || '')}"></div>
     <div class="field"><label>Description</label><textarea id="p-desc">${esc(p.description || '')}</textarea></div>
@@ -1196,7 +1192,6 @@ routes['pro-edit'] = async () => {
       USER = await api('/pro/profile', {
         method: 'PUT', body: {
           profession: document.getElementById('p-prof').value,
-          services: [...document.querySelectorAll('#p-services .chip.on')].map(c => parseInt(c.dataset.sid, 10)),
           zone: document.getElementById('p-zone').value, experience: document.getElementById('p-exp').value,
           description: document.getElementById('p-desc').value,
           company_name: document.getElementById('p-cname') ? document.getElementById('p-cname').value : null,
@@ -1204,7 +1199,14 @@ routes['pro-edit'] = async () => {
           company_size: document.getElementById('p-csize') ? document.getElementById('p-csize').value : null
         }
       });
-      toast('Profil mis à jour ✓', 'ok'); back();
+      const selectedDomains = [...document.querySelectorAll('#p-domains .domain-chip:checked')].map(c => parseInt(c.value, 10));
+      const currentDomains = (p.authorized_domain_categories || p.domain_categories || []).map(Number).sort((a,b) => a-b);
+      const wantedDomains = [...new Set(selectedDomains)].sort((a,b) => a-b);
+      if (JSON.stringify(currentDomains) !== JSON.stringify(wantedDomains)) {
+        await api('/pro/domain-change-request', { method: 'POST', body: { domain_categories: wantedDomains } });
+        toast('Profil mis à jour ✓ Demande de nouveaux domaines envoyée à l’administration.', 'ok');
+      } else toast('Profil mis à jour ✓', 'ok');
+      back();
     } catch (err) { toast(err.message, 'err'); busy(e.target, false); }
   };
 };
@@ -1947,6 +1949,7 @@ const A = {
     const i = document.getElementById(inputId);
     if (i) i.value = v;
     closeModal();
+    if (inputId === 'r-city' && A.requestEstimate) A.requestEstimate();
   },
   async maintRetry() { await checkMaintenance(); render(); },
   eye(id, btn) {
@@ -2018,21 +2021,44 @@ const A = {
     sessionStorage.setItem('ks_cat_q', '');
     nav('#/services/' + catId);
   },
+  _searchTimer: null, _lastSearchQuery: '', _searchSeq: 0,
+  searchResultCard(s, compact) {
+    const task = s.tache_suggeree ? ` — <b>${esc(s.tache_suggeree)}</b>` : '';
+    const confidence = s.confidence === 'élevée' ? 'Correspondance très probable' : s.confidence === 'moyenne' ? 'Correspondance possible' : 'Autre résultat pertinent';
+    return `<div class="menu-item" onclick="A.openSearchResult(${Number(s.id)},${Number(s.task_id || 0)})">
+      <span class="mi-ic">${esc(s.icon || '🔹')}</span><div class="grow"><div><b>${esc(s.name)}</b></div>
+      <div class="small muted">${esc(s.grand_category || s.category || '')}${s.category && s.grand_category ? ' › ' + esc(s.category) : ''}${task}</div>
+      ${prixHtml(s, true)}${compact ? '' : `<div class="small muted" style="margin-top:3px">${confidence}</div>`}</div><span class="mi-arr">›</span></div>`;
+  },
+  openSearchResult(serviceId, taskId) {
+    sessionStorage.setItem('ks_search_selection', JSON.stringify({ service_id: Number(serviceId), task_id: taskId ? Number(taskId) : null, query: A._lastSearchQuery || '' }));
+    nav('#/request/' + Number(serviceId));
+  },
+  async liveSearch(inputId, zoneId, compact) {
+    const input = document.getElementById(inputId), zone = document.getElementById(zoneId);
+    if (!input || !zone) return;
+    const q = input.value.trim();
+    clearTimeout(A._searchTimer);
+    if (q.length < 2) { zone.innerHTML = compact ? '' : '<div class="hint">Décrivez librement votre besoin : service, problème ou travail à réaliser.</div>'; return; }
+    const sequence = ++A._searchSeq;
+    A._searchTimer = setTimeout(async () => {
+      if (zoneId === 's-results') zone.innerHTML = '<div class="center muted mt"><div class="spinner" style="margin:0 auto"></div></div>';
+      try {
+        const city = USER && USER.ville ? '&ville=' + encodeURIComponent(USER.ville) : '';
+        const r = await api('/search?q=' + encodeURIComponent(q) + city);
+        if (sequence !== A._searchSeq) return;
+        A._lastSearchQuery = q;
+        zone.innerHTML = r.results.length
+          ? (compact ? r.results.slice(0, 5).map(s => A.searchResultCard(s, true)).join('') : `<div class="sec-title">Prestations correspondantes</div>${r.results.map(s => A.searchResultCard(s, false)).join('')}`)
+          : (compact ? '<div class="hint">Aucune correspondance certaine — vous pouvez continuer à décrire votre besoin.</div>' : emptyState('🔍', 'Aucun résultat suffisamment fiable. Vous pouvez préciser votre besoin ou parcourir les services.') + `<button class="btn sec" onclick="nav('#/services')">Voir tous les services</button>`);
+      } catch (e) { if (sequence === A._searchSeq) zone.innerHTML = compact ? '<div class="hint">Recherche momentanément indisponible.</div>' : emptyState('📶', e.message); }
+    }, 180);
+  },
   async doSearch() {
-    const q = document.getElementById('s-q').value.trim();
-    const zone = document.getElementById('s-results');
-    if (!q) { zone.innerHTML = '<div class="hint">Tapez votre besoin ci-dessus.</div>'; return; }
-    zone.innerHTML = '<div class="center muted mt"><div class="spinner" style="margin:0 auto"></div></div>';
-    try {
-      const r = await api('/search?q=' + encodeURIComponent(q) + (USER && USER.ville ? '&ville=' + encodeURIComponent(USER.ville) : ''));
-      zone.innerHTML = r.results.length
-        ? `<div class="sec-title">Services correspondants</div>` + r.results.map(s =>
-          `<div class="menu-item" onclick="${s.tache_suggeree ? `sessionStorage.setItem('ks_sug_tache','${esc(s.tache_suggeree).replace(/'/g, "\\'")}');` : ''}nav('#/request/${s.id}')">
-            <span class="mi-ic">${esc(s.icon || '🔹')}</span>
-            <div><div>${esc(s.name)}</div>${prixHtml(s)}<div class="muted small">${esc(s.category)}${s.tache_suggeree ? ` — <b>${esc(s.tache_suggeree)}</b>` : ''}</div></div>
-            <span class="mi-arr">›</span></div>`).join('')
-        : emptyState('🔍', 'Aucun service trouvé pour « ' + q + ' ».') + `<button class="btn sec" onclick="nav('#/services')">Voir tous les services</button>`;
-    } catch (e) { zone.innerHTML = emptyState('📶', e.message); }
+    const q = (document.getElementById('s-q') || {}).value?.trim() || '';
+    if (!q) return;
+    A._lastSearchQuery = q;
+    await A.liveSearch('s-q', 's-results', false);
   },
   pickChip(el, val) {
     [...el.parentElement.children].forEach(c => c.classList.remove('on'));
@@ -2125,6 +2151,19 @@ const A = {
   },
   collap(id) { document.getElementById(id).classList.toggle('open'); },
   requestSchedule() { const s=document.getElementById('r-schedule'), d=document.getElementById('r-date'); if (!s || !d) return; d.style.display=s.value==='date'?'block':'none'; if(s.value!=='date') d.value=''; },
+  async requestEstimate() {
+    const city = ((document.getElementById('r-city') || {}).value || '').trim();
+    const zone = document.getElementById('r-estimate'); if (!zone) return;
+    if (!city) { zone.innerHTML = '<div class="muted small">Choisissez la ville réelle d’intervention pour obtenir une estimation de départ.</div>'; return; }
+    zone.innerHTML = '<div class="muted small">Calcul de l’estimation pour ' + esc(city) + '…</div>';
+    try {
+      const r = await api('/estimates?service_id=' + encodeURIComponent(REQ.service_id) + (REQ.task_id ? '&task_id=' + encodeURIComponent(REQ.task_id) : '') + '&city=' + encodeURIComponent(city));
+      if (r.status === 'estimated' && r.amount) {
+        const range = r.min_price && r.max_price && r.min_price !== r.max_price ? ` <span class="small">(fourchette encadrée : ${fmtFCFA(r.min_price)} à ${fmtFCFA(r.max_price)})</span>` : '';
+        zone.innerHTML = `<div class="estimate-price">À partir de ${fmtFCFA(r.amount)}</div>${range}<div class="small muted">Estimation pour ${esc(r.city || city)}${r.provisional ? ' — provisoire' : ''}. ${esc(r.source || '')}</div><div class="small muted">${esc(r.includes || '')}</div>`;
+      } else zone.innerHTML = `<div class="bold">Prix à confirmer après précision de votre besoin.</div><div class="small muted">${esc(r.reason || 'Les données disponibles ne permettent pas une estimation suffisamment fiable.')}</div>`;
+    } catch (e) { zone.innerHTML = '<div class="bold">Prix à confirmer après précision de votre besoin.</div><div class="small muted">L’estimation sera reprise à l’envoi de votre demande.</div>'; }
+  },
   mTab(t) { sessionStorage.setItem('ks_mtab', t); render(); },
   toggleSound(el) {
     const now = localStorage.getItem('ks_sound') !== '0';
@@ -2197,7 +2236,7 @@ const A = {
           toast('Message vocal enregistré. Vous pouvez l’écouter avant l’envoi ✓', 'ok');
         } catch (e) { toast(e.message, 'err'); }
       };
-      A._rec.start(250); A.startRecClock(btn, Math.min(20, Number(REQ.audio_max || 20))); btn.classList.add('warn');
+      A._rec.start(250); A.startRecClock(btn, Math.min(25, Number(REQ.audio_max || 25))); btn.classList.add('warn');
     } catch (e) { if (stream) stream.getTracks().forEach(t => t.stop()); toast(microphoneError(e), 'err'); }
   },
   clearRequestAudio(zoneId) {

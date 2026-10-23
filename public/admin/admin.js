@@ -76,7 +76,7 @@ const MENU = [
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
   ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Je cherche un job', null, 'contenu'], ['ecole', '🏫 École & famille', null, 'contenu'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
   ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
-  ['CONFIGURATION', [['commerce', '💰 Paramètres commerciaux', null, 'parametres'], ['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
+  ['CONFIGURATION', [['estimates', '🧠 Tarifs & estimations intelligentes', null, 'PDG'], ['commerce', '💰 Paramètres commerciaux', null, 'parametres'], ['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
 ];
 function menuVisible(perm) { return !perm || (perm === 'PDG' ? ME && ME.role === 'pdg' : can(perm)); }
 
@@ -329,6 +329,7 @@ views.journal = async () => {
 
 /* ---------- Catalogue services ---------- */
 let CATD = null; // données du catalogue (partagées avec les actions A.*)
+let ESTD = null; // catalogue + règles du moteur intelligent
 views.catalog = async () => {
   const tab = sessionStorage.getItem('adm_cat_tab') || 'cat';
   if (tab === 'villes') return views._villes();
@@ -409,6 +410,37 @@ views.catalog = async () => {
   ${body}`);
   const qi = document.getElementById('cat-q');
   if (q && qi) { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); }
+};
+
+/* ---------- Tarifs et estimations intelligentes (PDG) ---------- */
+views.estimates = async () => {
+  const [catalog, rules, cfg, villes, terms] = await Promise.all([
+    api('/admin/catalog'), api('/admin/estimation-rules'), api('/admin/estimation-config'), api('/admin/villes'), api('/admin/search-terms')
+  ]);
+  ESTD = { catalog, rules, cfg, villes, terms };
+  const target = r => [r.grand_category_name, r.category_name, r.sub_name, r.service_name, r.task_name].filter(Boolean).join(' › ') || 'Cible non renseignée';
+  const source = r => r.source_type === 'pdg' ? 'Règle direction' : 'Donnée locale vérifiée';
+  const cities = villes.filter(v => v.active).map(v => v.name);
+  const allServices = catalog.services.filter(s => s.active);
+  shell(`<h1>🧠 Gestion des tarifs et estimations intelligentes</h1>
+    <div class="panel small muted">Le moteur applique d’abord les règles explicites de la direction, puis les données locales vérifiées, ensuite l’historique suffisamment documenté, puis le tarif de référence autorisé. Sans donnée fiable, il affiche « Prix à confirmer ». Aucun prix de marché n’est inventé.</div>
+    <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Grandes catégories centrales</h2><button class="btn sm" onclick="A.grandCategoryForm(0)">＋ Ajouter</button></div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">${catalog.grand_categories.map(g => `<span class="pill ${g.active ? 'ok' : 'off'}">${esc(g.icon || '🧩')} ${esc(g.name)} <button type="button" style="border:0;background:transparent;cursor:pointer" onclick="A.grandCategoryForm(${g.id})">✏️</button></span>`).join('')}</div></div>
+    <div class="panel"><h2 style="margin-top:0">Règles globales</h2><div class="frow">
+      <label><input type="checkbox" id="est-geo" ${cfg.geo_enabled ? 'checked' : ''}> Ajustements géographiques par ville actifs</label>
+      <label>Repli si aucune donnée locale <select id="est-fallback"><option value="reference" ${cfg.fallback === 'reference' ? 'selected' : ''}>Tarif de référence PDG (provisoire)</option><option value="confirmer" ${cfg.fallback === 'confirmer' ? 'selected' : ''}>Prix à confirmer</option></select></label>
+      <label>Historique minimum <input id="est-samples" type="number" min="3" max="100" value="${cfg.history_min_samples}" style="width:78px"> interventions validées</label>
+      <button class="btn" onclick="A.saveEstimationConfig()">Enregistrer</button>
+    </div></div>
+    <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Règles tarifaires (${rules.length})</h2><button class="btn" onclick="A.estimateRuleForm(0)">＋ Nouvelle règle</button></div>
+      <div class="small muted" style="margin:8px 0">Une règle peut cibler une grande catégorie, un métier, une sous-catégorie, une prestation ou une tâche, et éventuellement une ville/zone. Les facteurs JSON permettent par exemple un ajustement fixe ou un pourcentage.</div>
+      <div style="overflow:auto"><table><tr><th>Cible</th><th>Ville / zone</th><th>Estimation</th><th>Source / actualisation</th><th>État</th><th></th></tr>
+      ${rules.map(r => `<tr><td><b>${esc(target(r))}</b><div class="small muted">Priorité ${r.priority || 0}</div></td><td>${esc(r.city || 'Toutes villes')}${r.zone ? '<br><span class="small muted">' + esc(r.zone) + '</span>' : ''}</td><td><b>${r.base_price ? fcfa(r.base_price) : '—'}</b>${r.min_price || r.max_price ? `<div class="small muted">${r.min_price ? fcfa(r.min_price) : '—'} → ${r.max_price ? fcfa(r.max_price) : '—'}</div>` : ''}</td><td>${esc(source(r))}<div class="small muted">${esc(r.source_date || r.verified_at || r.updated_at || '')}</div></td><td>${r.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.estimateRuleForm(${r.id})">Modifier</button><button class="btn sm warn" onclick="A.deleteEstimationRule(${r.id})">🗑️</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Aucune règle : le moteur utilisera seulement le repli éventuellement autorisé.</td></tr>'}
+      </table></div></div>
+    <div class="panel"><h2 style="margin-top:0">Tester une estimation avant publication</h2><div class="frow"><select id="est-test-service" style="min-width:230px"><option value="">Choisir une prestation</option>${allServices.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><select id="est-test-city" style="min-width:180px"><option value="">Choisir une ville</option>${cities.map(c => `<option>${esc(c)}</option>`).join('')}</select><button class="btn" onclick="A.testEstimation()">Tester</button></div><div id="est-test-result" class="small muted" style="margin-top:9px">Aucun test en cours.</div></div>
+    <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Dictionnaire de recherche (${terms.length})</h2><button class="btn" onclick="A.searchTermForm()">＋ Ajouter une expression</button></div>
+      <div class="small muted" style="margin:8px 0">Synonymes, formulations familières et fautes connues reliés à une prestation/tâche réelle. Les expressions du catalogue restent modifiables ou désactivables.</div>
+      <div style="max-height:340px;overflow:auto"><table><tr><th>Expression</th><th>Destination</th><th>Source</th><th>État</th><th></th></tr>${terms.map(t => `<tr><td>${esc(t.term)}</td><td>${esc(t.service_name)}${t.task_name ? ' › ' + esc(t.task_name) : ''}</td><td class="small">${esc(t.source)}</td><td>${t.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.toggleSearchTerm(${t.id},${t.active ? 0 : 1})">${t.active ? 'Désactiver' : 'Activer'}</button><button class="btn sm warn" onclick="A.deleteSearchTerm(${t.id})">🗑️</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucune expression.</td></tr>'}</table></div></div>`);
 };
 
 /* ---------- Services populaires (sélection et ordre de l'accueil) ---------- */
@@ -1066,8 +1098,8 @@ views.settings = async () => {
       <div><label>Commission Klean Services (%)</label><input type="number" id="st-comm" value="${esc(s.commission_rate)}" min="0" max="100" step="0.5" style="width:110px"></div>
       <div><label>Délai de réponse d'un professionnel (secondes)</label><input type="number" id="st-wait" value="${esc(s.dispatch_wait_seconds)}" min="15" max="3600" style="width:130px"></div>
       <div><label>Conservation des fichiers (jours)</label><input type="number" id="st-ret" value="${esc(s.file_retention_days)}" min="1" style="width:110px"></div>
-      <div><label>Photos / demande</label><input type="number" id="st-reqphotos" value="${esc(s.request_image_limit || '5')}" min="0" max="12" style="width:90px"></div>
-      <div><label>Vocal demande (max. s)</label><input type="number" id="st-reqaudio" value="${esc(s.request_audio_max_seconds || '20')}" min="1" max="20" style="width:100px"></div>
+      <div><label>Photos / demande</label><input type="number" id="st-reqphotos" value="${esc(s.request_image_limit || '3')}" min="0" max="3" style="width:90px"></div>
+      <div><label>Vocal demande (max. s)</label><input type="number" id="st-reqaudio" value="${esc(s.request_audio_max_seconds || '25')}" min="1" max="25" style="width:100px"></div>
       <div><label>Seuil « actif récemment » (min)</label><input type="number" id="st-activity" value="${esc(s.activity_active_minutes || '5')}" min="1" max="120" style="width:110px"></div>
     </div>
     <h3 style="margin:18px 0 8px">Paramètres des demandes et des alertes</h3>
@@ -1138,7 +1170,7 @@ const A = {
         Documents : ${u.pro.documents.length ? u.pro.documents.map(d => `<a href="${esc(d)}" target="_blank">📄</a>`).join(' ') : 'Aucun'}</p>` : ''}
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
           <button class="btn sm sec" onclick="A.userEdit(${u.id})">✏️ Modifier</button>
-          ${u.pro && u.pro_status === 'approved' ? `<button class="btn sm sec" onclick="A.proEligibility(${u.id})">🧰 Autorisations pro</button>` : ''}
+          ${u.pro && u.pro_status === 'approved' ? `<button class="btn sm sec" onclick="A.proEligibility(${u.id})">🧰 Autorisations pro</button><button class="btn sm sec" onclick="A.domainRequests(${u.id})">🗂️ Demandes de domaines</button>` : ''}
           ${u.pro_status !== 'approved' ? `<button class="btn sm sec" onclick="A.convertUserPro(${u.id})">💼 Convertir en pro</button>` : ''}
           <button class="btn sm ${u.suspended ? '' : 'warn'}" onclick="A.suspend(${u.id},${u.suspended ? 0 : 1})">${u.suspended ? '▶️ Réactiver' : '⏸ Suspendre'}</button>
           <button class="btn sm ${u.blocked ? '' : 'warn'}" onclick="A.userBlock(${u.id},${u.blocked ? 0 : 1})">${u.blocked ? '🔓 Débloquer' : '🚫 Bloquer'}</button>
@@ -1185,20 +1217,31 @@ const A = {
       const [u, catalog, villes] = await Promise.all([api('/admin/users/' + id), api('/admin/catalog'), api('/admin/villes')]);
       if (!u.pro) return toast('Ce compte ne possède pas de profil professionnel.', 'err');
       const declared = (u.pro.services || []).map(Number), allowed = (u.pro.authorized_services || declared).map(Number);
+      const declaredDomains = (u.pro.domain_categories || []).map(Number);
+      const allowedDomains = (u.pro.authorized_domain_categories || declaredDomains).map(Number);
       const flat = (catalog.services || []).filter(s => declared.includes(+s.id));
+      const domains = (catalog.grand_categories || []);
       openModal(`<h3>🧰 Autorisations de ${esc(u.name)}</h3>
-        <p class="small muted">Seuls les services cochés peuvent recevoir une demande. Cette règle est contrôlée par le backend avant l’alerte et l’acceptation.</p>
+        <p class="small muted">Les domaines cochés sont contrôlés par le backend avant l’alerte et l’acceptation. Une tâche ajoutée ultérieurement dans un domaine autorisé devient automatiquement éligible.</p>
         <label class="small muted">Type de prestataire</label><select id="pe-type" style="width:100%;margin-bottom:10px"><option value="particulier" ${u.pro.pro_type !== 'entreprise' ? 'selected' : ''}>Un particulier</option><option value="entreprise" ${u.pro.pro_type === 'entreprise' ? 'selected' : ''}>Une entreprise</option></select>
         <label class="small muted">Capacité de mission</label><select id="pe-cap" style="width:100%;margin-bottom:10px"><option value="1" ${(+u.pro.capacity_level || 1) === 1 ? 'selected' : ''}>Standard</option><option value="2" ${(+u.pro.capacity_level || 1) === 2 ? 'selected' : ''}>Renforcée / gros travaux</option><option value="3" ${(+u.pro.capacity_level || 1) >= 3 ? 'selected' : ''}>Grande capacité</option></select>
-        <label class="small muted">Services autorisés</label><div style="max-height:260px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${flat.map(s => `<label style="display:block;padding:5px 0"><input class="pe-service" type="checkbox" value="${s.id}" ${allowed.includes(+s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('') || '<span class="small muted">Aucun service déclaré dans le profil. Le professionnel doit d’abord compléter son profil.</span>'}</div>
+        <label class="small muted">Domaines d’activité autorisés</label><div style="max-height:240px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${domains.map(g => `<label style="display:block;padding:5px 0"><input class="pe-domain" type="checkbox" value="${g.id}" ${allowedDomains.includes(+g.id) ? 'checked' : ''}> ${esc(g.icon || '🧩')} <b>${esc(g.name)}</b>${g.active ? '' : ' <span class="muted small">(inactive)</span>'}</label>`).join('') || '<span class="small muted">Aucune grande catégorie disponible.</span>'}</div>
+        ${declaredDomains.length ? `<div class="small muted" style="margin:-7px 0 12px">Déclarés initialement : ${domains.filter(g=>declaredDomains.includes(+g.id)).map(g=>esc(g.name)).join(' • ') || '—'}</div>` : `<label class="small muted">Services autorisés (profil historique)</label><div style="max-height:160px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${flat.map(s => `<label style="display:block;padding:5px 0"><input class="pe-service" type="checkbox" value="${s.id}" ${allowed.includes(+s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('') || '<span class="small muted">Aucun service déclaré.</span>'}</div>`}
         <label class="small muted">Villes d’intervention autorisées</label><div class="small muted">Une seule ville est la règle normale. Plusieurs villes ou « toutes » sont réservées à un administrateur / PDG et appliquées au matching.</div><div style="max-height:180px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${(['pdg','admin'].includes(ME.role) ? `<label style="display:block;padding:5px 0"><input class="pe-city" type="checkbox" value="*" ${(u.pro.service_cities||[]).includes('*')?'checked':''}> Toutes les villes actives</label>` : '')}${villes.map(v=>`<label style="display:block;padding:5px 0"><input class="pe-city" type="checkbox" value="${esc(v.name)}" ${(u.pro.service_cities||[]).includes(v.name)?'checked':''}> ${esc(v.name)}</label>`).join('')}</div>
         <button class="btn" onclick="A.saveProEligibility(${id})">Enregistrer</button><button class="btn sec mt" onclick="A.userDetail(${id})">Annuler</button>`);
     } catch (e) { toast(e.message, 'err'); }
   },
+  async domainRequests(id) {
+    try { const [items,catalog,u]=await Promise.all([api('/admin/pros/'+id+'/domain-requests'),api('/admin/catalog'),api('/admin/users/'+id)]); const nameBy=new Map((catalog.grand_categories||[]).map(g=>[+g.id,g.name])); const labels=ids=>(ids||[]).map(i=>nameBy.get(+i)||('#'+i)).join(' • ')||'—';
+      openModal(`<h3>Demandes de domaines — ${esc(u.name)}</h3><div style="max-height:55vh;overflow:auto">${items.map(r=>`<div style="border:1px solid #e3edeb;border-radius:9px;padding:9px;margin:8px 0"><b>${r.status==='en_attente'?'⏳ En attente':r.status==='approuvee'?'✅ Approuvée':'❌ Refusée'}</b><div class="small">Demandés : ${esc(labels(r.requested_domains))}</div><div class="small muted">Avant : ${esc(labels(r.previous_domains))} • ${fmtD(r.created_at)}</div>${r.note?`<div class="small">Note : ${esc(r.note)}</div>`:''}${r.status==='en_attente'?`<div class="frow mt"><button class="btn sm" onclick="A.reviewDomainRequest(${id},${r.id},'approuver')">Approuver</button><button class="btn sm warn" onclick="A.reviewDomainRequest(${id},${r.id},'refuser')">Refuser</button></div>`:''}</div>`).join('')||'<div class="muted">Aucune demande enregistrée.</div>'}</div><button class="btn sec mt" onclick="A.userDetail(${id})">Retour à la fiche</button>`);
+    } catch(e){toast(e.message,'err');}
+  },
+  async reviewDomainRequest(uid,rid,decision) { const note=prompt(decision==='approuver'?'Note facultative pour le professionnel :':'Motif du refus (facultatif) :')||'';try{await api(`/admin/pros/${uid}/domain-requests/${rid}/review`,{method:'POST',body:{decision,note}});toast(decision==='approuver'?'Domaines approuvés ✓':'Demande refusée.','ok');A.domainRequests(uid);}catch(e){toast(e.message,'err');} },
   async saveProEligibility(id) {
     const authorized_services = [...document.querySelectorAll('.pe-service:checked')].map(el => +el.value);
+    const authorized_domain_categories = [...document.querySelectorAll('.pe-domain:checked')].map(el => +el.value);
     const service_cities = [...document.querySelectorAll('.pe-city:checked')].map(el => el.value);
-    try { await api('/admin/pros/' + id + '/eligibility', { method: 'PUT', body: { authorized_services, service_cities, pro_type: document.getElementById('pe-type').value, capacity_level: +document.getElementById('pe-cap').value } }); toast('Autorisations professionnelles enregistrées ✓', 'ok'); A.userDetail(id); }
+    try { await api('/admin/pros/' + id + '/eligibility', { method: 'PUT', body: { authorized_services, authorized_domain_categories, service_cities, pro_type: document.getElementById('pe-type').value, capacity_level: +document.getElementById('pe-cap').value } }); toast('Autorisations professionnelles enregistrées ✓', 'ok'); A.userDetail(id); }
     catch (e) { toast(e.message, 'err'); }
   },
   async userEdit(id) {
@@ -1279,6 +1322,47 @@ const A = {
   },
   async _doReject(id) { try { await api(`/admin/pros/${id}/reject`, { method: 'POST', body: { reason: document.getElementById('rej-reason').value } }); closeModal(); toast('Demande refusée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
 
+  grandCategoryForm(id) {
+    const g=id ? ESTD.catalog.grand_categories.find(x=>x.id===id) : {name:'',icon:'🧩',description:'',active:1,sort:99};
+    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3><label>Nom</label><input id="gc-name" style="width:100%" value="${esc(g.name||'')}"><label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px"><label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea><div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div><button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+  },
+  async saveGrandCategory(id) { const body={name:document.getElementById('gc-name').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked};try{await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Grande catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');} },
+  async saveEstimationConfig() {
+    try { await api('/admin/estimation-config', { method:'PUT', body:{ geo_enabled:document.getElementById('est-geo').checked, fallback:document.getElementById('est-fallback').value, history_min_samples:document.getElementById('est-samples').value } }); toast('Paramètres d’estimation enregistrés ✓','ok'); render(); } catch(e){toast(e.message,'err');}
+  },
+  estimateRuleForm(id) {
+    const d=ESTD, r=id ? d.rules.find(x=>x.id===id) : { grand_category_id:'',category_id:'',sub_id:'',service_id:'',task_id:'',city:'',zone:'',base_price:'',min_price:'',max_price:'',factors:'{}',source_type:'pdg',source_note:'',source_url:'',source_date:'',verified_at:'',active:1,priority:0 };
+    const opt=(rows,key,label,cur)=>`<option value="">${label}</option>`+rows.map(v=>`<option value="${v.id}" ${Number(cur)===Number(v.id)?'selected':''}>${esc(v.name)}</option>`).join('');
+    openModal(`<h3>${id?'Modifier':'Nouvelle'} règle tarifaire</h3><div class="small muted">Plus la cible est précise, plus elle est prioritaire à source et priorité égales. Laissez les niveaux inutiles vides.</div>
+      <label>Grande catégorie</label><select id="er-grand" style="width:100%;margin-bottom:7px">${opt(d.catalog.grand_categories,'id','Toutes les grandes catégories',r.grand_category_id)}</select>
+      <label>Métier</label><select id="er-cat" style="width:100%;margin-bottom:7px">${opt(d.catalog.categories,'id','Tous les métiers',r.category_id)}</select>
+      <label>Sous-catégorie</label><select id="er-sub" style="width:100%;margin-bottom:7px">${opt(d.catalog.sous_categories,'id','Toutes les sous-catégories',r.sub_id)}</select>
+      <label>Prestation</label><select id="er-service" style="width:100%;margin-bottom:7px">${opt(d.catalog.services,'id','Toutes les prestations',r.service_id)}</select>
+      <label>Tâche</label><select id="er-task" style="width:100%;margin-bottom:7px">${opt(d.catalog.taches,'id','Toutes les tâches',r.task_id)}</select>
+      <div class="frow"><div style="flex:1"><label>Ville <span class="muted">(vide = toutes)</span></label><select id="er-city" style="width:100%"><option value="">Toutes les villes</option>${d.villes.filter(v=>v.active).map(v=>`<option ${r.city===v.name?'selected':''}>${esc(v.name)}</option>`).join('')}</select></div><div style="flex:1"><label>Zone <span class="muted">(facultatif)</span></label><input id="er-zone" value="${esc(r.zone||'')}"></div></div>
+      <div class="frow"><div><label>Prix de départ</label><input id="er-base" type="number" min="1" value="${esc(r.base_price??'')}"></div><div><label>Minimum</label><input id="er-min" type="number" min="1" value="${esc(r.min_price??'')}"></div><div><label>Maximum</label><input id="er-max" type="number" min="1" value="${esc(r.max_price??'')}"></div><div><label>Priorité</label><input id="er-priority" type="number" value="${esc(r.priority??0)}" style="width:75px"></div></div>
+      <label>Source</label><select id="er-source"><option value="pdg" ${r.source_type==='pdg'?'selected':''}>Règle explicite de la direction</option><option value="local_verifie" ${r.source_type==='local_verifie'?'selected':''}>Donnée locale vérifiée</option></select>
+      <label>Note / source vérifiable</label><textarea id="er-note" rows="2" placeholder="Ex : relevé validé par la direction, période et origine…">${esc(r.source_note||'')}</textarea>
+      <div class="frow"><div style="flex:1"><label>URL source <span class="muted">(facultatif)</span></label><input id="er-url" value="${esc(r.source_url||'')}"></div><div><label>Date source</label><input id="er-date" type="date" value="${esc(r.source_date||'')}"></div></div>
+      <label>Facteurs JSON <span class="muted">(facultatif : fixed_adjustment, percent_adjustment, includes)</span></label><textarea id="er-factors" rows="3">${esc(typeof r.factors==='string'?r.factors:JSON.stringify(r.factors||{}))}</textarea>
+      <label class="check-line"><input id="er-active" type="checkbox" ${r.active?'checked':''}> Règle active</label>
+      <button class="btn" onclick="A.saveEstimationRule(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+  },
+  async saveEstimationRule(id) {
+    const num=k=>{const v=document.getElementById(k).value;return v===''?null:Number(v);};
+    const body={grand_category_id:num('er-grand'),category_id:num('er-cat'),sub_id:num('er-sub'),service_id:num('er-service'),task_id:num('er-task'),city:document.getElementById('er-city').value,zone:document.getElementById('er-zone').value,base_price:num('er-base'),min_price:num('er-min'),max_price:num('er-max'),priority:num('er-priority'),source_type:document.getElementById('er-source').value,source_note:document.getElementById('er-note').value,source_url:document.getElementById('er-url').value,source_date:document.getElementById('er-date').value,factors:document.getElementById('er-factors').value,active:document.getElementById('er-active').checked};
+    try { await api('/admin/estimation-rules'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Règle tarifaire enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');}
+  },
+  async deleteEstimationRule(id) { if(!confirm('Supprimer définitivement cette règle tarifaire ?'))return;try{await api('/admin/estimation-rules/'+id,{method:'DELETE'});toast('Règle supprimée.','ok');render();}catch(e){toast(e.message,'err');} },
+  async testEstimation() { const sid=document.getElementById('est-test-service').value,city=document.getElementById('est-test-city').value,z=document.getElementById('est-test-result');if(!sid||!city){toast('Choisissez une prestation et une ville.','err');return;}z.textContent='Calcul en cours…';try{const r=await api('/admin/estimation-test?service_id='+encodeURIComponent(sid)+'&city='+encodeURIComponent(city));z.innerHTML=r.status==='estimated'?`<b style="color:#dc2626">À partir de ${fcfa(r.amount)}</b> — ${esc(r.source||'')}${r.provisional?' (provisoire)':''}<br><span class="muted">${esc(r.includes||'')}</span>`:`<b>Prix à confirmer</b> — ${esc(r.reason||'Aucune donnée fiable.')}`;}catch(e){z.textContent=e.message;} },
+  searchTermForm() {
+    const d=ESTD, serviceOpts=d.catalog.services.filter(s=>s.active).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    const taskOpts=d.catalog.taches.filter(t=>t.active).map(t=>{const s=d.catalog.services.find(v=>v.id===t.service_id)||{};return `<option value="${t.id}" data-service="${t.service_id}">${esc(s.name||'')} › ${esc(t.name)}</option>`;}).join('');
+    openModal(`<h3>Ajouter une expression de recherche</h3><div class="small muted">Exemple : « mon eau coule » peut pointer vers une tâche de réparation de fuite.</div><label>Expression, synonyme ou formulation familière</label><input id="st-term" style="width:100%" placeholder="Ex : mon eau coule"><label>Prestation</label><select id="st-service" style="width:100%"><option value="">Choisir</option>${serviceOpts}</select><label>Tâche <span class="muted">(facultatif)</span></label><select id="st-task" style="width:100%"><option value="">Toute la prestation</option>${taskOpts}</select><button class="btn mt" onclick="A.saveSearchTerm()">Ajouter</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+  },
+  async saveSearchTerm() { const service_id=Number(document.getElementById('st-service').value),task_id=Number(document.getElementById('st-task').value)||null;if(!service_id)return toast('Choisissez une prestation.','err');try{await api('/admin/search-terms',{method:'POST',body:{term:document.getElementById('st-term').value,service_id,task_id}});closeModal();toast('Expression ajoutée ✓','ok');render();}catch(e){toast(e.message,'err');} },
+  async toggleSearchTerm(id,active) { try{await api('/admin/search-terms/'+id,{method:'PUT',body:{active}});render();}catch(e){toast(e.message,'err');} },
+  async deleteSearchTerm(id) {if(!confirm('Supprimer cette expression du dictionnaire ?'))return;try{await api('/admin/search-terms/'+id,{method:'DELETE'});render();}catch(e){toast(e.message,'err');}},
   async addCat() {
     const name = document.getElementById('c-name').value.trim();
     if (!name) return toast('Indiquez le nom de la catégorie.', 'err');
@@ -1294,9 +1378,10 @@ const A = {
     openModal(`<h3>Modifier le métier</h3>
       <label class="small muted">Nom</label><input id="em-name" style="width:100%;margin-bottom:10px" value="${esc(c.name)}">
       <label class="small muted">Icône (émoji)</label><input id="em-icon" style="width:90px;margin-bottom:12px" value="${esc(c.icon || '')}">
+      <label class="small muted">Grande catégorie racine</label><select id="em-grand" style="width:100%;margin-bottom:12px"><option value="">Non classée</option>${(CATD.grand_categories || []).map(g => `<option value="${g.id}" ${Number(c.grand_category_id)===Number(g.id)?'selected':''}>${esc(g.icon || '')} ${esc(g.name)}</option>`).join('')}</select>
       <div><button class="btn" onclick="A._metSave(${id})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
   },
-  async _metSave(id) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { name: document.getElementById('em-name').value, icon: document.getElementById('em-icon').value } }); closeModal(); toast('Catégorie modifiée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async _metSave(id) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { name: document.getElementById('em-name').value, icon: document.getElementById('em-icon').value, grand_category_id: document.getElementById('em-grand').value || null } }); closeModal(); toast('Catégorie modifiée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async metDel(id) {
     if (!confirm('Supprimer cette catégorie, ses services et leurs tâches ?\n(Refusé automatiquement si des missions l\u2019utilisent — préférez « Désactiver ».)')) return;
     try { await api('/admin/categories/' + id, { method: 'DELETE' }); toast('Catégorie supprimée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }

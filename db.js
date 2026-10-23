@@ -898,7 +898,7 @@ function migrate() {
     dispatch_initial_alert_count: '3', dispatch_expand_alert_count: '3', dispatch_expand_strategy: 'vagues', dispatch_reminder_seconds: '2',
     dispatch_auto_enabled: '1', dispatch_geo_enabled: '1', dispatch_alert_sound: '1', dispatch_max_reminders: '6', dispatch_search_max_seconds: '3600',
     dispatch_allow_particulier: '1', dispatch_allow_entreprise: '1',
-    request_image_limit: '5', request_audio_max_seconds: '20', activity_active_minutes: '5',
+    request_image_limit: '3', request_audio_max_seconds: '25', activity_active_minutes: '5',
     share_official_url: '',
     game_quiz_account: 'tous', game_quiz_share: 'tous', game_quiz_service: 'tous',
     game_flipfizz_account: 'tous', game_flipfizz_share: 'tous', game_flipfizz_service: 'tous',
@@ -1274,5 +1274,210 @@ ensureColumn('annonces', 'theme', "TEXT NOT NULL DEFAULT ''");      // sujet ent
 if (getSetting('bandeau_enabled') === null) setSetting('bandeau_enabled', '1');
 if (getSetting('bandeau_speed') === null) setSetting('bandeau_speed', '60'); // pixels/seconde
 if (getSetting('pro_doc_entreprise') === null) setSetting('pro_doc_entreprise', '1');
+
+
+// ============================================================
+// MOTEUR DE RECHERCHE, DOMAINES PROFESSIONNELS ET ESTIMATIONS (COLIS 16)
+// Les nouvelles relations complètent le catalogue historique sans jamais
+// renuméroter les métiers, services, tâches ou missions existants.
+// ============================================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS grand_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  icon TEXT NOT NULL DEFAULT '🧩',
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS service_search_terms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+  task_id INTEGER REFERENCES taches(id) ON DELETE CASCADE,
+  term TEXT NOT NULL,
+  normalized TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  source TEXT NOT NULL DEFAULT 'catalogue', -- catalogue | direction
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(service_id, task_id, normalized)
+);
+CREATE INDEX IF NOT EXISTS idx_search_terms_normalized ON service_search_terms(normalized);
+CREATE TABLE IF NOT EXISTS pro_domain_change_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  requested_domains TEXT NOT NULL DEFAULT '[]',
+  previous_domains TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'en_attente', -- en_attente | approuvee | refusee | annulee
+  note TEXT,
+  reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_domain_requests_user ON pro_domain_change_requests(user_id,status,created_at);
+CREATE TABLE IF NOT EXISTS price_estimation_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  grand_category_id INTEGER REFERENCES grand_categories(id) ON DELETE SET NULL,
+  category_id INTEGER REFERENCES service_categories(id) ON DELETE SET NULL,
+  sub_id INTEGER REFERENCES sous_categories(id) ON DELETE SET NULL,
+  service_id INTEGER REFERENCES services(id) ON DELETE SET NULL,
+  task_id INTEGER REFERENCES taches(id) ON DELETE SET NULL,
+  city TEXT,
+  zone TEXT,
+  base_price INTEGER,
+  min_price INTEGER,
+  max_price INTEGER,
+  factors TEXT NOT NULL DEFAULT '{}',
+  source_type TEXT NOT NULL DEFAULT 'pdg', -- pdg | local_verifie
+  source_note TEXT,
+  source_url TEXT,
+  source_date TEXT,
+  verified_at TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  priority INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_price_rules_lookup ON price_estimation_rules(active,service_id,task_id,category_id,city);
+`);
+ensureColumn('service_categories', 'grand_category_id', 'INTEGER REFERENCES grand_categories(id) ON DELETE SET NULL');
+ensureColumn('pro_profiles', 'domain_categories', "TEXT NOT NULL DEFAULT '[]'");             // domaines déclarés (grandes catégories)
+ensureColumn('pro_profiles', 'authorized_domain_categories', 'TEXT');                         // décision explicite de la direction ; NULL = ancien profil
+ensureColumn('missions', 'intervention_city', 'TEXT');
+ensureColumn('missions', 'estimated_price', 'INTEGER');
+ensureColumn('missions', 'estimate_meta', "TEXT NOT NULL DEFAULT '{}'");
+
+// Les vingt domaines demandés sont des données de configuration initiales, jamais
+// des libellés codés dans les interfaces. Le PDG peut les gérer ensuite en base.
+(function seedGrandCategories() {
+  const rows = [
+    ['Nettoyage et entretien','🧹','Entretien des logements, locaux et équipements.'],
+    ['Plomberie','🔧','Installation, réparation et dépannage des réseaux d’eau.'],
+    ['Électricité','⚡','Installations, pannes et équipements électriques.'],
+    ['Bâtiment et construction','🧱','Construction, rénovation, finition et études de bâtiment.'],
+    ['Menuiserie et aluminium','🪚','Bois, aluminium, vitrerie et ouvrages sur mesure.'],
+    ['Climatisation et froid','❄️','Climatiseurs, froid domestique et professionnel.'],
+    ['Transport et déménagement','🚚','Transport, livraison et déménagement.'],
+    ['Mécanique et automobile','🚗','Automobile, moto et dépannage mécanique.'],
+    ['Informatique et téléphonie','💻','Ordinateurs, réseaux, logiciels et téléphones.'],
+    ['Beauté, coiffure et bien-être','💆','Soins, coiffure et bien-être.'],
+    ['Couture et mode','🧵','Couture, retouche, stylisme et mode.'],
+    ['Restauration et alimentation','🍲','Cuisine, pâtisserie et services alimentaires.'],
+    ['Jardinage et espaces verts','🌿','Jardins, espaces verts et entretien extérieur.'],
+    ['Sécurité et surveillance','🛡️','Gardiennage, surveillance et sécurité.'],
+    ['Aide à domicile et services familiaux','🏠','Aide quotidienne, garde et services familiaux.'],
+    ['Événementiel','🎉','Organisation et prestations pour événements.'],
+    ['Services professionnels et administratifs','📋','Administration, communication, conseil et services aux entreprises.'],
+    ['Cours et formation','🎓','Cours, accompagnement et formation professionnelle.'],
+    ['Agriculture et élevage','🌾','Production agricole, élevage et services associés.'],
+    ['Autres services','🧩','Domaines non encore classés dans les catégories précédentes.']
+  ];
+  const ins = db.prepare('INSERT OR IGNORE INTO grand_categories(name,icon,description,sort) VALUES(?,?,?,?)');
+  rows.forEach((r, i) => ins.run(r[0], r[1], r[2], i + 1));
+})();
+
+// Classification initiale des métiers existants. Elle ne remplace aucune donnée
+// métier : elle rattache seulement les enregistrements historiques à une racine.
+(function mapExistingCategoriesToDomains() {
+  const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const ids = new Map(db.prepare('SELECT id,name FROM grand_categories').all().map(r => [r.name, r.id]));
+  const pick = name => {
+    const n = norm(name);
+    if (/nettoyage|blanchisserie|desinsect|fosse|piscine/.test(n)) return 'Nettoyage et entretien';
+    if (/plomb/.test(n)) return 'Plomberie';
+    if (/electric|solaire/.test(n)) return 'Électricité';
+    if (/clim|froid|refriger|congel/.test(n)) return 'Climatisation et froid';
+    if (/menuiser|aluminium|vitrerie/.test(n)) return 'Menuiserie et aluminium';
+    if (/transport|livraison|demenag|chauffeur/.test(n)) return 'Transport et déménagement';
+    if (/mecan|auto|moto|garage/.test(n)) return 'Mécanique et automobile';
+    if (/informat|telephon|electronique|ordinateur/.test(n)) return 'Informatique et téléphonie';
+    if (/coiff|beaute|esthet|bien.etre|maquillage/.test(n)) return 'Beauté, coiffure et bien-être';
+    if (/couture|mode|styl/.test(n)) return 'Couture et mode';
+    if (/restauration|restauration|cuisine|patisserie|aliment/.test(n)) return 'Restauration et alimentation';
+    if (/jardin|espace vert|paysag/.test(n)) return 'Jardinage et espaces verts';
+    if (/securite|surveillance|gardien/.test(n)) return 'Sécurité et surveillance';
+    if (/aide|domicile|famil|nounou|placement/.test(n)) return 'Aide à domicile et services familiaux';
+    if (/evenement|photo|video|sono|decoration evenement/.test(n)) return 'Événementiel';
+    if (/cours|formation|education/.test(n)) return 'Cours et formation';
+    if (/agric|elevage|agro/.test(n)) return 'Agriculture et élevage';
+    if (/maconner|construction|peinture|carrelage|platr|architecture|metaller|soudure|toiture/.test(n)) return 'Bâtiment et construction';
+    if (/administr|comptab|marketing|communication|redaction|traduction|jurid|conseil|immobilier/.test(n)) return 'Services professionnels et administratifs';
+    return 'Autres services';
+  };
+  const update = db.prepare('UPDATE service_categories SET grand_category_id=? WHERE id=?');
+  db.prepare('SELECT id,name,grand_category_id FROM service_categories').all().forEach(c => {
+    if (!c.grand_category_id) update.run(ids.get(pick(c.name)), c.id);
+  });
+})();
+
+// Les profils historiques conservent leurs services, mais reçoivent en plus le
+// domaine racine correspondant. Le matching pourra alors inclure toute nouvelle
+// tâche active créée dans ce domaine, sans réinscription du professionnel.
+(function migrateProfessionalDomains() {
+  const catForService = db.prepare('SELECT grand_category_id FROM services s JOIN service_categories c ON c.id=s.category_id WHERE s.id=?');
+  const upd = db.prepare('UPDATE pro_profiles SET domain_categories=?, authorized_domain_categories=? WHERE user_id=?');
+  db.prepare('SELECT user_id,services,domain_categories,authorized_domain_categories FROM pro_profiles').all().forEach(p => {
+    let declared = []; try { declared = JSON.parse(p.domain_categories || '[]'); } catch {}
+    if (!Array.isArray(declared) || !declared.length) {
+      let svcs = []; try { svcs = JSON.parse(p.services || '[]'); } catch {}
+      declared = [...new Set(svcs.map(id => catForService.get(id)).filter(r => r && r.grand_category_id).map(r => r.grand_category_id))];
+    }
+    let authorized = p.authorized_domain_categories;
+    if (authorized === null || authorized === undefined || authorized === '') authorized = JSON.stringify(declared);
+    upd.run(JSON.stringify([...new Set(declared.map(Number).filter(Number.isInteger))]), authorized, p.user_id);
+  });
+})();
+
+// Des entrées catalogue sont indexées à partir des noms et mots-clés existants.
+// Elles rendent le dictionnaire extensible dans le tableau de bord et évitent une
+// seconde source indépendante de services.
+(function seedCatalogueSearchTerms() {
+  const normal = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const insert = db.prepare('INSERT INTO service_search_terms(service_id,task_id,term,normalized,source) VALUES(?,?,?,?,?)');
+  const exists = db.prepare('SELECT 1 FROM service_search_terms WHERE service_id=? AND normalized=? AND ((task_id IS NULL AND ? IS NULL) OR task_id=?) LIMIT 1');
+  const add = (serviceId, taskId, term, normalized, source) => { if (!exists.get(serviceId, normalized, taskId, taskId)) insert.run(serviceId, taskId, term, normalized, source); };
+  const services = db.prepare('SELECT id,name,keywords FROM services').all();
+  services.forEach(s => {
+    [s.name, ...(String(s.keywords || '').split(','))].forEach(term => { const n = normal(term); if (n) add(s.id, null, String(term).trim(), n, 'catalogue'); });
+  });
+  db.prepare('SELECT t.id,t.service_id,t.name FROM taches t').all().forEach(t => { const n = normal(t.name); if (n) add(t.service_id, t.id, t.name, n, 'catalogue'); });
+  // Expressions populaires ciblées : elles sont éditables/désactivables par la direction après installation.
+  const aliases = [
+    ['Réparation de fuite', 'Réparation de fuite d’eau', ['mon eau coule','robinet fuit','robine coule','tuyau gate','y a eau partout','fuite chez moi']],
+    ['Dépannage climatiseur', 'Diagnostic de panne', ['ma clime est gatee','ma clim est gatee','clim gatee','clim ne refroidit plus','split ne fait plus froid']],
+    ['Dépannage électrique', 'Recherche de panne', ['y a plus lumiere chez moi','plus de courant','courant coupe','electricite gatee','prise ne marche pas']],
+    ['Réparation de téléphone', 'Remplacement d’écran', ['mon phone est casse','telephone casse','mon portable est gate','ecran phone casse','phone ne s allume pas']],
+    ['Ménage à domicile', 'Nettoyage complet de la maison', ['je veux laver ma maison','laver maison','maison sale','femme de menage','nettoyer chez moi']],
+    ['Mécanique moto', 'Réparation de moto', ['ma moto ne demarre pas','moto gatee','moto en panne']],
+    ['Rénovation', 'Réparation de fissures', ['mon mur est gate','mur fissure','reparer mur','mur abime']]
+  ];
+  aliases.forEach(([serviceLike, taskLike, terms]) => {
+    const svc = db.prepare('SELECT id FROM services WHERE lower(name) LIKE lower(?) ORDER BY id LIMIT 1').get('%' + serviceLike + '%');
+    if (!svc) return;
+    const task = db.prepare('SELECT id FROM taches WHERE service_id=? AND lower(name) LIKE lower(?) ORDER BY id LIMIT 1').get(svc.id, '%' + taskLike + '%');
+    terms.forEach(term => { const n = normal(term); if (n) add(svc.id, task && task.id || null, term, n, 'catalogue'); });
+  });
+})();
+
+const INTELLIGENT_SEARCH_DEFAULTS = {
+  request_image_limit: '3',
+  request_audio_max_seconds: '25',
+  price_estimation_geo_enabled: '1',
+  price_estimation_fallback: 'reference', // reference | confirmer
+  price_estimation_history_min_samples: '3'
+};
+for (const [key, value] of Object.entries(INTELLIGENT_SEARCH_DEFAULTS)) {
+  // Les anciennes limites plus permissives sont resserrées pour respecter le nouveau formulaire universel.
+  if (key === 'request_image_limit') { const old = parseInt(getSetting(key, value), 10); setSetting(key, String(Number.isFinite(old) ? Math.min(3, Math.max(0, old)) : 3)); }
+  else if (key === 'request_audio_max_seconds') { const old = parseInt(getSetting(key, value), 10); setSetting(key, String(Number.isFinite(old) ? (old === 20 ? 25 : Math.min(25, Math.max(1, old))) : 25)); }
+  else if (getSetting(key) === null) setSetting(key, value);
+}
+
+// Les anciennes demandes restent lisibles : leur ville d’intervention est initialisée
+// depuis la ville du client seulement lorsqu’aucune ville n’avait été enregistrée.
+db.prepare(`UPDATE missions SET intervention_city=(SELECT ville FROM users WHERE users.id=missions.client_id)
+  WHERE (intervention_city IS NULL OR intervention_city='') AND client_id IS NOT NULL`).run();
 
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
