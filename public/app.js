@@ -80,27 +80,31 @@ function toast(msg, cls, title) {
   setTimeout(() => t.remove(), 5000);
 }
 
+let pendingWriteOperations = 0;
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   if (!(opts.body instanceof FormData) && opts.body) headers['Content-Type'] = 'application/json';
   if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-  let res;
+  const writing = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(opts.method || 'GET').toUpperCase());
+  if (writing) pendingWriteOperations++;
   try {
-    res = await fetch('/api' + path, { ...opts, headers, body: opts.body instanceof FormData ? opts.body : (opts.body ? JSON.stringify(opts.body) : undefined) });
-  } catch {
-    throw new Error('Connexion impossible. Vérifiez votre connexion internet puis réessayez.');
-  }
-  let data = {};
-  try { data = await res.json(); } catch { }
-  if (!res.ok) {
-    if (res.status === 401 && TOKEN) { logout(false); }
-    const err = new Error(data.error || 'Une erreur est survenue. Veuillez réessayer.');
-    err.status = res.status; err.data = data;
-    throw err;
-  }
-  return data;
+    let res;
+    try {
+      res = await fetch('/api' + path, { ...opts, headers, body: opts.body instanceof FormData ? opts.body : (opts.body ? JSON.stringify(opts.body) : undefined) });
+    } catch {
+      throw new Error('Connexion impossible. Vérifiez votre connexion internet puis réessayez.');
+    }
+    let data = {};
+    try { data = await res.json(); } catch { }
+    if (!res.ok) {
+      if (res.status === 401 && TOKEN) { logout(false); }
+      const err = new Error(data.error || 'Une erreur est survenue. Veuillez réessayer.');
+      err.status = res.status; err.data = data;
+      throw err;
+    }
+    return data;
+  } finally { if (writing) pendingWriteOperations = Math.max(0, pendingWriteOperations - 1); }
 }
-
 function busy(btn, on, label) {
   if (!btn) return;
   if (on) { btn.dataset.l = btn.textContent; btn.disabled = true; btn.textContent = label || 'Veuillez patienter…'; }
@@ -175,32 +179,170 @@ function updateBadges() {
   });
 }
 
-/* ---------- Navigation ---------- */
-function nav(hash) { location.hash = hash; }
+/* ---------- Navigation centralisée, historique et protection des brouillons ---------- */
+let navCursor = 0;
+let currentHash = '';
+let allowNavigationOnce = false;
+let pendingHistoryMove = 0;
+let restoringBrowserNavigation = false;
+let browserNavigationToConfirm = null;
+let leavePromptOpen = false;
+let draftGuard = { enabled: false, dirty: false, modalDirty: false, submitting: false, scope: '' };
+
+function normalHash(hash) {
+  const h = String(hash || '');
+  return h && h.startsWith('#/') ? h : (TOKEN ? '#/home' : '#/login');
+}
+function currentRoute() { return (currentHash || normalHash(location.hash)).slice(2).split('/')[0]; }
+function hasNavigationHistory() { return navCursor > 0; }
+function resetDraftGuard() { draftGuard = { enabled: false, dirty: false, modalDirty: false, submitting: false, scope: '' }; }
+function isDraftControl(el) {
+  if (!el || !el.matches || !el.matches('input, textarea, select')) return false;
+  if (el.disabled || el.type === 'hidden' || el.type === 'button' || el.type === 'submit' || el.dataset.navIgnore !== undefined) return false;
+  if (el.id === 'gs-q' || el.id === 'home-q' || el.id === 's-q' || el.id === 'cat-q' || el.id === 'job-q' || el.id === 'avis-q' || el.id === 'ville-q') return false;
+  return true;
+}
+function armDraftProtection(root, scope, reset) {
+  if (reset) resetDraftGuard();
+  const zone = root || document.getElementById('app');
+  if (!zone) return;
+  const controls = zone.querySelectorAll('input, textarea, select');
+  if (!controls.length) return;
+  draftGuard.enabled = true; draftGuard.scope = scope || draftGuard.scope || 'formulaire';
+  controls.forEach(el => {
+    if (!isDraftControl(el) || el.dataset.ksDraftBound) return;
+    el.dataset.ksDraftBound = '1';
+    const changed = () => { draftGuard.dirty = true; if (el.closest('#modal')) draftGuard.modalDirty = true; };
+    el.addEventListener('input', changed, { passive: true });
+    el.addEventListener('change', changed, { passive: true });
+  });
+}
+function pageNeedsDraftProtection(route) {
+  return ['register', 'request', 'infos', 'addresses', 'security', 'settings', 'pro'].includes(route);
+}
+function forceCloseModal() {
+  if (window._supportPoll) { clearInterval(window._supportPoll); window._supportPoll = null; }
+  const m = document.getElementById('modal'); if (m) m.remove();
+  draftGuard.modalDirty = false;
+}
+function closeLeavePrompt() { const p = document.getElementById('leave-confirm'); if (p) p.remove(); leavePromptOpen = false; }
+function showLeaveConfirm(onLeave) {
+  if (leavePromptOpen) return;
+  leavePromptOpen = true;
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg'; bg.id = 'leave-confirm';
+  bg.style.zIndex = '2000';
+  bg.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="leave-confirm-title">
+    <h3 id="leave-confirm-title">Modifications non enregistrées</h3>
+    <p class="small">Vous avez des modifications non enregistrées. Voulez-vous quitter cette page ?</p>
+    <div class="btn-row"><button class="btn sec" id="leave-stay">Continuer la modification</button><button class="btn warn" id="leave-drop">Quitter sans enregistrer</button></div>
+  </div>`;
+  document.body.appendChild(bg);
+  document.getElementById('leave-stay').onclick = closeLeavePrompt;
+  document.getElementById('leave-drop').onclick = () => { closeLeavePrompt(); resetDraftGuard(); onLeave(); };
+}
+function withLeaveProtection(action) {
+  if (pendingWriteOperations > 0 || draftGuard.submitting) { toast('Envoi en cours : veuillez patienter avant de revenir.', 'err'); return; }
+  if (draftGuard.enabled && draftGuard.dirty) { showLeaveConfirm(action); return; }
+  action();
+}
+function fallbackHash(hash) {
+  const route = String(hash || '').slice(2).split('/')[0];
+  if (['request', 'services', 'search'].includes(route)) return '#/services';
+  if (['mission'].includes(route)) return '#/missions';
+  if (['chat', 'contact', 'messages', 'notifications'].includes(route)) return '#/messages';
+  if (['infos', 'addresses', 'security', 'settings', 'pro', 'pros', 'visibilite', 'pub', 'payments'].includes(route)) return '#/account';
+  if (['jobs', 'avis-recherche', 'urgence', 'about', 'quiz', 'flip', 'kdo'].includes(route)) return '#/home';
+  return '';
+}
+function nav(hash) {
+  const target = normalHash(hash);
+  if (target === (currentHash || normalHash(location.hash))) return;
+  withLeaveProtection(() => { allowNavigationOnce = true; forceCloseModal(); location.hash = target; });
+}
 function back() {
-  if (navStack.length > 1) { navStack.pop(); suppressPush = true; location.hash = navStack[navStack.length - 1]; }
-  else nav('#/home');
+  // Un formulaire présenté dans une fenêtre est refermé avant de changer de page.
+  const modal = document.getElementById('modal');
+  if (modal) {
+    if (draftGuard.modalDirty) showLeaveConfirm(() => forceCloseModal());
+    else forceCloseModal();
+    return;
+  }
+  withLeaveProtection(() => {
+    if (navCursor > 0) { allowNavigationOnce = true; pendingHistoryMove = -1; history.back(); return; }
+    const fallback = fallbackHash(currentHash || location.hash);
+    if (fallback && fallback !== (currentHash || location.hash)) { allowNavigationOnce = true; location.hash = fallback; }
+    else toast('Vous êtes déjà sur le premier écran de cette navigation.', 'ok');
+  });
+}
+window.back = back;
+function commitHash(hash) {
+  const h = normalHash(hash);
+  if (!currentHash) { navStack = [h]; navCursor = 0; currentHash = h; render(); return; }
+  if (h === currentHash) return;
+  if (pendingHistoryMove) {
+    const expected = navCursor + pendingHistoryMove;
+    if (navStack[expected] === h) navCursor = expected;
+    else { const found = navStack.lastIndexOf(h); navCursor = found >= 0 ? found : Math.max(0, expected); }
+    pendingHistoryMove = 0;
+  } else if (navStack[navCursor - 1] === h) navCursor--;
+  else if (navStack[navCursor + 1] === h) navCursor++;
+  else {
+    navStack = navStack.slice(0, navCursor + 1);
+    navStack.push(h); navCursor = navStack.length - 1;
+  }
+  currentHash = h;
+  resetDraftGuard();
+  render();
 }
 window.addEventListener('hashchange', () => {
-  if (!suppressPush) {
-    const h = location.hash || '#/home';
-    if (navStack[navStack.length - 1] !== h) navStack.push(h);
-    if (navStack.length > 30) navStack.shift();
+  const h = normalHash(location.hash);
+  if (restoringBrowserNavigation && h === currentHash) {
+    restoringBrowserNavigation = false;
+    const pending = browserNavigationToConfirm; browserNavigationToConfirm = null;
+    if (pending) showLeaveConfirm(() => { allowNavigationOnce = true; pendingHistoryMove = pending.delta; history.go(pending.delta); });
+    return;
   }
-  suppressPush = false;
-  render();
+  if (h === currentHash) return;
+  // Les boutons natifs du navigateur/Android/iPhone arrivent ici après le changement d’historique.
+  if (!allowNavigationOnce && draftGuard.enabled && draftGuard.dirty && !draftGuard.submitting) {
+    let delta = navStack[navCursor - 1] === h ? -1 : (navStack[navCursor + 1] === h ? 1 : 0);
+    if (delta) {
+      browserNavigationToConfirm = { delta };
+      restoringBrowserNavigation = true;
+      history.go(-delta); // on restaure le formulaire, puis l’utilisateur décide.
+      return;
+    }
+    // Cas rare (historique externe/non linéaire) : on reste dans l’application et on demande confirmation.
+    const target = h;
+    allowNavigationOnce = true;
+    location.hash = currentHash;
+    showLeaveConfirm(() => nav(target));
+    return;
+  }
+  allowNavigationOnce = false;
+  commitHash(h);
 });
-/* Navigation gestuelle (balayage) */
-let touchX = null, touchY = null;
-document.addEventListener('touchstart', e => { if (e.touches.length === 1) { touchX = e.touches[0].clientX; touchY = e.touches[0].clientY; } }, { passive: true });
+
+/* Balayage horizontal vers la droite : réservé au bord gauche et ignoré sur les zones interactives.
+   Sur iPhone, le geste système est laissé prioritaire ; son retour navigateur arrive via hashchange. */
+let touchX = null, touchY = null, touchAt = 0, touchBlocked = false;
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function gestureBlocked(target) {
+  return !!(target && target.closest && target.closest('input,textarea,select,button,a,.photo-strip,.choices,.tabs,.searchbar,[data-horizontal-scroll],video,audio'));
+}
+document.addEventListener('touchstart', e => {
+  if (e.touches.length !== 1) return;
+  const t=e.touches[0]; touchX=t.clientX; touchY=t.clientY; touchAt=Date.now(); touchBlocked=gestureBlocked(e.target);
+}, { passive:true });
+document.addEventListener('touchcancel', () => { touchX=null; touchBlocked=false; }, { passive:true });
 document.addEventListener('touchend', e => {
   if (touchX === null) return;
-  const dx = e.changedTouches[0].clientX - touchX, dy = e.changedTouches[0].clientY - touchY;
-  touchX = null;
-  if (Math.abs(dx) > 70 && Math.abs(dy) < 50 && !['#/home', '#/login', '#/register', ''].includes(location.hash)) {
-    if (dx > 0) back();
-  }
-}, { passive: true });
+  const t=e.changedTouches[0], dx=t.clientX-touchX, dy=t.clientY-touchY, started=touchX, elapsed=Date.now()-touchAt;
+  touchX=null;
+  if (isIOS || touchBlocked || started>44 || elapsed>900 || dx<78 || Math.abs(dy)>Math.min(56, dx*.45)) return;
+  back();
+}, { passive:true });
 
 function logout(manual = true) {
   TOKEN = null; USER = null; localStorage.removeItem('ks_token');
@@ -211,8 +353,9 @@ function logout(manual = true) {
 
 /* ---------- Gabarits ---------- */
 function header(title, opts = {}) {
+  const showBack = opts.back === 'contextual' ? hasNavigationHistory() : opts.back !== false;
   return `<div class="hdr">
-    ${opts.back !== false ? `<button class="back-btn" onclick="back()">←<span>Retour</span></button>` : ''}
+    ${showBack ? `<button class="back-btn" onclick="back()" aria-label="Retour à l’écran précédent">←<span>Retour</span></button>` : ''}
     ${opts.brand ? `<div class="brand" aria-label="Klean Services"><img src="/logo.png" alt=""> <span>Klean Services</span></div>` : `<div class="title">${esc(title)}</div>`}
     ${opts.bell !== false ? `<button class="bell" onclick="nav('#/notifications')">🔔<span class="js-bell-badge"></span></button>` : ''}
   </div>`;
@@ -233,14 +376,16 @@ function statusPill(s) {
 }
 
 function openModal(html) {
-  closeModal();
+  forceCloseModal();
   const bg = document.createElement('div');
   bg.className = 'modal-bg'; bg.id = 'modal';
   bg.innerHTML = `<div class="modal">${html}</div>`;
-  bg.onclick = e => { if (e.target === bg) closeModal(); };
+  bg.onclick = e => { if (e.target === bg) attemptCloseModal(); };
   document.body.appendChild(bg);
+  armDraftProtection(bg, 'fenêtre', false);
 }
-function closeModal() { const m = document.getElementById('modal'); if (m) m.remove(); }
+function attemptCloseModal() { if (draftGuard.modalDirty) showLeaveConfirm(() => forceCloseModal()); else forceCloseModal(); }
+function closeModal() { forceCloseModal(); }
 
 /* ============================================================
    ÉCRANS
@@ -408,7 +553,7 @@ routes.home = async () => {
       <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🎮 JEU</span><span class="small muted">👁️ ${gv('kdo')}</span></div>
       <div class="bold small">🎁 Kdo</div></div>`);
   $app.innerHTML = `
-  ${header('', { brand: true, back: false })}
+  ${header('', { brand: true, back: 'contextual' })}
   <div class="content" style="padding-top:0">
     <div id="home-fixe" style="position:sticky;top:calc(58px + var(--safe-t));z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
       ${adsBandHtml(topZone)}
@@ -628,7 +773,7 @@ routes.missions = async () => {
       ${m.urgence ? '<div class="small" style="color:var(--danger);font-weight:700;margin-top:6px">🔥 Urgent</div>' : ''}
     </div>`;
   $app.innerHTML = `
-  ${header(isPro ? 'Demandes & Missions' : 'Mes demandes', { back: false })}
+  ${header(isPro ? 'Demandes & Missions' : 'Mes demandes', { back: 'contextual' })}
   <div class="content">
     ${isPro ? `<div class="tabs">
       <button class="tab ${tab === 'client' ? 'on' : ''}" onclick="A.mTab('client')">Mes demandes (client)</button>
@@ -918,7 +1063,7 @@ routes.messages = async () => {
   let convs = [];
   try { convs = await api('/conversations'); } catch (e) { toast(e.message, 'err'); }
   $app.innerHTML = `
-  ${header('Messages', { back: false })}
+  ${header('Messages', { back: 'contextual' })}
   <div class="content">
     ${convs.length ? convs.map(c => `
       <div class="card tap" onclick="nav('#/chat/${c.id}')"><div class="row">
@@ -956,7 +1101,7 @@ routes.account = async () => {
   try { USER = await api('/me'); } catch { }
   const statut = USER.pro_status === 'approved' ? 'Client • Professionnel' : 'Client';
   $app.innerHTML = `
-  ${header('Mon compte', { back: false })}
+  ${header('Mon compte', { back: 'contextual' })}
   <div class="content">
     <div class="card"><div class="row">
       ${avatar(USER, 'lg')}
@@ -2096,7 +2241,7 @@ const A = {
       const r = await api('/missions', { method: 'POST', body: { ...REQ.draft, provider_type, duplicate_confirmed: !!duplicate_confirmed } });
       closeModal(); delete REQ.draft;
       toast('Demande envoyée ! Recherche de prestataires en cours…', 'ok');
-      navStack = ['#/home', '#/missions']; nav('#/mission/' + r.id);
+      navStack = ['#/home', '#/missions']; navCursor = 1; currentHash = '#/missions'; nav('#/mission/' + r.id);
     } catch (err) {
       if (err.status === 409 && err.data && err.data.duplicate && !duplicate_confirmed) {
         openModal(`<h3>Demande semblable détectée</h3><p class="small muted">Une demande récente de ce service existe déjà. Souhaitez-vous tout de même créer une demande indépendante ?</p><button class="btn" onclick="A.sendRequestWithProvider('${provider_type}',true)">Créer quand même</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
@@ -2775,6 +2920,9 @@ function maintenanceScreen() {
 }
 
 function render() {
+  // Un rendu complet remplace l’écran : aucun brouillon n’y survit implicitement.
+  // Les écrans de formulaire réarment leur protection une fois leurs champs affichés.
+  resetDraftGuard();
   currentChat = null;
   currentSupport = null;
   const h = (location.hash || '#/home').slice(2);
@@ -2784,7 +2932,9 @@ function render() {
   if (!TOKEN && !['login', 'register'].includes(route)) { location.hash = '#/login'; return; }
   if (USER && USER.must_change_password) { setTimeout(forcePasswordModal, 50); }
   const fn = routes[route] || routes.home;
-  Promise.resolve(fn(param)).catch(e => {
+  Promise.resolve(fn(param)).then(() => {
+    if (normalHash(location.hash) === currentHash && pageNeedsDraftProtection(route)) armDraftProtection(document.getElementById('app'), route, true);
+  }).catch(e => {
     $app.innerHTML = header('Erreur') + `<div class="content">${emptyState('⚠️', e.message || 'Une erreur est survenue.')}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home');
   });
   window.scrollTo(0, 0);
@@ -2822,7 +2972,7 @@ function render() {
     } catch { TOKEN = null; localStorage.removeItem('ks_token'); }
   }
   if (!location.hash) location.hash = TOKEN ? '#/home' : '#/login';
-  navStack = [location.hash];
+  currentHash = normalHash(location.hash); navStack = [currentHash]; navCursor = 0;
   const releasedBeforeBoot = splashReleased;
   const splashWait = Math.max(0, 3000 - (Date.now() - splashStartedAt));
   if (!splashReleased && splashWait) await new Promise(resolve => setTimeout(resolve, splashWait));

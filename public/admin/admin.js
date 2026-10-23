@@ -7,6 +7,10 @@ let TOKEN = localStorage.getItem('ks_admin_token') || null;
 let STATS = {};
 let ME = null; // compte connecté : { role, perms: [...] }
 let VIEW = location.hash.replace('#', '') || 'dashboard';
+let ADMIN_STACK = [VIEW], ADMIN_CURSOR = 0, ADMIN_CURRENT = VIEW;
+let ADMIN_ALLOW_ONCE = false, ADMIN_PENDING_MOVE = 0, ADMIN_RESTORING = false, ADMIN_CONFIRM_MOVE = null;
+let ADMIN_DIRTY = { enabled:false, dirty:false, modalDirty:false };
+let ADMIN_WRITES = 0;
 const ROLE_LB = { pdg: '👑 PDG', admin: 'Administrateur', gestionnaire: 'Gestionnaire', agent: 'Agent', user: 'Utilisateur' };
 function can(k) { return ME && (ME.role === 'pdg' || (ME.perms || []).includes(k)); }
 
@@ -21,20 +25,24 @@ async function api(path, opts = {}) {
   const headers = {};
   if (opts.body) headers['Content-Type'] = 'application/json';
   if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-  let res;
-  try { res = await fetch('/api' + path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined }); }
-  catch { throw new Error('Connexion impossible. Vérifiez votre connexion.'); }
-  let data = {};
-  try { data = await res.json(); } catch { }
-  if (!res.ok) {
-    if (res.status === 401) { TOKEN = null; localStorage.removeItem('ks_admin_token'); renderLogin(); }
-    throw new Error(data.error || 'Erreur serveur.');
-  }
-  return data;
+  const writing=['POST','PUT','PATCH','DELETE'].includes(String(opts.method||'GET').toUpperCase()); if(writing)ADMIN_WRITES++;
+  try {
+    let res;
+    try { res = await fetch('/api' + path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined }); }
+    catch { throw new Error('Connexion impossible. Vérifiez votre connexion.'); }
+    let data = {}; try { data = await res.json(); } catch { }
+    if (!res.ok) { if (res.status === 401) { TOKEN = null; localStorage.removeItem('ks_admin_token'); renderLogin(); } throw new Error(data.error || 'Erreur serveur.'); }
+    return data;
+  } finally { if(writing) ADMIN_WRITES=Math.max(0,ADMIN_WRITES-1); }
 }
-
-function openModal(html) { closeModal(); const bg = document.createElement('div'); bg.className = 'modal-bg'; bg.id = 'modal'; bg.innerHTML = `<div class="modal">${html}</div>`; bg.onclick = e => { if (e.target === bg) closeModal(); }; document.body.appendChild(bg); }
-function closeModal() { if (window._supportPoll) { clearInterval(window._supportPoll); window._supportPoll = null; } const m = document.getElementById('modal'); if (m) m.remove(); }
+function adminResetDirty(){ ADMIN_DIRTY={enabled:false,dirty:false,modalDirty:false}; }
+function adminArmDraft(root, reset){ if(reset)adminResetDirty(); const zone=root||root; if(!zone)return; const controls=zone.querySelectorAll('input,textarea,select'); if(!controls.length)return; ADMIN_DIRTY.enabled=true; controls.forEach(el=>{ if(el.disabled||el.type==='hidden'||el.type==='button'||el.type==='submit'||el.id==='gs-q'||el.dataset.adminDraftBound)return; el.dataset.adminDraftBound='1'; const changed=()=>{ADMIN_DIRTY.dirty=true;if(el.closest('#modal'))ADMIN_DIRTY.modalDirty=true;};el.addEventListener('input',changed,{passive:true});el.addEventListener('change',changed,{passive:true}); }); }
+function adminForceCloseModal(){ if(window._supportPoll){clearInterval(window._supportPoll);window._supportPoll=null;}const m=document.getElementById('modal');if(m)m.remove();ADMIN_DIRTY.modalDirty=false; }
+function adminLeaveConfirm(action){ if(document.getElementById('admin-leave-confirm'))return; const bg=document.createElement('div');bg.className='modal-bg';bg.id='admin-leave-confirm';bg.style.zIndex='2000';bg.innerHTML=`<div class="modal"><h3>Modifications non enregistrées</h3><p class="small">Vous avez des modifications non enregistrées. Voulez-vous quitter cette page ?</p><div class="btn-row"><button class="btn sec" id="admin-leave-stay">Continuer la modification</button><button class="btn warn" id="admin-leave-drop">Quitter sans enregistrer</button></div></div>`;document.body.appendChild(bg);document.getElementById('admin-leave-stay').onclick=()=>bg.remove();document.getElementById('admin-leave-drop').onclick=()=>{bg.remove();adminResetDirty();action();}; }
+function adminWithLeave(action){ if(ADMIN_WRITES){toast('Enregistrement en cours : veuillez patienter avant de revenir.','err');return;} if(ADMIN_DIRTY.enabled&&ADMIN_DIRTY.dirty){adminLeaveConfirm(action);return;}action(); }
+function adminCloseAttempt(){if(ADMIN_DIRTY.modalDirty)adminLeaveConfirm(()=>adminForceCloseModal());else adminForceCloseModal();}
+function openModal(html) { adminForceCloseModal(); const bg = document.createElement('div'); bg.className = 'modal-bg'; bg.id = 'modal'; bg.innerHTML = `<div class="modal">${html}</div>`; bg.onclick = e => { if (e.target === bg) adminCloseAttempt(); }; document.body.appendChild(bg); adminArmDraft(bg,false); }
+function closeModal() { adminForceCloseModal(); }
 
 /* ---------- Connexion ---------- */
 function renderLogin() {
@@ -96,10 +104,13 @@ function shell(content) {
       <button onclick="adminLogout()">🚪 Se déconnecter</button>
     </div>
     <div class="main">
-      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+      <div class="admin-topbar">
+        ${ADMIN_CURSOR > 0 ? `<button class="btn sec admin-back" onclick="adminBack()" aria-label="Retour à l’écran précédent">← Retour</button>` : ''}
+        <div style="display:flex;gap:8px;flex:1;align-items:center">
         <input id="gs-q" style="flex:1;max-width:620px;padding:10px 14px;border:1.5px solid #cfe0dd;border-radius:10px;font-size:14px"
           placeholder="🔎 Rechercher partout : nom, téléphone, e-mail, code KP, service, mission, paiement…" value="${esc(sessionStorage.getItem('adm_gs') || '')}">
         <button class="btn sm" onclick="A.gsGo()">Rechercher</button>
+        </div>
       </div>
       ${content}
     </div>
@@ -108,9 +119,18 @@ function shell(content) {
   const gq = document.getElementById('gs-q');
   if (gq) gq.addEventListener('keydown', e => { if (e.key === 'Enter') A.gsGo(); });
 }
-function go(v) { VIEW = v; location.hash = v; render(); }
-function adminLogout() { TOKEN = null; localStorage.removeItem('ks_admin_token'); renderLogin(); }
-window.go = go; window.adminLogout = adminLogout; window.closeModal = closeModal;
+function adminCommit(view){
+  if(view===ADMIN_CURRENT)return;
+  if(ADMIN_PENDING_MOVE){const expect=ADMIN_CURSOR+ADMIN_PENDING_MOVE; if(ADMIN_STACK[expect]===view)ADMIN_CURSOR=expect;else {const f=ADMIN_STACK.lastIndexOf(view);ADMIN_CURSOR=f>=0?f:Math.max(0,expect);} ADMIN_PENDING_MOVE=0;}
+  else if(ADMIN_STACK[ADMIN_CURSOR-1]===view)ADMIN_CURSOR--;
+  else if(ADMIN_STACK[ADMIN_CURSOR+1]===view)ADMIN_CURSOR++;
+  else {ADMIN_STACK=ADMIN_STACK.slice(0,ADMIN_CURSOR+1);ADMIN_STACK.push(view);ADMIN_CURSOR=ADMIN_STACK.length-1;}
+  ADMIN_CURRENT=view;VIEW=view;adminResetDirty();render();
+}
+function go(v) { if(v===ADMIN_CURRENT)return; adminWithLeave(()=>{ADMIN_ALLOW_ONCE=true;adminForceCloseModal();location.hash=v;}); }
+function adminBack(){ const m=document.getElementById('modal');if(m){adminCloseAttempt();return;}adminWithLeave(()=>{if(ADMIN_CURSOR>0){ADMIN_ALLOW_ONCE=true;ADMIN_PENDING_MOVE=-1;history.back();}else toast('Vous êtes déjà sur le premier écran de cette navigation.','ok');}); }
+function adminLogout() { TOKEN = null; localStorage.removeItem('ks_admin_token'); adminResetDirty(); renderLogin(); }
+window.go = go; window.adminBack = adminBack; window.adminLogout = adminLogout; window.closeModal = closeModal;
 
 const views = {};
 
@@ -2198,6 +2218,8 @@ window.A = A;
 
 /* ---------- Rendu ---------- */
 async function render() {
+  // Un rendu complet remplace la vue : seules les modifications encore présentes à l’écran sont protégées ensuite.
+  adminResetDirty();
   if (!TOKEN) { renderLogin(); return; }
   try {
     if (!ME) ME = await api('/me');
@@ -2206,8 +2228,22 @@ async function render() {
     document.body.style.zoom = f === 16 ? '' : String(f / 16);
   } catch (e) { return; }
   const fn = views[VIEW] || views.dashboard;
-  try { await fn(); } catch (e) { shell(`<h1>Erreur</h1><div class="panel">${esc(e.message)}<br><button class="btn" style="margin-top:10px" onclick="render()">Réessayer</button></div>`); }
+  try { await fn(); if(['settings','commerce','estimates','catalog','questions','rules','maintenance','prooptions','staff','ads'].includes(VIEW)) adminArmDraft(document.getElementById('root'),true); }
+  catch (e) { shell(`<h1>Erreur</h1><div class="panel">${esc(e.message)}<br><button class="btn" style="margin-top:10px" onclick="render()">Réessayer</button></div>`); }
 }
 window.render = render;
-window.addEventListener('hashchange', () => { VIEW = location.hash.replace('#', '') || 'dashboard'; render(); });
+// Balayage arrière tactile du tableau de bord : bord gauche uniquement, sans interférer avec les champs/tableaux.
+let adminTouchX=null, adminTouchY=null, adminTouchBlocked=false, adminTouchAt=0;
+const adminIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+function adminGestureBlocked(target){return !!(target&&target.closest&&target.closest('input,textarea,select,button,a,table,.tabs,[data-horizontal-scroll]'));}
+document.addEventListener('touchstart',e=>{if(e.touches.length!==1)return;const t=e.touches[0];adminTouchX=t.clientX;adminTouchY=t.clientY;adminTouchAt=Date.now();adminTouchBlocked=adminGestureBlocked(e.target);},{passive:true});
+document.addEventListener('touchcancel',()=>{adminTouchX=null;adminTouchBlocked=false;},{passive:true});
+document.addEventListener('touchend',e=>{if(adminTouchX===null)return;const t=e.changedTouches[0],dx=t.clientX-adminTouchX,dy=t.clientY-adminTouchY,x=adminTouchX,elapsed=Date.now()-adminTouchAt;adminTouchX=null;if(adminIOS||adminTouchBlocked||x>44||elapsed>900||dx<78||Math.abs(dy)>Math.min(56,dx*.45))return;adminBack();},{passive:true});
+window.addEventListener('hashchange', () => {
+  const view=location.hash.replace('#','')||'dashboard';
+  if(ADMIN_RESTORING && view===ADMIN_CURRENT){ADMIN_RESTORING=false;const p=ADMIN_CONFIRM_MOVE;ADMIN_CONFIRM_MOVE=null;if(p)adminLeaveConfirm(()=>{ADMIN_ALLOW_ONCE=true;ADMIN_PENDING_MOVE=p;history.go(p);});return;}
+  if(view===ADMIN_CURRENT)return;
+  if(!ADMIN_ALLOW_ONCE&&ADMIN_DIRTY.enabled&&ADMIN_DIRTY.dirty&&!ADMIN_WRITES){const delta=ADMIN_STACK[ADMIN_CURSOR-1]===view?-1:(ADMIN_STACK[ADMIN_CURSOR+1]===view?1:0);if(delta){ADMIN_CONFIRM_MOVE=delta;ADMIN_RESTORING=true;history.go(-delta);return;}const target=view;ADMIN_ALLOW_ONCE=true;location.hash=ADMIN_CURRENT;adminLeaveConfirm(()=>go(target));return;}
+  ADMIN_ALLOW_ONCE=false;adminCommit(view);
+});
 render();
