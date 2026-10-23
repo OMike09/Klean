@@ -74,7 +74,7 @@ const MENU = [
   ['MISSIONS', [['missions', '🧰 Demandes & missions', null, 'missions'], ['payments', '💰 Paiements & commissions', null, 'paiements'], ['finances', '📈 Finances & revenus', null, 'paiements']]],
   ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['support', '📩 Messages Klean Services', null, 'communication'], ['broadcast', '📨 Messages généraux', null, 'communication']]],
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
-  ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Je cherche un job', null, 'contenu'], ['ecole', '🏫 École & famille', null, 'contenu'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
+  ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Trouver ou proposer un job', null, 'contenu'], ['ecole', '🏫 École & famille', null, 'contenu'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
   ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
   ['CONFIGURATION', [['estimates', '🧠 Tarifs & estimations intelligentes', null, 'PDG'], ['commerce', '💰 Paramètres commerciaux', null, 'parametres'], ['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
 ];
@@ -939,32 +939,19 @@ views.files = async () => {
 
 /* ---------- Contenu : avis, jobs, école ---------- */
 views.avis = async () => {
-  const list = await api('/admin/avis-recherche');
+  const [list,categories] = await Promise.all([api('/admin/avis-recherche'),api('/admin/avis-categories')]);
+  window._avisCategories=categories;
   shell(`<h1>📢 Avis de recherche</h1>
-  <div class="panel"><table><tr><th></th><th>Nom</th><th>Publié par</th><th>Détails</th><th>Contact</th><th>Statut</th><th>Actions</th></tr>
-  ${list.map(a => `<tr>
-    <td>${a.photo ? `<img class="thumb" src="${esc(mediaUrl(a.photo))}">` : '—'}</td>
-    <td><b>${esc(a.nom)}</b></td><td class="small">${esc(a.publisher)}<br>${esc(a.phone)}</td>
-    <td class="small">${esc([a.date_disparition, a.dernier_lieu, a.description_physique].filter(Boolean).join(' • '))}</td>
-    <td class="small">${esc(a.contact)}</td>
-    <td>${a.status === 'approved' ? '<span class="pill ok">Publié</span>' : a.status === 'pending' ? '<span class="pill warn">En attente</span>' : a.status === 'resolved' ? '<span class="pill info">Résolu</span>' : '<span class="pill bad">Refusé</span>'}</td>
-    <td>
-      ${a.status === 'pending' ? `<button class="btn sm" onclick="A.avisStatus(${a.id},'approved')">Publier</button><button class="btn sm warn" onclick="A.avisStatus(${a.id},'rejected')">Refuser</button>` : ''}
-      ${a.status === 'approved' ? `<button class="btn sm sec" onclick="A.avisStatus(${a.id},'resolved')">Marquer résolu</button>` : ''}
-    </td></tr>`).join('')}
-  ${!list.length ? '<tr><td colspan="7" class="muted">Aucun avis de recherche.</td></tr>' : ''}</table></div>`);
+  <div class="panel"><div class="frow" style="justify-content:space-between"><div><b>Catégories configurables</b><div class="small muted">Seules les catégories actives sont proposées dans l’application.</div></div><button class="btn" onclick="A.avisCategoryForm()">＋ Ajouter une catégorie</button></div>
+  <table><tr><th>Catégorie</th><th>Description</th><th>Ordre</th><th>État</th><th>Action</th></tr>${categories.map(c=>`<tr><td><b>${esc(c.name)}</b></td><td class="small">${esc(c.description||'')}</td><td>${c.sort}</td><td>${c.active?'<span class="pill ok">Active</span>':'<span class="pill bad">Inactive</span>'}</td><td><button class="btn sm sec" onclick="A.avisCategoryForm(${c.id})">Modifier</button> <button class="btn sm ${c.active?'warn':''}" onclick="A.avisCategoryState(${c.id},${c.active?0:1})">${c.active?'Désactiver':'Activer'}</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucune catégorie.</td></tr>'}</table></div>
+  <div class="panel"><h2>Publications à modérer</h2><table><tr><th></th><th>Catégorie / intitulé</th><th>Publié par</th><th>Détails</th><th>Contact</th><th>Statut</th><th>Actions</th></tr>
+  ${list.map(a => `<tr><td>${a.photo ? `<img class="thumb" src="${esc(mediaUrl(a.photo))}">` : '—'}</td><td><span class="small muted">${esc(a.category_name||'Sans catégorie')}</span><br><b>${esc(a.nom)}</b></td><td class="small">${esc(a.publisher)}<br>${esc(a.phone)}</td><td class="small">${esc([a.city,a.dernier_lieu,a.description].filter(Boolean).join(' • '))}</td><td class="small">${esc(a.contact)}</td><td>${a.status==='approved'?'<span class="pill ok">Publié</span>':a.status==='pending'?'<span class="pill warn">En attente</span>':a.status==='resolved'?'<span class="pill info">Résolu</span>':'<span class="pill bad">Refusé</span>'}</td><td>${a.status==='pending'?`<button class="btn sm" onclick="A.avisStatus(${a.id},'approved')">Publier</button><button class="btn sm warn" onclick="A.avisStatus(${a.id},'rejected')">Refuser</button>`:''}${a.status==='approved'?`<button class="btn sm sec" onclick="A.avisStatus(${a.id},'resolved')">Marquer résolu</button>`:''}</td></tr>`).join('')}${!list.length?'<tr><td colspan="7" class="muted">Aucun avis de recherche.</td></tr>':''}</table></div>`);
 };
 
 views.jobs = async () => {
-  const list = await api('/admin/jobs');
-  shell(`<h1>💼 Je cherche un job</h1>
-  <div class="panel"><table><tr><th>Métier</th><th>Publié par</th><th>Détails</th><th>Contact</th><th>Statut</th><th>Actions</th></tr>
-  ${list.map(j => `<tr><td><b>${esc(j.metier)}</b></td><td class="small">${esc(j.publisher)}<br>${esc(j.phone)}</td>
-    <td class="small">${esc([j.competences, j.experience, j.localisation, j.disponibilite].filter(Boolean).join(' • '))} ${j.cv ? `<a href="${esc(j.cv)}" target="_blank">📄 CV</a>` : ''}</td>
-    <td class="small">${esc(j.contact)}</td>
-    <td>${j.status === 'approved' ? '<span class="pill ok">Publié</span>' : j.status === 'pending' ? '<span class="pill warn">En attente</span>' : '<span class="pill bad">Refusé</span>'}</td>
-    <td>${j.status === 'pending' ? `<button class="btn sm" onclick="A.jobStatus(${j.id},'approved')">Publier</button><button class="btn sm warn" onclick="A.jobStatus(${j.id},'rejected')">Refuser</button>` : ''}</td></tr>`).join('')}
-  ${!list.length ? '<tr><td colspan="6" class="muted">Aucun profil.</td></tr>' : ''}</table></div>`);
+  const [offers,list] = await Promise.all([api('/admin/job-offers'),api('/admin/jobs')]);
+  shell(`<h1>💼 Trouver ou proposer un job</h1><div class="panel"><h2>Offres de job proposées</h2><table><tr><th>Poste</th><th>Publié par</th><th>Informations</th><th>Contact</th><th>Statut</th><th>Actions</th></tr>${offers.map(o=>`<tr><td><b>${esc(o.title)}</b></td><td class="small">${esc(o.publisher)}<br>${esc(o.phone)}</td><td class="small">${esc([o.skills,o.city,o.location,o.duration,o.compensation].filter(Boolean).join(' • '))}<br>${esc(o.description)}</td><td class="small">${esc(o.contact)}${o.application_method?'<br>'+esc(o.application_method):''}</td><td>${o.status==='approved'?'<span class="pill ok">Publiée</span>':o.status==='pending'?'<span class="pill warn">En attente</span>':o.status==='closed'?'<span class="pill info">Clôturée</span>':'<span class="pill bad">Refusée</span>'}</td><td>${o.status==='pending'?`<button class="btn sm" onclick="A.jobOfferStatus(${o.id},'approved')">Publier</button><button class="btn sm warn" onclick="A.jobOfferStatus(${o.id},'rejected')">Refuser</button>`:''}${o.status==='approved'?`<button class="btn sm sec" onclick="A.jobOfferStatus(${o.id},'closed')">Clôturer</button>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Aucune offre de job.</td></tr>'}</table></div>
+  <div class="panel"><h2>Profils de candidats historiques</h2><div class="small muted">Ces données et leur modération sont conservées pour compatibilité.</div><table><tr><th>Métier</th><th>Publié par</th><th>Détails</th><th>Contact</th><th>Statut</th><th>Actions</th></tr>${list.map(j=>`<tr><td><b>${esc(j.metier)}</b></td><td class="small">${esc(j.publisher)}<br>${esc(j.phone)}</td><td class="small">${esc([j.competences,j.experience,j.localisation,j.disponibilite].filter(Boolean).join(' • '))} ${j.cv?`<a href="${esc(j.cv)}" target="_blank">📄 CV</a>`:''}</td><td class="small">${esc(j.contact)}</td><td>${j.status==='approved'?'<span class="pill ok">Publié</span>':j.status==='pending'?'<span class="pill warn">En attente</span>':'<span class="pill bad">Refusé</span>'}</td><td>${j.status==='pending'?`<button class="btn sm" onclick="A.jobStatus(${j.id},'approved')">Publier</button><button class="btn sm warn" onclick="A.jobStatus(${j.id},'rejected')">Refuser</button>`:''}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Aucun profil.</td></tr>'}</table></div>`);
 };
 
 views.ecole = async () => {
@@ -1144,11 +1131,14 @@ views.settings = async () => {
     </div>
   </div>` : ''}
   <div class="panel">
-    <h2 style="margin-top:0">Urgence</h2>
+    <h2 style="margin-top:0">Urgences — configuration réelle</h2>
+    <label class="check-line"><input type="checkbox" id="st-urgavailable" ${s.urgence_assistance_enabled === '1' ? 'checked' : ''}> Assistance Klean Services disponible</label>
+    <div class="small muted" style="margin:4px 0 10px">Désactivée par défaut : aucun bouton d’alerte n’est affiché. Klean Services ne remplace jamais les secours publics.</div>
     <div class="frow"><div style="flex:1"><label>Message d'information affiché dans l'application</label><textarea id="st-urginfo">${esc(s.urgence_info || '')}</textarea></div></div>
-    <label class="small muted">Contacts d'urgence (un par ligne : Nom | Numéro)</label>
-    <textarea id="st-urgc">${contacts.map(c => c.nom + ' | ' + c.tel).join('\n')}</textarea>
-    <button class="btn" style="margin-top:8px" onclick="A.saveUrgence()">Enregistrer l'urgence</button>
+    <label class="small muted">Catégories / services (une par ligne : Nom | description)</label><textarea id="st-urgcats">${(() => { try { return JSON.parse(s.urgence_categories || '[]').map(c => c.name + (c.description ? ' | ' + c.description : '')).join('\n'); } catch { return ''; } })()}</textarea>
+    <label class="small muted">Contacts vérifiés (une par ligne : Nom | Numéro | oui). Seuls les contacts marqués « oui » sont affichés publiquement.</label>
+    <textarea id="st-urgc">${contacts.map(c => c.nom + ' | ' + c.tel + ' | ' + (c.verified ? 'oui' : 'non')).join('\n')}</textarea>
+    <button class="btn" style="margin-top:8px" onclick="A.saveUrgence()">Enregistrer la configuration d’urgence</button>
   </div>`);
 };
 
@@ -2050,6 +2040,10 @@ const A = {
   async cleanup() { try { const r = await api('/admin/files/cleanup', { method: 'POST' }); toast(`Nettoyage terminé : ${r.deleted} fichier(s) récupérables supprimé(s).`, 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async avisStatus(id, st) { try { await api(`/admin/avis-recherche/${id}/status`, { method: 'POST', body: { status: st } }); toast('Statut mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async jobStatus(id, st) { try { await api(`/admin/jobs/${id}/status`, { method: 'POST', body: { status: st } }); toast('Statut mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async jobOfferStatus(id, st) { try { await api(`/admin/job-offers/${id}/status`, { method:'POST', body:{status:st} }); toast('Statut mis à jour ✓','ok'); render(); } catch(e){toast(e.message,'err');} },
+  avisCategoryForm(id) { const c=id && window._avisCategories && window._avisCategories.find(x=>x.id===id); openModal(`<h3>${c?'Modifier':'Ajouter'} une catégorie d’avis</h3><div class="field"><label>Nom</label><input id="ac-name" value="${esc(c?c.name:'')}"></div><div class="field"><label>Description</label><textarea id="ac-desc">${esc(c?c.description:'')}</textarea></div><div class="field"><label>Ordre</label><input type="number" id="ac-sort" value="${c?c.sort:99}"></div><button class="btn" onclick="A.saveAvisCategory(${id||0},this)">Enregistrer</button>`); },
+  async saveAvisCategory(id,btn) { try { const body={name:document.getElementById('ac-name').value,description:document.getElementById('ac-desc').value,sort:document.getElementById('ac-sort').value}; await api('/admin/avis-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body}); closeModal();toast('Catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');} },
+  async avisCategoryState(id,active) { try {await api('/admin/avis-categories/'+id,{method:'PUT',body:{active}});toast('Catégorie mise à jour ✓','ok');render();}catch(e){toast(e.message,'err');} },
   async efStatus(id, st) { try { await api(`/admin/ecole-famille/${id}/status`, { method: 'POST', body: { status: st } }); render(); } catch (e) { toast(e.message, 'err'); } },
   async toggleSetting(k, v) { try { await api('/admin/settings', { method: 'PUT', body: { [k]: v } }); toast('Paramètre mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async addQuiz() {
@@ -2195,14 +2189,9 @@ const A = {
     } catch (e) { toast(e.message, 'err'); }
   },
   async saveUrgence() {
-    const contacts = document.getElementById('st-urgc').value.split('\n').map(l => {
-      const [nom, tel] = l.split('|').map(s => (s || '').trim());
-      return nom && tel ? { nom, tel } : null;
-    }).filter(Boolean);
-    try {
-      await api('/admin/settings', { method: 'PUT', body: { urgence_info: document.getElementById('st-urginfo').value, urgence_contacts: JSON.stringify(contacts) } });
-      toast('Paramètres d\u2019urgence enregistrés ✓', 'ok');
-    } catch (e) { toast(e.message, 'err'); }
+    const contacts = document.getElementById('st-urgc').value.split('\n').map(l => { const [nom,tel,verified] = l.split('|').map(s=>(s||'').trim()); return nom&&tel ? {nom,tel,verified:/^(oui|yes|true|1)$/i.test(verified||'')} : null; }).filter(Boolean);
+    const categories = document.getElementById('st-urgcats').value.split('\n').map(l => { const [name,description] = l.split('|').map(s=>(s||'').trim()); return name ? {name,description,active:true} : null; }).filter(Boolean);
+    try { await api('/admin/settings',{method:'PUT',body:{urgence_info:document.getElementById('st-urginfo').value,urgence_contacts:JSON.stringify(contacts),urgence_categories:JSON.stringify(categories),urgence_assistance_enabled:document.getElementById('st-urgavailable').checked?'1':'0'}});toast('Configuration d’urgence enregistrée ✓','ok');render(); } catch(e){toast(e.message,'err');}
   },
 };
 window.A = A;

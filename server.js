@@ -2003,33 +2003,70 @@ app.get('/api/badges', auth, (req, res) => {
 // ============================================================
 // CONTENUS : avis de recherche, jobs, école & famille, urgence
 // ============================================================
+app.get('/api/avis-recherche/categories', auth, (req,res) => {
+  res.json(frenchSort(db.prepare('SELECT * FROM search_notice_categories WHERE active=1 ORDER BY sort,id').all()));
+});
 app.get('/api/avis-recherche', auth, (req, res) => {
-  const list = db.prepare(`SELECT a.*, u.name publisher FROM avis_recherche a JOIN users u ON u.id=a.user_id
+  const q = normalize(req.query.q || ''), categoryId = Number(req.query.category_id) || null, city = String(req.query.city || '').trim();
+  let list = db.prepare(`SELECT a.*, u.name publisher, c.name category_name, c.description category_description FROM avis_recherche a
+    JOIN users u ON u.id=a.user_id LEFT JOIN search_notice_categories c ON c.id=a.category_id
     WHERE (a.status='approved' AND (a.expire_at IS NULL OR a.expire_at >= datetime('now'))) OR a.user_id=?
     ORDER BY CASE WHEN a.paid=1 AND a.formule='urgent' THEN 0 WHEN a.paid=1 AND a.formule='avant' THEN 1 ELSE 2 END, a.id DESC`).all(req.user.id);
+  if (categoryId) list = list.filter(a => Number(a.category_id) === categoryId);
+  if (city) list = list.filter(a => cityMatches(a.city || a.dernier_lieu || '', city));
+  if (q) list = list.filter(a => normalize([a.nom,a.description,a.infos,a.dernier_lieu,a.city,a.category_name].join(' ')).includes(q));
   res.json(list);
 });
 app.post('/api/avis-recherche', auth, (req, res) => {
-  const b = req.body || {};
-  if (!b.nom || !b.contact) return res.status(400).json({ error: 'Le nom et un contact sont obligatoires.' });
+  const b = req.body || {}, title = String(b.nom || b.title || '').trim().slice(0, 180), contact = String(b.contact || '').trim().slice(0, 80);
+  const description = String(b.description || '').trim().slice(0, 5000);
+  if (!title || !description || !contact) return res.status(400).json({ error: 'L’intitulé, la description et un contact sont obligatoires.' });
+  const categoryId = Number(b.category_id);
+  const category = db.prepare('SELECT * FROM search_notice_categories WHERE id=? AND active=1').get(categoryId);
+  if (!category) return res.status(400).json({ error: 'Choisissez une catégorie d’avis active.' });
+  const city = String(b.city || '').trim();
+  if (!city) return res.status(400).json({ error: 'Choisissez la ville concernée dans la liste proposée.' });
+  if (!activeCity(city)) return res.status(400).json({ error: 'Choisissez une ville active dans la liste proposée.' });
+  if (b.photo) { try { assertOwnUploadedFile(req.user, b.photo, 'photo'); } catch (e) { return res.status(400).json({ error:e.message }); } }
   // Formule : normal (gratuit ou payant selon le paramètre du PDG) | mis en avant | urgent
   let formule = ['avant', 'urgent'].includes(b.formule) ? b.formule : 'normal';
   if (formule === 'avant' && getSetting('avis_avant_enabled', '1') !== '1') formule = 'normal';
   if (formule === 'urgent' && getSetting('avis_urgent_enabled', '1') !== '1') formule = 'normal';
   const prixAvis = parseInt(getSetting('avis_prix_' + formule, '0'), 10) || 0;
-  const info = db.prepare(`INSERT INTO avis_recherche(user_id, nom, photo, description, date_disparition, heure_disparition, dernier_lieu, derniere_vue, description_physique, vetements, contact, infos, formule, paid)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(req.user.id, b.nom, b.photo || null, b.description || null, b.date_disparition || null, b.heure_disparition || null,
-         b.dernier_lieu || null, b.derniere_vue || null, b.description_physique || null, b.vetements || null, b.contact, b.infos || null,
-         formule, prixAvis === 0 ? 1 : 0);
-  if (prixAvis > 0) addTransaction({ user_id: req.user.id, kind: 'avis_recherche', ref_id: info.lastInsertRowid, label: `Avis de recherche « ${b.nom} » — formule ${formule}`, amount: prixAvis, ville: req.user.ville, categorie: formule });
-  notifyAdmins('information', 'Avis de recherche à modérer', `Publié par ${req.user.name} : ${b.nom}${prixAvis > 0 ? ` (formule ${formule} — ${prixAvis.toLocaleString('fr-FR')} FCFA à encaisser)` : ''}`, 'admin:contenu');
+  const info = db.prepare(`INSERT INTO avis_recherche(user_id, nom, photo, description, date_disparition, heure_disparition, dernier_lieu, derniere_vue, description_physique, vetements, contact, infos, category_id, city, formule, paid)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(req.user.id, title, b.photo || null, description, b.date_disparition || null, b.heure_disparition || null,
+         String(b.dernier_lieu || '').trim().slice(0,300) || null, String(b.derniere_vue || '').trim().slice(0,500) || null, String(b.description_physique || '').trim().slice(0,3000) || null, String(b.vetements || '').trim().slice(0,1000) || null, contact, String(b.infos || '').trim().slice(0,3000) || null,
+         category.id, city || null, formule, prixAvis === 0 ? 1 : 0);
+  if (prixAvis > 0) addTransaction({ user_id: req.user.id, kind: 'avis_recherche', ref_id: info.lastInsertRowid, label: `Avis de recherche « ${title} » — formule ${formule}`, amount: prixAvis, ville: city || req.user.ville, categorie: formule });
+  notifyAdmins('information', 'Avis de recherche à modérer', `Publié par ${req.user.name} : ${title}${prixAvis > 0 ? ` (formule ${formule} — ${prixAvis.toLocaleString('fr-FR')} FCFA à encaisser)` : ''}`, 'admin:contenu');
   notify(req.user.id, 'information', 'Avis de recherche envoyé', prixAvis > 0
-    ? `Réglez ${prixAvis.toLocaleString('fr-FR')} FCFA à Klean Services : la mise en avant sera appliquée après confirmation du paiement. L\u2019avis sera publié après validation.`
-    : 'Votre avis sera publié après validation par l\u2019administration.', '#/avis-recherche');
+    ? `Réglez ${prixAvis.toLocaleString('fr-FR')} FCFA à Klean Services : la mise en avant sera appliquée après confirmation du paiement. L’avis sera publié après validation.`
+    : 'Votre avis sera publié après validation par l’administration.', '#/avis-recherche');
   res.json({ ok: true, id: info.lastInsertRowid, status: 'pending', formule, prix: prixAvis });
 });
 
+// Les offres d’emploi sont distinctes des profils de candidats historiques : aucune création de compte pro n’est requise.
+app.get('/api/job-offers', auth, (req,res) => {
+  const q=normalize(req.query.q||''), city=String(req.query.city||'').trim();
+  let rows=db.prepare(`SELECT o.*,u.name publisher FROM job_offers o JOIN users u ON u.id=o.user_id
+    WHERE o.status='approved' OR o.user_id=? ORDER BY CASE o.status WHEN 'approved' THEN 0 ELSE 1 END,o.id DESC`).all(req.user.id);
+  if(city) rows=rows.filter(o=>cityMatches(o.city||o.location||'',city));
+  if(q) rows=rows.filter(o=>normalize([o.title,o.description,o.skills,o.city,o.location,o.contract_type,o.duration].join(' ')).includes(q));
+  res.json(rows);
+});
+app.post('/api/job-offers', auth, (req,res) => {
+  const b=req.body||{}, title=String(b.title||'').trim().slice(0,180), description=String(b.description||'').trim().slice(0,5000), contact=String(b.contact||req.user.phone||'').trim().slice(0,80);
+  if(!title || !description || !contact) return res.status(400).json({error:'L’intitulé, la description et un moyen de candidature sont obligatoires.'});
+  const city=String(b.city||'').trim(); if(!city) return res.status(400).json({error:'Choisissez la ville concernée dans la liste proposée.'}); if(!activeCity(city)) return res.status(400).json({error:'Choisissez une ville active dans la liste proposée.'});
+  const info=db.prepare(`INSERT INTO job_offers(user_id,title,description,skills,city,location,contract_type,duration,compensation,contact,application_method)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.id,title,description,String(b.skills||'').trim().slice(0,2000)||null,city||null,String(b.location||'').trim().slice(0,300)||null,String(b.contract_type||'').trim().slice(0,120)||null,String(b.duration||'').trim().slice(0,180)||null,String(b.compensation||'').trim().slice(0,180)||null,contact,String(b.application_method||'').trim().slice(0,500)||null);
+  notifyAdmins('information','Offre de job à modérer',`${req.user.name} propose : ${title}`,'admin:contenu');
+  notify(req.user.id,'information','Offre de job envoyée','Votre offre sera visible après validation par l’administration.','#/jobs');
+  res.status(201).json({ok:true,id:info.lastInsertRowid,status:'pending'});
+});
+
+// Profils de candidats historiques : l’API et les données sont conservées, mais l’interface les présente avec le nouveau vocabulaire.
 app.get('/api/jobs', auth, (req, res) => {
   const q = normalize(req.query.q || '');
   let list = db.prepare(`SELECT j.*, u.name publisher FROM jobs j JOIN users u ON u.id=j.user_id WHERE j.status='approved' OR j.user_id=?
@@ -2044,8 +2081,8 @@ app.post('/api/jobs', auth, (req, res) => {
   const info = db.prepare(`INSERT INTO jobs(user_id, metier, competences, experience, localisation, disponibilite, contact, cv, photo, description)
     VALUES(?,?,?,?,?,?,?,?,?,?)`)
     .run(req.user.id, b.metier, b.competences || null, b.experience || null, b.localisation || null, b.disponibilite || null, b.contact, b.cv || null, b.photo || null, b.description || null);
-  notifyAdmins('information', 'Profil « Je cherche un job » à modérer', `${req.user.name} : ${b.metier}`, 'admin:contenu');
-  notify(req.user.id, 'information', 'Profil envoyé', 'Votre profil sera visible après validation par l\u2019administration.', '#/jobs');
+  notifyAdmins('information', 'Profil candidat à modérer', `${req.user.name} : ${b.metier}`, 'admin:contenu');
+  notify(req.user.id, 'information', 'Profil candidat envoyé', 'Votre profil sera visible après validation par l’administration.', '#/jobs');
   res.json({ ok: true, id: info.lastInsertRowid, status: 'pending' });
 });
 // Mise en avant FACULTATIVE d'un profil emploi (la recherche d'emploi reste gratuite)
@@ -2081,14 +2118,25 @@ app.post('/api/ecole-famille', auth, (req, res) => {
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 
-app.get('/api/urgence/config', auth, (req, res) => {
-  res.json({ info: getSetting('urgence_info', ''), contacts: JSON.parse(getSetting('urgence_contacts', '[]')) });
-});
+function emergencyConfig() {
+  let rawContacts = [], rawCategories = [];
+  try { rawContacts = JSON.parse(getSetting('urgence_contacts', '[]')); } catch { rawContacts = []; }
+  try { rawCategories = JSON.parse(getSetting('urgence_categories', '[]')); } catch { rawCategories = []; }
+  const contacts = rawContacts.filter(c => c && c.nom && c.tel && c.verified === true).map(c => ({ nom:String(c.nom).slice(0,120), tel:String(c.tel).slice(0,60) }));
+  const categories = rawCategories.filter(c => c && c.name && c.active !== false).map(c => ({ name:String(c.name).slice(0,120), description:String(c.description||'').slice(0,300) }));
+  return { info:getSetting('urgence_info',''), contacts, categories, assistance_available:getSetting('urgence_assistance_enabled','0') === '1' };
+}
+app.get('/api/urgence/config', auth, (req, res) => res.json(emergencyConfig()));
 app.post('/api/urgence', auth, (req, res) => {
-  const { message, lat, lng } = req.body || {};
-  const info = db.prepare('INSERT INTO urgences(user_id, message, lat, lng) VALUES(?,?,?,?)').run(req.user.id, message || '', lat || null, lng || null);
-  notifyAdmins('urgence', '🚨 ALERTE URGENCE', `${req.user.name} (${req.user.phone}) a déclenché une urgence${message ? ' : ' + message : ''}.`, 'admin:securite');
-  notify(req.user.id, 'urgence', '🚨 Alerte envoyée', 'Votre alerte a été transmise à l\u2019équipe Klean Services.', '#/urgence');
+  const { message, lat, lng, category } = req.body || {}, cfg=emergencyConfig();
+  if (!cfg.assistance_available) return res.status(503).json({ error:'L’assistance d’urgence Klean Services n’est pas disponible actuellement.' });
+  const cat=String(category||'').trim();
+  if (cfg.categories.length && !cfg.categories.some(c=>c.name===cat)) return res.status(400).json({error:'Choisissez une catégorie d’assistance disponible.'});
+  const safeMessage=String(message||'').trim().slice(0,2000);
+  const label=cat ? '['+cat+'] ' : '';
+  const info = db.prepare('INSERT INTO urgences(user_id, message, lat, lng) VALUES(?,?,?,?)').run(req.user.id, label+safeMessage, lat || null, lng || null);
+  notifyAdmins('urgence', '🚨 Demande d’assistance urgente', `${req.user.name} (${req.user.phone}) a demandé une assistance${cat ? ' — '+cat : ''}${safeMessage ? ' : ' + safeMessage : ''}.`, 'admin:securite');
+  notify(req.user.id, 'urgence', 'Demande d’assistance envoyée', 'Votre demande a été transmise à l’équipe Klean Services.', '#/urgence');
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 
@@ -2467,7 +2515,7 @@ const PERM_ROUTES = [
   [/^\/frequentation/, 'frequentation'],
   [/^\/about/, 'PDG'],
   [/^\/(signalements|urgences|files|rules)/, 'securite'],
-  [/^\/(avis-recherche|jobs|ecole-famille|quiz|kdo|game-plays|quiz-sessions|shares)/, 'contenu'],
+  [/^\/(avis-recherche|avis-categories|jobs|job-offers|ecole-famille|quiz|kdo|game-plays|quiz-sessions|shares)/, 'contenu'],
   [/^\/settings/, 'parametres'],
 ];
 // Libellés lisibles pour le journal automatique
@@ -3526,7 +3574,7 @@ A.post('/about/publish', (req, res) => {
 
 A.get('/settings', (req, res) => {
   const keys = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
-    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
+    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'urgence_categories', 'urgence_assistance_enabled', 'rules_client', 'rules_pro', 'admin_font_size',
     'pro_doc_particulier', 'pro_doc_entreprise',
     'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise',
     'dispatch_initial_alert_count', 'dispatch_expand_alert_count', 'dispatch_expand_strategy', 'dispatch_reminder_seconds', 'dispatch_auto_enabled', 'dispatch_geo_enabled', 'dispatch_alert_sound', 'dispatch_max_reminders', 'dispatch_search_max_seconds', 'dispatch_allow_particulier', 'dispatch_allow_entreprise',
@@ -3537,7 +3585,7 @@ A.get('/settings', (req, res) => {
 });
 A.put('/settings', (req, res) => {
   const allowed = ['commission_rate', 'dispatch_wait_seconds', 'file_retention_days', 'payment_especes', 'payment_mobile_money',
-    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'rules_client', 'rules_pro', 'admin_font_size',
+    'quiz_enabled', 'flipfizz_enabled', 'kdo_enabled', 'quiz_audience', 'bandeau_enabled', 'bandeau_speed', 'urgence_info', 'urgence_contacts', 'urgence_categories', 'urgence_assistance_enabled', 'rules_client', 'rules_pro', 'admin_font_size',
     'pro_doc_particulier', 'pro_doc_entreprise',
     'commission_enabled', 'visibilite_enabled', 'pub_campagnes_enabled', 'pub_max_actives', 'pub_budgets', 'pub_niveaux', 'avis_prix_normal', 'avis_prix_avant', 'avis_prix_urgent', 'avis_avant_enabled', 'avis_urgent_enabled', 'avis_duree_jours', 'emploi_boost_enabled', 'emploi_prix_avant', 'emploi_prix_prioritaire', 'emploi_boost_duree_jours', 'pays', 'devise',
     'dispatch_initial_alert_count', 'dispatch_expand_alert_count', 'dispatch_expand_strategy', 'dispatch_reminder_seconds', 'dispatch_auto_enabled', 'dispatch_geo_enabled', 'dispatch_alert_sound', 'dispatch_max_reminders', 'dispatch_search_max_seconds', 'dispatch_allow_particulier', 'dispatch_allow_entreprise',
@@ -3564,6 +3612,9 @@ A.put('/settings', (req, res) => {
     if (k === 'request_image_limit') { const n=parseInt(v,10); if (isNaN(n)||n<0||n>3) return res.status(400).json({ error: 'Limite de photos invalide (0 à 3).' }); }
     if (k === 'request_audio_max_seconds') { const n=parseInt(v,10); if (isNaN(n)||n<1||n>25) return res.status(400).json({ error: 'La durée vocale doit être comprise entre 1 et 25 secondes.' }); }
     if (k === 'activity_active_minutes') { const n=parseInt(v,10); if (isNaN(n)||n<1||n>120) return res.status(400).json({ error: 'Seuil d’activité invalide (1 à 120 minutes).' }); }
+    if (k === 'urgence_assistance_enabled' && !['0','1',0,1,true,false].includes(v)) return res.status(400).json({ error: 'Disponibilité d’urgence invalide.' });
+    if (k === 'urgence_contacts') { try { const items=JSON.parse(v); if(!Array.isArray(items)||items.some(c=>!c||!String(c.nom||'').trim()||!String(c.tel||'').trim()||typeof c.verified!=='boolean')) throw new Error(); } catch { return res.status(400).json({error:'Contacts d’urgence invalides : nom, numéro et statut vérifié requis.'}); } }
+    if (k === 'urgence_categories') { try { const items=JSON.parse(v); if(!Array.isArray(items)||items.some(c=>!c||!String(c.name||'').trim())) throw new Error(); } catch { return res.status(400).json({error:'Catégories d’urgence invalides.'}); } }
     if (k === 'share_official_url' && String(v||'').trim() && !/^https:\/\//i.test(String(v).trim())) return res.status(400).json({ error: 'Le lien officiel doit commencer par https://.' });
     if (/^game_(quiz|flipfizz|kdo)_(account|share|service)$/.test(k)) { const type=k.split('_').pop(); const ok=type==='account'?['tous','clients','pros','clients_pros'].includes(v):type==='share'?['tous','lien_ouvert','inscription_acquise','sans_partage'].includes(v):['tous','realisee','non_realisee'].includes(v); if (!ok) return res.status(400).json({ error: 'Condition de jeu invalide.' }); }
     const ancienneValeur = getSetting(k);
@@ -3804,7 +3855,11 @@ A.get('/shares/stats', (req, res) => {
     recent: db.prepare(`SELECT s.clicked_at,s.detected_at,s.joined_at,u.name,u.phone FROM share_events s JOIN users u ON u.id=s.user_id ORDER BY s.id DESC LIMIT 20`).all()
   });
 });
-A.get('/avis-recherche', (req, res) => res.json(db.prepare('SELECT a.*, u.name publisher, u.phone FROM avis_recherche a JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 200').all()));
+A.get('/avis-recherche', (req, res) => res.json(db.prepare(`SELECT a.*, u.name publisher, u.phone, c.name category_name FROM avis_recherche a
+  JOIN users u ON u.id=a.user_id LEFT JOIN search_notice_categories c ON c.id=a.category_id ORDER BY a.id DESC LIMIT 200`).all()));
+A.get('/avis-categories', (req,res) => res.json(db.prepare('SELECT * FROM search_notice_categories ORDER BY sort,id').all()));
+A.post('/avis-categories', (req,res) => { const name=String(req.body&&req.body.name||'').trim().slice(0,120); if(!name)return res.status(400).json({error:'Nom de catégorie requis.'}); try{const id=db.prepare('INSERT INTO search_notice_categories(name,description,sort) VALUES(?,?,?)').run(name,String(req.body.description||'').trim().slice(0,500),Number(req.body.sort)||99).lastInsertRowid;res.status(201).json({id});}catch{res.status(409).json({error:'Cette catégorie existe déjà.'});} });
+A.put('/avis-categories/:id', (req,res) => { const b=req.body||{}; const name=b.name===undefined?null:String(b.name).trim().slice(0,120); if(name!==null&&!name)return res.status(400).json({error:'Nom de catégorie requis.'}); try { const changed=db.prepare('UPDATE search_notice_categories SET name=COALESCE(?,name),description=COALESCE(?,description),active=COALESCE(?,active),sort=COALESCE(?,sort) WHERE id=?').run(name,b.description===undefined?null:String(b.description).trim().slice(0,500),b.active??null,b.sort??null,req.params.id); if(!changed.changes)return res.status(404).json({error:'Catégorie introuvable.'});res.json({ok:true}); }catch{return res.status(409).json({error:'Cette catégorie existe déjà.'});} });
 A.post('/avis-recherche/:id/status', (req, res) => {
   const a = db.prepare('SELECT * FROM avis_recherche WHERE id=?').get(req.params.id);
   if (!a) return res.status(404).json({ error: 'Avis introuvable.' });
@@ -3817,12 +3872,21 @@ A.post('/avis-recherche/:id/status', (req, res) => {
   if (req.body.status === 'rejected') notify(a.user_id, 'information', 'Avis de recherche refusé', 'Votre avis n\u2019a pas été validé par l\u2019administration.', '#/avis-recherche');
   res.json({ ok: true });
 });
+A.get('/job-offers', (req,res) => res.json(db.prepare(`SELECT o.*,u.name publisher,u.phone FROM job_offers o JOIN users u ON u.id=o.user_id ORDER BY o.id DESC LIMIT 300`).all()));
+A.post('/job-offers/:id/status', (req,res) => {
+  const o=db.prepare('SELECT * FROM job_offers WHERE id=?').get(req.params.id); if(!o)return res.status(404).json({error:'Offre introuvable.'});
+  const status=['approved','rejected','closed'].includes(req.body.status)?req.body.status:'pending';
+  db.prepare("UPDATE job_offers SET status=?,updated_at=datetime('now') WHERE id=?").run(status,o.id);
+  if(status==='approved') notify(o.user_id,'information','Offre de job publiée ✅',`Votre offre « ${o.title} » est maintenant visible.`, '#/jobs');
+  if(status==='rejected') notify(o.user_id,'information','Offre de job refusée',`Votre offre « ${o.title} » n’a pas été validée.`, '#/jobs');
+  res.json({ok:true});
+});
 A.get('/jobs', (req, res) => res.json(db.prepare('SELECT j.*, u.name publisher, u.phone FROM jobs j JOIN users u ON u.id=j.user_id ORDER BY j.id DESC LIMIT 200').all()));
 A.post('/jobs/:id/status', (req, res) => {
   const j = db.prepare('SELECT * FROM jobs WHERE id=?').get(req.params.id);
   if (!j) return res.status(404).json({ error: 'Profil introuvable.' });
   db.prepare('UPDATE jobs SET status=? WHERE id=?').run(req.body.status, j.id);
-  if (req.body.status === 'approved') notify(j.user_id, 'information', 'Profil emploi publié ✅', 'Votre profil « Je cherche un job » est maintenant visible.', '#/jobs');
+  if (req.body.status === 'approved') notify(j.user_id, 'information', 'Profil emploi publié ✅', 'Votre profil candidat est maintenant visible.', '#/jobs');
   res.json({ ok: true });
 });
 A.get('/ecole-famille', (req, res) => res.json(db.prepare('SELECT e.*, u.name, u.phone FROM ecole_famille e JOIN users u ON u.id=e.user_id ORDER BY e.id DESC LIMIT 200').all()));

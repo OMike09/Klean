@@ -240,3 +240,13 @@ img.msg-missing{display:none}
 .live-search-results .menu-item{background:#fff;border:1px solid #e2ece9;margin:4px 0;border-radius:10px}
 .estimate-box{border-left:4px solid #dc2626;background:#fff6f6;border-radius:9px;padding:10px 11px;margin-bottom:12px}
 .estimate-box .estimate-price{color:#dc2626;font-size:18px;font-weight:800}
+
+/* COLIS 17 — Accueil, splash et accès transverses */
+/* Le splash est volontairement hors du conteneur étroit : aucun liseré blanc,
+   y compris sur tablette/ordinateur et autour des encoches iPhone. */
+.splash{position:fixed;inset:0;width:100vw;width:100dvw;height:100vh;height:100dvh;min-height:100dvh;z-index:1000;padding:max(28px,calc(24px + var(--safe-t))) max(24px,var(--safe-r)) max(28px,calc(24px + var(--safe-b))) max(24px,var(--safe-l));gap:clamp(15px,2.4vh,24px);background:#0b7a6b;background:linear-gradient(155deg,#0b7a6b 0%,#075e52 100%)}
+.splash-logo{width:clamp(128px,31vw,178px);height:clamp(128px,31vw,178px);border-radius:clamp(28px,7vw,42px)}
+.splash-name{font-size:clamp(27px,7vw,42px);line-height:1.08;letter-spacing:-.03em}.splash-tagline{font-size:clamp(16px,4.3vw,21px);line-height:1.42;max-width:min(500px,88vw)}
+.home-shortcuts{display:grid;gap:10px;margin:16px 0 4px}.home-shortcut{width:100%;border:1px solid var(--line);background:var(--card);border-radius:var(--radius);padding:14px;display:flex;align-items:center;gap:12px;text-align:left;color:var(--txt);cursor:pointer;box-shadow:0 2px 8px rgba(8,49,43,.04)}.home-shortcut>span{font-size:25px;width:34px;text-align:center}.home-shortcut div{flex:1}.home-shortcut b{display:block;font-size:15px}.home-shortcut small{display:block;color:var(--muted);font-size:12px;margin-top:2px}.home-shortcut i{font-style:normal;color:var(--p);font-size:24px}.home-shortcut.urgent{border-left:4px solid var(--danger)}
+.job-actions{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px}.job-actions .btn{flex:1;min-width:180px}.compact-card{padding:12px}.compact-card .field{margin-bottom:8px}.emergency-disclaimer{border-left:4px solid #e67e22;background:#fff8f0}.status-banner.warn{background:#fff8e6;border-color:#f0b846;color:#714700}
+@media(max-width:380px){.home-shortcut{padding:12px}.job-actions .btn{min-width:100%}.splash-logo{width:118px;height:118px}}

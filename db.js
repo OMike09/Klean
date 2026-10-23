@@ -1480,4 +1480,51 @@ for (const [key, value] of Object.entries(INTELLIGENT_SEARCH_DEFAULTS)) {
 db.prepare(`UPDATE missions SET intervention_city=(SELECT ville FROM users WHERE users.id=missions.client_id)
   WHERE (intervention_city IS NULL OR intervention_city='') AND client_id IS NOT NULL`).run();
 
+
+// ============================================================
+// ACCUEIL, EMPLOI ET AVIS DE RECHERCHE (COLIS 17)
+// Extensions non destructives : les anciens profils emploi et avis restent intacts.
+// ============================================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS search_notice_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS job_offers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  skills TEXT,
+  city TEXT,
+  location TEXT,
+  contract_type TEXT,
+  duration TEXT,
+  compensation TEXT,
+  contact TEXT NOT NULL,
+  application_method TEXT,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected | closed
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_job_offers_status_city ON job_offers(status,city,created_at);
+`);
+ensureColumn('avis_recherche', 'category_id', 'INTEGER REFERENCES search_notice_categories(id) ON DELETE SET NULL');
+ensureColumn('avis_recherche', 'city', 'TEXT');
+(function seedSearchNoticeCategories() {
+  const rows = [
+    ['Personne recherchée ou disparue', 'Pour une personne disparue, recherchée ou retrouvée.'],
+    ['Objet perdu ou retrouvé', 'Pour signaler un objet perdu, retrouvé ou recherché.'],
+    ['Autre recherche autorisée', 'Pour toute recherche autorisée par les règles de Klean Services.']
+  ];
+  const ins = db.prepare('INSERT OR IGNORE INTO search_notice_categories(name,description,sort) VALUES(?,?,?)');
+  rows.forEach((r,i) => ins.run(r[0],r[1],i+1));
+  const first = db.prepare('SELECT id FROM search_notice_categories ORDER BY sort,id LIMIT 1').get();
+  if (first) db.prepare('UPDATE avis_recherche SET category_id=? WHERE category_id IS NULL').run(first.id);
+})();
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

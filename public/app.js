@@ -41,6 +41,7 @@ window.addEventListener('focus', () => signalRealActivity('active'));
 
 /* ---------- Utilitaires ---------- */
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function normalize(s) { return String(s || '').toLocaleLowerCase('fr').normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
 // Les fichiers privés sont demandés avec la session courante : une URL /uploads connue seule ne suffit pas.
 function mediaUrl(src) {
   const s = String(src || '');
@@ -391,7 +392,6 @@ routes.home = async () => {
   try { GAMES = await api('/games/config'); } catch { }
   try { ADS = await api('/ads'); } catch { }
   const homeAds = ADS; // toutes les publicités actives sortent sur l'écran d'accueil
-  const cats = SERVICES;
   const topZone = [];
   if (MAINT.active && MAINT.scope !== 'F') topZone.push(`<div style="border-left:3px solid #e67e22;background:#fff8f0">
       <div class="bold small">🛠️ Maintenance partielle</div>
@@ -412,7 +412,6 @@ routes.home = async () => {
   <div class="content" style="padding-top:0">
     <div id="home-fixe" style="position:sticky;top:calc(58px + var(--safe-t));z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
       ${adsBandHtml(topZone)}
-      <div class="home-hero"><div>Klean Services - Tout commence par une mise en relation.</div><small>Décrivez votre besoin simplement : nous proposons les prestations correspondantes.</small></div>
       <div class="searchbar" style="margin:0 2px">
         <input type="text" id="home-q" placeholder="🔎 Décrivez votre besoin…" enterkeyhint="search" autocomplete="off">
         <button onclick="A.goSearch()" aria-label="Rechercher">🔍</button>
@@ -425,12 +424,12 @@ routes.home = async () => {
     <div class="svc-grid">
       ${POPULAIRES.map(s => `<div class="svc-card" onclick="nav('#/request/${s.id}')"><span class="ic">${esc(s.icon || '🔹')}</span><span class="nm">${esc(s.name)}</span>${prixHtml(s, true)}</div>`).join('')}
     </div>` : ''}
-    <div class="sec-title">Tous les services</div>
-    <div class="svc-grid">
-      ${cats.slice(0, 7).map(c => `<div class="svc-card" onclick="A.openCat(${c.id})"><span class="ic">${esc(c.icon || '🔹')}</span><span class="nm">${esc(c.name)}</span></div>`).join('')}
-      <div class="svc-card" onclick="nav('#/services')"><span class="ic">📋</span><span class="nm">Voir tout</span></div>
-    </div>
     <button class="btn sec mt" onclick="nav('#/services')">Voir tous les services</button>
+    <div class="home-shortcuts" aria-label="Accès rapides">
+      <button class="home-shortcut" onclick="nav('#/jobs')"><span>💼</span><div><b>Trouver ou proposer un job</b><small>Consulter les offres ou publier la vôtre</small></div><i>›</i></button>
+      <button class="home-shortcut" onclick="nav('#/avis-recherche')"><span>📢</span><div><b>Avis de recherche</b><small>Publier ou consulter un avis</small></div><i>›</i></button>
+      <button class="home-shortcut urgent" onclick="nav('#/urgence')"><span>🚨</span><div><b>Urgences</b><small>Contacts et assistance configurés</small></div><i>›</i></button>
+    </div>
     <div id="bandeau-espace"></div>
   </div><div id="bandeau-host"></div>${bottomNav('home')}`;
   updateBadges();
@@ -502,25 +501,28 @@ routes.services = async (params) => {
   let listHtml;
   if (q) {
     const out = [];
+    const seenSearch = new Set();
     CATALOGUE.forEach(c => c.services.forEach(s => {
-      if (hit(s.name) || hit(c.name) || s.taches.some(t => hit(t.name)))
-        out.push({ ...s, icon: c.icon, path: c.name });
+      if (!seenSearch.has(Number(s.id)) && (hit(s.name) || hit(c.name) || s.taches.some(t => hit(t.name)))) {
+        seenSearch.add(Number(s.id)); out.push({ ...s, icon: c.icon, path: c.name });
+      }
     }));
+    out.sort((a,b)=>String(a.name).localeCompare(String(b.name),'fr',{sensitivity:'base',numeric:true}));
     listHtml = out.length
       ? out.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')"><span class="mi-ic">${esc(s.icon || '🔹')}</span><div><div>${esc(s.name)}</div>${prixHtml(s)}<div class="muted small">${esc(s.path)}</div></div><span class="mi-arr">›</span></div>`).join('')
       : emptyState('🔍', 'Aucun service trouvé pour « ' + esc(q) + ' ».');
   } else {
-    const groups = new Map();
-    CATALOGUE.forEach(c => {
-      const key = c.grand_category_id || ('legacy-' + c.id);
-      if (!groups.has(key)) groups.set(key, { name: c.grand_category || 'Autres services', icon: c.grand_icon || '🧩', categories: [] });
-      groups.get(key).categories.push(c);
-    });
-    listHtml = [...groups.values()].map(g => `<div class="sec-title">${esc(g.icon)} ${esc(g.name)}</div>${g.categories.map(c => `
-      <div class="menu-item" onclick="nav('#/services/${c.id}')">
-        <span class="mi-ic">${esc(c.icon || '🔹')}</span><div><div style="font-weight:700">${esc(c.name)}</div>
-        <div class="muted small">${c.services.length} prestation${c.services.length > 1 ? 's' : ''}</div></div>
-        <span class="mi-arr">›</span></div>`).join('')}`).join('');
+    // Un seul catalogue central : chaque service actif une seule fois, tri A–Z français,
+    // sans distinguer accent ni casse. Les modifications PDG viennent de /catalogue.
+    const seen = new Set();
+    const all = [];
+    CATALOGUE.forEach(c => (c.services || []).forEach(s => {
+      if (!seen.has(Number(s.id))) { seen.add(Number(s.id)); all.push({ ...s, icon: s.icon || c.icon, path: [c.grand_category, c.name].filter(Boolean).join(' › ') }); }
+    }));
+    all.sort((a,b) => String(a.name).localeCompare(String(b.name), 'fr', { sensitivity:'base', numeric:true }));
+    listHtml = all.length ? `<div class="small muted mb">${all.length} service${all.length > 1 ? 's' : ''} actif${all.length > 1 ? 's' : ''}, classé${all.length > 1 ? 's' : ''} de A à Z.</div>` + all.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')">
+      <span class="mi-ic">${esc(s.icon || '🔹')}</span><div><div style="font-weight:700">${esc(s.name)}</div>${prixHtml(s)}<div class="muted small">${esc(s.path)}</div></div><span class="mi-arr">›</span></div>`).join('')
+      : emptyState('📋', 'Aucun service actif pour le moment.');
   }
 
   $app.innerHTML = `
@@ -977,9 +979,9 @@ routes.account = async () => {
       <div class="collap-head" onclick="A.collap('c-autres')">Autres services <span class="arr">›</span></div>
       <div class="collap-body">
         <div class="menu-item" onclick="nav('#/avis-recherche')"><span class="mi-ic">📢</span>Avis de recherche<span class="mi-arr">›</span></div>
-        <div class="menu-item" onclick="nav('#/jobs')"><span class="mi-ic">💼</span>Je cherche un job<span class="mi-arr">›</span></div>
+        <div class="menu-item" onclick="nav('#/jobs')"><span class="mi-ic">💼</span>Trouver ou proposer un job<span class="mi-arr">›</span></div>
         <div class="menu-item" onclick="nav('#/ecole-famille')"><span class="mi-ic">🏫</span>École & famille<span class="mi-arr">›</span></div>
-        <div class="menu-item" onclick="nav('#/urgence')"><span class="mi-ic">🚨</span>Urgence<span class="mi-arr">›</span></div>
+        <div class="menu-item" onclick="nav('#/urgence')"><span class="mi-ic">🚨</span>Urgences<span class="mi-arr">›</span></div>
       </div>
     </div>
 
@@ -1312,51 +1314,65 @@ routes.pub = async () => {
 /* ---------- Avis de recherche ---------- */
 routes['avis-recherche'] = async () => {
   if (!USER) { nav('#/login'); return; }
-  let list = [];
-  try { list = await api('/avis-recherche'); } catch (e) { toast(e.message, 'err'); }
+  const saved = JSON.parse(sessionStorage.getItem('ks_avis_filters') || '{}');
+  let list = [], categories = [];
+  try { [list, categories] = await Promise.all([api('/avis-recherche'), api('/avis-recherche/categories')]); } catch (e) { toast(e.message, 'err'); }
+  const filtered = list.filter(a => (!saved.category_id || Number(a.category_id) === Number(saved.category_id))
+    && (!saved.q || normalize([a.nom,a.description,a.infos,a.city,a.dernier_lieu,a.category_name].join(' ')).includes(normalize(saved.q)))
+    && (!saved.city || normalize([a.city,a.dernier_lieu].join(' ')).includes(normalize(saved.city))));
   $app.innerHTML = `${header('Avis de recherche')}
   <div class="content">
     <button class="btn mb" onclick="A.avisForm()">📢 Publier un avis de recherche</button>
-    ${list.length ? list.map(a => `<div class="card" ${a.paid && a.formule === 'urgent' ? 'style="border:2px solid #dc2626"' : ''}>
+    <div class="card compact-card"><div class="bold small mb">Rechercher des avis</div>
+      <div class="field"><select id="avis-cat"><option value="">Toutes les catégories</option>${categories.map(c=>`<option value="${c.id}" ${Number(saved.category_id)===Number(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="searchbar"><input type="search" id="avis-q" placeholder="Personne, objet, lieu…" value="${esc(saved.q || '')}"><button onclick="A.avisSearch()">🔍</button></div>
+      <div class="field"><input type="text" id="avis-city" readonly onclick="A.villePick('avis-city')" placeholder="📍 Filtrer par ville" value="${esc(saved.city || '')}" style="cursor:pointer;background:#fff"></div>
+      <button class="btn sec sm" onclick="A.avisSearch()">Appliquer les filtres</button></div>
+    ${filtered.length ? filtered.map(a => `<div class="card" ${a.paid && a.formule === 'urgent' ? 'style="border:2px solid #dc2626"' : ''}>
       ${a.status === 'pending' && a.publisher ? '<span class="pill warn">En attente de validation</span>' : ''}
       ${a.paid && a.formule === 'urgent' ? '<span class="pill bad">🚨 URGENT</span>' : a.paid && a.formule === 'avant' ? '<span class="pill ok">⭐ Mis en avant</span>' : ''}
-      <div class="row">${a.photo ? `<img src="${esc(mediaUrl(a.photo))}" style="width:72px;height:72px;border-radius:10px;object-fit:cover">` : ''}
-        <div class="grow"><div class="bold">${esc(a.nom)}</div>
-        ${a.date_disparition ? `<div class="small">Disparu(e) le : ${esc(a.date_disparition)} ${esc(a.heure_disparition || '')}</div>` : ''}
-        ${a.dernier_lieu ? `<div class="small">Dernier lieu connu : ${esc(a.dernier_lieu)}</div>` : ''}</div></div>
+      <div class="row">${a.photo ? `<img src="${esc(mediaUrl(a.photo))}" style="width:72px;height:72px;border-radius:10px;object-fit:cover" alt="Photo de l’avis">` : ''}
+        <div class="grow"><div class="small muted">📌 ${esc(a.category_name || 'Avis de recherche')}</div><div class="bold">${esc(a.nom)}</div>
+        ${a.city ? `<div class="small">📍 ${esc(a.city)}</div>` : a.dernier_lieu ? `<div class="small">📍 ${esc(a.dernier_lieu)}</div>` : ''}</div></div>
+      ${a.date_disparition ? `<div class="small mt">Date / période : ${esc(a.date_disparition)} ${esc(a.heure_disparition || '')}</div>` : ''}
+      ${a.description ? `<div class="small mt">${esc(a.description)}</div>` : ''}
       ${a.derniere_vue ? `<div class="small mt">Vu(e) pour la dernière fois : ${esc(a.derniere_vue)}</div>` : ''}
       ${a.description_physique ? `<div class="small mt">Description : ${esc(a.description_physique)}</div>` : ''}
       ${a.vetements ? `<div class="small">Vêtements : ${esc(a.vetements)}</div>` : ''}
-      ${a.description ? `<div class="small mt">${esc(a.description)}</div>` : ''}
       ${a.infos ? `<div class="small mt">${esc(a.infos)}</div>` : ''}
-      <div class="small mt bold">📞 Contact : <a href="tel:${esc(a.contact)}">${esc(a.contact)}</a></div>
-    </div>`).join('') : emptyState('📢', 'Aucun avis de recherche publié.')}
+      <div class="small mt bold">📞 Contact autorisé : <a href="tel:${esc(a.contact)}">${esc(a.contact)}</a></div>
+      ${a.user_id !== USER.id ? `<button class="btn ghost sm mt" onclick="A.reportNotice(${Number(a.user_id)},${Number(a.id)})">⚠️ Signaler cet avis</button>` : ''}
+    </div>`).join('') : emptyState('📢', saved.q || saved.category_id || saved.city ? 'Aucun avis ne correspond à ces filtres.' : 'Aucun avis de recherche publié.')}
   </div>${bottomNav('account')}`;
+  const q=document.getElementById('avis-q'); q.addEventListener('keydown',e=>{if(e.key==='Enter')A.avisSearch();});
 };
 
-/* ---------- Je cherche un job ---------- */
+/* ---------- Trouver ou proposer un job ---------- */
 routes.jobs = async () => {
   if (!USER) { nav('#/login'); return; }
   const q = sessionStorage.getItem('ks_jobq') || '';
-  let list = [];
-  try { list = await api('/jobs' + (q ? '?q=' + encodeURIComponent(q) : '')); } catch (e) { toast(e.message, 'err'); }
-  $app.innerHTML = `${header('Je cherche un job')}
+  let offers = [], profiles = [];
+  try { [offers, profiles] = await Promise.all([api('/job-offers' + (q ? '?q=' + encodeURIComponent(q) : '')), api('/jobs' + (q ? '?q=' + encodeURIComponent(q) : ''))]); } catch (e) { toast(e.message, 'err'); }
+  $app.innerHTML = `${header('Trouver ou proposer un job')}
   <div class="content">
-    <button class="btn mb" onclick="A.jobForm()">💼 Publier mon profil</button>
-    <div class="searchbar"><input type="text" id="job-q" placeholder="🔎 Rechercher un profil (ex : chauffeur)" value="${esc(q)}"><button onclick="A.jobSearch()">🔍</button></div>
-    ${list.length ? list.map(j => `<div class="card">
+    <div class="job-actions"><button class="btn" onclick="A.jobOfferForm()">＋ Proposer un job</button><button class="btn sec" onclick="A.jobProfileForm()">Publier mon profil candidat</button></div>
+    <div class="searchbar"><input type="search" id="job-q" placeholder="🔎 Métier, compétence, ville…" value="${esc(q)}"><button onclick="A.jobSearch()">🔍</button></div>
+    <div class="sec-title">Trouver un job — offres disponibles</div>
+    ${offers.length ? offers.map(o=>`<div class="card">
+      ${o.status === 'pending' ? '<span class="pill warn">Mon offre en attente de validation</span>' : o.status === 'rejected' ? '<span class="pill bad">Mon offre non publiée</span>' : o.status === 'closed' ? '<span class="pill info">Offre clôturée</span>' : ''}
+      <div class="bold">${esc(o.title)}</div><div class="muted small">Publié par ${esc(o.publisher)}${o.city ? ' • 📍 '+esc(o.city) : ''}</div>
+      <div class="small mt">${esc(o.description)}</div>${o.skills?`<div class="small mt"><b>Compétences :</b> ${esc(o.skills)}</div>`:''}
+      ${o.location?`<div class="small"><b>Lieu :</b> ${esc(o.location)}</div>`:''}${o.contract_type?`<div class="small"><b>Type :</b> ${esc(o.contract_type)}</div>`:''}${o.duration?`<div class="small"><b>Durée / période :</b> ${esc(o.duration)}</div>`:''}${o.compensation?`<div class="small"><b>Rémunération :</b> ${esc(o.compensation)}</div>`:''}
+      <div class="small mt bold">Candidature : <a href="tel:${esc(o.contact)}">${esc(o.contact)}</a></div>${o.application_method?`<div class="small muted">${esc(o.application_method)}</div>`:''}
+    </div>`).join('') : emptyState('💼','Aucune offre de job disponible pour le moment.')}
+    <div class="sec-title">Profils de candidats</div><div class="hint">Ces profils historiques restent disponibles pour les personnes qui souhaitent recruter directement.</div>
+    ${profiles.length ? profiles.map(j => `<div class="card">
       ${j.status === 'pending' ? '<span class="pill warn">En attente de validation</span>' : ''}
       ${j.boost && j.boost !== 'normal' && (!j.boost_until || j.boost_until >= new Date().toISOString().slice(0, 19).replace('T', ' ')) ? `<span class="pill ok">⭐ ${j.boost === 'prioritaire' ? 'Profil prioritaire' : 'Mis en avant'}</span>` : ''}
-      <div class="row">${avatar({ name: j.publisher, photo: j.photo })}
-        <div class="grow"><div class="bold">${esc(j.metier)}</div><div class="muted small">${esc(j.publisher)} • ${esc(j.localisation || '')}</div></div></div>
-      ${j.competences ? `<div class="small mt"><b>Compétences :</b> ${esc(j.competences)}</div>` : ''}
-      ${j.experience ? `<div class="small"><b>Expérience :</b> ${esc(j.experience)}</div>` : ''}
-      ${j.disponibilite ? `<div class="small"><b>Disponibilité :</b> ${esc(j.disponibilite)}</div>` : ''}
-      ${j.description ? `<div class="small mt">${esc(j.description)}</div>` : ''}
-      ${j.cv ? `<div class="small mt"><a href="${esc(j.cv)}" target="_blank">📄 Voir le CV</a></div>` : ''}
-      <div class="small mt bold">📞 <a href="tel:${esc(j.contact)}">${esc(j.contact)}</a></div>
-      ${j.user_id === USER.id && (!j.boost || j.boost === 'normal') ? `<button class="btn outline sm mt" onclick="A.jobBoost(${j.id})">⭐ Mettre mon profil en avant (facultatif)</button>` : ''}
-    </div>`).join('') : emptyState('💼', 'Aucun profil publié pour le moment.')}
+      <div class="row">${avatar({ name: j.publisher, photo: j.photo })}<div class="grow"><div class="bold">${esc(j.metier)}</div><div class="muted small">${esc(j.publisher)}${j.localisation ? ' • '+esc(j.localisation) : ''}</div></div></div>
+      ${j.competences ? `<div class="small mt"><b>Compétences :</b> ${esc(j.competences)}</div>` : ''}${j.experience ? `<div class="small"><b>Expérience :</b> ${esc(j.experience)}</div>` : ''}${j.disponibilite ? `<div class="small"><b>Disponibilité :</b> ${esc(j.disponibilite)}</div>` : ''}${j.description ? `<div class="small mt">${esc(j.description)}</div>` : ''}
+      <div class="small mt bold">📞 <a href="tel:${esc(j.contact)}">${esc(j.contact)}</a></div>${j.user_id === USER.id && (!j.boost || j.boost === 'normal') ? `<button class="btn outline sm mt" onclick="A.jobBoost(${j.id})">⭐ Mettre mon profil en avant (facultatif)</button>` : ''}
+    </div>`).join('') : emptyState('👤','Aucun profil candidat publié pour le moment.')}
   </div>${bottomNav('account')}`;
   document.getElementById('job-q').addEventListener('keydown', e => { if (e.key === 'Enter') A.jobSearch(); });
 };
@@ -1392,18 +1408,21 @@ routes['ecole-famille'] = async () => {
   };
 };
 
-/* ---------- Urgence ---------- */
+/* ---------- Urgences ---------- */
 routes.urgence = async () => {
   if (!USER) { nav('#/login'); return; }
-  let cfg = { info: '', contacts: [] };
+  let cfg = { info: '', contacts: [], categories: [], assistance_available: false };
   try { cfg = await api('/urgence/config'); } catch { }
-  $app.innerHTML = `${header('Urgence')}
+  const available = !!cfg.assistance_available;
+  $app.innerHTML = `${header('Urgences')}
   <div class="content">
-    <div class="status-banner bad">🚨 ${esc(cfg.info)}</div>
-    <div class="sec-title">Numéros utiles</div>
-    ${cfg.contacts.map(c => `<a class="menu-item" href="tel:${esc(c.tel)}" style="text-decoration:none;color:inherit"><span class="mi-ic">📞</span>${esc(c.nom)}<span class="mi-arr bold">${esc(c.tel)}</span></a>`).join('')}
-    <button class="sos-btn" onclick="A.sosConfirm()">🚨 ENVOYER UNE ALERTE</button>
-    <div class="muted small center">Une confirmation vous sera demandée pour éviter tout déclenchement accidentel.</div>
+    <div class="status-banner ${available ? 'warn' : 'bad'}"><b>${available ? 'Assistance Klean Services disponible' : 'Assistance Klean Services indisponible'}</b>${cfg.info ? `<div class="small mt">${esc(cfg.info)}</div>` : `<div class="small mt">Aucune disponibilité n’est actuellement configurée.</div>`}</div>
+    <div class="card emergency-disclaimer"><b>Information importante</b><div class="small">Klean Services ne remplace pas les secours publics. En cas de danger immédiat, contactez uniquement les services publics officiels dont le numéro est vérifié dans votre zone.</div></div>
+    <div class="sec-title">Services et catégories disponibles</div>
+    ${cfg.categories && cfg.categories.length ? cfg.categories.map(c=>`<div class="menu-item"><span class="mi-ic">🚨</span><div><b>${esc(c.name)}</b>${c.description?`<div class="small muted">${esc(c.description)}</div>`:''}</div></div>`).join('') : `<div class="hint">Aucun service d’assistance n’est configuré actuellement.</div>`}
+    <div class="sec-title">Contacts configurés et vérifiés</div>
+    ${cfg.contacts && cfg.contacts.length ? cfg.contacts.map(c => `<a class="menu-item" href="tel:${esc(c.tel)}" style="text-decoration:none;color:inherit"><span class="mi-ic">📞</span><div><b>${esc(c.nom)}</b><div class="small muted">Contact vérifié par l’administration</div></div><span class="mi-arr bold">${esc(c.tel)}</span></a>`).join('') : `<div class="hint">Aucun contact vérifié n’est disponible. Aucun numéro n’est inventé.</div>`}
+    ${available ? `<button class="sos-btn" onclick="A.sosConfirm()">🚨 DEMANDER UNE ASSISTANCE</button><div class="muted small center">Une confirmation vous sera demandée. Cette demande est envoyée à l’équipe Klean Services, pas aux secours publics.</div>` : ''}
   </div>${bottomNav('account')}`;
 };
 
@@ -2500,83 +2519,62 @@ const A = {
   },
 
   /* Avis de recherche / jobs */
+  avisSearch() {
+    sessionStorage.setItem('ks_avis_filters', JSON.stringify({
+      q: document.getElementById('avis-q').value.trim(), category_id: document.getElementById('avis-cat').value, city: document.getElementById('avis-city').value.trim()
+    })); render();
+  },
+  reportNotice(targetId, noticeId) {
+    openModal(`<h3>⚠️ Signaler cet avis</h3><div class="field"><textarea id="rep-notice-reason" placeholder="Décrivez le problème constaté…"></textarea></div><div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button><button class="btn warn" onclick="A._doReport(null,${Number(targetId)},this)">Envoyer le signalement</button></div>`);
+  },
   async avisForm() {
     REQ = { photos: [] };
-    let cc = null;
-    try { cc = await api('/commerce/config'); } catch { }
-    const av = cc ? cc.avis : null;
-    const fmls = [];
-    if (av) {
-      fmls.push({ code: 'normal', label: 'Normal', prix: av.prix_normal });
-      if (av.avant.enabled) fmls.push({ code: 'avant', label: '⭐ Mis en avant', prix: av.avant.prix });
-      if (av.urgent.enabled) fmls.push({ code: 'urgent', label: '🚨 Urgent', prix: av.urgent.prix });
-    }
+    let cc = null, categories = [];
+    try { [cc, categories] = await Promise.all([api('/commerce/config'), api('/avis-recherche/categories')]); } catch (e) { toast(e.message, 'err'); return; }
+    if (!categories.length) { toast('Aucune catégorie d’avis n’est disponible. Contactez l’administration.', 'err'); return; }
+    const av = cc ? cc.avis : null, fmls = [];
+    if (av) { fmls.push({ code:'normal',label:'Normal',prix:av.prix_normal }); if(av.avant.enabled)fmls.push({code:'avant',label:'⭐ Mis en avant',prix:av.avant.prix}); if(av.urgent.enabled)fmls.push({code:'urgent',label:'🚨 Urgent',prix:av.urgent.prix}); }
     window._avisFormule = 'normal';
-    const fmlBlock = av && fmls.length > 1 ? `
-      <div class="field"><label>Formule</label><div class="choices" id="av-fml">
-        ${fmls.map((f, i) => `<button type="button" class="chip ${i === 0 ? 'on' : ''}" onclick="A.pickChip(this,'${f.code}');window._avisFormule='${f.code}'">${f.label} — ${f.prix ? f.prix.toLocaleString('fr-FR') + ' ' + cc.devise : 'gratuit'}</button>`).join('')}
-      </div><div class="muted small">Les formules payantes placent votre avis en tête de liste après confirmation du paiement. Durée de publication : ${av.duree_jours} jours.</div></div>` : '';
+    const fmlBlock = av && fmls.length > 1 ? `<div class="field"><label>Formule</label><div class="choices" id="av-fml">${fmls.map((f,i)=>`<button type="button" class="chip ${i===0?'on':''}" onclick="A.pickChip(this,'${f.code}');window._avisFormule='${f.code}'">${f.label} — ${f.prix?f.prix.toLocaleString('fr-FR')+' '+cc.devise:'gratuit'}</button>`).join('')}</div><div class="muted small">Les formules payantes ne sont appliquées qu’après confirmation du paiement. Publication après modération.</div></div>` : '';
     openModal(`<h3>📢 Publier un avis de recherche</h3>${fmlBlock}
-      <div class="field"><label>Nom de la personne <span class="req">*</span></label><input type="text" id="av-nom"></div>
-      <div class="field"><label>Photo</label><div class="photo-strip" id="av-photo"><button class="ph-add" onclick="A.pickPhotos('av-photo')">＋</button></div>
-      <input type="file" id="file-input" accept="image/*" style="display:none"></div>
-      <div class="field"><label>Date de disparition</label><input type="date" id="av-date"></div>
-      <div class="field"><label>Heure de disparition</label><input type="text" id="av-heure" placeholder="Ex : vers 18h"></div>
-      <div class="field"><label>Dernier lieu connu</label><input type="text" id="av-lieu"></div>
-      <div class="field"><label>Vu(e) pour la dernière fois</label><input type="text" id="av-vue" placeholder="Date/heure et circonstances"></div>
-      <div class="field"><label>Description physique</label><textarea id="av-phys"></textarea></div>
-      <div class="field"><label>Vêtements portés</label><input type="text" id="av-vet"></div>
-      <div class="field"><label>Contact <span class="req">*</span></label><input type="tel" id="av-contact" value="${esc(USER.phone)}"></div>
-      <div class="field"><label>Informations supplémentaires</label><textarea id="av-infos"></textarea></div>
-      <div class="muted small mb">L'avis sera publié après validation par l'administration.</div>
-      <button class="btn" onclick="A._sendAvis(this)">Publier</button>`);
+      <div class="field"><label>Catégorie <span class="req">*</span></label><select id="av-cat">${categories.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select><div class="small muted">${esc(categories[0].description || '')}</div></div>
+      <div class="field"><label>Intitulé <span class="req">*</span></label><input type="text" id="av-nom" placeholder="Ex : Sac noir perdu, recherche de Mariam…"></div>
+      <div class="field"><label>Description <span class="req">*</span></label><textarea id="av-desc" placeholder="Décrivez précisément ce qui est recherché et les circonstances."></textarea></div>
+      <div class="field"><label>Ville / localité <span class="req">*</span></label><input type="text" id="av-city" readonly onclick="A.villePick('av-city')" placeholder="👆 Choisir une ville" style="cursor:pointer;background:#fff"></div>
+      <div class="field"><label>Photo</label><div class="photo-strip" id="av-photo"><button class="ph-add" onclick="A.pickPhotos('av-photo')">＋</button></div><input type="file" id="file-input" accept="image/*" style="display:none"></div>
+      <div class="field"><label>Date / période (facultatif)</label><input type="date" id="av-date"></div>
+      <div class="field"><label>Dernier lieu / précisions</label><input type="text" id="av-lieu"></div>
+      <div class="field"><label>Contact autorisé <span class="req">*</span></label><input type="tel" id="av-contact" value="${esc(USER.phone)}"></div>
+      <div class="field"><label>Informations complémentaires</label><textarea id="av-infos"></textarea></div>
+      <div class="muted small mb">N’indiquez que des informations dont vous êtes autorisé(e) à disposer. L’avis sera vérifié par l’administration.</div><button class="btn" onclick="A._sendAvis(this)">Envoyer pour validation</button>`);
   },
   async _sendAvis(btn) {
-    busy(btn, true);
-    try {
-      await api('/avis-recherche', {
-        method: 'POST', body: {
-          nom: document.getElementById('av-nom').value, photo: REQ.photos[0] || null,
-          date_disparition: document.getElementById('av-date').value, heure_disparition: document.getElementById('av-heure').value,
-          dernier_lieu: document.getElementById('av-lieu').value, derniere_vue: document.getElementById('av-vue').value,
-          description_physique: document.getElementById('av-phys').value, vetements: document.getElementById('av-vet').value,
-          contact: document.getElementById('av-contact').value, infos: document.getElementById('av-infos').value,
-          formule: window._avisFormule || 'normal'
-        }
-      });
-      closeModal(); toast('Avis envoyé pour validation ✓', 'ok'); render();
-    } catch (e) { toast(e.message, 'err'); busy(btn, false); }
+    busy(btn,true); try {
+      await api('/avis-recherche',{method:'POST',body:{category_id:document.getElementById('av-cat').value,nom:document.getElementById('av-nom').value,description:document.getElementById('av-desc').value,city:document.getElementById('av-city').value,photo:REQ.photos[0]||null,date_disparition:document.getElementById('av-date').value,dernier_lieu:document.getElementById('av-lieu').value,contact:document.getElementById('av-contact').value,infos:document.getElementById('av-infos').value,formule:window._avisFormule||'normal'}});
+      closeModal();toast('Avis envoyé pour validation ✓','ok');render();
+    } catch(e){toast(e.message,'err');busy(btn,false);}
   },
   jobSearch() { sessionStorage.setItem('ks_jobq', document.getElementById('job-q').value); render(); },
-  jobForm() {
-    REQ = { photos: [] };
-    openModal(`<h3>💼 Publier mon profil</h3>
-      <div class="field"><label>Métier recherché <span class="req">*</span></label><input type="text" id="jb-metier" placeholder="Ex : Chauffeur, Ménagère…"></div>
-      <div class="field"><label>Compétences</label><input type="text" id="jb-comp"></div>
-      <div class="field"><label>Expérience</label><input type="text" id="jb-exp"></div>
-      <div class="field"><label>Localisation</label><input type="text" id="jb-loc" value="${esc(USER.address || '')}"></div>
-      <div class="field"><label>Disponibilité</label><input type="text" id="jb-dispo" placeholder="Ex : Immédiate"></div>
-      <div class="field"><label>Contact <span class="req">*</span></label><input type="tel" id="jb-contact" value="${esc(USER.phone)}"></div>
-      <div class="field"><label>CV ou photo</label><div class="photo-strip" id="jb-cv"><button class="ph-add" onclick="A.pickPhotos('jb-cv')">＋</button></div>
-      <input type="file" id="file-input" accept="image/*,.pdf" style="display:none"></div>
-      <div class="field"><label>Description</label><textarea id="jb-desc"></textarea></div>
-      <div class="muted small mb">Le profil sera visible après validation par l'administration.</div>
-      <button class="btn" onclick="A._sendJob(this)">Publier</button>`);
+  jobOfferForm() {
+    openModal(`<h3>💼 Proposer un job</h3><div class="muted small mb">Votre offre est examinée avant publication.</div>
+      <div class="field"><label>Intitulé du poste <span class="req">*</span></label><input id="jo-title" placeholder="Ex : Chauffeur particulier"></div>
+      <div class="field"><label>Description <span class="req">*</span></label><textarea id="jo-description" placeholder="Missions, attentes et conditions…"></textarea></div>
+      <div class="field"><label>Compétences recherchées</label><textarea id="jo-skills" placeholder="Ex : Permis B, conduite à Abidjan…"></textarea></div>
+      <div class="field"><label>Ville <span class="req">*</span></label><input id="jo-city" readonly onclick="A.villePick('jo-city')" value="${esc(USER.ville||'')}" placeholder="👆 Choisir une ville" style="cursor:pointer;background:#fff"></div>
+      <div class="field"><label>Lieu / quartier</label><input id="jo-location" placeholder="Ex : Cocody Angré"></div>
+      <div class="field"><label>Durée / période</label><input id="jo-duration" placeholder="Ex : CDD 6 mois, à partir de novembre"></div>
+      <div class="field"><label>Rémunération</label><input id="jo-compensation" placeholder="Ex : À discuter, 150 000 FCFA / mois"></div>
+      <div class="field"><label>Contact / modalités de candidature <span class="req">*</span></label><input type="tel" id="jo-contact" value="${esc(USER.phone)}"></div>
+      <div class="field"><label>Précisions pour candidater</label><textarea id="jo-method" placeholder="Ex : Appelez entre 8h et 17h, envoyez votre CV…"></textarea></div>
+      <button class="btn" onclick="A._sendJobOffer(this)">Proposer cette offre</button>`);
   },
-  async _sendJob(btn) {
-    busy(btn, true);
-    try {
-      await api('/jobs', {
-        method: 'POST', body: {
-          metier: document.getElementById('jb-metier').value, competences: document.getElementById('jb-comp').value,
-          experience: document.getElementById('jb-exp').value, localisation: document.getElementById('jb-loc').value,
-          disponibilite: document.getElementById('jb-dispo').value, contact: document.getElementById('jb-contact').value,
-          cv: REQ.photos[0] || null, description: document.getElementById('jb-desc').value
-        }
-      });
-      closeModal(); toast('Profil envoyé pour validation ✓', 'ok'); render();
-    } catch (e) { toast(e.message, 'err'); busy(btn, false); }
+  async _sendJobOffer(btn) { busy(btn,true);try { await api('/job-offers',{method:'POST',body:{title:document.getElementById('jo-title').value,description:document.getElementById('jo-description').value,skills:document.getElementById('jo-skills').value,city:document.getElementById('jo-city').value,location:document.getElementById('jo-location').value,duration:document.getElementById('jo-duration').value,compensation:document.getElementById('jo-compensation').value,contact:document.getElementById('jo-contact').value,application_method:document.getElementById('jo-method').value}});closeModal();toast('Offre envoyée pour validation ✓','ok');render();}catch(e){toast(e.message,'err');busy(btn,false);} },
+  jobProfileForm() {
+    REQ={photos:[]};openModal(`<h3>👤 Publier mon profil candidat</h3><div class="field"><label>Métier recherché <span class="req">*</span></label><input type="text" id="jb-metier" placeholder="Ex : Chauffeur, Ménagère…"></div><div class="field"><label>Compétences</label><input type="text" id="jb-comp"></div><div class="field"><label>Expérience</label><input type="text" id="jb-exp"></div><div class="field"><label>Localisation</label><input type="text" id="jb-loc" value="${esc(USER.address||'')}"></div><div class="field"><label>Disponibilité</label><input type="text" id="jb-dispo" placeholder="Ex : Immédiate"></div><div class="field"><label>Contact <span class="req">*</span></label><input type="tel" id="jb-contact" value="${esc(USER.phone)}"></div><div class="field"><label>CV ou photo</label><div class="photo-strip" id="jb-cv"><button class="ph-add" onclick="A.pickPhotos('jb-cv')">＋</button></div><input type="file" id="file-input" accept="image/*,.pdf" style="display:none"></div><div class="field"><label>Description</label><textarea id="jb-desc"></textarea></div><div class="muted small mb">Le profil sera visible après validation par l'administration.</div><button class="btn" onclick="A._sendJob(this)">Publier mon profil</button>`);
   },
+  // Compatibilité avec les anciens liens internes : même écran, nouveau libellé.
+  jobForm() { A.jobProfileForm(); },
+  async _sendJob(btn) { busy(btn,true);try {await api('/jobs',{method:'POST',body:{metier:document.getElementById('jb-metier').value,competences:document.getElementById('jb-comp').value,experience:document.getElementById('jb-exp').value,localisation:document.getElementById('jb-loc').value,disponibilite:document.getElementById('jb-dispo').value,contact:document.getElementById('jb-contact').value,cv:REQ.photos[0]||null,description:document.getElementById('jb-desc').value}});closeModal();toast('Profil envoyé pour validation ✓','ok');render();}catch(e){toast(e.message,'err');busy(btn,false);}},
 
   /* Visibilité professionnelle */
   visSub(planId, name, price, btn) {
@@ -2651,18 +2649,19 @@ const A = {
   },
 
   /* Urgence */
-  sosConfirm() {
-    openModal(`<h3>🚨 Confirmer l'alerte</h3>
-      <p class="small">Voulez-vous vraiment envoyer une alerte d'urgence à l'équipe Klean Services ?</p>
-      <div class="field"><input type="text" id="sos-msg" placeholder="Précisez la situation (facultatif)"></div>
-      <div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button>
-      <button class="btn warn" onclick="A._doSOS(this)">🚨 OUI, ENVOYER</button></div>`);
+  async sosConfirm() {
+    let cfg; try { cfg=await api('/urgence/config'); } catch(e){ toast(e.message,'err'); return; }
+    if(!cfg.assistance_available) return toast('L’assistance Klean Services est indisponible actuellement.','err');
+    openModal(`<h3>🚨 Demander une assistance</h3><p class="small">Cette demande est transmise à l’équipe Klean Services. Elle ne contacte pas les secours publics.</p>
+      ${cfg.categories && cfg.categories.length ? `<div class="field"><label>Catégorie <span class="req">*</span></label><select id="sos-category"><option value="">Choisir…</option>${cfg.categories.map(c=>`<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}</select></div>` : ''}
+      <div class="field"><textarea id="sos-msg" placeholder="Précisez la situation (facultatif)"></textarea></div><div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button><button class="btn warn" onclick="A._doSOS(this)">Confirmer l’envoi</button></div>`);
   },
   _doSOS(btn) {
+    const cat=document.getElementById('sos-category'); if(cat && !cat.value){toast('Choisissez une catégorie d’assistance.','err');return;}
     busy(btn, true);
-    const send = (lat, lng) => api('/urgence', { method: 'POST', body: { message: document.getElementById('sos-msg').value, lat, lng } })
-      .then(() => { closeModal(); toast('🚨 Alerte envoyée ! L\u2019équipe a été prévenue.', 'ok'); })
-      .catch(e => { closeModal(); toast(e.message, 'err'); });
+    const send = (lat, lng) => api('/urgence', { method: 'POST', body: { message: document.getElementById('sos-msg').value, category: cat ? cat.value : '', lat, lng } })
+      .then(() => { closeModal(); toast('Demande d’assistance envoyée à l’équipe Klean Services.', 'ok'); })
+      .catch(e => { toast(e.message, 'err'); busy(btn,false); });
     if (navigator.geolocation) navigator.geolocation.getCurrentPosition(p => send(p.coords.latitude, p.coords.longitude), () => send(null, null), { timeout: 5000 });
     else send(null, null);
   },
