@@ -191,7 +191,7 @@ let draftGuard = { enabled: false, dirty: false, modalDirty: false, submitting: 
 
 function normalHash(hash) {
   const h = String(hash || '');
-  return h && h.startsWith('#/') ? h : (TOKEN ? '#/home' : '#/login');
+  return h && h.startsWith('#/') ? h : '#/home';
 }
 function currentRoute() { return (currentHash || normalHash(location.hash)).slice(2).split('/')[0]; }
 function hasNavigationHistory() { return navCursor > 0; }
@@ -276,6 +276,57 @@ function back() {
   });
 }
 window.back = back;
+
+
+// Consultation ouverte : seules les opérations qui écrivent, contactent ou affichent des données privées demandent une session.
+function authRequired(returnHash, message) {
+  const target = returnHash || currentHash || '#/account';
+  sessionStorage.setItem('ks_return_after_auth', target);
+  openModal(`<h3>🔐 Compte requis</h3><p class="small">${esc(message || 'Pour effectuer cette action, veuillez créer un compte ou vous connecter.')}</p>
+    <div class="btn-row"><button class="btn sec" onclick="closeModal();nav('#/login')">Se connecter</button><button class="btn" onclick="closeModal();nav('#/register')">Créer un compte</button></div>`);
+}
+function resumeAfterAuth(fallback) {
+  const target = sessionStorage.getItem('ks_return_after_auth');
+  sessionStorage.removeItem('ks_return_after_auth');
+  nav(target && target.startsWith('#/') ? target : (fallback || '#/home'));
+}
+function guestAccount() {
+  $app.innerHTML = `${header('Compte', { back: 'contextual', bell: false })}<div class="content"><div class="card center">
+    <div style="font-size:42px">👤</div><h2 style="margin:8px 0">Bienvenue sur Klean Services</h2>
+    <p class="muted small">Vous pouvez découvrir librement les services et contenus publics. Créez un compte seulement lorsque vous souhaitez envoyer une demande, publier ou accéder à votre espace personnel.</p>
+    <button class="btn" onclick="sessionStorage.setItem('ks_return_after_auth','#/account');nav('#/register')">Créer un compte</button>
+    <button class="btn sec mt" onclick="sessionStorage.setItem('ks_return_after_auth','#/account');nav('#/login')">Se connecter</button>
+  </div></div>${bottomNav('account')}`;
+}
+function publicAuthGate() {
+  $app.innerHTML = `${header('Accès au compte', { bell: false })}<div class="content"><div class="card center"><div style="font-size:38px">🔐</div><p>Pour effectuer cette action, veuillez créer un compte ou vous connecter.</p><button class="btn" onclick="nav('#/register')">Créer un compte</button><button class="btn sec mt" onclick="nav('#/login')">Se connecter</button></div></div>${bottomNav('account')}`;
+}
+
+// Installation PWA : le navigateur conserve la décision finale. Aucun succès n’est annoncé avant l’événement système appinstalled.
+let deferredInstallPrompt = null;
+function isInstalledApp() { return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; }
+function isAppleMobile() { return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+function installCtaMount() {
+  const old=document.getElementById('install-cta'); if(old)old.remove();
+  if (isInstalledApp()) return;
+  const c=document.createElement('button'); c.id='install-cta'; c.className='install-cta'; c.type='button'; c.innerHTML='<span aria-hidden="true">⇩</span><b>Installer l’application</b>';
+  c.setAttribute('aria-label','Installer l’application Klean Services'); c.onclick=installApp; document.body.appendChild(c);
+}
+async function installApp() {
+  if (isInstalledApp()) { const c=document.getElementById('install-cta'); if(c)c.remove(); return; }
+  if (deferredInstallPrompt) {
+    const prompt=deferredInstallPrompt;
+    try { await prompt.prompt(); const result=await prompt.userChoice; if(result && result.outcome==='accepted') { const c=document.getElementById('install-cta'); if(c){c.disabled=true;c.innerHTML='<span aria-hidden="true">…</span><b>Installation en cours…</b>';} setTimeout(()=>installCtaMount(),5000); } else toast('Installation annulée. Vous pourrez réessayer quand vous le souhaitez.','ok'); }
+    catch { toast('L’installation n’a pas pu être lancée. Vous pourrez réessayer.','err'); }
+    return;
+  }
+  const instructions=isAppleMobile()
+    ? 'Sur iPhone ou iPad, ouvrez ce site dans Safari, touchez le bouton Partager puis choisissez « Sur l’écran d’accueil ».'
+    : 'Votre navigateur ne propose pas l’installation directe. Ouvrez son menu puis choisissez « Installer l’application » ou « Ajouter à l’écran d’accueil ».';
+  openModal(`<h3>📲 Installer Klean Services</h3><p class="small">${instructions}</p><button class="btn sec" onclick="closeModal()">Compris</button>`);
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstallPrompt=e; if((location.hash||'#/home')==='#/home') installCtaMount(); });
+window.addEventListener('appinstalled', () => { deferredInstallPrompt=null; const c=document.getElementById('install-cta'); if(c)c.remove(); toast('Klean Services a été installée sur cet appareil.','ok'); });
 function commitHash(hash) {
   const h = normalHash(hash);
   if (!currentHash) { navStack = [h]; navCursor = 0; currentHash = h; render(); return; }
@@ -414,7 +465,7 @@ routes.login = () => {
       TOKEN = r.token; USER = r.user; localStorage.setItem('ks_token', TOKEN);
       if (USER.font_size) applyFont(USER.font_size);
       connectSSE(); refreshBadges();
-      nav(['pdg', 'admin', 'gestionnaire', 'agent'].includes(USER.role) ? '#/account' : '#/home');
+      resumeAfterAuth(['pdg', 'admin', 'gestionnaire', 'agent'].includes(USER.role) ? '#/account' : '#/home');
     } catch (err) { toast(err.message, 'err'); busy(e.target, false); }
   };
   document.getElementById('f-pass').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('b-login').click(); });
@@ -462,7 +513,7 @@ routes.register = async () => {
       TOKEN = r.token; USER = r.user; localStorage.setItem('ks_token', TOKEN); localStorage.removeItem('ks_referral_token');
       connectSSE(); refreshBadges(); signalRealActivity('active');
       toast('Bienvenue sur Klean Services !', 'ok');
-      nav('#/home');
+      resumeAfterAuth('#/home');
     } catch (err) {
       busy(e.target, false);
       if (err.message === 'Ce numéro est déjà associé à un compte.') {
@@ -553,7 +604,7 @@ routes.home = async () => {
       <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🎮 JEU</span><span class="small muted">👁️ ${gv('kdo')}</span></div>
       <div class="bold small">🎁 Kdo</div></div>`);
   $app.innerHTML = `
-  ${header('', { brand: true, back: 'contextual' })}
+  ${header('', { brand: true, back: 'contextual', bell: !!USER })}
   <div class="content" style="padding-top:0">
     <div id="home-fixe" style="position:sticky;top:calc(58px + var(--safe-t));z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
       ${adsBandHtml(topZone)}
@@ -578,6 +629,7 @@ routes.home = async () => {
     <div id="bandeau-espace"></div>
   </div><div id="bandeau-host"></div>${bottomNav('home')}`;
   updateBadges();
+  installCtaMount();
   quizLiveMount(); // le quiz actif s'affiche automatiquement, sans aucun clic
   bandeauMount();  // bandeau d'annonces défilantes en bas de l'accueil
   // comptage des vues (pub/infos/urgences + jeux affichés)
@@ -595,7 +647,7 @@ routes.home = async () => {
 routes.search = async (params) => {
   const q = decodeURIComponent(params || '');
   $app.innerHTML = `
-  ${header('Rechercher')}
+  ${header('Rechercher', { bell: !!USER })}
   <div class="content">
     <div class="searchbar">
       <input type="text" id="s-q" placeholder="🔎 Que recherchez-vous ?" value="${esc(q)}" enterkeyhint="search">
@@ -671,7 +723,7 @@ routes.services = async (params) => {
   }
 
   $app.innerHTML = `
-  ${header('Tous les services')}
+  ${header('Tous les services', { bell: !!USER })}
   <div class="content">
     ${bandePub}
     <div class="searchbar">
@@ -690,19 +742,20 @@ routes.services = async (params) => {
 /* ---------- Demande de service (formulaire adaptatif) ---------- */
 let REQ = { photos: [], audio: null, lat: null, lng: null };
 routes.request = async (serviceId) => {
-  if (!USER) { nav('#/login'); return; }
   let data;
   try { data = await api('/services/' + serviceId + '/questions'); }
   catch (e) { toast(e.message, 'err'); back(); return; }
   let selection = {}; try { selection = JSON.parse(sessionStorage.getItem('ks_search_selection') || '{}'); } catch { selection = {}; }
   if (Number(selection.service_id) !== Number(data.service.id)) selection = {};
   sessionStorage.removeItem('ks_search_selection');
-  const selectedTask = (data.taches || []).find(t => Number(t.id) === Number(selection.task_id));
-  REQ = { photos: [], audio: null, lat: USER.lat, lng: USER.lng, service_id: data.service.id, task_id: selectedTask ? selectedTask.id : null,
-    photo_limit: Math.min(3, Number(data.limits && data.limits.photos || 3)), audio_max: Math.min(25, Number(data.limits && data.limits.audio_seconds || 25)) };
-  const initialCity = USER.ville || '';
+  let savedDraft = {}; try { savedDraft = JSON.parse(sessionStorage.getItem('ks_pending_request_draft') || '{}'); } catch { savedDraft = {}; }
+  if (Number(savedDraft.service_id) !== Number(data.service.id)) savedDraft = {};
+  const selectedTask = (data.taches || []).find(t => Number(t.id) === Number(savedDraft.task_id || selection.task_id));
+  REQ = { photos: [], audio: null, lat: savedDraft.lat ?? (USER && USER.lat), lng: savedDraft.lng ?? (USER && USER.lng), service_id: data.service.id, task_id: selectedTask ? selectedTask.id : null,
+    photo_limit: Math.min(3, Number(data.limits && data.limits.photos || 3)), audio_max: Math.min(25, Number(data.limits && data.limits.audio_seconds || 25) || 25) };
+  const initialCity = savedDraft.intervention_city || (USER && USER.ville) || '';
   $app.innerHTML = `
-  ${header(data.service.name)}
+  ${header(data.service.name, { bell: !!USER })}
   <div class="content">
     <div class="card">
       <div class="small muted mb">${esc(data.service.grand_category || data.service.category || '')}${data.service.category && data.service.grand_category ? ' › ' + esc(data.service.category) : ''}${selectedTask ? ' › ' + esc(selectedTask.name) : ''}</div>
@@ -712,7 +765,7 @@ routes.request = async (serviceId) => {
       </div>
       <div id="r-estimate" class="estimate-box"><div class="muted small">Choisissez la ville réelle d’intervention pour obtenir une estimation de départ.</div></div>
       <div class="field"><label>Décrivez ce que vous souhaitez faire. Expliquez votre problème ou le travail à réaliser.</label>
-        <textarea id="r-desc" maxlength="5000" placeholder="Ex : Le robinet de ma cuisine coule depuis ce matin…">${esc(selection.query || '')}</textarea></div>
+        <textarea id="r-desc" maxlength="5000" placeholder="Ex : Le robinet de ma cuisine coule depuis ce matin…">${esc(savedDraft.description || selection.query || '')}</textarea></div>
       <div class="field"><label>Photos (facultatif) <span class="muted small">3 maximum</span></label>
         <div class="photo-strip" id="r-photos"><button class="ph-add" onclick="A.pickPhotos('r-photos')">＋</button></div>
         <input type="file" id="file-input" accept="image/*" multiple style="display:none">
@@ -722,14 +775,15 @@ routes.request = async (serviceId) => {
       </div>
       <div class="sec-title">Localisation précise</div>
       <div class="gps-row mb"><button class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Utiliser ma position GPS</button></div>
-      <div class="field"><label>Adresse / Quartier <span class="req">*</span></label><input type="text" id="r-addr" placeholder="Ex : quartier Air France, près de…" value="${esc(USER.address || '')}"></div>
+      <div class="field"><label>Adresse / Quartier <span class="req">*</span></label><input type="text" id="r-addr" placeholder="Ex : quartier Air France, près de…" value="${esc(savedDraft.address || (USER && USER.address) || '')}"></div>
       <div class="field"><label>Disponibilité souhaitée</label><select id="r-schedule" onchange="A.requestSchedule()"><option value="asap">Dès que possible</option><option value="today">Aujourd’hui</option><option value="date">À une date précise</option></select><input type="datetime-local" id="r-date" style="display:none;margin-top:8px"></div>
-      <label class="check-line"><input type="checkbox" id="r-urgent"> 🔥 C'est urgent</label>
+      <label class="check-line"><input type="checkbox" id="r-urgent" ${savedDraft.urgence ? 'checked' : ''}> 🔥 C'est urgent</label>
       <button class="btn" id="b-send">Envoyer ma demande</button>
     </div>
   </div>${bottomNav('search')}`;
   updateBadges();
   if (initialCity) A.requestEstimate();
+  if (savedDraft.schedule_type) { document.getElementById('r-schedule').value = savedDraft.schedule_type; document.getElementById('r-date').value = savedDraft.date_souhaitee || ''; A.requestSchedule(); }
   document.getElementById('b-send').onclick = async e => {
     const addr = document.getElementById('r-addr').value, interventionCity = document.getElementById('r-city').value;
     if (!interventionCity.trim()) { toast('Choisissez la ville réelle d’intervention.', 'err'); return; }
@@ -740,6 +794,13 @@ routes.request = async (serviceId) => {
       urgence: document.getElementById('r-urgent').checked, schedule_type: document.getElementById('r-schedule').value,
       date_souhaitee: document.getElementById('r-date').value || null, photos: REQ.photos, audio: REQ.audio
     };
+    if (!USER) {
+      // Les informations textuelles et de localisation sont conservées temporairement dans cette session du navigateur.
+      sessionStorage.setItem('ks_pending_request_draft', JSON.stringify(REQ.draft));
+      authRequired('#/request/' + data.service.id);
+      return;
+    }
+    sessionStorage.removeItem('ks_pending_request_draft');
     A.chooseProviderForRequest();
   };
 };
@@ -1097,7 +1158,7 @@ routes.notifications = async () => {
 
 /* ---------- Mon compte ---------- */
 routes.account = async () => {
-  if (!USER) { nav('#/login'); return; }
+  if (!USER) { guestAccount(); return; }
   try { USER = await api('/me'); } catch { }
   const statut = USER.pro_status === 'approved' ? 'Client • Professionnel' : 'Client';
   $app.innerHTML = `
@@ -1458,14 +1519,13 @@ routes.pub = async () => {
 
 /* ---------- Avis de recherche ---------- */
 routes['avis-recherche'] = async () => {
-  if (!USER) { nav('#/login'); return; }
   const saved = JSON.parse(sessionStorage.getItem('ks_avis_filters') || '{}');
   let list = [], categories = [];
   try { [list, categories] = await Promise.all([api('/avis-recherche'), api('/avis-recherche/categories')]); } catch (e) { toast(e.message, 'err'); }
   const filtered = list.filter(a => (!saved.category_id || Number(a.category_id) === Number(saved.category_id))
     && (!saved.q || normalize([a.nom,a.description,a.infos,a.city,a.dernier_lieu,a.category_name].join(' ')).includes(normalize(saved.q)))
     && (!saved.city || normalize([a.city,a.dernier_lieu].join(' ')).includes(normalize(saved.city))));
-  $app.innerHTML = `${header('Avis de recherche')}
+  $app.innerHTML = `${header('Avis de recherche', { bell: !!USER })}
   <div class="content">
     <button class="btn mb" onclick="A.avisForm()">📢 Publier un avis de recherche</button>
     <div class="card compact-card"><div class="bold small mb">Rechercher des avis</div>
@@ -1485,8 +1545,8 @@ routes['avis-recherche'] = async () => {
       ${a.description_physique ? `<div class="small mt">Description : ${esc(a.description_physique)}</div>` : ''}
       ${a.vetements ? `<div class="small">Vêtements : ${esc(a.vetements)}</div>` : ''}
       ${a.infos ? `<div class="small mt">${esc(a.infos)}</div>` : ''}
-      <div class="small mt bold">📞 Contact autorisé : <a href="tel:${esc(a.contact)}">${esc(a.contact)}</a></div>
-      ${a.user_id !== USER.id ? `<button class="btn ghost sm mt" onclick="A.reportNotice(${Number(a.user_id)},${Number(a.id)})">⚠️ Signaler cet avis</button>` : ''}
+      ${a.contact ? `<div class="small mt bold">📞 Contact autorisé : <a href="tel:${esc(a.contact)}">${esc(a.contact)}</a></div>` : `<button class="btn sec sm mt" onclick="authRequired('#/avis-recherche')">Se connecter pour contacter</button>`}
+      ${USER && a.user_id !== USER.id ? `<button class="btn ghost sm mt" onclick="A.reportNotice(${Number(a.user_id)},${Number(a.id)})">⚠️ Signaler cet avis</button>` : ''}
     </div>`).join('') : emptyState('📢', saved.q || saved.category_id || saved.city ? 'Aucun avis ne correspond à ces filtres.' : 'Aucun avis de recherche publié.')}
   </div>${bottomNav('account')}`;
   const q=document.getElementById('avis-q'); q.addEventListener('keydown',e=>{if(e.key==='Enter')A.avisSearch();});
@@ -1494,11 +1554,10 @@ routes['avis-recherche'] = async () => {
 
 /* ---------- Trouver ou proposer un job ---------- */
 routes.jobs = async () => {
-  if (!USER) { nav('#/login'); return; }
   const q = sessionStorage.getItem('ks_jobq') || '';
   let offers = [], profiles = [];
   try { [offers, profiles] = await Promise.all([api('/job-offers' + (q ? '?q=' + encodeURIComponent(q) : '')), api('/jobs' + (q ? '?q=' + encodeURIComponent(q) : ''))]); } catch (e) { toast(e.message, 'err'); }
-  $app.innerHTML = `${header('Trouver ou proposer un job')}
+  $app.innerHTML = `${header('Trouver ou proposer un job', { bell: !!USER })}
   <div class="content">
     <div class="job-actions"><button class="btn" onclick="A.jobOfferForm()">＋ Proposer un job</button><button class="btn sec" onclick="A.jobProfileForm()">Publier mon profil candidat</button></div>
     <div class="searchbar"><input type="search" id="job-q" placeholder="🔎 Métier, compétence, ville…" value="${esc(q)}"><button onclick="A.jobSearch()">🔍</button></div>
@@ -1508,7 +1567,7 @@ routes.jobs = async () => {
       <div class="bold">${esc(o.title)}</div><div class="muted small">Publié par ${esc(o.publisher)}${o.city ? ' • 📍 '+esc(o.city) : ''}</div>
       <div class="small mt">${esc(o.description)}</div>${o.skills?`<div class="small mt"><b>Compétences :</b> ${esc(o.skills)}</div>`:''}
       ${o.location?`<div class="small"><b>Lieu :</b> ${esc(o.location)}</div>`:''}${o.contract_type?`<div class="small"><b>Type :</b> ${esc(o.contract_type)}</div>`:''}${o.duration?`<div class="small"><b>Durée / période :</b> ${esc(o.duration)}</div>`:''}${o.compensation?`<div class="small"><b>Rémunération :</b> ${esc(o.compensation)}</div>`:''}
-      <div class="small mt bold">Candidature : <a href="tel:${esc(o.contact)}">${esc(o.contact)}</a></div>${o.application_method?`<div class="small muted">${esc(o.application_method)}</div>`:''}
+      ${o.contact ? `<div class="small mt bold">Candidature : <a href="tel:${esc(o.contact)}">${esc(o.contact)}</a></div>${o.application_method?`<div class="small muted">${esc(o.application_method)}</div>`:''}` : `<button class="btn sec sm mt" onclick="authRequired('#/jobs')">Se connecter pour contacter</button>`}
     </div>`).join('') : emptyState('💼','Aucune offre de job disponible pour le moment.')}
     <div class="sec-title">Profils de candidats</div><div class="hint">Ces profils historiques restent disponibles pour les personnes qui souhaitent recruter directement.</div>
     ${profiles.length ? profiles.map(j => `<div class="card">
@@ -1516,7 +1575,7 @@ routes.jobs = async () => {
       ${j.boost && j.boost !== 'normal' && (!j.boost_until || j.boost_until >= new Date().toISOString().slice(0, 19).replace('T', ' ')) ? `<span class="pill ok">⭐ ${j.boost === 'prioritaire' ? 'Profil prioritaire' : 'Mis en avant'}</span>` : ''}
       <div class="row">${avatar({ name: j.publisher, photo: j.photo })}<div class="grow"><div class="bold">${esc(j.metier)}</div><div class="muted small">${esc(j.publisher)}${j.localisation ? ' • '+esc(j.localisation) : ''}</div></div></div>
       ${j.competences ? `<div class="small mt"><b>Compétences :</b> ${esc(j.competences)}</div>` : ''}${j.experience ? `<div class="small"><b>Expérience :</b> ${esc(j.experience)}</div>` : ''}${j.disponibilite ? `<div class="small"><b>Disponibilité :</b> ${esc(j.disponibilite)}</div>` : ''}${j.description ? `<div class="small mt">${esc(j.description)}</div>` : ''}
-      <div class="small mt bold">📞 <a href="tel:${esc(j.contact)}">${esc(j.contact)}</a></div>${j.user_id === USER.id && (!j.boost || j.boost === 'normal') ? `<button class="btn outline sm mt" onclick="A.jobBoost(${j.id})">⭐ Mettre mon profil en avant (facultatif)</button>` : ''}
+      ${j.contact ? `<div class="small mt bold">📞 <a href="tel:${esc(j.contact)}">${esc(j.contact)}</a></div>` : `<button class="btn sec sm mt" onclick="authRequired('#/jobs')">Se connecter pour contacter</button>`}${USER && j.user_id === USER.id && (!j.boost || j.boost === 'normal') ? `<button class="btn outline sm mt" onclick="A.jobBoost(${j.id})">⭐ Mettre mon profil en avant (facultatif)</button>` : ''}
     </div>`).join('') : emptyState('👤','Aucun profil candidat publié pour le moment.')}
   </div>${bottomNav('account')}`;
   document.getElementById('job-q').addEventListener('keydown', e => { if (e.key === 'Enter') A.jobSearch(); });
@@ -1555,11 +1614,10 @@ routes['ecole-famille'] = async () => {
 
 /* ---------- Urgences ---------- */
 routes.urgence = async () => {
-  if (!USER) { nav('#/login'); return; }
   let cfg = { info: '', contacts: [], categories: [], assistance_available: false };
   try { cfg = await api('/urgence/config'); } catch { }
   const available = !!cfg.assistance_available;
-  $app.innerHTML = `${header('Urgences')}
+  $app.innerHTML = `${header('Urgences', { bell: !!USER })}
   <div class="content">
     <div class="status-banner ${available ? 'warn' : 'bad'}"><b>${available ? 'Assistance Klean Services disponible' : 'Assistance Klean Services indisponible'}</b>${cfg.info ? `<div class="small mt">${esc(cfg.info)}</div>` : `<div class="small mt">Aucune disponibilité n’est actuellement configurée.</div>`}</div>
     <div class="card emergency-disclaimer"><b>Information importante</b><div class="small">Klean Services ne remplace pas les secours publics. En cas de danger immédiat, contactez uniquement les services publics officiels dont le numéro est vérifié dans votre zone.</div></div>
@@ -2165,7 +2223,7 @@ const A = {
       if (USER.font_size) applyFont(USER.font_size);
       closeModal(); connectSSE(); refreshBadges();
       toast('Mot de passe modifié ✓ Vous êtes connecté.', 'ok');
-      nav('#/home');
+      resumeAfterAuth('#/home');
     } catch (e) { toast(e.message, 'err'); }
   },
   async forcePwdSave() {
@@ -2239,7 +2297,7 @@ const A = {
     if (!REQ.draft) return;
     try {
       const r = await api('/missions', { method: 'POST', body: { ...REQ.draft, provider_type, duplicate_confirmed: !!duplicate_confirmed } });
-      closeModal(); delete REQ.draft;
+      closeModal(); delete REQ.draft; sessionStorage.removeItem('ks_pending_request_draft');
       toast('Demande envoyée ! Recherche de prestataires en cours…', 'ok');
       navStack = ['#/home', '#/missions']; navCursor = 1; currentHash = '#/missions'; nav('#/mission/' + r.id);
     } catch (err) {
@@ -2338,6 +2396,7 @@ const A = {
 
   /* Photos */
   pickPhotos(zoneId) {
+    if (!USER) { authRequired(currentHash || '#/home'); return; }
     const input = document.getElementById('file-input');
     input.onchange = async () => {
       if (!input.files.length) return;
@@ -2378,6 +2437,7 @@ const A = {
   /* Audio — enregistre, arrête, puis affiche une écoute avant l'envoi de la demande. */
   _rec: null, _recChunks: [], _pendingChatAudio: null, _recTimer: null, _recLimitTimer: null, _audioMaxSec: 20,
   async toggleRec(zoneId) {
+    if (!USER) { authRequired(currentHash || '#/home'); return; }
     const btn = document.getElementById('r-rec');
     if (A._rec && A._rec.state === 'recording') { A._rec.stop(); return; }
     let stream;
@@ -2673,6 +2733,7 @@ const A = {
     openModal(`<h3>⚠️ Signaler cet avis</h3><div class="field"><textarea id="rep-notice-reason" placeholder="Décrivez le problème constaté…"></textarea></div><div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button><button class="btn warn" onclick="A._doReport(null,${Number(targetId)},this)">Envoyer le signalement</button></div>`);
   },
   async avisForm() {
+    if (!USER) { authRequired('#/avis-recherche'); return; }
     REQ = { photos: [] };
     let cc = null, categories = [];
     try { [cc, categories] = await Promise.all([api('/commerce/config'), api('/avis-recherche/categories')]); } catch (e) { toast(e.message, 'err'); return; }
@@ -2701,6 +2762,7 @@ const A = {
   },
   jobSearch() { sessionStorage.setItem('ks_jobq', document.getElementById('job-q').value); render(); },
   jobOfferForm() {
+    if (!USER) { authRequired('#/jobs'); return; }
     openModal(`<h3>💼 Proposer un job</h3><div class="muted small mb">Votre offre est examinée avant publication.</div>
       <div class="field"><label>Intitulé du poste <span class="req">*</span></label><input id="jo-title" placeholder="Ex : Chauffeur particulier"></div>
       <div class="field"><label>Description <span class="req">*</span></label><textarea id="jo-description" placeholder="Missions, attentes et conditions…"></textarea></div>
@@ -2715,6 +2777,7 @@ const A = {
   },
   async _sendJobOffer(btn) { busy(btn,true);try { await api('/job-offers',{method:'POST',body:{title:document.getElementById('jo-title').value,description:document.getElementById('jo-description').value,skills:document.getElementById('jo-skills').value,city:document.getElementById('jo-city').value,location:document.getElementById('jo-location').value,duration:document.getElementById('jo-duration').value,compensation:document.getElementById('jo-compensation').value,contact:document.getElementById('jo-contact').value,application_method:document.getElementById('jo-method').value}});closeModal();toast('Offre envoyée pour validation ✓','ok');render();}catch(e){toast(e.message,'err');busy(btn,false);} },
   jobProfileForm() {
+    if (!USER) { authRequired('#/jobs'); return; }
     REQ={photos:[]};openModal(`<h3>👤 Publier mon profil candidat</h3><div class="field"><label>Métier recherché <span class="req">*</span></label><input type="text" id="jb-metier" placeholder="Ex : Chauffeur, Ménagère…"></div><div class="field"><label>Compétences</label><input type="text" id="jb-comp"></div><div class="field"><label>Expérience</label><input type="text" id="jb-exp"></div><div class="field"><label>Localisation</label><input type="text" id="jb-loc" value="${esc(USER.address||'')}"></div><div class="field"><label>Disponibilité</label><input type="text" id="jb-dispo" placeholder="Ex : Immédiate"></div><div class="field"><label>Contact <span class="req">*</span></label><input type="tel" id="jb-contact" value="${esc(USER.phone)}"></div><div class="field"><label>CV ou photo</label><div class="photo-strip" id="jb-cv"><button class="ph-add" onclick="A.pickPhotos('jb-cv')">＋</button></div><input type="file" id="file-input" accept="image/*,.pdf" style="display:none"></div><div class="field"><label>Description</label><textarea id="jb-desc"></textarea></div><div class="muted small mb">Le profil sera visible après validation par l'administration.</div><button class="btn" onclick="A._sendJob(this)">Publier mon profil</button>`);
   },
   // Compatibilité avec les anciens liens internes : même écran, nouveau libellé.
@@ -2795,6 +2858,7 @@ const A = {
 
   /* Urgence */
   async sosConfirm() {
+    if (!USER) { authRequired('#/urgence'); return; }
     let cfg; try { cfg=await api('/urgence/config'); } catch(e){ toast(e.message,'err'); return; }
     if(!cfg.assistance_available) return toast('L’assistance Klean Services est indisponible actuellement.','err');
     openModal(`<h3>🚨 Demander une assistance</h3><p class="small">Cette demande est transmise à l’équipe Klean Services. Elle ne contacte pas les secours publics.</p>
@@ -2928,8 +2992,10 @@ function render() {
   const h = (location.hash || '#/home').slice(2);
   const [route, ...rest] = h.split('/');
   const param = rest.join('/');
+  if (route !== 'home') { const install=document.getElementById('install-cta'); if (install) install.remove(); }
   if (MAINT.active && MAINT.scope === 'F' && (!USER || USER.role !== 'pdg')) { maintenanceScreen(); return; }
-  if (!TOKEN && !['login', 'register'].includes(route)) { location.hash = '#/login'; return; }
+  const publicRoutes = ['home','search','services','request','jobs','avis-recherche','urgence','about','login','register','account'];
+  if (!TOKEN && !publicRoutes.includes(route)) { publicAuthGate(); return; }
   if (USER && USER.must_change_password) { setTimeout(forcePasswordModal, 50); }
   const fn = routes[route] || routes.home;
   Promise.resolve(fn(param)).then(() => {
@@ -2971,7 +3037,7 @@ function render() {
       connectSSE(); refreshBadges();
     } catch { TOKEN = null; localStorage.removeItem('ks_token'); }
   }
-  if (!location.hash) location.hash = TOKEN ? '#/home' : '#/login';
+  if (!location.hash) location.hash = '#/home';
   currentHash = normalHash(location.hash); navStack = [currentHash]; navCursor = 0;
   const releasedBeforeBoot = splashReleased;
   const splashWait = Math.max(0, 3000 - (Date.now() - splashStartedAt));

@@ -9,7 +9,8 @@
     "test:update15": "node test-update-15.js",
     "test:update16": "node test-update-16.js",
     "test:update17": "node test-update-17.js",
-    "test:update18": "node test-update-18.js"
+    "test:update18": "node test-update-18.js",
+    "test:update19": "node test-update-19.js"
   },
   "keywords": [],
   "author": "",

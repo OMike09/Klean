@@ -172,6 +172,19 @@ function auth(req, res, next) {
   next();
 }
 
+
+// Lecture publique : un jeton valide enrichit la réponse avec les éléments appartenant au visiteur,
+// sans jamais rendre obligatoire une session pour consulter le contenu ouvert.
+function optionalAuth(req, res, next) {
+  const token = (req.headers.authorization || '').replace('Bearer ', '') || req.query.token;
+  const payload = verifyToken(token);
+  if (!payload) return next();
+  const user = db.prepare('SELECT * FROM users WHERE id=?').get(payload.id);
+  if (!user || (user.role !== 'pdg' && (user.blocked || user.suspended || (user.disabled_until && user.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' '))))) return next();
+  req.user = user;
+  next();
+}
+
 // ---------- HIÉRARCHIE & PERMISSIONS ----------
 // PDG → Administrateurs → Gestionnaires → Agents → Utilisateurs
 const STAFF_ROLES = ['pdg', 'admin', 'gestionnaire', 'agent'];
@@ -2003,19 +2016,21 @@ app.get('/api/badges', auth, (req, res) => {
 // ============================================================
 // CONTENUS : avis de recherche, jobs, école & famille, urgence
 // ============================================================
-app.get('/api/avis-recherche/categories', auth, (req,res) => {
+app.get('/api/avis-recherche/categories', optionalAuth, (req,res) => {
   res.json(frenchSort(db.prepare('SELECT * FROM search_notice_categories WHERE active=1 ORDER BY sort,id').all()));
 });
-app.get('/api/avis-recherche', auth, (req, res) => {
+app.get('/api/avis-recherche', optionalAuth, (req, res) => {
+  const viewerId = req.user ? req.user.id : -1;
   const q = normalize(req.query.q || ''), categoryId = Number(req.query.category_id) || null, city = String(req.query.city || '').trim();
   let list = db.prepare(`SELECT a.*, u.name publisher, c.name category_name, c.description category_description FROM avis_recherche a
     JOIN users u ON u.id=a.user_id LEFT JOIN search_notice_categories c ON c.id=a.category_id
     WHERE (a.status='approved' AND (a.expire_at IS NULL OR a.expire_at >= datetime('now'))) OR a.user_id=?
-    ORDER BY CASE WHEN a.paid=1 AND a.formule='urgent' THEN 0 WHEN a.paid=1 AND a.formule='avant' THEN 1 ELSE 2 END, a.id DESC`).all(req.user.id);
+    ORDER BY CASE WHEN a.paid=1 AND a.formule='urgent' THEN 0 WHEN a.paid=1 AND a.formule='avant' THEN 1 ELSE 2 END, a.id DESC`).all(viewerId);
   if (categoryId) list = list.filter(a => Number(a.category_id) === categoryId);
   if (city) list = list.filter(a => cityMatches(a.city || a.dernier_lieu || '', city));
   if (q) list = list.filter(a => normalize([a.nom,a.description,a.infos,a.dernier_lieu,a.city,a.category_name].join(' ')).includes(q));
-  res.json(list);
+  // Les coordonnées de publication ne sont jamais exposées aux visiteurs anonymes.
+  res.json(req.user ? list : list.map(a => ({ ...a, contact: null })));
 });
 app.post('/api/avis-recherche', auth, (req, res) => {
   const b = req.body || {}, title = String(b.nom || b.title || '').trim().slice(0, 180), contact = String(b.contact || '').trim().slice(0, 80);
@@ -2047,13 +2062,14 @@ app.post('/api/avis-recherche', auth, (req, res) => {
 });
 
 // Les offres d’emploi sont distinctes des profils de candidats historiques : aucune création de compte pro n’est requise.
-app.get('/api/job-offers', auth, (req,res) => {
+app.get('/api/job-offers', optionalAuth, (req,res) => {
+  const viewerId=req.user ? req.user.id : -1;
   const q=normalize(req.query.q||''), city=String(req.query.city||'').trim();
   let rows=db.prepare(`SELECT o.*,u.name publisher FROM job_offers o JOIN users u ON u.id=o.user_id
-    WHERE o.status='approved' OR o.user_id=? ORDER BY CASE o.status WHEN 'approved' THEN 0 ELSE 1 END,o.id DESC`).all(req.user.id);
+    WHERE o.status='approved' OR o.user_id=? ORDER BY CASE o.status WHEN 'approved' THEN 0 ELSE 1 END,o.id DESC`).all(viewerId);
   if(city) rows=rows.filter(o=>cityMatches(o.city||o.location||'',city));
   if(q) rows=rows.filter(o=>normalize([o.title,o.description,o.skills,o.city,o.location,o.contract_type,o.duration].join(' ')).includes(q));
-  res.json(rows);
+  res.json(req.user ? rows : rows.map(o => ({ ...o, contact: null, application_method: null })));
 });
 app.post('/api/job-offers', auth, (req,res) => {
   const b=req.body||{}, title=String(b.title||'').trim().slice(0,180), description=String(b.description||'').trim().slice(0,5000), contact=String(b.contact||req.user.phone||'').trim().slice(0,80);
@@ -2067,13 +2083,14 @@ app.post('/api/job-offers', auth, (req,res) => {
 });
 
 // Profils de candidats historiques : l’API et les données sont conservées, mais l’interface les présente avec le nouveau vocabulaire.
-app.get('/api/jobs', auth, (req, res) => {
+app.get('/api/jobs', optionalAuth, (req, res) => {
+  const viewerId = req.user ? req.user.id : -1;
   const q = normalize(req.query.q || '');
   let list = db.prepare(`SELECT j.*, u.name publisher FROM jobs j JOIN users u ON u.id=j.user_id WHERE j.status='approved' OR j.user_id=?
     ORDER BY CASE WHEN j.boost != 'normal' AND (j.boost_until IS NULL OR j.boost_until >= datetime('now'))
-      THEN (CASE j.boost WHEN 'prioritaire' THEN 0 ELSE 1 END) ELSE 2 END, j.id DESC`).all(req.user.id);
+      THEN (CASE j.boost WHEN 'prioritaire' THEN 0 ELSE 1 END) ELSE 2 END, j.id DESC`).all(viewerId);
   if (q) list = list.filter(j => normalize([j.metier, j.competences, j.localisation, j.description].join(' ')).includes(q));
-  res.json(list);
+  res.json(req.user ? list : list.map(j => ({ ...j, contact: null, cv: null })));
 });
 app.post('/api/jobs', auth, (req, res) => {
   const b = req.body || {};
@@ -2126,7 +2143,7 @@ function emergencyConfig() {
   const categories = rawCategories.filter(c => c && c.name && c.active !== false).map(c => ({ name:String(c.name).slice(0,120), description:String(c.description||'').slice(0,300) }));
   return { info:getSetting('urgence_info',''), contacts, categories, assistance_available:getSetting('urgence_assistance_enabled','0') === '1' };
 }
-app.get('/api/urgence/config', auth, (req, res) => res.json(emergencyConfig()));
+app.get('/api/urgence/config', optionalAuth, (req, res) => res.json(emergencyConfig()));
 app.post('/api/urgence', auth, (req, res) => {
   const { message, lat, lng, category } = req.body || {}, cfg=emergencyConfig();
   if (!cfg.assistance_available) return res.status(503).json({ error:'L’assistance d’urgence Klean Services n’est pas disponible actuellement.' });
