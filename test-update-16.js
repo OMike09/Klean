@@ -34,16 +34,16 @@ const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '
   const afterTask = await api(null, '/services/' + leak.id + '/questions');
   yes(r.r.status === 200 && afterTask.d.taches.some(t => t.id === dynamicTaskId), 'nouvelle tâche ajoutée au catalogue central');
 
-  const ruleBouake = await api(admin.token, '/admin/estimation-rules', 'POST', { service_id: leak.id, task_id: leak.task_id, city: bouake, base_price: 6500, source_type: 'pdg', source_note: 'Référence validée par la direction pour le test.', active: true, priority: 10, factors: { includes: 'Main-d’œuvre de départ uniquement.' } });
-  const ruleAbidjan = await api(admin.token, '/admin/estimation-rules', 'POST', { service_id: leak.id, task_id: leak.task_id, city: 'Abidjan', base_price: 8000, source_type: 'pdg', source_note: 'Référence direction Abidjan pour le test.', active: true, priority: 10, factors: {} });
-  const estBouake = await api(null, `/estimates?service_id=${leak.id}&task_id=${leak.task_id}&city=${encodeURIComponent(bouake)}`);
-  const estAbidjan = await api(null, `/estimates?service_id=${leak.id}&task_id=${leak.task_id}&city=Abidjan`);
-  yes(ruleBouake.r.status === 201 && ruleAbidjan.r.status === 201 && estBouake.d.amount === 6500 && estAbidjan.d.amount === 8000 && estBouake.d.source.includes('direction'), 'prix de départ calculé avec règles PDG distinctes pour Bouaké et Abidjan');
+  const ruleBouake = await api(admin.token, '/admin/estimation-rules', 'POST', { service_id: leak.id, task_id: leak.task_id, city: bouake, base_price: 6500, source_type: 'pdg', source_note: 'Référence validée par la direction pour le test.', verified_at:'2026-10-25', active: true, priority: 10, factors: { includes: 'Main-d’œuvre de départ uniquement.' } });
+  const ruleAbidjan = await api(admin.token, '/admin/estimation-rules', 'POST', { service_id: leak.id, task_id: leak.task_id, city: 'Abidjan', base_price: 8000, source_type: 'pdg', source_note: 'Référence direction Abidjan pour le test.', verified_at:'2026-10-25', active: true, priority: 10, factors: {} });
+  const estBouake = await api(null, `/estimates?service_id=${leak.id}&task_id=${leak.task_id}&city=${encodeURIComponent(bouake)}&details=Test%20documenté`);
+  const estAbidjan = await api(null, `/estimates?service_id=${leak.id}&task_id=${leak.task_id}&city=Abidjan&zone=Cocody&details=Test%20documenté`);
+  yes(ruleBouake.r.status === 201 && ruleAbidjan.r.status === 201 && estBouake.d.amount === 6500 && estAbidjan.d.amount === 8000 && !('source' in estBouake.d), 'prix de départ calculé avec règles PDG distinctes pour Bouaké et Abidjan');
 
   const serviceList = (await api(null, '/services?ville=' + encodeURIComponent(bouake))).d;
   const noDataService = serviceList.flatMap(c => c.services || []).find(s => s.id !== leak.id);
   await api(admin.token, '/admin/estimation-config', 'PUT', { fallback: 'confirmer', geo_enabled: true, history_min_samples: 3 });
-  const noEstimate = await api(null, `/estimates?service_id=${noDataService.id}&city=${encodeURIComponent(bouake)}`);
+  const noEstimate = await api(null, `/estimates?service_id=${noDataService.id}&city=${encodeURIComponent(bouake)}&details=Test%20documenté`);
   await api(admin.token, '/admin/estimation-config', 'PUT', { fallback: 'reference', geo_enabled: true, history_min_samples: 3 });
   yes(noEstimate.r.status === 200 && noEstimate.d.status === 'confirm', 'absence de donnée fiable : prix à confirmer au lieu d’un montant inventé');
 

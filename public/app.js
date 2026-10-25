@@ -528,12 +528,8 @@ routes.register = async () => {
   };
 };
 
-/* Prix indicatif de départ d'un service (toujours modifiable dans le tableau
-   de bord ; jamais un prix définitif). Affiché en rouge sous le service. */
-function prixHtml(s, small) {
-  if (!s || !s.price_show || !s.price_from) return '';
-  return `<div class="svc-prix" style="color:#dc2626;font-weight:700;font-size:${small ? '12px' : '13px'};margin-top:2px">${esc(s.price_prefix || 'Dès')} ${Number(s.price_from).toLocaleString('fr-FR')} FCFA</div>`;
-}
+/* COLIS 20 : les prix de catalogue ne quittent pas la gestion tarifaire PDG. */
+function prixHtml() { return ''; }
 
 /* Choix des services d'un professionnel : mêmes catégories et services que
    partout ailleurs. Un professionnel peut sélectionner plusieurs catégories. */
@@ -751,57 +747,54 @@ routes.request = async (serviceId) => {
   let savedDraft = {}; try { savedDraft = JSON.parse(sessionStorage.getItem('ks_pending_request_draft') || '{}'); } catch { savedDraft = {}; }
   if (Number(savedDraft.service_id) !== Number(data.service.id)) savedDraft = {};
   const selectedTask = (data.taches || []).find(t => Number(t.id) === Number(savedDraft.task_id || selection.task_id));
-  REQ = { photos: [], audio: null, lat: savedDraft.lat ?? (USER && USER.lat), lng: savedDraft.lng ?? (USER && USER.lng), service_id: data.service.id, task_id: selectedTask ? selectedTask.id : null,
+  REQ = { photos: [], audio: null, lat: savedDraft.lat ?? (USER && USER.lat), lng: savedDraft.lng ?? (USER && USER.lng), service_id: data.service.id,
+    task_id: selectedTask ? selectedTask.id : ((data.taches || []).length === 1 ? data.taches[0].id : null), has_tasks: (data.taches || []).length > 0,
     photo_limit: Math.min(3, Number(data.limits && data.limits.photos || 3)), audio_max: Math.min(25, Number(data.limits && data.limits.audio_seconds || 25) || 25) };
   const initialCity = savedDraft.intervention_city || (USER && USER.ville) || '';
+  const initialCommune = savedDraft.intervention_commune || '';
+  const tasksHtml = (data.taches || []).length ? `<div class="field"><label>Tâche <span class="req">*</span></label>
+    <select id="r-task" onchange="A.requestTaskChanged()"><option value="">Choisir la tâche</option>${data.taches.map(t => `<option value="${t.id}" ${Number(REQ.task_id) === Number(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>` : '';
   $app.innerHTML = `
   ${header(data.service.name, { bell: !!USER })}
-  <div class="content">
-    <div class="card">
-      <div class="small muted mb">${esc(data.service.grand_category || data.service.category || '')}${data.service.category && data.service.grand_category ? ' › ' + esc(data.service.category) : ''}${selectedTask ? ' › ' + esc(selectedTask.name) : ''}</div>
-      <div class="field"><label>Ville réelle d’intervention <span class="req">*</span></label>
+  <div class="content"><div class="card">
+      <div class="small muted mb">${esc(data.service.grand_category || data.service.category || '')}${data.service.category && data.service.grand_category ? ' › ' + esc(data.service.category) : ''} › ${esc(data.service.name)}</div>
+      ${tasksHtml}
+      <div class="field"><label>Décrivez votre tache ou ce que vous voulez. <span class="req">*</span></label>
+        <textarea id="r-desc" maxlength="5000" placeholder="Ex : Le robinet de ma cuisine coule depuis ce matin…" oninput="A.requestDescriptionChanged()">${esc(savedDraft.description || selection.query || '')}</textarea></div>
+      <div class="field"><label>Ville d’intervention <span class="req">*</span></label>
         <input type="text" id="r-city" placeholder="👆 Choisir la ville de l’intervention" readonly style="cursor:pointer;background:#fff" value="${esc(initialCity)}" onclick="A.villePick('r-city')">
-        <div class="small muted">La position GPS aide à localiser, mais ne remplace jamais le lieu réel de l’intervention.</div>
       </div>
-      <div id="r-estimate" class="estimate-box"><div class="muted small">Choisissez la ville réelle d’intervention pour obtenir une estimation de départ.</div></div>
-      <div class="field"><label>Décrivez ce que vous souhaitez faire. Expliquez votre problème ou le travail à réaliser.</label>
-        <textarea id="r-desc" maxlength="5000" placeholder="Ex : Le robinet de ma cuisine coule depuis ce matin…">${esc(savedDraft.description || selection.query || '')}</textarea></div>
-      <div class="field"><label>Photos (facultatif) <span class="muted small">3 maximum</span></label>
-        <div class="photo-strip" id="r-photos"><button class="ph-add" onclick="A.pickPhotos('r-photos')">＋</button></div>
-        <input type="file" id="file-input" accept="image/*" multiple style="display:none">
+      <div class="field" id="r-commune-field" style="display:${initialCity === 'Abidjan' ? 'block' : 'none'}"><label>Commune <span class="req">*</span></label>
+        <input type="text" id="r-commune" placeholder="👆 Choisir la commune" readonly style="cursor:pointer;background:#fff" value="${esc(initialCommune)}" onclick="A.communePick()">
       </div>
-      <div class="field"><label>Note vocale (facultatif) <span class="muted small">${REQ.audio_max} secondes maximum</span></label>
-        <div id="r-audio-zone"><button class="btn sec sm" id="r-rec" onclick="A.toggleRec('r-audio-zone')">🎤 Enregistrer une note vocale</button></div>
-      </div>
+      <div id="r-estimate" class="estimate-box" aria-live="polite"></div>
       <div class="sec-title">Localisation précise</div>
       <div class="gps-row mb"><button class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Utiliser ma position GPS</button></div>
+      <div class="small muted mb">La position GPS aide à localiser, mais ne remplace jamais la ville choisie.</div>
       <div class="field"><label>Adresse / Quartier <span class="req">*</span></label><input type="text" id="r-addr" placeholder="Ex : quartier Air France, près de…" value="${esc(savedDraft.address || (USER && USER.address) || '')}"></div>
+      <div class="field"><label>Photos (facultatif) <span class="muted small">3 maximum</span></label><div class="photo-strip" id="r-photos"><button class="ph-add" onclick="A.pickPhotos('r-photos')">＋</button></div><input type="file" id="file-input" accept="image/*" multiple style="display:none"></div>
+      <div class="field"><label>Note vocale (facultatif) <span class="muted small">${REQ.audio_max} secondes maximum</span></label><div id="r-audio-zone"><button class="btn sec sm" id="r-rec" onclick="A.toggleRec('r-audio-zone')">🎤 Enregistrer une note vocale</button></div></div>
       <div class="field"><label>Disponibilité souhaitée</label><select id="r-schedule" onchange="A.requestSchedule()"><option value="asap">Dès que possible</option><option value="today">Aujourd’hui</option><option value="date">À une date précise</option></select><input type="datetime-local" id="r-date" style="display:none;margin-top:8px"></div>
       <label class="check-line"><input type="checkbox" id="r-urgent" ${savedDraft.urgence ? 'checked' : ''}> 🔥 C'est urgent</label>
       <button class="btn" id="b-send">Envoyer ma demande</button>
-    </div>
-  </div>${bottomNav('search')}`;
+  </div></div>${bottomNav('search')}`;
   updateBadges();
-  if (initialCity) A.requestEstimate();
+  if (initialCity === 'Abidjan') await A.requestLocationChanged(true);
+  A.requestEstimate();
   if (savedDraft.schedule_type) { document.getElementById('r-schedule').value = savedDraft.schedule_type; document.getElementById('r-date').value = savedDraft.date_souhaitee || ''; A.requestSchedule(); }
-  document.getElementById('b-send').onclick = async e => {
-    const addr = document.getElementById('r-addr').value, interventionCity = document.getElementById('r-city').value;
-    if (!interventionCity.trim()) { toast('Choisissez la ville réelle d’intervention.', 'err'); return; }
+  document.getElementById('b-send').onclick = async () => {
+    const addr = document.getElementById('r-addr').value, description = document.getElementById('r-desc').value;
+    const interventionCity = document.getElementById('r-city').value, interventionCommune = (document.getElementById('r-commune') || {}).value || '';
+    const taskEl = document.getElementById('r-task'); if (taskEl) REQ.task_id = Number(taskEl.value) || null;
+    if (taskEl && !REQ.task_id) { toast('Choisissez la tâche.', 'err'); return; }
+    if (!description.trim()) { toast('Décrivez votre tache ou ce que vous voulez.', 'err'); return; }
+    if (!interventionCity.trim()) { toast('Choisissez la ville d’intervention.', 'err'); return; }
+    if (interventionCity === 'Abidjan' && !interventionCommune.trim()) { toast('Choisissez la commune d’intervention.', 'err'); return; }
     if (!addr.trim()) { toast('Indiquez l’adresse ou le quartier de l’intervention.', 'err'); return; }
-    REQ.draft = {
-      service_id: REQ.service_id, task_id: REQ.task_id, answers: {}, description: document.getElementById('r-desc').value,
-      address: addr, intervention_city: interventionCity, lat: REQ.lat, lng: REQ.lng,
-      urgence: document.getElementById('r-urgent').checked, schedule_type: document.getElementById('r-schedule').value,
-      date_souhaitee: document.getElementById('r-date').value || null, photos: REQ.photos, audio: REQ.audio
-    };
-    if (!USER) {
-      // Les informations textuelles et de localisation sont conservées temporairement dans cette session du navigateur.
-      sessionStorage.setItem('ks_pending_request_draft', JSON.stringify(REQ.draft));
-      authRequired('#/request/' + data.service.id);
-      return;
-    }
-    sessionStorage.removeItem('ks_pending_request_draft');
-    A.chooseProviderForRequest();
+    REQ.draft = { service_id: REQ.service_id, task_id: REQ.task_id, answers: {}, description, address: addr, intervention_city: interventionCity, intervention_commune: interventionCommune, lat: REQ.lat, lng: REQ.lng,
+      urgence: document.getElementById('r-urgent').checked, schedule_type: document.getElementById('r-schedule').value, date_souhaitee: document.getElementById('r-date').value || null, photos: REQ.photos, audio: REQ.audio };
+    if (!USER) { sessionStorage.setItem('ks_pending_request_draft', JSON.stringify(REQ.draft)); authRequired('#/request/' + data.service.id); return; }
+    sessionStorage.removeItem('ks_pending_request_draft'); A.chooseProviderForRequest();
   };
 };
 function renderQuestion(q) {
@@ -1623,8 +1616,10 @@ routes.urgence = async () => {
     <div class="card emergency-disclaimer"><b>Information importante</b><div class="small">Klean Services ne remplace pas les secours publics. En cas de danger immédiat, contactez uniquement les services publics officiels dont le numéro est vérifié dans votre zone.</div></div>
     <div class="sec-title">Services et catégories disponibles</div>
     ${cfg.categories && cfg.categories.length ? cfg.categories.map(c=>`<div class="menu-item"><span class="mi-ic">🚨</span><div><b>${esc(c.name)}</b>${c.description?`<div class="small muted">${esc(c.description)}</div>`:''}</div></div>`).join('') : `<div class="hint">Aucun service d’assistance n’est configuré actuellement.</div>`}
-    <div class="sec-title">Contacts configurés et vérifiés</div>
-    ${cfg.contacts && cfg.contacts.length ? cfg.contacts.map(c => `<a class="menu-item" href="tel:${esc(c.tel)}" style="text-decoration:none;color:inherit"><span class="mi-ic">📞</span><div><b>${esc(c.nom)}</b><div class="small muted">Contact vérifié par l’administration</div></div><span class="mi-arr bold">${esc(c.tel)}</span></a>`).join('') : `<div class="hint">Aucun contact vérifié n’est disponible. Aucun numéro n’est inventé.</div>`}
+    <div class="sec-title">Urgences vitales</div>
+    ${cfg.contacts && cfg.contacts.filter(c=>c.group==='vital').length ? cfg.contacts.filter(c=>c.group==='vital').map(c => `<a class="menu-item" href="tel:${esc(c.tel)}" style="text-decoration:none;color:inherit"><span class="mi-ic">📞</span><div><b>${esc(c.nom)}</b>${c.label?`<div class="small muted">${esc(c.label)}</div>`:''}<div class="small muted">${esc(c.source_name)}${c.source_date ? ' · ' + esc(c.source_date) : ''}<br>Vérifié le ${esc(c.verified_at)}${c.last_modified ? ' · mis à jour le ' + esc(c.last_modified) : ''}</div></div><span class="mi-arr bold">${esc(c.tel)}</span></a>`).join('') : `<div class="hint">Aucun contact officiel n’est disponible. Aucun numéro n’est inventé.</div>`}
+    <div class="sec-title">Services publics et assistance</div>
+    ${cfg.contacts && cfg.contacts.filter(c=>c.group==='public_assistance').length ? cfg.contacts.filter(c=>c.group==='public_assistance').map(c => `<a class="menu-item" href="tel:${esc(c.tel)}" style="text-decoration:none;color:inherit"><span class="mi-ic">📞</span><div><b>${esc(c.nom)}</b>${c.label?`<div class="small muted">${esc(c.label)}</div>`:''}<div class="small muted">${esc(c.source_name)}${c.source_date ? ' · ' + esc(c.source_date) : ''}<br>Vérifié le ${esc(c.verified_at)}${c.last_modified ? ' · mis à jour le ' + esc(c.last_modified) : ''}</div></div><span class="mi-arr bold">${esc(c.tel)}</span></a>`).join('') : `<div class="hint">Aucun service public officiel n’est disponible.</div>`}
     ${available ? `<button class="sos-btn" onclick="A.sosConfirm()">🚨 DEMANDER UNE ASSISTANCE</button><div class="muted small center">Une confirmation vous sera demandée. Cette demande est envoyée à l’équipe Klean Services, pas aux secours publics.</div>` : ''}
   </div>${bottomNav('account')}`;
 };
@@ -2171,7 +2166,7 @@ const A = {
     const i = document.getElementById(inputId);
     if (i) i.value = v;
     closeModal();
-    if (inputId === 'r-city' && A.requestEstimate) A.requestEstimate();
+    if (inputId === 'r-city' && A.requestLocationChanged) A.requestLocationChanged(false);
   },
   async maintRetry() { await checkMaintenance(); render(); },
   eye(id, btn) {
@@ -2373,18 +2368,36 @@ const A = {
   },
   collap(id) { document.getElementById(id).classList.toggle('open'); },
   requestSchedule() { const s=document.getElementById('r-schedule'), d=document.getElementById('r-date'); if (!s || !d) return; d.style.display=s.value==='date'?'block':'none'; if(s.value!=='date') d.value=''; },
+  requestTaskChanged() { const task = document.getElementById('r-task'); REQ.task_id = task ? (Number(task.value) || null) : null; A.requestEstimate(); },
+  requestDescriptionChanged() { clearTimeout(A._estimateTimer); A._estimateTimer = setTimeout(() => A.requestEstimate(), 300); },
+  async requestLocationChanged(keepCommune) {
+    const city = ((document.getElementById('r-city') || {}).value || '').trim();
+    const field = document.getElementById('r-commune-field'); const input = document.getElementById('r-commune');
+    if (!field || !input) return A.requestEstimate();
+    if (city !== 'Abidjan') { field.style.display = 'none'; input.value = ''; return A.requestEstimate(); }
+    field.style.display = 'block';
+    if (!keepCommune) input.value = '';
+    try { window._requestCommunes = await api('/communes?city=' + encodeURIComponent(city)); } catch { window._requestCommunes = []; }
+    A.requestEstimate();
+  },
+  communePick() {
+    const communes = window._requestCommunes || []; if (!communes.length) return toast('Liste des communes indisponible.', 'err');
+    const rows = list => list.map(v => `<div class="menu-item" onclick="A._communeSet('${esc(v).replace(/'/g, "\\'")}')"><span class="mi-ic">📍</span>${esc(v)}<span class="mi-arr">›</span></div>`).join('');
+    openModal(`<h3>📍 Choisir la commune</h3><div class="searchbar" style="margin-bottom:8px"><input id="commune-q" placeholder="Rechercher une commune"></div><div id="commune-liste" style="max-height:52vh;overflow:auto">${rows(communes)}</div>`);
+    const q = document.getElementById('commune-q'), zone = document.getElementById('commune-liste'); q.addEventListener('input', () => { const text = q.value.toLowerCase(); zone.innerHTML = rows(communes.filter(v => v.toLowerCase().includes(text))) || '<div class="hint">Aucune commune trouvée.</div>'; }); q.focus();
+  },
+  _communeSet(value) { const input = document.getElementById('r-commune'); if (input) input.value = value; closeModal(); A.requestEstimate(); },
   async requestEstimate() {
     const city = ((document.getElementById('r-city') || {}).value || '').trim();
+    const description = ((document.getElementById('r-desc') || {}).value || '').trim();
+    const commune = ((document.getElementById('r-commune') || {}).value || '').trim();
     const zone = document.getElementById('r-estimate'); if (!zone) return;
-    if (!city) { zone.innerHTML = '<div class="muted small">Choisissez la ville réelle d’intervention pour obtenir une estimation de départ.</div>'; return; }
-    zone.innerHTML = '<div class="muted small">Calcul de l’estimation pour ' + esc(city) + '…</div>';
+    // Aucun prix ni texte sur le prix avant tâche + description + lieu complet.
+    if ((REQ.has_tasks && !REQ.task_id) || !description || !city || (city === 'Abidjan' && !commune)) { zone.innerHTML = ''; return; }
     try {
-      const r = await api('/estimates?service_id=' + encodeURIComponent(REQ.service_id) + (REQ.task_id ? '&task_id=' + encodeURIComponent(REQ.task_id) : '') + '&city=' + encodeURIComponent(city));
-      if (r.status === 'estimated' && r.amount) {
-        const range = r.min_price && r.max_price && r.min_price !== r.max_price ? ` <span class="small">(fourchette encadrée : ${fmtFCFA(r.min_price)} à ${fmtFCFA(r.max_price)})</span>` : '';
-        zone.innerHTML = `<div class="estimate-price">À partir de ${fmtFCFA(r.amount)}</div>${range}<div class="small muted">Estimation pour ${esc(r.city || city)}${r.provisional ? ' — provisoire' : ''}. ${esc(r.source || '')}</div><div class="small muted">${esc(r.includes || '')}</div>`;
-      } else zone.innerHTML = `<div class="bold">Prix à confirmer après précision de votre besoin.</div><div class="small muted">${esc(r.reason || 'Les données disponibles ne permettent pas une estimation suffisamment fiable.')}</div>`;
-    } catch (e) { zone.innerHTML = '<div class="bold">Prix à confirmer après précision de votre besoin.</div><div class="small muted">L’estimation sera reprise à l’envoi de votre demande.</div>'; }
+      const r = await api('/estimates?service_id=' + encodeURIComponent(REQ.service_id) + '&task_id=' + encodeURIComponent(REQ.task_id) + '&city=' + encodeURIComponent(city) + '&zone=' + encodeURIComponent(commune) + '&details=' + encodeURIComponent(description));
+      zone.innerHTML = r.status === 'estimated' && r.amount ? `<div class="estimate-price">À partir de ${fmtFCFA(r.amount)}</div>` : '<div class="estimate-price">Prix à confirmer</div>';
+    } catch { zone.innerHTML = '<div class="estimate-price">Prix à confirmer</div>'; }
   },
   mTab(t) { sessionStorage.setItem('ks_mtab', t); render(); },
   toggleSound(el) {

@@ -49,11 +49,11 @@ const norm = s => String(s || '').toLocaleLowerCase('fr').normalize('NFD').repla
   yes(newCat.r.status === 201 && r.r.status === 200 && !activeCats.d.some(c=>c.id===newCat.d.id), 'PDG peut configurer et désactiver une catégorie sans effacer les données');
 
   let emergency = await api(user.token, '/urgence/config');
-  yes(emergency.r.status === 200 && emergency.d.assistance_available === false && emergency.d.contacts.length === 0, 'urgence indisponible clairement par défaut, sans faux contact');
+  yes(emergency.r.status === 200 && emergency.d.assistance_available === false && emergency.d.contacts.length >= 18 && emergency.d.contacts.every(c=>c.source_url&&c.verified_at), 'assistance Klean indisponible par défaut, répertoire officiel public disponible');
   r = await api(admin.token, '/admin/settings', 'PUT', { urgence_assistance_enabled:'1', urgence_info:'Assistance test disponible', urgence_categories:JSON.stringify([{name:'Panne critique',description:'Test de configuration',active:true}]), urgence_contacts:JSON.stringify([{nom:'Contact test vérifié',tel:'0700000000',verified:true},{nom:'Contact non vérifié',tel:'0100000000',verified:false}]) });
   emergency = await api(user.token, '/urgence/config');
   const alert = await api(user.token, '/urgence', 'POST', {category:'Panne critique', message:'Besoin d’assistance', lat:null, lng:null});
-  yes(r.r.status === 200 && emergency.d.assistance_available && emergency.d.categories.length===1 && emergency.d.contacts.length===1 && emergency.d.contacts[0].nom==='Contact test vérifié' && alert.r.status===200, 'urgences : disponibilité, catégories et seuls contacts vérifiés réellement configurés');
+  yes(r.r.status === 200 && emergency.d.assistance_available && emergency.d.categories.length===1 && emergency.d.contacts.some(c=>c.nom==='Police nationale') && !emergency.d.contacts.some(c=>c.nom==='Contact test vérifié') && alert.r.status===200, 'urgences : assistance configurée et répertoire limité aux contacts institutionnels');
 
   const app = fs.readFileSync('public/app.js','utf8'), css = fs.readFileSync('public/styles.css','utf8');
   yes(!app.includes('Klean Services - Tout commence par une mise en relation.') && app.includes('Trouver ou proposer un job') && app.includes('home-shortcuts'), 'accueil simplifié et libellé emploi remplacé dans l’interface');

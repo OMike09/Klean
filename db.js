@@ -1527,4 +1527,123 @@ ensureColumn('avis_recherche', 'city', 'TEXT');
   if (first) db.prepare('UPDATE avis_recherche SET category_id=? WHERE category_id IS NULL').run(first.id);
 })();
 
+// ============================================================
+// COLIS 20 — contacts institutionnels, communes et fiabilité tarifaire
+// Ces tables complètent les réglages historiques sans supprimer leurs données.
+// ============================================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS communes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  city_name TEXT NOT NULL,
+  name TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(city_name, name)
+);
+CREATE INDEX IF NOT EXISTS idx_communes_city_active ON communes(city_name, active, sort);
+CREATE TABLE IF NOT EXISTS emergency_contacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_key TEXT NOT NULL CHECK(group_key IN ('vital','public_assistance')),
+  service_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  source_name TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  source_date TEXT,
+  verified_at TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(service_name, phone)
+);
+CREATE INDEX IF NOT EXISTS idx_emergency_contacts_public ON emergency_contacts(active, group_key, sort);
+CREATE TABLE IF NOT EXISTS emergency_contact_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  contact_id INTEGER NOT NULL REFERENCES emergency_contacts(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  previous_data TEXT,
+  changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_emergency_history_contact ON emergency_contact_history(contact_id, changed_at DESC);
+CREATE TABLE IF NOT EXISTS price_estimation_rule_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule_id INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  snapshot TEXT NOT NULL,
+  changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_price_rule_history_rule ON price_estimation_rule_history(rule_id, changed_at DESC);
+`);
+ensureColumn('missions', 'intervention_commune', 'TEXT');
+
+(function seedColis20CommunesAndContacts() {
+  const communes = ['Abobo','Adjamé','Anyama','Attécoubé','Bingerville','Cocody','Koumassi','Marcory','Plateau','Port-Bouët','Songon','Treichville','Yopougon'];
+  // Abidjan est de nouveau une ville sélectionnable. Les anciennes localités composées
+  // restent conservées mais sont retirées de la liste active au profit de communes séparées.
+  const base = db.prepare('SELECT COALESCE(MAX(sort),0) n FROM villes').get().n;
+  db.prepare("INSERT OR IGNORE INTO villes(name,active,sort) VALUES('Abidjan',1,?)").run(base + 1);
+  db.prepare("UPDATE villes SET active=1 WHERE name='Abidjan'").run();
+  db.prepare("UPDATE villes SET active=0 WHERE name LIKE 'Abidjan / %'").run();
+  const ci = db.prepare('INSERT OR IGNORE INTO communes(city_name,name,active,sort) VALUES(?,?,1,?)');
+  communes.forEach((name, index) => ci.run('Abidjan', name, index + 1));
+
+  // Date de contrôle interne : 25 octobre 2026. Aucune entrée non officielle ou Klean
+  // n'est ajoutée à ce répertoire public.
+  const onpc = 'https://mail.onpc-ci.org/actualite/saison-des-pluies-2026-message-dalerte-aux-intemperies-et-mesures-de-prevention-des-risques-dinondation';
+  const diplomacy = 'https://www.diplomatie.gouv.ci/index.php/numeros-utiles';
+  const cie = 'https://www.cie.ci/communiques';
+  const sodeci = 'https://sodeci.ci/nos-services-eau-potable/les-conseils-utiles';
+  const allo = 'https://communication.gouv.ci/actualite/194';
+  const rows = [
+    ['vital','Police nationale','170','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',1],
+    ['vital','Police nationale','110','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',2],
+    ['vital','Police nationale','111','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',3],
+    ['vital','Gendarmerie','145','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',4],
+    ['vital','GSPM','180','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',5],
+    ['vital','GSPM','01 01 80 13 28','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',6],
+    ['vital','GSPM','01 03 01 90 94','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',7],
+    ['vital','SAMU CI','185','', 'Ministère des Affaires étrangères — numéros utiles',diplomacy,null,8],
+    ['vital','ONPC','07 89 32 32 32','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',9],
+    ['vital','ONPC','05 74 32 32 32','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',10],
+    ['vital','ONPC','01 50 32 32 32','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',11],
+    ['vital','Police secours','100','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',12],
+    ['vital','Police secours','07 78 43 76 46','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',13],
+    ['vital','Police secours','01 03 79 91 44','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',14],
+    ['public_assistance','CIE','179','Dépannage / relation client', 'CIE — centre de relation client',cie,null,15],
+    ['public_assistance','SODECI','175','Dépannage / relation client', 'SODECI — centre de relation client',sodeci,null,16],
+    ['public_assistance','Allô Gouvernement','101','Information et signalement de service public', 'Gouvernement de Côte d’Ivoire — Allo 101',allo,'2025-09-13',17],
+    ['public_assistance','Centre d’appels Gouvernement','27 22 59 90 00','', 'ONPC — communiqué saison des pluies 2026',onpc,'2026-06-29',18]
+  ];
+  const ins = db.prepare(`INSERT OR IGNORE INTO emergency_contacts(group_key,service_name,phone,label,source_name,source_url,source_date,verified_at,sort)
+    VALUES(?,?,?,?,?,?,?,?,?)`);
+  rows.forEach(([groupKey, serviceName, phone, label, sourceName, sourceUrl, sourceDate, sort]) =>
+    ins.run(groupKey, serviceName, phone, label, sourceName, sourceUrl, sourceDate, '2026-10-25', sort));
+  // Transparence sur une divergence institutionnelle : l'ONPC récent est la source
+  // utilisée pour l'affectation policière, tandis que la page diplomatique consultée
+  // le 25/10/2026 classe 110 / 1111 / 170 sous la gendarmerie.
+  if (getSetting('colis20_emergency_conflict_note') === null) {
+    const note = 'Attribution ONPC du 29/06/2026. La page du ministère des Affaires étrangères consultée le 25/10/2026 liste 110, 1111 et 170 sous la gendarmerie : attribution divergente.';
+    db.prepare("UPDATE emergency_contacts SET label=? WHERE service_name='Police nationale' AND phone IN ('170','110','111') AND (label='' OR label IS NULL)").run(note);
+    setSetting('colis20_emergency_conflict_note', '1');
+  }
+  if (getSetting('colis20_emergency_initial_history') === null) {
+    const log = db.prepare("INSERT INTO emergency_contact_history(contact_id,action,previous_data) VALUES(?,?,?)");
+    db.prepare('SELECT id,source_name,source_url,verified_at FROM emergency_contacts').all().forEach(c =>
+      log.run(c.id, 'importation officielle initiale', JSON.stringify({ source_name:c.source_name, source_url:c.source_url, verified_at:c.verified_at })));
+    setSetting('colis20_emergency_initial_history', '1');
+  }
+})();
+
+// Les tarifs de référence historiques ne constituent pas une donnée vérifiée par eux-mêmes.
+// Les nouvelles installations et les installations mises à jour privilégient donc la confirmation.
+if (getSetting('colis20_pricing_safety') === null) {
+  setSetting('price_estimation_fallback', 'confirmer');
+  setSetting('colis20_pricing_safety', '1');
+}
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

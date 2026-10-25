@@ -652,9 +652,22 @@ function villeOk(s, ville) {
 function activeCity(city) {
   const wanted = String(city || '').trim();
   if (!wanted) return null;
-  const found = db.prepare('SELECT name FROM villes WHERE active=1 AND lower(name)=lower(?)').get(wanted);
-  // Abidjan reste une zone tarifaire agrégée compatible avec les communes détaillées proposées au client.
-  return found || (normalize(wanted) === 'abidjan' ? { name: 'Abidjan' } : null);
+  const direct = db.prepare('SELECT name FROM villes WHERE active=1 AND lower(name)=lower(?)').get(wanted);
+  if (direct) return direct;
+  // Compatibilité non destructive des anciens profils « Abidjan / Cocody » :
+  // ils sont lus comme Abidjan + commune, mais ne sont plus proposés à la sélection.
+  const legacy = wanted.match(/^abidjan\s*\/\s*(.+)$/i);
+  if (legacy) { const commune = activeCommune('Abidjan', legacy[1]); if (commune) return { name:'Abidjan', legacy_commune:commune.name }; }
+  return null;
+}
+function activeCommune(city, commune) {
+  const cityName = String(city || '').trim(), communeName = String(commune || '').trim();
+  if (!cityName || !communeName) return null;
+  return db.prepare('SELECT name FROM communes WHERE active=1 AND lower(city_name)=lower(?) AND lower(name)=lower(?)').get(cityName, communeName) || null;
+}
+function ruleCityMatches(ruleCity, city) {
+  const targets = String(ruleCity || '').split(',').map(x => x.trim()).filter(Boolean);
+  return !targets.length || targets.some(target => cityMatches(target, city));
 }
 function activeDomainIds(raw) {
   const ids = [...new Set((Array.isArray(raw) ? raw : []).map(Number).filter(Number.isInteger))];
@@ -682,7 +695,8 @@ app.get('/api/services', (req, res) => {
   const cats = frenchSort(db.prepare(`SELECT c.*,gc.name grand_category,gc.icon grand_icon FROM service_categories c
     LEFT JOIN grand_categories gc ON gc.id=c.grand_category_id WHERE c.active=1 AND (gc.id IS NULL OR gc.active=1)`).all());
   const svcs = frenchSort(catalogueServiceRows().filter(s => villeOk(s, req.query.ville)));
-  res.json(cats.map(c => ({ ...c, services: svcs.filter(s => s.category_id === c.id) })).filter(c => c.services.length));
+  const publicService = ({ price_from, price_prefix, price_show, price_updated_at, ...service }) => service;
+  res.json(cats.map(c => ({ ...c, services: svcs.filter(s => s.category_id === c.id).map(publicService) })).filter(c => c.services.length));
 });
 // Catalogue complet : racine grand domaine → métiers existants → sous-catégories → prestations/tâches.
 app.get('/api/catalogue', (req, res) => {
@@ -694,7 +708,6 @@ app.get('/api/catalogue', (req, res) => {
     id: c.id, name: c.name, icon: c.icon, grand_category_id: c.grand_category_id, grand_category: c.grand_category, grand_icon: c.grand_icon,
     services: svcs.filter(s => s.category_id === c.id).map(s => ({
       id: s.id, name: s.name, popular: s.popular, seasonal: s.seasonal,
-      price_from: s.price_from, price_prefix: s.price_prefix, price_show: s.price_show,
       taches: tas.filter(t => t.service_id === s.id).map(t => ({ id: t.id, name: t.name }))
     }))
   })).filter(c => c.services.length));
@@ -702,7 +715,7 @@ app.get('/api/catalogue', (req, res) => {
 // Services populaires (accueil) — sélection de la même liste de services,
 // dans l'ordre choisi par l'administration (popular_sort)
 app.get('/api/services/populaires', (req, res) => {
-  const svcs = db.prepare(`SELECT s.id, s.name, s.cities, s.price_from, s.price_prefix, s.price_show, c.icon, c.name cat FROM services s
+  const svcs = db.prepare(`SELECT s.id, s.name, s.cities, c.icon, c.name cat FROM services s
     JOIN service_categories c ON c.id=s.category_id
     LEFT JOIN grand_categories gc ON gc.id=c.grand_category_id
     WHERE s.active=1 AND c.active=1 AND (gc.id IS NULL OR gc.active=1) AND s.popular=1
@@ -712,7 +725,14 @@ app.get('/api/services/populaires', (req, res) => {
 });
 // Villes de Côte d'Ivoire (liste sélectionnable, avec recherche côté application)
 app.get('/api/villes', (req, res) => {
-  res.json(frenchSort(db.prepare('SELECT name FROM villes WHERE active=1').all()).map(v => v.name));
+  res.json(frenchSort(db.prepare("SELECT name FROM villes WHERE active=1 AND name NOT LIKE 'Abidjan / %'").all()).map(v => v.name));
+});
+// Communes administrées dans la source centrale. Une commune n'est demandée que
+// lorsque la ville choisie est Abidjan ; le GPS ne peut jamais la déduire à la place du client.
+app.get('/api/communes', (req, res) => {
+  const city = activeCity(req.query.city);
+  if (!city) return res.status(400).json({ error: 'Ville invalide.' });
+  res.json(frenchSort(db.prepare('SELECT name FROM communes WHERE active=1 AND lower(city_name)=lower(?) ORDER BY sort,id').all(city.name)).map(r => r.name));
 });
 app.get('/api/services/:id/questions', (req, res) => {
   const svc = db.prepare(`SELECT s.*, c.name cat, c.grand_category_id, gc.name grand_category FROM services s
@@ -722,7 +742,7 @@ app.get('/api/services/:id/questions', (req, res) => {
   const questions = db.prepare('SELECT * FROM service_questions WHERE service_id=? AND active=1 ORDER BY sort,id').all(svc.id)
     .map(q => ({ ...q, options: JSON.parse(q.options) }));
   const taches = frenchSort(db.prepare('SELECT id, name FROM taches WHERE service_id=? AND active=1').all(svc.id));
-  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat, grand_category_id: svc.grand_category_id, grand_category: svc.grand_category, price_from: svc.price_from, price_prefix: svc.price_prefix, price_show: svc.price_show }, questions, taches,
+  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat, grand_category_id: svc.grand_category_id, grand_category: svc.grand_category }, questions, taches,
     limits: { photos: settingInt('request_image_limit', 3, 0, 3), audio_seconds: settingInt('request_audio_max_seconds', 25, 1, 25) } });
 });
 
@@ -780,7 +800,7 @@ function intelligentSearch(query, city) {
     }
     return {
       id: s.id, name: s.name, category: s.cat, grand_category: s.grand_category || null, grand_category_id: s.grand_category_id || null,
-      icon: s.icon, price_from: s.price_from, price_prefix: s.price_prefix, price_show: s.price_show,
+      icon: s.icon,
       task_id: bestTask && bestTask.id || null, tache_suggeree: bestTask && bestTask.name || null,
       confidence: bestScore >= 60 ? 'élevée' : bestScore >= 18 ? 'moyenne' : 'faible', match: bestMatch || null, score: bestScore
     };
@@ -803,8 +823,14 @@ function estimatePrice({ serviceId, taskId, city, zone, details } = {}) {
     WHERE s.id=? AND s.active=1 AND c.active=1`).get(Number(serviceId));
   if (!svc) return { status: 'confirm', reason: 'Service indisponible.' };
   const task = taskId ? db.prepare('SELECT * FROM taches WHERE id=? AND service_id=? AND active=1').get(Number(taskId), svc.id) : null;
+  const description = String(details || '').trim();
+  if (!description) return { status: 'confirm', needs_description: true, service_id: svc.id, task_id: task && task.id || null };
   const chosenCity = activeCity(city);
-  if (!chosenCity) return { status: 'confirm', reason: 'Choisissez une ville d’intervention dans la liste pour obtenir une estimation.' };
+  if (!chosenCity) return { status: 'confirm', needs_city: true, service_id: svc.id, task_id: task && task.id || null };
+  const chosenCommune = normalize(chosenCity.name) === 'abidjan' ? activeCommune(chosenCity.name, zone || chosenCity.legacy_commune) : null;
+  if (normalize(chosenCity.name) === 'abidjan' && !chosenCommune) {
+    return { status: 'confirm', needs_commune: true, city: chosenCity.name, service_id: svc.id, task_id: task && task.id || null };
+  }
   const geoEnabled = getSetting('price_estimation_geo_enabled', '1') === '1';
   const rules = db.prepare('SELECT * FROM price_estimation_rules WHERE active=1').all().filter(r => {
     if (r.grand_category_id && Number(r.grand_category_id) !== Number(svc.grand_category_id)) return false;
@@ -812,48 +838,46 @@ function estimatePrice({ serviceId, taskId, city, zone, details } = {}) {
     if (r.sub_id && Number(r.sub_id) !== Number(svc.sub_id)) return false;
     if (r.service_id && Number(r.service_id) !== Number(svc.id)) return false;
     if (r.task_id && (!task || Number(r.task_id) !== Number(task.id))) return false;
-    if (geoEnabled && r.city && !cityMatches(r.city, chosenCity.name)) return false;
+    // Aucune surcote de commune implicite : une zone agit uniquement lorsqu'une
+    // règle PDG/référence vérifiée l'a explicitement désignée.
+    if (geoEnabled && r.city && !ruleCityMatches(r.city, chosenCity.name)) return false;
+    if (geoEnabled && r.zone && (!chosenCommune || normalize(r.zone) !== normalize(chosenCommune.name))) return false;
     return true;
   });
   const rank = r => {
     const source = r.source_type === 'pdg' ? 3 : r.source_type === 'local_verifie' ? 2 : 1;
-    const geographic = r.city && cityMatches(r.city, chosenCity.name) ? 32 : 0;
+    const geographic = (r.city && ruleCityMatches(r.city, chosenCity.name) ? 32 : 0) + (r.zone && chosenCommune && normalize(r.zone) === normalize(chosenCommune.name) ? 16 : 0);
     const specificity = (r.task_id ? 16 : 0) + (r.service_id ? 8 : 0) + (r.sub_id ? 4 : 0) + (r.category_id ? 2 : 0) + (r.grand_category_id ? 1 : 0);
     return [source, Number(r.priority || 0), geographic + specificity, Number(r.id)];
   };
   rules.sort((a, b) => { const ra=rank(a), rb=rank(b); for(let i=0;i<ra.length;i++) if(ra[i]!==rb[i]) return rb[i]-ra[i]; return 0; });
   const selected = rules[0];
-  const materialInfo = 'Main-d’œuvre et déplacement selon la règle affichée ; matériaux non compris sauf mention de la direction.';
   if (selected && (Number(selected.base_price) > 0 || Number(selected.min_price) > 0 || Number(selected.max_price) > 0)) {
     const factors = parsedRuleFactors(selected.factors);
     let amount = Number(selected.base_price || selected.min_price || selected.max_price || 0);
     amount = Math.round(amount * (1 + factors.percent_adjustment / 100) + factors.fixed_adjustment);
     if (Number(selected.min_price) > 0) amount = Math.max(amount, Number(selected.min_price));
     if (Number(selected.max_price) > 0) amount = Math.min(amount, Number(selected.max_price));
-    const isManual = selected.source_type === 'pdg';
-    return { status: 'estimated', amount, min_price: selected.min_price || null, max_price: selected.max_price || null,
-      confidence: isManual ? 'élevée' : 'moyenne', provisional: !isManual,
-      city: chosenCity.name, service_id: svc.id, task_id: task && task.id || null,
-      source: isManual ? 'Règle tarifaire configurée par la direction' : 'Donnée tarifaire locale vérifiée et autorisée par la direction',
-      source_date: selected.source_date || selected.verified_at || selected.updated_at, includes: factors.includes || materialInfo,
-      rule_id: selected.id, factors };
+    // La règle est une valeur explicitement approuvée par le PDG, ou une référence
+    // locale vérifiée. Les facteurs ne peuvent jamais fabriquer une valeur sans base.
+    return { status: 'estimated', amount, city: chosenCity.name, commune: chosenCommune && chosenCommune.name || null,
+      service_id: svc.id, task_id: task && task.id || null, rule_id: selected.id };
   }
-  // Une moyenne historique n’est exploitée que si les paiements validés sont suffisamment nombreux et comparables.
   const minSamples = settingInt('price_estimation_history_min_samples', 3, 3, 100);
-  const historic = db.prepare(`SELECT COUNT(*) n, AVG(m.amount) avg FROM missions m JOIN payments p ON p.mission_id=m.id
-    WHERE m.service_id=? AND m.intervention_city=? AND p.status='valide' AND m.amount IS NOT NULL`).get(svc.id, chosenCity.name);
-  if (historic && historic.n >= minSamples && historic.avg > 0) {
-    return { status: 'estimated', amount: Math.round(historic.avg / 100) * 100, confidence: 'moyenne', provisional: true,
-      city: chosenCity.name, service_id: svc.id, task_id: task && task.id || null, samples: historic.n,
-      source: 'Historique d’interventions comparables validées', includes: 'Montant historique observé ; prestation exacte et matériaux à confirmer.' };
+  const historic = db.prepare(`SELECT m.amount FROM missions m JOIN payments p ON p.mission_id=m.id
+    WHERE m.service_id=? AND m.intervention_city=? AND (? IS NULL OR m.intervention_commune=?)
+      AND p.status='valide' AND m.amount IS NOT NULL ORDER BY m.amount`).all(svc.id, chosenCity.name, chosenCommune ? chosenCommune.name : null, chosenCommune ? chosenCommune.name : null).map(r => Number(r.amount)).filter(n => n > 0);
+  if (historic.length >= minSamples) {
+    // Médiane : plus robuste qu'une moyenne contre une mission atypique, et utilisée
+    // seulement au sein d'une même prestation, ville et commune si nécessaire.
+    const middle = Math.floor(historic.length / 2);
+    const amount = historic.length % 2 ? historic[middle] : Math.round((historic[middle - 1] + historic[middle]) / 2);
+    return { status: 'estimated', amount, city: chosenCity.name, commune: chosenCommune && chosenCommune.name || null,
+      service_id: svc.id, task_id: task && task.id || null, samples: historic.length };
   }
-  if (getSetting('price_estimation_fallback', 'reference') === 'reference' && Number(svc.price_from) > 0) {
-    return { status: 'estimated', amount: Number(svc.price_from), confidence: 'provisoire', provisional: true,
-      city: chosenCity.name, service_id: svc.id, task_id: task && task.id || null,
-      source: 'Tarif de référence configuré par la direction', includes: 'Estimation provisoire de départ ; le prix final dépend de la description et des conditions réelles.' };
-  }
-  return { status: 'confirm', city: chosenCity.name, service_id: svc.id, task_id: task && task.id || null,
-    reason: 'Aucune donnée tarifaire suffisamment fiable n’est disponible pour cette prestation dans cette ville.' };
+  // Le prix statique d'un service n'est jamais exploité comme pseudo-prix de marché.
+  return { status: 'confirm', city: chosenCity.name, commune: chosenCommune && chosenCommune.name || null,
+    service_id: svc.id, task_id: task && task.id || null, reason: 'Prix à confirmer' };
 }
 app.get('/api/estimates', (req, res) => {
   const result = estimatePrice({ serviceId: req.query.service_id, taskId: req.query.task_id, city: req.query.city, zone: req.query.zone, details: req.query.details });
@@ -1366,17 +1390,22 @@ app.post('/api/pub/campagnes', auth, (req, res) => {
 
 // Créer une demande
 app.post('/api/missions', auth, async (req, res) => {
-  const { service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache, taches, intervention_city, task_id } = req.body || {};
+  const { service_id, answers, description, address, lat, lng, urgence, date_souhaitee, photos, audio, tache, taches, intervention_city, intervention_commune, task_id } = req.body || {};
   const schedule_type = ['asap', 'today', 'date'].includes((req.body || {}).schedule_type) ? (req.body || {}).schedule_type : 'asap';
   const provider_type = req.body && req.body.provider_type === 'entreprise' ? 'entreprise' : 'particulier';
   if (!providerTypeEnabled(provider_type)) return res.status(409).json({ error: `Les demandes destinées aux ${provider_type === 'entreprise' ? 'entreprises' : 'particuliers'} sont temporairement désactivées par Klean Services.` });
   const svc = db.prepare('SELECT * FROM services WHERE id=? AND active=1').get(service_id);
   if (!svc) return res.status(400).json({ error: 'Service invalide.' });
+  // Le nouveau parcours client exige une description avant l’estimation. Pour conserver
+  // les anciennes applications/API, une demande historique sans description reste envoyable,
+  // mais le moteur ne peut alors produire qu’un « Prix à confirmer ».
   if (!address || !address.trim()) return res.status(400).json({ error: 'Indiquez votre localisation (GPS ou saisie manuelle).' });
   // Compatibilité des anciennes applications : elles n’envoyaient pas encore ce champ.
   // Le nouveau formulaire l’exige explicitement ; l’API historique reprend seulement la ville du compte si elle existe.
   const placeCity = activeCity(intervention_city || req.user.ville);
   if (!placeCity) return res.status(400).json({ error: 'Choisissez la ville réelle d’intervention dans la liste proposée.' });
+  const placeCommune = normalize(placeCity.name) === 'abidjan' ? activeCommune(placeCity.name, intervention_commune || placeCity.legacy_commune) : null;
+  if (normalize(placeCity.name) === 'abidjan' && !placeCommune) return res.status(400).json({ error: 'Choisissez la commune d’intervention à Abidjan.' });
   if (schedule_type === 'date' && !date_souhaitee) return res.status(400).json({ error: 'Choisissez la date souhaitée ou sélectionnez une autre disponibilité.' });
   if (schedule_type === 'date' && Number.isNaN(Date.parse(date_souhaitee))) return res.status(400).json({ error: 'Date souhaitée invalide.' });
   const requestPhotos = Array.isArray(photos) ? [...new Set(photos)].slice(0, 3) : [];
@@ -1421,11 +1450,11 @@ app.post('/api/missions', auth, async (req, res) => {
   // Les détails déjà saisis sont utilisés sans imposer un écran supplémentaire au client.
   const scopeText = [description, legacyTask, ...Object.values(answers || {})].join(' ').toLowerCase();
   const capacityRequired = /chantier|industriel|immeuble|plusieurs|grande?\s+(maison|surface|quantit)|gros travaux|équipe|volume important/.test(scopeText) ? 2 : 1;
-  const estimate = estimatePrice({ serviceId: service_id, taskId: selected[0] && selected[0].id, city: placeCity.name, details: description });
+  const estimate = estimatePrice({ serviceId: service_id, taskId: selected[0] && selected[0].id, city: placeCity.name, zone: placeCommune && placeCommune.name, details: description });
   const code = 'KS' + Date.now().toString(36).toUpperCase() + Math.floor(Math.random() * 90 + 10);
-  const info = db.prepare(`INSERT INTO missions(code, client_id, service_id, provider_type, capacity_required, answers, description, address, intervention_city, lat, lng, urgence, date_souhaitee, schedule_type, photos, audio, tache, taches, estimated_price, estimate_meta, search_started_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`)
-    .run(code, req.user.id, service_id, provider_type, capacityRequired, JSON.stringify(answers || {}), String(description || '').trim().slice(0, 5000), address.trim(), placeCity.name, lat || null, lng || null,
+  const info = db.prepare(`INSERT INTO missions(code, client_id, service_id, provider_type, capacity_required, answers, description, address, intervention_city, intervention_commune, lat, lng, urgence, date_souhaitee, schedule_type, photos, audio, tache, taches, estimated_price, estimate_meta, search_started_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`)
+    .run(code, req.user.id, service_id, provider_type, capacityRequired, JSON.stringify(answers || {}), String(description || '').trim().slice(0, 5000), address.trim(), placeCity.name, placeCommune && placeCommune.name || null, lat || null, lng || null,
          urgence ? 1 : 0, schedule_type === 'date' ? date_souhaitee : null, schedule_type, JSON.stringify(requestPhotos), audio || null, legacyTask, JSON.stringify(selected), estimate.status === 'estimated' ? estimate.amount : null, JSON.stringify(estimate));
   addEvent(info.lastInsertRowid, 'recherche', req.user.id, `Demande créée — ${placeCity.name} — prestataire souhaité : ${provider_type}`);
   startDispatch(info.lastInsertRowid);
@@ -2136,10 +2165,12 @@ app.post('/api/ecole-famille', auth, (req, res) => {
 });
 
 function emergencyConfig() {
-  let rawContacts = [], rawCategories = [];
-  try { rawContacts = JSON.parse(getSetting('urgence_contacts', '[]')); } catch { rawContacts = []; }
+  let rawCategories = [];
   try { rawCategories = JSON.parse(getSetting('urgence_categories', '[]')); } catch { rawCategories = []; }
-  const contacts = rawContacts.filter(c => c && c.nom && c.tel && c.verified === true).map(c => ({ nom:String(c.nom).slice(0,120), tel:String(c.tel).slice(0,60) }));
+  const contacts = db.prepare(`SELECT service_name,phone,label,source_name,source_url,source_date,verified_at,updated_at,group_key
+    FROM emergency_contacts WHERE active=1 ORDER BY CASE group_key WHEN 'vital' THEN 0 ELSE 1 END,sort,id`).all()
+    .map(c => ({ nom:c.service_name, tel:c.phone, label:c.label || '', source_name:c.source_name, source_url:c.source_url,
+      source_date:c.source_date || null, verified_at:c.verified_at, last_modified:c.updated_at, group:c.group_key }));
   const categories = rawCategories.filter(c => c && c.name && c.active !== false).map(c => ({ name:String(c.name).slice(0,120), description:String(c.description||'').slice(0,300) }));
   return { info:getSetting('urgence_info',''), contacts, categories, assistance_available:getSetting('urgence_assistance_enabled','0') === '1' };
 }
@@ -2520,8 +2551,8 @@ const PERM_ROUTES = [
   [/^\/journal/, 'journal'],
   [/^\/users\/\d+$/, 'comptes'], [/^\/users/, 'comptes'],
   [/^\/pros/, 'pros'],
-  [/^\/(estimation-rules|estimation-config|estimation-test|search-terms|grand-categories)/, 'PDG'],
-  [/^\/(catalog|categories|sous-categories|services|taches|villes)/, 'catalogue'],
+  [/^\/(estimation-rules|estimation-config|estimation-test|search-terms|grand-categories|emergency-contacts)/, 'PDG'],
+  [/^\/(catalog|categories|sous-categories|services|taches|villes|communes)/, 'catalogue'], 
   [/^\/questions/, 'questions'],
   [/^\/missions/, 'missions'],
   [/^\/payments/, 'paiements'],
@@ -3096,7 +3127,7 @@ A.get('/catalog', (req, res) => {
   const grand_categories = frenchSort(db.prepare('SELECT * FROM grand_categories ORDER BY sort,id').all());
   const cats = frenchSort(db.prepare('SELECT * FROM service_categories').all());
   const subs = frenchSort(db.prepare('SELECT * FROM sous_categories').all());
-  const svcs = frenchSort(db.prepare('SELECT * FROM services').all()).map(s => ({ ...s, cities: JSON.parse(s.cities || '[]') }));
+  const svcs = frenchSort(db.prepare('SELECT * FROM services').all()).map(({ price_from, price_prefix, price_show, price_updated_at, ...s }) => ({ ...s, cities: JSON.parse(s.cities || '[]') }));
   const tas = frenchSort(db.prepare('SELECT * FROM taches').all());
   const qs = db.prepare('SELECT * FROM service_questions ORDER BY sort,id').all().map(q => ({ ...q, options: JSON.parse(q.options) }));
   res.json({ grand_categories, categories: cats, sous_categories: subs, services: svcs, taches: tas, questions: qs });
@@ -3179,6 +3210,10 @@ A.put('/villes/:id', (req, res) => {
   res.json({ ok: true });
 });
 A.delete('/villes/:id', (req, res) => { db.prepare('DELETE FROM villes WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+// Communes : la même source centrale que les villes, sans liste parallèle client.
+A.get('/communes', (req,res) => res.json(frenchSort(db.prepare('SELECT * FROM communes ORDER BY city_name,sort,id').all())));
+A.post('/communes', (req,res) => { const city=activeCity((req.body||{}).city_name), name=String((req.body||{}).name||'').trim().slice(0,120); if(!city||!name)return res.status(400).json({error:'Ville centrale et nom de commune requis.'}); try { const id=db.prepare('INSERT INTO communes(city_name,name,sort) VALUES(?,?,?)').run(city.name,name,Number(req.body.sort)||99).lastInsertRowid;res.status(201).json({id}); }catch{return res.status(409).json({error:'Cette commune existe déjà pour cette ville.'});} });
+A.put('/communes/:id', (req,res) => { const old=db.prepare('SELECT * FROM communes WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Commune introuvable.'});const b=req.body||{}, city=b.city_name===undefined?old.city_name:activeCity(b.city_name)?.name,name=b.name===undefined?old.name:String(b.name).trim().slice(0,120);if(!city||!name)return res.status(400).json({error:'Ville ou commune invalide.'});try{db.prepare("UPDATE communes SET city_name=?,name=?,active=COALESCE(?,active),sort=COALESCE(?,sort),updated_at=datetime('now') WHERE id=?").run(city,name,b.active??null,b.sort??null,old.id);res.json({ok:true});}catch{return res.status(409).json({error:'Cette commune existe déjà pour cette ville.'});} });
 A.post('/categories', (req, res) => {
   const domainId = req.body.grand_category_id ? Number(req.body.grand_category_id) : null;
   if (domainId && !db.prepare('SELECT 1 FROM grand_categories WHERE id=?').get(domainId)) return res.status(400).json({ error: 'Grande catégorie invalide.' });
@@ -3194,20 +3229,16 @@ A.put('/categories/:id', (req, res) => {
 });
 A.post('/services', (req, res) => {
   if (!req.body.name || !req.body.category_id) return res.status(400).json({ error: 'Nom et catégorie requis.' });
-  const info = db.prepare('INSERT INTO services(category_id, sub_id, name, keywords, sort, price_from, price_prefix, price_show) VALUES(?,?,?,?,?,?,?,?)')
-    .run(req.body.category_id, req.body.sub_id || null, req.body.name, req.body.keywords || '', req.body.sort || 99,
-      req.body.price_from ?? null, req.body.price_prefix || 'Dès', req.body.price_show ?? 1);
+  const info = db.prepare('INSERT INTO services(category_id, sub_id, name, keywords, sort) VALUES(?,?,?,?,?)')
+    .run(req.body.category_id, req.body.sub_id || null, req.body.name, req.body.keywords || '', req.body.sort || 99);
   res.json({ id: info.lastInsertRowid });
 });
 A.put('/services/:id', (req, res) => {
   db.prepare(`UPDATE services SET name=COALESCE(?,name), keywords=COALESCE(?,keywords), active=COALESCE(?,active), sort=COALESCE(?,sort),
-    category_id=COALESCE(?,category_id), sub_id=COALESCE(?,sub_id), popular=COALESCE(?,popular), seasonal=COALESCE(?,seasonal), cities=COALESCE(?,cities),
-    price_from=COALESCE(?,price_from), price_prefix=COALESCE(?,price_prefix), price_show=COALESCE(?,price_show), price_updated_at=CASE WHEN ? IS NOT NULL OR ? IS NOT NULL OR ? IS NOT NULL THEN datetime('now') ELSE price_updated_at END WHERE id=?`)
+    category_id=COALESCE(?,category_id), sub_id=COALESCE(?,sub_id), popular=COALESCE(?,popular), seasonal=COALESCE(?,seasonal), cities=COALESCE(?,cities) WHERE id=?`)
     .run(req.body.name || null, req.body.keywords ?? null, req.body.active ?? null, req.body.sort ?? null,
       req.body.category_id || null, req.body.sub_id || null, req.body.popular ?? null, req.body.seasonal ?? null,
-      req.body.cities !== undefined ? JSON.stringify(req.body.cities) : null,
-      req.body.price_from ?? null, req.body.price_prefix || null, req.body.price_show ?? null,
-      req.body.price_from ?? null, req.body.price_prefix ?? null, req.body.price_show ?? null, req.params.id);
+      req.body.cities !== undefined ? JSON.stringify(req.body.cities) : null, req.params.id);
   // Cohérence de l'ordre des populaires : ajout → en fin de liste ; retrait → ordre effacé
   if (req.body.popular === 1) {
     const s = db.prepare('SELECT popular_sort FROM services WHERE id=?').get(req.params.id);
@@ -3283,7 +3314,9 @@ function cleanEstimationRule(body, previous) {
   if(typeof f==='string') { try { f=JSON.parse(f||'{}'); } catch { throw new Error('FACTORS'); } }
   if(!f || typeof f!=='object' || Array.isArray(f)) throw new Error('FACTORS');
   out.factors=JSON.stringify(parsedRuleFactors(f));
-  if(out.city && !activeCity(out.city)) throw new Error('CITY');
+  if(out.city) { const cities=out.city.split(',').map(x=>x.trim()).filter(Boolean); if(!cities.length || cities.some(city=>!activeCity(city))) throw new Error('CITY'); out.city=cities.join(', '); }
+  if(out.zone && (!out.city || !out.city.split(',').some(city => normalize(city)==='abidjan') || !activeCommune('Abidjan',out.zone))) throw new Error('ZONE');
+  if(!out.source_note || !out.verified_at) throw new Error('VERIFY');
   if(out.grand_category_id && !db.prepare('SELECT 1 FROM grand_categories WHERE id=?').get(out.grand_category_id)) throw new Error('DOMAIN');
   const category=out.category_id && db.prepare('SELECT * FROM service_categories WHERE id=?').get(out.category_id);
   if(out.category_id && !category) throw new Error('CATEGORY');
@@ -3300,26 +3333,52 @@ function cleanEstimationRule(body, previous) {
   if(out.source_type==='local_verifie' && !out.source_note) throw new Error('NOTE');
   return out;
 }
-function ruleError(e) { return ({ PRICE:'Indiquez un prix de départ ou une fourchette.', RANGE:'La fourchette minimale ne peut pas dépasser le maximum.', TARGET:'Choisissez au moins une cible tarifaire.', SOURCE:'Source tarifaire invalide.', FACTORS:'Les facteurs doivent être un objet JSON valide.', CITY:'La ville tarifaire doit être active dans le catalogue.', DOMAIN:'Grande catégorie invalide.', CATEGORY:'Métier invalide.', SUB:'Sous-catégorie invalide.', SERVICE:'Prestation invalide.', TASK:'Tâche invalide pour cette prestation.', HIERARCHY:'Les niveaux choisis ne correspondent pas à la même branche du catalogue.', NOTE:'Décrivez la source locale vérifiée.' })[e.message] || 'Règle tarifaire invalide.'; }
+function ruleError(e) { return ({ PRICE:'Indiquez un prix de départ ou une fourchette.', RANGE:'La fourchette minimale ne peut pas dépasser le maximum.', TARGET:'Choisissez au moins une cible tarifaire.', SOURCE:'Source tarifaire invalide.', FACTORS:'Les facteurs doivent être un objet JSON valide.', CITY:'La ville tarifaire doit être active dans le catalogue.', DOMAIN:'Grande catégorie invalide.', CATEGORY:'Métier invalide.', SUB:'Sous-catégorie invalide.', SERVICE:'Prestation invalide.', TASK:'Tâche invalide pour cette prestation.', HIERARCHY:'Les niveaux choisis ne correspondent pas à la même branche du catalogue.', NOTE:'Décrivez la source locale vérifiée.', ZONE:'La commune doit être une commune active d’Abidjan et la règle doit inclure Abidjan.', VERIFY:'Indiquez la provenance vérifiable et la date de vérification.' })[e.message] || 'Règle tarifaire invalide.'; }
 A.get('/estimation-rules', pdgOnly, (req,res) => res.json(db.prepare(`SELECT r.*,gc.name grand_category_name,c.name category_name,sc.name sub_name,s.name service_name,t.name task_name
   FROM price_estimation_rules r LEFT JOIN grand_categories gc ON gc.id=r.grand_category_id LEFT JOIN service_categories c ON c.id=r.category_id
   LEFT JOIN sous_categories sc ON sc.id=r.sub_id LEFT JOIN services s ON s.id=r.service_id LEFT JOIN taches t ON t.id=r.task_id
   ORDER BY r.active DESC, CASE r.source_type WHEN 'pdg' THEN 1 ELSE 0 END DESC,r.priority DESC,r.updated_at DESC,r.id DESC`).all()));
+function priceRuleHistory(id, action, snapshot, user) { db.prepare('INSERT INTO price_estimation_rule_history(rule_id,action,snapshot,changed_by) VALUES(?,?,?,?)').run(id,action,JSON.stringify(snapshot||{}),user.id); }
 A.post('/estimation-rules', pdgOnly, (req,res) => {
   let r;try{r=cleanEstimationRule(req.body);}catch(e){return res.status(400).json({error:ruleError(e)});}
   const id=db.prepare(`INSERT INTO price_estimation_rules(grand_category_id,category_id,sub_id,service_id,task_id,city,zone,base_price,min_price,max_price,factors,source_type,source_note,source_url,source_date,verified_at,active,priority)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(r.grand_category_id,r.category_id,r.sub_id,r.service_id,r.task_id,r.city,r.zone,r.base_price,r.min_price,r.max_price,r.factors,r.source_type,r.source_note,r.source_url,r.source_date,r.verified_at,r.active,r.priority).lastInsertRowid;
-  res.status(201).json({id});
+  priceRuleHistory(id,'creation',r,req.user); res.status(201).json({id});
 });
 A.put('/estimation-rules/:id', pdgOnly, (req,res) => {
   const old=db.prepare('SELECT * FROM price_estimation_rules WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Règle introuvable.'});let r;try{r=cleanEstimationRule(req.body,old);}catch(e){return res.status(400).json({error:ruleError(e)});}
   db.prepare(`UPDATE price_estimation_rules SET grand_category_id=?,category_id=?,sub_id=?,service_id=?,task_id=?,city=?,zone=?,base_price=?,min_price=?,max_price=?,factors=?,source_type=?,source_note=?,source_url=?,source_date=?,verified_at=?,active=?,priority=?,updated_at=datetime('now') WHERE id=?`)
-    .run(r.grand_category_id,r.category_id,r.sub_id,r.service_id,r.task_id,r.city,r.zone,r.base_price,r.min_price,r.max_price,r.factors,r.source_type,r.source_note,r.source_url,r.source_date,r.verified_at,r.active,r.priority,old.id);res.json({ok:true});
+    .run(r.grand_category_id,r.category_id,r.sub_id,r.service_id,r.task_id,r.city,r.zone,r.base_price,r.min_price,r.max_price,r.factors,r.source_type,r.source_note,r.source_url,r.source_date,r.verified_at,r.active,r.priority,old.id); priceRuleHistory(old.id,r.active?'modification':'désactivation',{before:old,after:r},req.user);res.json({ok:true});
 });
-A.delete('/estimation-rules/:id', pdgOnly, (req,res)=>{const r=db.prepare('DELETE FROM price_estimation_rules WHERE id=?').run(req.params.id);if(!r.changes)return res.status(404).json({error:'Règle introuvable.'});res.json({ok:true});});
-A.get('/estimation-config', pdgOnly, (req,res)=>res.json({geo_enabled:getSetting('price_estimation_geo_enabled','1')==='1',fallback:getSetting('price_estimation_fallback','reference'),history_min_samples:settingInt('price_estimation_history_min_samples',3,3,100)}));
-A.put('/estimation-config', pdgOnly, (req,res)=>{const b=req.body||{};if(b.geo_enabled!==undefined)setSetting('price_estimation_geo_enabled',b.geo_enabled?'1':'0');if(b.fallback!==undefined){if(!['reference','confirmer'].includes(b.fallback))return res.status(400).json({error:'Règle de repli invalide.'});setSetting('price_estimation_fallback',b.fallback);}if(b.history_min_samples!==undefined)setSetting('price_estimation_history_min_samples',String(Math.max(3,Math.min(100,parseInt(b.history_min_samples,10)||3))));res.json({ok:true});});
-A.get('/estimation-test', pdgOnly, (req,res)=>res.json(estimatePrice({serviceId:req.query.service_id,taskId:req.query.task_id,city:req.query.city,zone:req.query.zone,details:req.query.details})));
+A.get('/estimation-rules/:id/history', pdgOnly, (req,res)=>res.json(db.prepare('SELECT h.*,u.name changed_by_name FROM price_estimation_rule_history h LEFT JOIN users u ON u.id=h.changed_by WHERE h.rule_id=? ORDER BY h.id DESC').all(req.params.id)));
+A.delete('/estimation-rules/:id', pdgOnly, (req,res)=>{const old=db.prepare('SELECT * FROM price_estimation_rules WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Règle introuvable.'});db.prepare("UPDATE price_estimation_rules SET active=0,updated_at=datetime('now') WHERE id=?").run(old.id);priceRuleHistory(old.id,'désactivation',old,req.user);res.json({ok:true});});
+A.get('/estimation-config', pdgOnly, (req,res)=>res.json({geo_enabled:getSetting('price_estimation_geo_enabled','1')==='1',fallback:'confirmer',history_min_samples:settingInt('price_estimation_history_min_samples',3,3,100)}));
+A.put('/estimation-config', pdgOnly, (req,res)=>{const b=req.body||{};if(b.geo_enabled!==undefined)setSetting('price_estimation_geo_enabled',b.geo_enabled?'1':'0');setSetting('price_estimation_fallback','confirmer');if(b.history_min_samples!==undefined)setSetting('price_estimation_history_min_samples',String(Math.max(3,Math.min(100,parseInt(b.history_min_samples,10)||3))));res.json({ok:true});});
+A.get('/estimation-test', pdgOnly, (req,res)=>res.json(estimatePrice({serviceId:req.query.service_id,taskId:req.query.task_id,city:req.query.city,zone:req.query.zone,details:req.query.details||'Prévisualisation de règle tarifaire'})));
+
+function safeEmergencyContact(body, old = {}) {
+  const b = body || {}, group = b.group_key ?? old.group_key, service = String(b.service_name ?? old.service_name ?? '').trim().slice(0,120), phone = String(b.phone ?? old.phone ?? '').trim().slice(0,60);
+  const sourceName = String(b.source_name ?? old.source_name ?? '').trim().slice(0,240), sourceUrl = String(b.source_url ?? old.source_url ?? '').trim().slice(0,1000);
+  if (!['vital','public_assistance'].includes(group)) throw new Error('GROUP');
+  if (!service || !phone || !sourceName || !/^https:\/\//i.test(sourceUrl)) throw new Error('FIELDS');
+  return { group_key:group, service_name:service, phone, label:String(b.label ?? old.label ?? '').trim().slice(0,240), source_name:sourceName, source_url:sourceUrl,
+    source_date:String(b.source_date ?? old.source_date ?? '').trim().slice(0,32) || null, verified_at:String(b.verified_at ?? old.verified_at ?? '').trim().slice(0,32) || new Date().toISOString().slice(0,10),
+    active:b.active === undefined ? (old.active ?? 1) : (b.active ? 1 : 0), sort:Math.max(0, Math.min(9999, Number(b.sort ?? old.sort ?? 99) || 99)) };
+}
+function emergencyContactHistory(id, action, snapshot, user) {
+  db.prepare('INSERT INTO emergency_contact_history(contact_id,action,previous_data,changed_by) VALUES(?,?,?,?)').run(id, action, JSON.stringify(snapshot || {}), user && user.id || null);
+}
+A.get('/emergency-contacts', pdgOnly, (req,res) => res.json(db.prepare(`SELECT c.*,u.name changed_by_name FROM emergency_contacts c
+  LEFT JOIN emergency_contact_history h ON h.id=(SELECT id FROM emergency_contact_history WHERE contact_id=c.id ORDER BY id DESC LIMIT 1)
+  LEFT JOIN users u ON u.id=h.changed_by ORDER BY CASE c.group_key WHEN 'vital' THEN 0 ELSE 1 END,c.sort,c.id`).all()));
+A.get('/emergency-contacts/:id/history', pdgOnly, (req,res) => res.json(db.prepare(`SELECT h.*,u.name changed_by_name FROM emergency_contact_history h LEFT JOIN users u ON u.id=h.changed_by WHERE h.contact_id=? ORDER BY h.id DESC`).all(req.params.id)));
+A.post('/emergency-contacts', pdgOnly, (req,res) => { let c; try { c=safeEmergencyContact(req.body); } catch(e) { return res.status(400).json({error:'Renseignez un groupe, le service, le numéro, la source institutionnelle HTTPS et la date de vérification.'}); }
+  const id=db.prepare(`INSERT INTO emergency_contacts(group_key,service_name,phone,label,source_name,source_url,source_date,verified_at,active,sort) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(c.group_key,c.service_name,c.phone,c.label,c.source_name,c.source_url,c.source_date,c.verified_at,c.active,c.sort).lastInsertRowid;
+  emergencyContactHistory(id,'creation',c,req.user); res.status(201).json({id}); });
+A.put('/emergency-contacts/:id', pdgOnly, (req,res) => { const old=db.prepare('SELECT * FROM emergency_contacts WHERE id=?').get(req.params.id); if(!old)return res.status(404).json({error:'Contact introuvable.'}); let c; try { c=safeEmergencyContact(req.body,old); } catch(e) { return res.status(400).json({error:'Renseignez un groupe, le service, le numéro, la source institutionnelle HTTPS et la date de vérification.'}); }
+  db.prepare(`UPDATE emergency_contacts SET group_key=?,service_name=?,phone=?,label=?,source_name=?,source_url=?,source_date=?,verified_at=?,active=?,sort=?,updated_at=datetime('now') WHERE id=?`).run(c.group_key,c.service_name,c.phone,c.label,c.source_name,c.source_url,c.source_date,c.verified_at,c.active,c.sort,old.id);
+  emergencyContactHistory(old.id,c.active ? 'modification' : 'désactivation',{before:old,after:c},req.user); res.json({ok:true}); });
+
 
 // MISSIONS
 A.get('/missions', (req, res) => {
