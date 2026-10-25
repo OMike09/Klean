@@ -13,7 +13,7 @@ async function get(path) { const r = await fetch(BASE + path); return { r, text:
   yes(modern.text.includes('@media (min-width:700px)') && modern.text.includes('@media (max-width:380px)') && modern.text.includes('.bottomnav'), 'les mises en page téléphone, tablette et ordinateur sont explicitement couvertes');
   yes(modern.text.includes('.menu-item>div') && modern.text.includes('overflow-wrap:anywhere') && modern.text.includes('overflow-x:hidden'), 'les textes longs et débordements horizontaux sont protégés');
   yes(admin.r.status === 200 && admin.text.includes('/admin/admin.css') && adminCss.r.status === 200 && adminCss.text.includes('@media(max-width:520px)'), 'le dashboard charge sa modernisation et son adaptation mobile');
-  yes(sw.r.status === 200 && sw.text.includes("ks-v7-public-shell") && sw.text.includes("'/modern-ui.css'") && sw.text.includes("'/category-request.css'") && sw.text.includes("url.pathname.startsWith('/api/')"), 'le cache PWA est renouvelé sans mettre en cache les données privées');
+  yes(sw.r.status === 200 && sw.text.includes("ks-v8-public-shell") && sw.text.includes("'/modern-ui.css'") && sw.text.includes("'/category-request.css'") && sw.text.includes("url.pathname.startsWith('/api/')"), 'le cache PWA est renouvelé sans mettre en cache les données privées');
 
   const app = fs.readFileSync('public/app.js', 'utf8');
   const appCss = fs.readFileSync('public/styles.css', 'utf8');

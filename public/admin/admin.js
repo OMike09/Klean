@@ -548,7 +548,8 @@ views.missions = async () => {
     <td>${m.status === 'litige'
       ? `<button class="btn sm" onclick="A.litige(${m.id},false)">Résoudre</button>`
       : `<button class="btn sm warn" onclick="A.litige(${m.id},true)">Litige</button>`}
-      <button class="btn sm sec" onclick="A.conversationLock(${m.id},${m.conversation_locked_at ? 0 : 1})">${m.conversation_locked_at ? '🔓 Réactiver échanges' : '🔒 Suspendre échanges'}</button></td></tr>`; }).join('')}
+      <button class="btn sm sec" onclick="A.conversationLock(${m.id},${m.conversation_locked_at ? 0 : 1})">${m.conversation_locked_at ? '🔓 Réactiver échanges' : '🔒 Suspendre échanges'}</button>
+      ${m.pro_id && can('reassign_missions') && !['annulee','payee'].includes(m.status) ? `<button class="btn sm" onclick="A.reassignMission(${m.id})">🔄 Réattribuer</button>` : ''}</td></tr>`; }).join('')}
   ${!list.length ? '<tr><td colspan="8" class="muted">Aucune mission.</td></tr>' : ''}</table></div>`);
 };
 
@@ -1311,14 +1312,27 @@ const A = {
 
   grandCategoryForm(id) {
     const g=id ? ESTD.catalog.grand_categories.find(x=>x.id===id) : {name:'',icon:'🧩',description:'',active:1,sort:99};
-    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3><label>Nom</label><input id="gc-name" style="width:100%" value="${esc(g.name||'')}"><label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px"><label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea><div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div><button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3><label>Nom</label><input id="gc-name" style="width:100%" value="${esc(g.name||'')}"><label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px"><label>Image de la carte <span class="muted">(URL, chemin /uploads/ ou téléversement)</span></label><input id="gc-image" style="width:100%" value="${esc(g.image_url||'')}" placeholder="/category-images/… ou https://…"><div class="btn-row mt"><input id="gc-image-file" type="file" accept="image/*" style="max-width:100%"><button type="button" class="btn outline sm" onclick="A.uploadGrandCategoryImage()">Téléverser l’image</button></div>${g.image_url?`<img src="${esc(mediaUrl(g.image_url))}" alt="Aperçu" style="width:100%;height:110px;object-fit:cover;border-radius:10px;margin:6px 0">`:''}<label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea><div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div><button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
-  async saveGrandCategory(id) { const body={name:document.getElementById('gc-name').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked};try{await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Grande catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');} },
+  async uploadGrandCategoryImage() {
+    const input=document.getElementById('gc-image-file'), file=input && input.files && input.files[0];
+    if(!file) return toast('Choisissez une image avant le téléversement.','err');
+    if(!String(file.type||'').startsWith('image/')) return toast('Choisissez un fichier image valide.','err');
+    if(file.size>8*1024*1024) return toast('L’image ne doit pas dépasser 8 Mo.','err');
+    const form=new FormData(); form.append('files',file);
+    try {
+      const response=await fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+TOKEN},body:form});
+      const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.error||'Téléversement impossible.');
+      document.getElementById('gc-image').value=(data.files||[])[0]||'';
+      toast('Image téléversée. Enregistrez la catégorie pour la publier.','ok');
+    } catch(e) { toast(e.message,'err'); }
+  },
+  async saveGrandCategory(id) { const body={name:document.getElementById('gc-name').value,icon:document.getElementById('gc-icon').value,image_url:document.getElementById('gc-image').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked};try{await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Grande catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');} },
   async saveEstimationConfig() {
     try { await api('/admin/estimation-config', { method:'PUT', body:{ geo_enabled:document.getElementById('est-geo').checked, fallback:document.getElementById('est-fallback').value, history_min_samples:document.getElementById('est-samples').value } }); toast('Paramètres d’estimation enregistrés ✓','ok'); render(); } catch(e){toast(e.message,'err');}
   },
   estimateRuleForm(id) {
-    const d=ESTD, r=id ? d.rules.find(x=>x.id===id) : { grand_category_id:'',category_id:'',sub_id:'',service_id:'',task_id:'',city:'',zone:'',base_price:'',min_price:'',max_price:'',factors:'{}',source_type:'pdg',source_note:'',source_url:'',source_date:'',verified_at:'',active:1,priority:0 };
+    const d=ESTD, r=id ? d.rules.find(x=>x.id===id) : { grand_category_id:'',category_id:'',sub_id:'',service_id:'',task_id:'',city:'',zone:'',base_price:'',min_price:'',max_price:'',factors:'{}',source_type:'pdg',source_note:'',source_url:'',source_date:'',verified_at:'',public_unit:'',active:1,priority:0 };
     const opt=(rows,key,label,cur)=>`<option value="">${label}</option>`+rows.map(v=>`<option value="${v.id}" ${Number(cur)===Number(v.id)?'selected':''}>${esc(v.name)}</option>`).join('');
     openModal(`<h3>${id?'Modifier':'Nouvelle'} règle tarifaire</h3><div class="small muted">Plus la cible est précise, plus elle est prioritaire à source et priorité égales. Laissez les niveaux inutiles vides.</div>
       <label>Grande catégorie</label><select id="er-grand" style="width:100%;margin-bottom:7px">${opt(d.catalog.grand_categories,'id','Toutes les grandes catégories',r.grand_category_id)}</select>
@@ -1329,15 +1343,16 @@ const A = {
       <div class="frow"><div style="flex:1"><label>Ville <span class="muted">(vide = toutes)</span></label><select id="er-city" style="width:100%"><option value="">Toutes les villes</option>${d.villes.filter(v=>v.active).map(v=>`<option ${r.city===v.name?'selected':''}>${esc(v.name)}</option>`).join('')}</select></div><div style="flex:1"><label>Zone <span class="muted">(facultatif)</span></label><input id="er-zone" value="${esc(r.zone||'')}"></div></div>
       <div class="frow"><div><label>Prix de départ</label><input id="er-base" type="number" min="1" value="${esc(r.base_price??'')}"></div><div><label>Minimum</label><input id="er-min" type="number" min="1" value="${esc(r.min_price??'')}"></div><div><label>Maximum</label><input id="er-max" type="number" min="1" value="${esc(r.max_price??'')}"></div><div><label>Priorité</label><input id="er-priority" type="number" value="${esc(r.priority??0)}" style="width:75px"></div></div>
       <label>Source</label><select id="er-source"><option value="pdg" ${r.source_type==='pdg'?'selected':''}>Règle explicite de la direction</option><option value="local_verifie" ${r.source_type==='local_verifie'?'selected':''}>Donnée locale vérifiée</option></select>
-      <label>Note / source vérifiable</label><textarea id="er-note" rows="2" placeholder="Ex : relevé validé par la direction, période et origine…">${esc(r.source_note||'')}</textarea>
-      <div class="frow"><div style="flex:1"><label>URL source <span class="muted">(facultatif)</span></label><input id="er-url" value="${esc(r.source_url||'')}"></div><div><label>Date source</label><input id="er-date" type="date" value="${esc(r.source_date||'')}"></div></div>
+      <label>Note / source vérifiable</label><textarea id="er-note" rows="2" placeholder="Ex : fournisseur CI, offre publiée, période et origine…">${esc(r.source_note||'')}</textarea>
+      <div class="frow"><div style="flex:1"><label>URL source <span class="muted">(requise pour afficher ce prix aux clients)</span></label><input id="er-url" value="${esc(r.source_url||'')}" placeholder="https://…"></div><div><label>Date source</label><input id="er-date" type="date" value="${esc(r.source_date||'')}"></div></div>
+      <label>Unité / condition visible <span class="muted">(facultatif)</span></label><input id="er-unit" value="${esc(r.public_unit||'')}" placeholder="Ex : par intervention, hors pièce / par appareil">
       <label>Facteurs JSON <span class="muted">(facultatif : fixed_adjustment, percent_adjustment, includes)</span></label><textarea id="er-factors" rows="3">${esc(typeof r.factors==='string'?r.factors:JSON.stringify(r.factors||{}))}</textarea>
       <label class="check-line"><input id="er-active" type="checkbox" ${r.active?'checked':''}> Règle active</label>
       <button class="btn" onclick="A.saveEstimationRule(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
   async saveEstimationRule(id) {
     const num=k=>{const v=document.getElementById(k).value;return v===''?null:Number(v);};
-    const body={grand_category_id:num('er-grand'),category_id:num('er-cat'),sub_id:num('er-sub'),service_id:num('er-service'),task_id:num('er-task'),city:document.getElementById('er-city').value,zone:document.getElementById('er-zone').value,base_price:num('er-base'),min_price:num('er-min'),max_price:num('er-max'),priority:num('er-priority'),source_type:document.getElementById('er-source').value,source_note:document.getElementById('er-note').value,source_url:document.getElementById('er-url').value,source_date:document.getElementById('er-date').value,factors:document.getElementById('er-factors').value,active:document.getElementById('er-active').checked};
+    const body={grand_category_id:num('er-grand'),category_id:num('er-cat'),sub_id:num('er-sub'),service_id:num('er-service'),task_id:num('er-task'),city:document.getElementById('er-city').value,zone:document.getElementById('er-zone').value,base_price:num('er-base'),min_price:num('er-min'),max_price:num('er-max'),priority:num('er-priority'),source_type:document.getElementById('er-source').value,source_note:document.getElementById('er-note').value,source_url:document.getElementById('er-url').value,source_date:document.getElementById('er-date').value,public_unit:document.getElementById('er-unit').value,factors:document.getElementById('er-factors').value,active:document.getElementById('er-active').checked};
     try { await api('/admin/estimation-rules'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Règle tarifaire enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');}
   },
   async deleteEstimationRule(id) { if(!confirm('Supprimer définitivement cette règle tarifaire ?'))return;try{await api('/admin/estimation-rules/'+id,{method:'DELETE'});toast('Règle supprimée.','ok');render();}catch(e){toast(e.message,'err');} },
@@ -1667,6 +1682,39 @@ const A = {
 
   async conversationLock(id, locked) { const reason = locked ? prompt('Motif de suspension des échanges :') : ''; if (locked && reason === null) return; try { await api(`/admin/missions/${id}/conversation-lock`, { method: 'POST', body: { locked: !!locked, reason: reason || '' } }); toast(locked ? 'Échanges suspendus.' : 'Échanges rétablis.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async litige(id, open) { try { await api(`/admin/missions/${id}/litige`, { method: 'POST', body: { open } }); toast(open ? 'Litige ouvert.' : 'Litige résolu.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  async reassignMission(id) {
+    try {
+      const [mission, data] = await Promise.all([api('/missions/' + id), api('/missions/' + id + '/reassignment-candidates')]);
+      A._reassignMission = mission; A._reassignCandidates = data.candidates || []; A._reassignSelected = null;
+      openModal(`<h3>🔄 Réattribuer la mission ${esc(mission.code)}</h3>
+        <p class="small muted">Professionnel actuel : <b>${esc(mission.pro && mission.pro.name || '—')}</b>. Seuls les professionnels disponibles, autorisés et compatibles sont proposés. L’ancien prestataire, les événements et les paiements restent archivés.</p>
+        <label class="small muted">Rechercher par nom, métier, ville ou zone</label><input id="ra-q" style="width:100%;margin:5px 0 9px" placeholder="Ex : Mariam, plomberie, Bouaké…" oninput="A.filterReassignmentCandidates()">
+        <div id="ra-candidates" style="max-height:40vh;overflow:auto"></div>
+        <label class="small muted">Motif de la réattribution <span class="req">*</span></label><textarea id="ra-reason" rows="3" maxlength="1000" placeholder="Ex : indisponibilité du professionnel initial…"></textarea>
+        <button class="btn mt" id="ra-submit" onclick="A.submitReassignment(${id})">Confirmer la réattribution</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+      A.filterReassignmentCandidates();
+    } catch(e) { toast(e.message,'err'); }
+  },
+  filterReassignmentCandidates() {
+    const zone=document.getElementById('ra-candidates'); if(!zone)return;
+    const q=((document.getElementById('ra-q')||{}).value||'').trim().toLocaleLowerCase('fr');
+    const rows=(A._reassignCandidates||[]).filter(p=>!q||`${p.name} ${p.profession||''} ${p.service_city||''} ${p.zone||''} ${p.available?'disponible':''}`.toLocaleLowerCase('fr').includes(q));
+    zone.innerHTML=rows.length?rows.map(p=>`<button type="button" class="menu-item ${A._reassignSelected===p.id?'selected':''}" style="width:100%;text-align:left" onclick="A.pickReassignmentPro(${p.id})"><span class="mi-ic">🧑‍🔧</span><div class="grow"><b>${esc(p.name)}</b><div class="small muted">${esc(p.profession||'Professionnel')} · ${esc(p.service_city||'Ville non renseignée')}${p.zone?' · '+esc(p.zone):''}</div><div class="small">${p.same_city?'📍 Même ville':p.nearby&&p.distance_km!=null?`📍 À environ ${p.distance_km} km`:'📍 Autre zone'} · 🟢 Disponible</div></div><span>${A._reassignSelected===p.id?'☑':'›'}</span></button>`).join(''):'<div class="hint">Aucun professionnel disponible ne correspond à cette recherche.</div>';
+  },
+  pickReassignmentPro(id) { A._reassignSelected=Number(id); A.filterReassignmentCandidates(); },
+  async submitReassignment(id, confirmed=false) {
+    const reason=((document.getElementById('ra-reason')||{}).value||'').trim();
+    if(!A._reassignSelected)return toast('Choisissez un nouveau professionnel.','err');
+    if(!reason)return toast('Indiquez le motif de la réattribution.','err');
+    const btn=document.getElementById('ra-submit'); if(btn)busy(btn,true);
+    try { await api('/missions/'+id+'/reassign',{method:'POST',body:{new_pro_id:A._reassignSelected,reason,confirm_sensitive:confirmed}}); closeModal();toast('Mission réattribuée et personnes concernées notifiées ✓','ok');render(); }
+    catch(e) {
+      if(e.data&&e.data.requires_confirmation) {
+        if(confirm('Cette mission a déjà commencé, est terminée ou comporte un paiement en attente. Confirmez-vous la réattribution avec conservation complète de son historique ?')) return A.submitReassignment(id,true);
+      }
+      toast(e.message,'err'); if(btn)busy(btn,false);
+    }
+  },
 
   supportFilter(v) { window._supportFilter = v; render(); },
   async supportOpen(id) {

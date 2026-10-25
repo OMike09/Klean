@@ -1653,6 +1653,26 @@ ensureColumn('grand_categories', 'popular', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('grand_categories', 'popular_sort', 'INTEGER');
 ensureColumn('taches', 'description', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('taches', 'updated_at', 'TEXT');
+// COLIS 25 — médias de catégories, références de prix unitaires, localisation pro et historique de réattribution.
+ensureColumn('grand_categories', 'image_url', 'TEXT');
+ensureColumn('pro_profiles', 'service_lat', 'REAL');
+ensureColumn('pro_profiles', 'service_lng', 'REAL');
+ensureColumn('pro_profiles', 'location_updated_at', 'TEXT');
+ensureColumn('price_estimation_rules', 'public_unit', 'TEXT');
+db.exec(`
+CREATE TABLE IF NOT EXISTS mission_reassignments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mission_id INTEGER NOT NULL REFERENCES missions(id),
+  old_pro_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  new_pro_id INTEGER NOT NULL REFERENCES users(id),
+  reassigned_by INTEGER NOT NULL REFERENCES users(id),
+  reason TEXT NOT NULL,
+  payment_guard INTEGER NOT NULL DEFAULT 0,
+  previous_status TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mission_reassignments_mission ON mission_reassignments(mission_id, created_at DESC);
+`);
 (function seedPopularGrandCategories() {
   if (getSetting('grand_categories_popular_v1') !== null) return;
   // Migration de la sélection historique de prestations populaires vers leurs
@@ -1670,6 +1690,47 @@ ensureColumn('taches', 'updated_at', 'TEXT');
   });
   tx();
   setSetting('grand_categories_popular_v1','1');
+})();
+
+// Références publiques initiales : elles ne couvrent que les prestations dont une source
+// CI traçable a été relevée. Les autres tâches restent volontairement sans prix affiché
+// jusqu'à validation par la direction — aucun tarif de marché n'est inventé.
+(function seedVerifiedTaskPriceReferences() {
+  if (getSetting('colis25_verified_task_prices_v1') !== null) return;
+  const refs = [
+    { task:'Nettoyage de climatiseur', service:'Entretien & recharge', price:8000, unit:'par climatiseur', city:'Abidjan', note:'Artisans Services+ : pack Business annoncé à 8 000 FCFA par entretien et par climatiseur.', url:'https://www.artisansservicesplus.ci/', date:'2026-10-25' },
+    { task:'Diagnostic de panne', service:'Dépannage climatiseur', price:5000, unit:'par diagnostic', city:'Abidjan', note:'CIP SARL : déplacement / diagnostic annoncé à partir de 5 000 FCFA.', url:'https://cip-sarl.com/reparation-climatisation-abidjan/', date:'2026-04-19' },
+    { task:'Réparation de climatiseur', service:'Dépannage climatiseur', price:15000, unit:'par intervention, hors pièce', city:'Abidjan', note:'CIP SARL : réparation de climatisation annoncée à partir de 15 000 FCFA selon la panne.', url:'https://cip-sarl.com/reparation-climatisation-abidjan/', date:'2026-04-19' },
+    { task:'Réparation de fuite d’eau', service:'Réparation de fuite', price:10000, unit:'par intervention, hors pièce', city:'Abidjan', note:'Yemba Services : fuite simple visible annoncée à partir de 10 000 FCFA.', url:'https://yembaservices.com/plombier-a-abidjan/', date:'2026-06-18' },
+    { task:'Débouchage de WC', service:'Débouchage', price:10000, unit:'par intervention', city:'Abidjan', note:'Yemba Services : débouchage simple annoncé à partir de 10 000 FCFA.', url:'https://yembaservices.com/plombier-a-abidjan/', date:'2026-06-18' },
+    { task:'Débouchage d’évier', service:'Débouchage', price:10000, unit:'par intervention', city:'Abidjan', note:'Yemba Services : débouchage simple évier ou douche annoncé à partir de 10 000 FCFA.', url:'https://yembaservices.com/plombier-a-abidjan/', date:'2026-06-18' },
+    { task:'Remplacement d’un robinet', service:'Réparation de fuite', price:10000, unit:'main-d’œuvre, hors pièce', city:'Abidjan', note:'Yemba Services : remplacement robinet, siphon ou flexible annoncé à partir de 10 000 FCFA hors pièce.', url:'https://yembaservices.com/plombier-a-abidjan/', date:'2026-06-18' },
+    { task:'Réparation de chasse d’eau', service:'Réparation de fuite', price:10000, unit:'par intervention, hors pièce', city:'Abidjan', note:'Yemba Services : réparation de chasse annoncée à partir de 10 000 FCFA selon la pièce.', url:'https://yembaservices.com/plombier-a-abidjan/', date:'2026-06-18' }
+  ];
+  const insert = db.prepare(`INSERT INTO price_estimation_rules(service_id,task_id,city,base_price,source_type,source_note,source_url,source_date,verified_at,public_unit,active,priority)
+    VALUES(?,?,?,?,?,?,?,?,?,?,1,500)`);
+  const exists = db.prepare('SELECT 1 FROM price_estimation_rules WHERE task_id=? AND city=? AND source_url=? LIMIT 1');
+  const tx = db.transaction(() => refs.forEach(ref => {
+    const row = db.prepare(`SELECT t.id task_id,s.id service_id FROM taches t JOIN services s ON s.id=t.service_id WHERE lower(t.name)=lower(?) AND lower(s.name)=lower(?) ORDER BY t.id LIMIT 1`).get(ref.task, ref.service);
+    if (row && !exists.get(row.task_id, ref.city, ref.url)) insert.run(row.service_id,row.task_id,ref.city,ref.price,'local_verifie',ref.note,ref.url,ref.date,new Date().toISOString().slice(0,10),ref.unit);
+  }));
+  tx();
+  setSetting('colis25_verified_task_prices_v1','1');
+})();
+
+// Visuels de départ des catégories les plus mises en avant. Ils sont des fichiers locaux,
+// non des liens externes fragiles, et restent entièrement remplaçables par le PDG.
+(function seedCategoryImages() {
+  const images = {
+    'Nettoyage et entretien':'/category-images/nettoyage.jpg',
+    'Plomberie':'/category-images/plomberie.jpg',
+    'Climatisation et froid':'/category-images/climatisation.jpg',
+    'Électricité':'/category-images/electricite.jpg',
+    'Beauté, coiffure et bien-être':'/category-images/beaute.jpg',
+    'Agriculture et élevage':'/category-images/agriculture.svg'
+  };
+  const set = db.prepare("UPDATE grand_categories SET image_url=?,updated_at=datetime('now') WHERE name=? AND (image_url IS NULL OR image_url='')");
+  Object.entries(images).forEach(([name,image]) => set.run(image,name));
 })();
 
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

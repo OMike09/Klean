@@ -44,7 +44,7 @@ async function api(token, path, method = 'GET', body) {
 
   const rule = await api(admin.token, '/admin/estimation-rules', 'POST', { service_id:service.id, base_price:5432, source_type:'pdg', source_note:'Référence vérifiée COLIS 21', source_url:'', source_date:'2026-10-25', verified_at:'2026-10-25', active:true, priority:77, factors:'{}' });
   const withPrice = await api(null, '/grand-categories/' + category.id + '/catalogue');
-  yes(rule.r.status === 201 && withPrice.d.price_from === 5432, 'une carte de grande catégorie expose seulement la référence fiable « À partir de »');
+  yes(rule.r.status === 201 && withPrice.d.price_from === null, 'une règle interne sans URL publique ne peut plus être affichée comme référence vérifiée sur une carte catégorie');
   await api(admin.token, '/admin/estimation-rules/' + rule.d.id, 'PUT', { active:false });
   const withoutPrice = await api(null, '/grand-categories/' + category.id + '/catalogue');
   yes(withoutPrice.d.price_from === null, 'sans règle fiable, aucune valeur ni texte de confirmation n’est retourné pour la carte catégorie');

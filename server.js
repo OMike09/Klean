@@ -66,6 +66,9 @@ function uploadIsPublicAd(name) {
   return !!db.prepare("SELECT 1 FROM ads WHERE active=1 AND file LIKE ?").get('%/uploads/' + name);
 }
 function canReadUpload(user, name) {
+  // Une image de grande catégorie active est un visuel de catalogue explicitement publié.
+  // Cette exception est évaluée avant l’exigence de session ; les médias privés restent protégés.
+  if (db.prepare("SELECT 1 FROM grand_categories WHERE active=1 AND image_url LIKE ?").get('%/uploads/' + name)) return true;
   if (!user) return false;
   if (isStaff(user) && (hasPerm(user, 'securite') || hasPerm(user, 'missions') || hasPerm(user, 'communication'))) return true;
   const record = db.prepare('SELECT state, uploaded_by FROM file_records WHERE name=?').get(name);
@@ -197,6 +200,7 @@ const PERM_KEYS = {
   catalogue: 'Métiers, services, tâches & villes',
   questions: 'Questions dynamiques',
   missions: 'Demandes & missions',
+  reassign_missions: 'Réattribution des missions',
   paiements: 'Paiements & commissions',
   communication: 'Publicités & messages système',
   securite: 'Signalements, urgences & fichiers',
@@ -208,7 +212,7 @@ const PERM_KEYS = {
 // Valeurs par défaut par rôle (modifiables par le PDG, compte par compte)
 const DEFAULT_PERMS = {
   pdg: Object.keys(PERM_KEYS),
-  admin: Object.keys(PERM_KEYS).filter(k => k !== 'comptes_suppr'),
+  admin: Object.keys(PERM_KEYS).filter(k => !['comptes_suppr','reassign_missions'].includes(k)),
   gestionnaire: ['comptes', 'pros', 'missions', 'contenu', 'frequentation'],
   agent: ['missions'],
 };
@@ -230,6 +234,10 @@ function admin(req, res, next) {
 }
 function pdgOnly(req, res, next) {
   if (req.user.role !== 'pdg') return res.status(403).json({ error: 'Action réservée au PDG.' });
+  next();
+}
+function reassignMissionAllowed(req,res,next) {
+  if (!hasPerm(req.user,'reassign_missions')) return res.status(403).json({ error:'Réattribution réservée au PDG ou à un compte auquel il a accordé cette permission.' });
   next();
 }
 
@@ -571,6 +579,23 @@ app.delete('/api/addresses/:id', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+
+// Géocodage explicite et facultatif : l’adresse n’est envoyée à OpenStreetMap qu’après
+// l’action volontaire du client. Sans résultat externe, la ville/adresse textuelle reste utilisée.
+app.post('/api/geocode', auth, async (req,res) => {
+  const b=req.body||{}, address=String(b.address||'').trim().slice(0,600), city=activeCity(b.city);
+  if(!address || !city) return res.status(400).json({error:'Adresse et ville active requises pour rechercher la position.'});
+  const query=[address,city.name,'Côte d’Ivoire'].join(', ');
+  try {
+    const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ci&q='+encodeURIComponent(query);
+    const response=await fetch(url,{headers:{'User-Agent':'KleanServices/2.0 geocoding contact@klean-services.ci','Accept-Language':'fr'},signal:AbortSignal.timeout(8000)});
+    if(!response.ok) throw new Error('REMOTE');
+    const rows=await response.json(), first=Array.isArray(rows)&&rows[0]; const lat=Number(first&&first.lat),lng=Number(first&&first.lon);
+    if(!Number.isFinite(lat)||!Number.isFinite(lng)||lat<4||lat>11||lng<-9||lng>-2) return res.status(404).json({error:'Adresse non localisée avec assez de précision. Vous pouvez utiliser la position GPS ou conserver l’adresse saisie.'});
+    res.json({lat,lng,label:String(first.display_name||'').slice(0,500),provider:'OpenStreetMap'});
+  } catch(e) { res.status(503).json({error:'Géocodage momentanément indisponible. Utilisez votre position GPS ou conservez l’adresse saisie.'}); }
+});
+
 // Upload générique (photos, audio, documents) — copié aussi dans PostgreSQL si configuré
 app.post('/api/upload', auth, upload.array('files', 8), async (req, res) => {
   if (!req.files || !req.files.length) return res.status(400).json({ error: 'Aucun fichier reçu.' });
@@ -698,7 +723,7 @@ function categoryReferencePrice(grandCategoryId, city) {
   const tasks = db.prepare(`SELECT id FROM taches WHERE active=1 AND service_id IN (${svcMarks})`).all(...services).map(r => r.id);
   // Une carte de catégorie ne montre qu'une référence explicitement documentée.
   // Elle ne déduit ni prix de marché ni majoration de complexité/commune.
-  const candidates = db.prepare('SELECT * FROM price_estimation_rules WHERE active=1 AND source_note IS NOT NULL AND source_note<>\'\' AND verified_at IS NOT NULL AND verified_at<>\'\'').all()
+  const candidates = db.prepare("SELECT * FROM price_estimation_rules WHERE active=1 AND source_note IS NOT NULL AND source_note<>'' AND source_url IS NOT NULL AND source_url LIKE 'https://%' AND source_date IS NOT NULL AND source_date<>'' AND verified_at IS NOT NULL AND verified_at<>''").all()
     .filter(r => {
       if (r.grand_category_id && Number(r.grand_category_id) !== Number(grandCategoryId)) return false;
       if (r.category_id && !cats.includes(Number(r.category_id))) return false;
@@ -711,15 +736,44 @@ function categoryReferencePrice(grandCategoryId, city) {
     }).map(r => Number(r.base_price || r.min_price || r.max_price)).filter(n => n > 0);
   return candidates.length ? Math.min(...candidates) : null;
 }
+function publicTaskPriceMap(taskRows, city) {
+  const ids = [...new Set(taskRows.map(t => Number(t.id)).filter(Boolean))];
+  if (!ids.length) return new Map();
+  // Un tarif public doit être réellement traçable. Les règles privées du PDG restent
+  // utilisables pour les estimations, mais ne sont jamais affichées comme prix marché.
+  const prices = new Map();
+  const rules = db.prepare(`SELECT * FROM price_estimation_rules
+    WHERE active=1 AND task_id IS NOT NULL AND source_note IS NOT NULL AND source_note<>''
+      AND source_url IS NOT NULL AND source_url LIKE 'https://%' AND source_date IS NOT NULL AND source_date<>''
+      AND verified_at IS NOT NULL AND verified_at<>''`).all().filter(r => {
+    if (!ids.includes(Number(r.task_id))) return false;
+    if (r.city && (!city || !ruleCityMatches(r.city, city))) return false;
+    // Sans quartier/commune au stade du catalogue, une règle de zone serait trompeuse.
+    if (r.zone) return false;
+    return Number(r.base_price || r.min_price || r.max_price || 0) > 0;
+  });
+  rules.forEach(r => {
+    const amount = Number(r.base_price || r.min_price || r.max_price || 0);
+    const current = prices.get(Number(r.task_id));
+    if (!current || amount < current.amount || (amount === current.amount && Number(r.priority || 0) > Number(current.priority || 0))) {
+      prices.set(Number(r.task_id), { amount, unit: String(r.public_unit || '').trim() || null, priority:Number(r.priority || 0) });
+    }
+  });
+  return prices;
+}
 function grandCategoryCatalogue(grandId, city) {
-  const grand = db.prepare('SELECT id,name,description,icon,sort,popular,popular_sort FROM grand_categories WHERE id=? AND active=1').get(grandId);
+  const grand = db.prepare('SELECT id,name,description,icon,image_url,sort,popular,popular_sort FROM grand_categories WHERE id=? AND active=1').get(grandId);
   if (!grand) return null;
   const categories = frenchSort(db.prepare('SELECT id,name,icon,sort FROM service_categories WHERE active=1 AND grand_category_id=?').all(grand.id));
   const svcs = catalogueServiceRows().filter(s => Number(s.grand_category_id) === Number(grand.id) && villeOk(s, city));
   const taskRows = frenchSort(db.prepare('SELECT id,service_id,name,description,sort FROM taches WHERE active=1').all());
+  const taskPrices = publicTaskPriceMap(taskRows, city);
   return { ...grand, price_from: categoryReferencePrice(grand.id, city), categories: categories.map(c => ({ ...c,
     services: svcs.filter(s => Number(s.category_id) === Number(c.id)).map(s => ({ id:s.id,name:s.name,icon:s.icon,description:s.description || '',
-      taches: taskRows.filter(t => Number(t.service_id) === Number(s.id)).map(t => ({ id:t.id,name:t.name,description:t.description || '' }))
+      taches: taskRows.filter(t => Number(t.service_id) === Number(s.id)).map(t => {
+        const price = taskPrices.get(Number(t.id));
+        return { id:t.id,name:t.name,description:t.description || '',price_from:price && price.amount || null,price_unit:price && price.unit || null };
+      })
     }))
   })).filter(c => c.services.length) };
 }
@@ -1064,17 +1118,30 @@ app.post('/api/pro/domain-change-request', auth, (req, res) => {
 });
 
 // Lieu où le professionnel travaille actuellement : indépendant de son inscription.
+// La ville est libre seulement dans les villes autorisées ; les zones détaillées et le GPS
+// servent au classement interne et ne sont jamais exposés publiquement.
 app.put('/api/pro/service-location', auth, (req, res) => {
   if (req.user.pro_status !== 'approved') return res.status(403).json({ error: 'Espace réservé aux professionnels validés.' });
-  const city = String((req.body || {}).service_city || '').trim();
+  const b = req.body || {}, city = String(b.service_city || '').trim();
   if (!city) return res.status(400).json({ error: 'Choisissez votre lieu de service actuel.' });
   const valid = db.prepare('SELECT 1 FROM villes WHERE active=1 AND lower(name)=lower(?)').get(city);
   if (!valid) return res.status(400).json({ error: 'Choisissez un lieu dans la liste proposée.' });
   const profile = db.prepare('SELECT service_cities FROM pro_profiles WHERE user_id=?').get(req.user.id);
   let allowed = []; try { allowed = JSON.parse(profile && profile.service_cities || '[]'); } catch {}
   if (allowed.length && !allowed.includes('*') && !allowed.some(v => cityMatches(v, city))) return res.status(403).json({ error: 'Cette ville n’est pas autorisée pour votre profil professionnel. Contactez l’administration.' });
-  db.prepare(`UPDATE pro_profiles SET service_city=?, service_cities=CASE WHEN service_cities IS NULL OR service_cities='[]' OR service_cities='' THEN ? ELSE service_cities END WHERE user_id=?`).run(city, JSON.stringify([city]), req.user.id);
-  notify(req.user.id, 'compte', '📍 Lieu de service mis à jour', `Vous recevez désormais les demandes correspondant à ${city}.`, '#/pro');
+  const changingGps = Object.prototype.hasOwnProperty.call(b,'lat') || Object.prototype.hasOwnProperty.call(b,'lng') || !!b.clear_gps;
+  let lat = null, lng = null;
+  if (changingGps && !b.clear_gps) {
+    lat=Number(b.lat); lng=Number(b.lng);
+    // Bornes larges de la Côte d’Ivoire : empêche des coordonnées incohérentes sans imposer une adresse.
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < 4 || lat > 11 || lng < -9 || lng > -2) return res.status(400).json({ error: 'Position GPS invalide pour la zone d’intervention.' });
+  }
+  const zone = b.zone === undefined ? null : String(b.zone || '').trim().slice(0,250);
+  db.prepare(`UPDATE pro_profiles SET service_city=?, service_cities=CASE WHEN service_cities IS NULL OR service_cities='[]' OR service_cities='' THEN ? ELSE service_cities END,
+      zone=CASE WHEN ?=1 THEN ? ELSE zone END, service_lat=CASE WHEN ?=1 THEN ? ELSE service_lat END, service_lng=CASE WHEN ?=1 THEN ? ELSE service_lng END,
+      location_updated_at=CASE WHEN ?=1 THEN datetime('now') ELSE location_updated_at END WHERE user_id=?`)
+    .run(city, JSON.stringify([city]), b.zone === undefined ? 0 : 1, zone, changingGps ? 1 : 0, lat, changingGps ? 1 : 0, lng, changingGps ? 1 : 0, req.user.id);
+  notify(req.user.id, 'compte', '📍 Lieu de service mis à jour', `Vous recevez désormais en priorité les demandes correspondant à ${city}.`, '#/pro');
   res.json(me(db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id)));
 });
 
@@ -1195,24 +1262,34 @@ function proMatchesMission(p, mission, client) {
   }
   if (Number(p.capacity_level || 1) < Number(mission.capacity_required || 1)) return false;
   if (!p.available || ['indisponible', 'en_mission', 'suspendu'].includes(p.availability_status || '') || proHasActiveMission(p.id)) return false;
-  const dist = haversine(mission.lat, mission.lng, p.lat, p.lng);
+  // La ville déclarée reste la première priorité. Les autres zones ne sont pas
+  // rejetées : elles constituent le recours explicite lorsque la ville/zone proche manque.
+  // Les coordonnées de service du professionnel ne sont jamais exposées au client.
+  return true;
+}
+function professionalLocationScore(mission, p, client) {
   let cities = []; try { cities = JSON.parse(p.service_cities || '[]'); } catch {}
   if (!cities.length && p.service_city) cities = [p.service_city];
   const interventionCity = mission.intervention_city || (client && client.ville) || '';
-  const cityAllowed = cities.includes('*') || !interventionCity || cities.some(c => cityMatches(c, interventionCity));
-  if (getSetting('dispatch_geo_enabled', '1') === '1' && cities.length && !cityAllowed && dist > 50) return false;
-  return true;
+  const sameCity = cities.includes('*') || (!!interventionCity && cities.some(c => cityMatches(c, interventionCity)));
+  const lat = p.service_lat ?? p.lat, lng = p.service_lng ?? p.lng;
+  const dist = haversine(mission.lat, mission.lng, lat, lng);
+  const hasPreciseDistance = Number.isFinite(dist) && dist < 99999;
+  const nearbyKm = settingInt('dispatch_nearby_km', 50, 1, 500);
+  // Ville déclarée > proximité GPS > autre zone avec GPS > ville non géolocalisée.
+  const tier = sameCity ? 0 : (hasPreciseDistance && dist <= nearbyKm ? 1 : (hasPreciseDistance ? 2 : 3));
+  return { dist, same_city:sameCity ? 1 : 0, nearby:hasPreciseDistance && dist <= nearbyKm ? 1 : 0, tier };
 }
 function findMatchingPros(mission) {
-  const pros = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id
+  const pros = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id
     WHERE u.pro_status='approved' AND u.suspended=0 AND COALESCE(u.blocked,0)=0 AND u.id != ?`).all(mission.client_id);
   const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
   return pros.filter(p => proMatchesMission(p, mission, client))
-    .map(p => ({ ...p, dist: haversine(mission.lat, mission.lng, p.lat, p.lng) }))
-    .sort((a, b) => (a.dist - b.dist) || (visibiliteNiveau(b.id) - visibiliteNiveau(a.id)) || a.id - b.id);
+    .map(p => ({ ...p, ...professionalLocationScore(mission, p, client) }))
+    .sort((a, b) => (a.tier - b.tier) || (a.dist - b.dist) || (visibiliteNiveau(b.id) - visibiliteNiveau(a.id)) || a.id - b.id);
 }
 function candidateStillEligible(mission, proId) {
-  const p = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(proId);
+  const p = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(proId);
   const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
   return !!(p && proMatchesMission(p, mission, client));
 }
@@ -1259,7 +1336,7 @@ function offerNext(missionId) {
   }
   if (db.prepare("SELECT 1 FROM mission_candidates WHERE mission_id=? AND status='offered'").get(missionId)) return;
   const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
-  const allPending = db.prepare(`SELECT mc.id AS candidate_id, mc.*, u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.availability_status FROM mission_candidates mc
+  const allPending = db.prepare(`SELECT mc.id AS candidate_id, mc.*, u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM mission_candidates mc
     JOIN pro_profiles p ON p.user_id=mc.pro_id JOIN users u ON u.id=mc.pro_id WHERE mc.mission_id=? AND mc.status='pending' ORDER BY mc.rank ASC`).all(missionId);
   const pending = allPending.filter(c => proMatchesMission(c, mission, client)).slice(0, alertWaveSize(missionId));
   if (!pending.length) {
@@ -1619,7 +1696,7 @@ app.post('/api/missions/:id/accept', auth, (req, res) => {
       if (!mission) throw new Error('NOT_FOUND');
       if (mission.status !== 'recherche') throw new Error('TAKEN');
       if (!proCanReceiveMission(req.user.id)) throw new Error('BUSY');
-      const profile = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(req.user.id);
+      const profile = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(req.user.id);
       const clientForMatch = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
       if (!profile || !proMatchesMission(profile, mission, clientForMatch)) throw new Error('INELIGIBLE');
       const cand = db.prepare("SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=? AND status='offered'").get(mission.id, req.user.id);
@@ -2662,6 +2739,7 @@ const ACTION_LABELS = [
   [/^DELETE \/staff\/\d+/, 'Équipe : compte supprimé'],
   [/^POST \/staff/, 'Équipe : compte créé'],
   [/^POST \/maintenance/, '🛠 MODE MAINTENANCE modifié'],
+  [/^POST \/missions\/\d+\/reassign/, 'Réattribution de mission'],
   [/^POST \/missions\/\d+/, 'Intervention sur une mission'],
   [/^POST \/payments/, 'Intervention sur un paiement'],
   [/^POST \/transactions/, '💰 Finance : statut d\u2019une transaction modifié'],
@@ -3206,15 +3284,15 @@ A.put('/grand-categories/populaires/ordre', pdgOnly, (req,res) => {
 A.post('/grand-categories', pdgOnly, (req, res) => {
   const b=req.body||{}, name=String(b.name||'').trim().slice(0,120);
   if (!name) return res.status(400).json({ error:'Nom de grande catégorie requis.' });
-  try { const id=db.prepare('INSERT INTO grand_categories(name,description,icon,sort,popular) VALUES(?,?,?,?,?)').run(name,String(b.description||'').trim().slice(0,1000),String(b.icon||'🧩').trim().slice(0,16),Number(b.sort)||99,b.popular?1:0).lastInsertRowid;
+  try { const id=db.prepare('INSERT INTO grand_categories(name,description,icon,image_url,sort,popular) VALUES(?,?,?,?,?,?)').run(name,String(b.description||'').trim().slice(0,1000),String(b.icon||'🧩').trim().slice(0,16),String(b.image_url||'').trim().slice(0,1000)||null,Number(b.sort)||99,b.popular?1:0).lastInsertRowid;
     if (b.popular) { const max=db.prepare('SELECT COALESCE(MAX(popular_sort),0) n FROM grand_categories').get().n; db.prepare('UPDATE grand_categories SET popular_sort=? WHERE id=?').run(max+1,id); } res.status(201).json({id}); }
   catch { res.status(409).json({ error:'Cette grande catégorie existe déjà.' }); }
 });
 A.put('/grand-categories/:id', pdgOnly, (req,res) => {
   const old=db.prepare('SELECT * FROM grand_categories WHERE id=?').get(req.params.id); if(!old)return res.status(404).json({error:'Grande catégorie introuvable.'}); const b=req.body||{};
   const popular=b.popular===undefined?old.popular:(b.popular?1:0);
-  db.prepare(`UPDATE grand_categories SET name=COALESCE(?,name),description=COALESCE(?,description),icon=COALESCE(?,icon),active=COALESCE(?,active),sort=COALESCE(?,sort),popular=?,popular_sort=CASE WHEN ?=0 THEN NULL WHEN popular_sort IS NULL THEN (SELECT COALESCE(MAX(popular_sort),0)+1 FROM grand_categories) ELSE popular_sort END,updated_at=datetime('now') WHERE id=?`)
-    .run(b.name === undefined ? null : String(b.name).trim().slice(0,120),b.description === undefined ? null : String(b.description).trim().slice(0,1000),b.icon === undefined ? null : String(b.icon).trim().slice(0,16),b.active === undefined ? null : (b.active ? 1 : 0),b.sort ?? null,popular,popular,old.id);
+  db.prepare(`UPDATE grand_categories SET name=COALESCE(?,name),description=COALESCE(?,description),icon=COALESCE(?,icon),image_url=CASE WHEN ?=1 THEN ? ELSE image_url END,active=COALESCE(?,active),sort=COALESCE(?,sort),popular=?,popular_sort=CASE WHEN ?=0 THEN NULL WHEN popular_sort IS NULL THEN (SELECT COALESCE(MAX(popular_sort),0)+1 FROM grand_categories) ELSE popular_sort END,updated_at=datetime('now') WHERE id=?`)
+    .run(b.name === undefined ? null : String(b.name).trim().slice(0,120),b.description === undefined ? null : String(b.description).trim().slice(0,1000),b.icon === undefined ? null : String(b.icon).trim().slice(0,16),b.image_url === undefined ? 0 : 1,b.image_url === undefined ? null : (String(b.image_url || '').trim().slice(0,1000) || null),b.active === undefined ? null : (b.active ? 1 : 0),b.sort ?? null,popular,popular,old.id);
   res.json({ok:true});
 });
 A.delete('/grand-categories/:id', pdgOnly, (req,res) => {
@@ -3376,6 +3454,7 @@ function cleanEstimationRule(body, previous) {
     source_url: String(get('source_url', previous && previous.source_url) || '').trim().slice(0,500) || null,
     source_date: String(get('source_date', previous && previous.source_date) || '').trim().slice(0,10) || null,
     verified_at: String(get('verified_at', previous && previous.verified_at) || '').trim().slice(0,10) || null,
+    public_unit: String(get('public_unit', previous && previous.public_unit) || '').trim().slice(0,120) || null,
     active: get('active', previous && previous.active) === undefined ? 1 : (get('active', previous && previous.active) ? 1 : 0),
     priority: Math.max(-1000,Math.min(1000,parseInt(get('priority', previous && previous.priority),10)||0))
   };
@@ -3415,14 +3494,14 @@ A.get('/estimation-rules', pdgOnly, (req,res) => res.json(db.prepare(`SELECT r.*
 function priceRuleHistory(id, action, snapshot, user) { db.prepare('INSERT INTO price_estimation_rule_history(rule_id,action,snapshot,changed_by) VALUES(?,?,?,?)').run(id,action,JSON.stringify(snapshot||{}),user.id); }
 A.post('/estimation-rules', pdgOnly, (req,res) => {
   let r;try{r=cleanEstimationRule(req.body);}catch(e){return res.status(400).json({error:ruleError(e)});}
-  const id=db.prepare(`INSERT INTO price_estimation_rules(grand_category_id,category_id,sub_id,service_id,task_id,city,zone,base_price,min_price,max_price,factors,source_type,source_note,source_url,source_date,verified_at,active,priority)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(r.grand_category_id,r.category_id,r.sub_id,r.service_id,r.task_id,r.city,r.zone,r.base_price,r.min_price,r.max_price,r.factors,r.source_type,r.source_note,r.source_url,r.source_date,r.verified_at,r.active,r.priority).lastInsertRowid;
+  const id=db.prepare(`INSERT INTO price_estimation_rules(grand_category_id,category_id,sub_id,service_id,task_id,city,zone,base_price,min_price,max_price,factors,source_type,source_note,source_url,source_date,verified_at,public_unit,active,priority)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(r.grand_category_id,r.category_id,r.sub_id,r.service_id,r.task_id,r.city,r.zone,r.base_price,r.min_price,r.max_price,r.factors,r.source_type,r.source_note,r.source_url,r.source_date,r.verified_at,r.public_unit,r.active,r.priority).lastInsertRowid;
   priceRuleHistory(id,'creation',r,req.user); res.status(201).json({id});
 });
 A.put('/estimation-rules/:id', pdgOnly, (req,res) => {
   const old=db.prepare('SELECT * FROM price_estimation_rules WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Règle introuvable.'});let r;try{r=cleanEstimationRule(req.body,old);}catch(e){return res.status(400).json({error:ruleError(e)});}
-  db.prepare(`UPDATE price_estimation_rules SET grand_category_id=?,category_id=?,sub_id=?,service_id=?,task_id=?,city=?,zone=?,base_price=?,min_price=?,max_price=?,factors=?,source_type=?,source_note=?,source_url=?,source_date=?,verified_at=?,active=?,priority=?,updated_at=datetime('now') WHERE id=?`)
-    .run(r.grand_category_id,r.category_id,r.sub_id,r.service_id,r.task_id,r.city,r.zone,r.base_price,r.min_price,r.max_price,r.factors,r.source_type,r.source_note,r.source_url,r.source_date,r.verified_at,r.active,r.priority,old.id); priceRuleHistory(old.id,r.active?'modification':'désactivation',{before:old,after:r},req.user);res.json({ok:true});
+  db.prepare(`UPDATE price_estimation_rules SET grand_category_id=?,category_id=?,sub_id=?,service_id=?,task_id=?,city=?,zone=?,base_price=?,min_price=?,max_price=?,factors=?,source_type=?,source_note=?,source_url=?,source_date=?,verified_at=?,public_unit=?,active=?,priority=?,updated_at=datetime('now') WHERE id=?`)
+    .run(r.grand_category_id,r.category_id,r.sub_id,r.service_id,r.task_id,r.city,r.zone,r.base_price,r.min_price,r.max_price,r.factors,r.source_type,r.source_note,r.source_url,r.source_date,r.verified_at,r.public_unit,r.active,r.priority,old.id); priceRuleHistory(old.id,r.active?'modification':'désactivation',{before:old,after:r},req.user);res.json({ok:true});
 });
 A.get('/estimation-rules/:id/history', pdgOnly, (req,res)=>res.json(db.prepare('SELECT h.*,u.name changed_by_name FROM price_estimation_rule_history h LEFT JOIN users u ON u.id=h.changed_by WHERE h.rule_id=? ORDER BY h.id DESC').all(req.params.id)));
 A.delete('/estimation-rules/:id', pdgOnly, (req,res)=>{const old=db.prepare('SELECT * FROM price_estimation_rules WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Règle introuvable.'});db.prepare("UPDATE price_estimation_rules SET active=0,updated_at=datetime('now') WHERE id=?").run(old.id);priceRuleHistory(old.id,'désactivation',old,req.user);res.json({ok:true});});
@@ -3468,6 +3547,65 @@ A.get('/missions', (req, res) => {
     LEFT JOIN users up ON up.id=m.pro_id WHERE ${where} ORDER BY m.updated_at DESC LIMIT 300`).all();
   res.json(rows);
 });
+// Réattribution : exclusivement PDG. Elle ne supprime jamais l’affectation ni les paiements historiques.
+A.get('/missions/:id/reassignment-candidates', reassignMissionAllowed, (req, res) => {
+  const mission = db.prepare('SELECT * FROM missions WHERE id=?').get(req.params.id);
+  if (!mission) return res.status(404).json({ error:'Mission introuvable.' });
+  const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
+  const q = normalize(String(req.query.q || ''));
+  const candidates = findMatchingPros(mission).filter(p => p.id !== mission.pro_id).filter(p => !q || normalize(`${p.name} ${p.profession || ''} ${p.service_city || ''} ${p.zone || ''}`).includes(q))
+    .map(p => ({ id:p.id, name:p.name, profession:p.profession || '', service_city:p.service_city || '', zone:p.zone || '', available:!!p.available,
+      same_city:!!p.same_city, nearby:!!p.nearby, distance_km:p.dist < 99999 ? Math.round(p.dist * 10) / 10 : null, pro_type:p.pro_type }));
+  res.json({ mission_id:mission.id, current_pro_id:mission.pro_id || null, candidates });
+});
+A.get('/missions/:id/reassignments', reassignMissionAllowed, (req,res) => {
+  const rows=db.prepare(`SELECT r.*,ou.name old_pro_name,nu.name new_pro_name,byu.name reassigned_by_name
+    FROM mission_reassignments r LEFT JOIN users ou ON ou.id=r.old_pro_id LEFT JOIN users nu ON nu.id=r.new_pro_id
+    LEFT JOIN users byu ON byu.id=r.reassigned_by WHERE r.mission_id=? ORDER BY r.id DESC`).all(req.params.id);
+  res.json(rows);
+});
+A.post('/missions/:id/reassign', reassignMissionAllowed, (req, res) => {
+  const b=req.body||{}, newProId=Number(b.new_pro_id), reason=String(b.reason||'').trim().slice(0,1000);
+  if (!Number.isInteger(newProId) || !reason) return res.status(400).json({ error:'Choisissez un professionnel et indiquez le motif de la réattribution.' });
+  let result;
+  try {
+    result=db.transaction(() => {
+      const mission=db.prepare('SELECT * FROM missions WHERE id=?').get(req.params.id);
+      if(!mission) throw new Error('NOT_FOUND');
+      if(!mission.pro_id) throw new Error('NO_PRO');
+      if(Number(mission.pro_id)===newProId) throw new Error('SAME');
+      const sensitive=['demarrage_demande','en_cours','fin_demande','terminee','payee','litige'].includes(mission.status) || !!db.prepare('SELECT 1 FROM payments WHERE mission_id=?').get(mission.id);
+      if(sensitive && !b.confirm_sensitive) throw new Error('CONFIRM');
+      // Une mission déjà payée est financièrement clôturée : changer pro la réécrirait injustement.
+      if(mission.status==='payee' || db.prepare("SELECT 1 FROM payments WHERE mission_id=? AND status='valide'").get(mission.id)) throw new Error('PAID');
+      if(!['acceptee','confirmee','demarrage_demande','en_cours','fin_demande','terminee','litige'].includes(mission.status)) throw new Error('STATUS');
+      if(!proCanReceiveMission(newProId) || !candidateStillEligible(mission,newProId)) throw new Error('INELIGIBLE');
+      const oldProId=mission.pro_id, nextStatus='acceptee';
+      db.prepare("UPDATE missions SET pro_id=?,status=?,updated_at=datetime('now') WHERE id=?").run(newProId,nextStatus,mission.id);
+      db.prepare("UPDATE pro_profiles SET availability_before_mission=available,available=0,availability_status='en_mission' WHERE user_id=?").run(newProId);
+      db.prepare(`INSERT INTO mission_reassignments(mission_id,old_pro_id,new_pro_id,reassigned_by,reason,payment_guard,previous_status)
+        VALUES(?,?,?,?,?,?,?)`).run(mission.id,oldProId,newProId,req.user.id,reason,sensitive?1:0,mission.status);
+      // Les anciennes offres restent dans l’historique ; seules les offres actives sont clôturées.
+      db.prepare("UPDATE mission_candidates SET status='expired',responded_at=datetime('now') WHERE mission_id=? AND pro_id!=? AND status IN ('pending','offered')").run(mission.id,newProId);
+      const acceptedCandidate=db.prepare("UPDATE mission_candidates SET status='accepted',offered_at=COALESCE(offered_at,datetime('now')),responded_at=datetime('now') WHERE mission_id=? AND pro_id=?").run(mission.id,newProId);
+      if (!acceptedCandidate.changes) db.prepare("INSERT INTO mission_candidates(mission_id,pro_id,rank,status,offered_at,responded_at) VALUES(?,?,0,'accepted',datetime('now'),datetime('now'))").run(mission.id,newProId);
+      addEvent(mission.id,'reaffectee',req.user.id,`Réattribution : professionnel #${oldProId} → #${newProId}. Motif : ${reason}`);
+      return { mission,oldProId,newProId,nextStatus,sensitive };
+    })();
+  } catch(e) {
+    const messages={NOT_FOUND:'Mission introuvable.',NO_PRO:'Cette mission n’est affectée à aucun professionnel.',SAME:'Choisissez un autre professionnel.',CONFIRM:'Cette mission a déjà commencé, est terminée ou comporte un paiement. Confirmez explicitement la réattribution.',PAID:'Mission payée : la réattribution est bloquée afin de préserver le paiement validé et l’historique financier.',STATUS:'Cette mission n’est pas dans un état réattribuable.',INELIGIBLE:'Le professionnel choisi n’est plus disponible ou ne correspond pas à cette mission.'};
+    return res.status(e.message==='NOT_FOUND'?404:409).json({error:messages[e.message]||'Réattribution impossible.',requires_confirmation:e.message==='CONFIRM'});
+  }
+  clearDispatchTimers(result.mission.id);
+  releaseProfessional(result.oldProId, 'Votre mission a été réattribuée par la direction. Vous êtes de nouveau disponible.');
+  const service=db.prepare('SELECT name FROM services WHERE id=?').get(result.mission.service_id);
+  notify(result.mission.client_id,'mission','🔄 Professionnel réattribué',`Klean Services a réattribué votre mission « ${service.name} ». Le nouveau professionnel doit encore être confirmé.`, '#/mission/'+result.mission.id);
+  notify(result.oldProId,'mission','🔄 Mission réattribuée',`La direction a confié « ${service.name} » à un autre professionnel. Motif : ${reason}`, '#/missions');
+  notify(result.newProId,'mission','🔄 Nouvelle mission réattribuée',`La direction vous a réattribué « ${service.name} ». Consultez la mission et coordonnez-vous avec le client.`, '#/mission/'+result.mission.id);
+  [result.mission.client_id,result.oldProId,result.newProId].forEach(uid=>push(uid,'mission',{id:result.mission.id,status:'reaffectee'}));
+  res.json({ok:true,status:result.nextStatus,sensitive:result.sensitive});
+});
+
 A.post('/missions/:id/conversation-lock', (req, res) => {
   const m = db.prepare('SELECT * FROM missions WHERE id=?').get(req.params.id);
   if (!m) return res.status(404).json({ error: 'Mission introuvable.' });
@@ -4529,7 +4667,7 @@ for (const m of db.prepare("SELECT id FROM missions WHERE status='recherche'").a
 
 // ---------- STATIQUE + AUTO-DIAGNOSTIC DES FICHIERS ----------
 const REQUIRED_FILES = [
-  'public/index.html', 'public/app.js', 'public/styles.css', 'public/modern-ui.css', 'public/category-request.css', 'public/sw.js',
+  'public/index.html', 'public/app.js', 'public/styles.css', 'public/modern-ui.css', 'public/category-request.css', 'public/category-cards.css', 'public/sw.js',
   'public/manifest.json', 'public/admin/index.html', 'public/admin/admin.js', 'public/admin/admin.css'
 ];
 const missingFiles = REQUIRED_FILES.filter(f => !fs.existsSync(path.join(__dirname, f)));

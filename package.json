@@ -15,7 +15,8 @@
     "test:update21": "node test-update-21.js",
     "test:update22": "node test-update-22.js",
     "test:update23": "node test-update-23.js",
-    "test:update24": "node test-update-24.js"
+    "test:update24": "node test-update-24.js",
+    "test:update25": "node test-update-25.js"
   },
   "keywords": [],
   "author": "",

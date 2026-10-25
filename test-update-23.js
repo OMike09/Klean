@@ -21,7 +21,7 @@ async function api(token, path, method='GET', body) { const r=await fetch(BASE+p
   yes(ordered.every((x,i)=>form.indexOf(x)>=0 && (!i || form.indexOf(x)>form.indexOf(ordered[i-1]))), 'les sections suivent l’ordre simplifié demandé, jusqu’au bouton final');
   yes(app.includes('saveCategoryDraft()') && app.includes("authRequired('#/categories/'") && app.includes("'categories'") && app.includes('showLeaveConfirm'), 'le brouillon catégorie est préservé pour retour et authentification');
   yes(app.includes('chooseProviderForRequest()') && app.includes("api('/missions'") && app.includes('submitCategoryRequest'), 'le bouton final utilise le parcours réel de demande et de mise en relation');
-  yes(css.includes('.need-picker') && css.includes('.category-task-list') && css.includes('@media(min-width:700px)') && index.includes('/category-request.css') && sw.includes('ks-v7-public-shell'), 'la page est stylée pour téléphone, tablette, ordinateur et PWA');
+  yes(css.includes('.need-picker') && css.includes('.category-task-list') && css.includes('@media(min-width:700px)') && index.includes('/category-request.css') && sw.includes('ks-v8-public-shell'), 'la page est stylée pour téléphone, tablette, ordinateur et PWA');
 
   const suffix=String(Date.now()).slice(-8);
   const client=(await api(null,'/auth/register','POST',{name:'Client page unique '+suffix,phone:'09'+suffix,password:'abcd1234',ville:'Abidjan',accept_rules:true})).d;

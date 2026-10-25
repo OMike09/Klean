@@ -25,6 +25,6 @@ async function api(token,path,method='GET',body){const r=await fetch(BASE+path,{
   yes(app.includes('Installer l’application')&&app.includes("beforeinstallprompt")&&app.includes("appinstalled")&&app.includes('Sur l’écran d’accueil'),'bouton PWA réel, déclencheur natif et instructions iPhone présents');
   yes(app.includes('Pour effectuer cette action, veuillez créer un compte ou vous connecter.')&&app.includes('ks_pending_request_draft')&&app.includes('resumeAfterAuth'),'demande de compte tardive et conservation de brouillon avant authentification');
   yes(app.includes('function guestAccount()')&&app.includes('Créer un compte')&&app.includes('Se connecter'),'rubrique Compte propose inscription et connexion aux visiteurs');
-  yes(manifest.name==='Klean Services'&&manifest.display==='standalone'&&manifest.icons.length>=2&&manifest.scope==='/'&&sw.includes("ks-v7-public-shell")&&sw.includes("url.pathname.startsWith('/api/')")&&sw.includes("SAFE_ASSETS"),'manifeste PWA complet et cache limité à la coque publique');
+  yes(manifest.name==='Klean Services'&&manifest.display==='standalone'&&manifest.icons.length>=2&&manifest.scope==='/'&&sw.includes("ks-v8-public-shell")&&sw.includes("url.pathname.startsWith('/api/')")&&sw.includes("SAFE_ASSETS"),'manifeste PWA complet et cache limité à la coque publique');
   console.log(`RESULT ${n-fail}/${n}, failed=${fail}`);process.exitCode=fail?1:0;
 }catch(e){console.error(e);process.exitCode=1;}})();

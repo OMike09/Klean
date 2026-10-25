@@ -614,7 +614,7 @@ routes.home = async () => {
     <div class="hint">Ex : « mon eau coule », « ma clime est gâtée », « je veux laver ma maison »…</div>
     ${POPULAIRES.length ? `<div class="sec-title">Services populaires</div>
     <div class="svc-grid">
-      ${POPULAIRES.map(s => `<div class="svc-card" onclick="nav('#/categories/${s.id}')"><span class="ic">${esc(s.icon || '🧩')}</span><span class="nm">${esc(s.name)}</span>${s.price_from ? `<span class="price-from">À partir de ${fmtFCFA(s.price_from)}</span>` : ''}</div>`).join('')}
+      ${POPULAIRES.map(s => `<button type="button" class="svc-card ${s.image_url ? 'has-image' : ''}" onclick="nav('#/categories/${s.id}')" aria-label="Ouvrir ${esc(s.name)}"><span class="svc-card-media">${s.image_url ? `<img src="${esc(s.image_url)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('image-missing')">` : `<span class="ic" aria-hidden="true">${esc(s.icon || '🧩')}</span>`}</span><span class="svc-card-copy"><span class="nm">${esc(s.name)}</span>${s.price_from ? `<span class="price-from">À partir de ${fmtFCFA(s.price_from)}</span>` : ''}</span></button>`).join('')}
     </div>` : ''}
     <button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>
     <div class="home-shortcuts" aria-label="Accès rapides">
@@ -673,7 +673,7 @@ function renderCategoryRequestForm(cat, serviceChoices) {
     $app.innerHTML = `${header(cat.name, { bell: !!USER })}<div class="content">${emptyState('📋','Aucune prestation active n’est disponible dans cette catégorie pour le moment.')}</div>${bottomNav('search')}`;
     updateBadges(); return;
   }
-  const allTasks = services.flatMap(s => (s.taches || []).map(t => ({ id:Number(t.id), name:t.name, description:t.description || '', service_id:Number(s.id), service_name:s.name, category:s.category || '' })));
+  const allTasks = services.flatMap(s => (s.taches || []).map(t => ({ id:Number(t.id), name:t.name, description:t.description || '', price_from:Number(t.price_from) || null, price_unit:t.price_unit || '', service_id:Number(s.id), service_name:s.name, category:s.category || '' })));
   const savedDraft = readCategoryDraft(cat.id);
   const taskById = new Map(allTasks.map(t => [Number(t.id), t]));
   let selectedTasks = (savedDraft.taches || []).map(raw => {
@@ -717,7 +717,7 @@ function renderCategoryRequestForm(cat, serviceChoices) {
           <div class="field" id="r-commune-field" style="display:${initialCity === 'Abidjan' ? 'block' : 'none'}"><label>Commune <span class="req">*</span></label><input type="text" id="r-commune" placeholder="👆 Choisir la commune" readonly style="cursor:pointer;background:#fff" value="${esc(initialCommune)}" onclick="A.communePick()"></div>
           <div class="field"><label>Quartier / repère <span class="muted small">facultatif</span></label><input type="text" id="r-quartier" maxlength="250" placeholder="Ex : Air France, près du marché…" value="${esc(initialQuartier)}"></div>
           <div class="field"><label>Adresse précise <span class="req">*</span></label><input type="text" id="r-addr" maxlength="1000" placeholder="Ex : rue, immeuble, porte ou autre repère" value="${esc(initialAddress)}"></div>
-          <div class="gps-row mb"><button type="button" class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Ajouter ma position GPS <span class="muted">(facultatif)</span></button></div>
+          <div class="gps-row mb"><button type="button" class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Ajouter ma position GPS <span class="muted">(facultatif)</span></button><button type="button" class="btn ghost sm" onclick="A.geocodeRequestAddress()">🗺️ Rechercher l’adresse</button></div><div class="small muted" id="r-geocode-note">La recherche d’adresse utilise OpenStreetMap seulement après votre clic.</div>
         </section>
         <section class="request-section">
           <div class="field"><label>Disponibilité</label><select id="r-schedule" onchange="A.requestSchedule()"><option value="asap">Dès que possible</option><option value="today">Aujourd’hui</option><option value="date">À une date précise</option></select><input type="datetime-local" id="r-date" style="display:none;margin-top:8px"></div>
@@ -872,7 +872,7 @@ routes.request = async (serviceId) => {
         <input type="text" id="r-commune" placeholder="👆 Choisir la commune" readonly style="cursor:pointer;background:#fff" value="${esc(initialCommune)}" onclick="A.communePick()">
       </div>
       <div class="field"><label>Adresse / Quartier <span class="req">*</span></label><input type="text" id="r-addr" placeholder="Ex : quartier Air France, près de…" value="${esc(savedDraft.address || (USER && USER.address) || '')}"></div>
-      <div class="gps-row mb"><button class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Ajouter ma position GPS <span class="muted">(facultatif)</span></button></div>
+      <div class="gps-row mb"><button class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Ajouter ma position GPS <span class="muted">(facultatif)</span></button><button class="btn ghost sm" onclick="A.geocodeRequestAddress()">🗺️ Rechercher l’adresse</button></div><div class="small muted" id="r-geocode-note">La recherche d’adresse utilise OpenStreetMap seulement après votre clic.</div>
       <div class="field"><label>Disponibilité</label><select id="r-schedule" onchange="A.requestSchedule()"><option value="asap">Dès que possible</option><option value="today">Aujourd’hui</option><option value="date">À une date précise</option></select><input type="datetime-local" id="r-date" style="display:none;margin-top:8px"></div>
       <div id="r-estimate" class="estimate-box" aria-live="polite"></div>
       <label class="check-line"><input type="checkbox" id="r-urgent" ${savedDraft.urgence ? 'checked' : ''}> 🔥 C'est urgent</label>
@@ -1082,6 +1082,7 @@ routes.mission = async (id) => {
   if (isClient && m.status === 'demarrage_demande') actions = `<div class="btn-row mt"><button class="btn warn" onclick="A.contestStage(${m.id},'start',this)">Contester</button><button class="btn" onclick="A.confirmStart(${m.id},this)">✅ Confirmer le démarrage</button></div>`;
   if (isPro && m.status === 'en_cours') actions = `<button class="btn mt" onclick="A.completeMission(${m.id},this)">✅ Demander la confirmation de fin</button>`;
   if (isClient && m.status === 'fin_demande') actions = `<div class="btn-row mt"><button class="btn warn" onclick="A.contestStage(${m.id},'complete',this)">Contester la fin</button><button class="btn" onclick="A.confirmEnd(${m.id},this)">✅ Confirmer la fin</button></div>`;
+  if (isPro && m.pro && ['acceptee','confirmee','demarrage_demande','en_cours','fin_demande','terminee'].includes(m.status)) actions += `<button class="btn outline mt" onclick="A.openDirections(${m.id},this)">🗺️ Itinéraire vers le client</button>`;
   const cancellable = ['recherche', 'sans_pro', 'acceptee', 'confirmee', 'demarrage_demande', 'en_cours', 'fin_demande'].includes(m.status) && (isClient || isPro);
 
   $app.innerHTML = `
@@ -2397,7 +2398,7 @@ const A = {
     const zone = document.getElementById('category-task-list'); if (!zone) return;
     const query = normalize((document.getElementById('category-task-q') || {}).value || '');
     const selected = new Set((REQ.selected_tasks || []).map(t => Number(t.id)));
-    const choice = t => `<button type="button" class="category-task-choice ${selected.has(Number(t.id)) ? 'on' : ''}" onclick="A.toggleCategoryNeed(${t.id})"><span>${selected.has(Number(t.id)) ? '☑' : '☐'}</span><div><b>${esc(t.name)}</b>${t.description ? `<small>${esc(t.description)}</small>` : ''}</div></button>`;
+    const choice = t => `<button type="button" class="category-task-choice ${selected.has(Number(t.id)) ? 'on' : ''}" onclick="A.toggleCategoryNeed(${t.id})"><span>${selected.has(Number(t.id)) ? '☑' : '☐'}</span><div><b>${esc(t.name)}</b>${t.description ? `<small>${esc(t.description)}</small>` : ''}${t.price_from ? `<small class="task-price">À partir de ${fmtFCFA(t.price_from)}${t.price_unit ? ` <em>· ${esc(t.price_unit)}</em>` : ''}</small>` : ''}</div></button>`;
     const groups = (REQ.category_services || []).map(service => {
       const tasks = (REQ.category_tasks || []).filter(t => Number(t.service_id) === Number(service.id) && (!query || normalize(`${t.name} ${t.description || ''}`).includes(query)));
       // Le nom de la prestation organise les tâches ; le nom de la grande catégorie reste seulement dans l’en-tête vert.
@@ -2530,20 +2531,22 @@ const A = {
   },
   async changeServiceCity() {
     let cities = []; try { cities = await api('/villes'); } catch (e) { toast(e.message, 'err'); return; }
-    const current = (USER.pro && USER.pro.service_city) || USER.ville || '';
-    const allowed = Array.isArray(USER.pro && USER.pro.service_cities) ? USER.pro.service_cities : [];
-    const allAllowed = allowed.includes('*');
-    // Sans autorisation encore enregistrée, le professionnel peut choisir UNE première ville. Après cela,
-    // le serveur verrouille toute ville non autorisée par l’administration.
+    const profile = USER.pro || {}, current = profile.service_city || USER.ville || '';
+    const allowed = Array.isArray(profile.service_cities) ? profile.service_cities : [], allAllowed = allowed.includes('*');
+    // Le professionnel choisit sa ville principale ; les villes supplémentaires restent une décision administrative.
     const selectable = allAllowed || !allowed.length ? cities : cities.filter(c => allowed.includes(c));
     if (current && !selectable.includes(current)) selectable.unshift(current);
     const assigned = allAllowed ? 'Toutes les villes actives sont autorisées par l’administration.' : allowed.length ? allowed.join(' • ') : 'Aucune ville n’est encore attribuée : choisissez votre ville principale.';
-    openModal(`<h3>📍 Ma ville d’intervention</h3>
-      <p class="small muted">Votre ville d’inscription ne change pas. Cette ville sert au matching et aux alertes de nouvelles demandes.</p>
+    A._proGps = (profile.service_lat != null && profile.service_lng != null) ? { lat:Number(profile.service_lat), lng:Number(profile.service_lng) } : null;
+    openModal(`<h3>📍 Ma zone d’intervention</h3>
+      <p class="small muted">Votre ville d’inscription ne change pas. La ville et la position de service servent uniquement à mieux classer les demandes qui vous sont proposées.</p>
       <div class="small" style="background:#f0f8f6;border-radius:8px;padding:8px;margin-bottom:10px"><b>Villes autorisées :</b><br>${esc(assigned)}</div>
       <label class="small muted">Rechercher une ville</label><input id="pro-city-search" style="width:100%;margin-bottom:8px" placeholder="Tapez les premières lettres…" oninput="A.filterServiceCities()">
       <label class="small muted">Ville principale d’intervention</label><select id="pro-service-city" style="width:100%;margin-bottom:10px">${selectable.map(v => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>
-      <p class="small muted">Vous souhaitez intervenir dans d’autres villes ? Contactez l’administration de Klean Services. Seule l’administration peut autoriser des villes supplémentaires.</p>
+      <label class="small muted">Quartiers / zone de déplacement <span class="muted">(facultatif)</span></label><input id="pro-service-zone" style="width:100%;margin-bottom:9px" maxlength="250" value="${esc(profile.zone || '')}" placeholder="Ex : Cocody, Riviera, Angré">
+      <div class="small muted" id="pro-gps-state">${A._proGps ? '✓ Position professionnelle enregistrée pour le classement interne.' : 'Position GPS facultative : elle permet de mieux classer les demandes proches.'}</div>
+      <div class="btn-row mt"><button class="btn outline sm" onclick="A.captureProGPS()">📍 ${A._proGps ? 'Mettre à jour ma position' : 'Ajouter ma position GPS'}</button>${A._proGps ? '<button class="btn ghost sm" onclick="A.clearProGPS()">Supprimer GPS</button>' : ''}</div>
+      <p class="small muted">Vous souhaitez intervenir dans d’autres villes ? Contactez l’administration. Seule l’administration peut autoriser des villes supplémentaires.</p>
       <button class="btn" onclick="A.saveServiceCity()">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
   filterServiceCities() {
@@ -2552,9 +2555,23 @@ const A = {
     [...sel.options].forEach(o => { o.hidden = !!q && !o.text.toLocaleLowerCase('fr').includes(q); });
     const first = [...sel.options].find(o => !o.hidden); if (first) sel.value = first.value;
   },
+  captureProGPS() {
+    if (!navigator.geolocation) return toast('GPS non disponible sur cet appareil. Vous pouvez enregistrer votre ville et vos quartiers.', 'err');
+    const state=document.getElementById('pro-gps-state'); if(state)state.textContent='Localisation en cours…';
+    navigator.geolocation.getCurrentPosition(pos => {
+      A._proGps={lat:pos.coords.latitude,lng:pos.coords.longitude};
+      if(state)state.textContent='✓ Position GPS prête à être enregistrée.';
+      toast('Position professionnelle capturée. Enregistrez la zone pour la conserver.', 'ok');
+    }, () => { if(state)state.textContent='GPS refusé ou indisponible. Votre ville restera utilisée.'; toast('Localisation indisponible : votre ville et votre zone restent prises en compte.', 'err'); }, {enableHighAccuracy:true,timeout:10000,maximumAge:120000});
+  },
+  clearProGPS() { A._proGps = null; const state=document.getElementById('pro-gps-state'); if(state)state.textContent='La position GPS sera supprimée après enregistrement.'; },
   async saveServiceCity() {
-    try { USER = await api('/pro/service-location', { method: 'PUT', body: { service_city: document.getElementById('pro-service-city').value } }); closeModal(); toast('Ville d’intervention mise à jour ✓', 'ok'); render(); }
-    catch (e) { toast(e.message, 'err'); }
+    try {
+      const previous=USER.pro || {}, body={ service_city:document.getElementById('pro-service-city').value, zone:document.getElementById('pro-service-zone').value };
+      if (A._proGps) { body.lat=A._proGps.lat; body.lng=A._proGps.lng; }
+      else if (previous.service_lat != null || previous.service_lng != null) body.clear_gps=true;
+      USER = await api('/pro/service-location', { method: 'PUT', body }); closeModal(); toast('Zone d’intervention mise à jour ✓', 'ok'); render();
+    } catch (e) { toast(e.message, 'err'); }
   },
   startContact(subject) { sessionStorage.setItem('ks_contact_subject', subject); nav('#/contact/new'); },
   async supportCreate(subject, btn) {
@@ -2685,6 +2702,14 @@ const A = {
   },
 
   /* GPS */
+  async geocodeRequestAddress() {
+    const address=((document.getElementById('r-addr')||{}).value||'').trim(), city=((document.getElementById('r-city')||{}).value||'').trim();
+    if(!city) return toast('Choisissez d’abord la ville d’intervention.', 'err');
+    if(!address) return toast('Saisissez l’adresse ou un repère avant de la rechercher.', 'err');
+    const note=document.getElementById('r-geocode-note'); if(note)note.textContent='Recherche de la position de l’adresse…';
+    try { const r=await api('/geocode',{method:'POST',body:{address,city}}); REQ.lat=r.lat;REQ.lng=r.lng;A.saveCategoryDraft();if(note)note.textContent='✓ Position de l’adresse trouvée via OpenStreetMap.';toast('Position de l’adresse enregistrée ✓','ok'); }
+    catch(e) { if(note)note.textContent='Adresse non localisée automatiquement : la ville et l’adresse saisies restent utilisées.';toast(e.message,'err'); }
+  },
   useGPS() {
     const btn = document.getElementById('b-gps');
     if (!navigator.geolocation) { toast('GPS non disponible sur cet appareil. Saisissez votre adresse manuellement.', 'err'); return; }
@@ -2706,6 +2731,29 @@ const A = {
   },
 
   /* Actions mission */
+  async openDirections(id, btn) {
+    if (btn) busy(btn, true);
+    try {
+      const m = await api('/missions/' + Number(id));
+      if (m.role !== 'pro') throw new Error('Cette option est réservée au professionnel affecté à la mission.');
+      const destination = (m.lat !== null && m.lat !== undefined && m.lng !== null && m.lng !== undefined && Number.isFinite(Number(m.lat)) && Number.isFinite(Number(m.lng)))
+        ? `${Number(m.lat)},${Number(m.lng)}`
+        : [m.address, m.intervention_city, 'Côte d’Ivoire'].filter(Boolean).join(', ');
+      if (!destination) throw new Error('Aucune destination exploitable n’est disponible pour cette mission.');
+      const launch = origin => {
+        let url='https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(destination)+'&travelmode=driving';
+        if (origin) url += '&origin='+encodeURIComponent(origin);
+        window.open(url, '_blank', 'noopener');
+      };
+      // La position courante est demandée seulement au professionnel qui lance l’itinéraire.
+      // En cas de refus, sa position de service déjà enregistrée est utilisée si elle existe ; sinon
+      // Google Maps ouvre simplement la destination/adresse sans divulgation supplémentaire.
+      const saved = USER && USER.pro && USER.pro.service_lat != null && USER.pro.service_lng != null ? `${USER.pro.service_lat},${USER.pro.service_lng}` : '';
+      if (navigator.geolocation) navigator.geolocation.getCurrentPosition(p => launch(`${p.coords.latitude},${p.coords.longitude}`), () => launch(saved), { enableHighAccuracy:true, timeout:8000, maximumAge:120000 });
+      else launch(saved);
+    } catch (e) { toast(e.message, 'err'); }
+    finally { if (btn) busy(btn, false); }
+  },
   async acceptMission(id, btn) {
     busy(btn, true);
     try { await api('/missions/' + id + '/accept', { method: 'POST' }); toast('Mission acceptée ! Le client a été notifié.', 'ok'); render(); }

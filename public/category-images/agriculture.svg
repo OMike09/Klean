@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200" role="img" aria-label="Agriculture et élevage">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#d8f3ee"/><stop offset=".52" stop-color="#f9f1c9"/><stop offset="1" stop-color="#6cae64"/></linearGradient>
+    <linearGradient id="field" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#397c52"/><stop offset="1" stop-color="#0f5e4f"/></linearGradient>
+  </defs>
+  <rect width="900" height="1200" fill="url(#sky)"/>
+  <circle cx="686" cy="226" r="80" fill="#f7c95c" opacity=".9"/>
+  <path d="M0 615C142 520 230 558 366 626c159 79 269 29 534-100v674H0z" fill="#79b86a"/>
+  <path d="M0 764c174-109 334-41 466 30 152 82 291 48 434-59v465H0z" fill="url(#field)"/>
+  <path d="M-10 935c213-136 373-61 540 22 125 62 243 67 390-17M-10 1040c217-140 360-55 536 31 126 62 257 65 394-20" fill="none" stroke="#d9c35d" stroke-width="28" opacity=".88"/>
+  <g transform="translate(132 427)" fill="#16624d"><path d="M155 230c-98-4-162-55-185-143 100 2 165 53 185 143z"/><path d="M160 230c-5-96 42-159 134-183 6 97-42 160-134 183z"/><path d="M149 230v-231h23v231z"/></g>
+  <g transform="translate(495 420)" fill="#1f7256"><path d="M155 245c-104-5-172-58-196-151 105 1 174 54 196 151z"/><path d="M160 245c-6-101 44-167 142-192 5 102-45 168-142 192z"/><path d="M149 245V0h23v245z"/></g>
+  <rect x="76" y="79" width="276" height="64" rx="32" fill="#0b7a6b" opacity=".92"/>
+  <text x="114" y="122" font-family="Arial, sans-serif" font-size="29" font-weight="700" fill="white">Klean Services</text>
+</svg>
