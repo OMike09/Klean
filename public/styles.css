@@ -239,6 +239,7 @@ img.msg-missing{display:none}
 .live-search-results:empty{display:none}
 .live-search-results .menu-item{background:#fff;border:1px solid #e2ece9;margin:4px 0;border-radius:10px}
 .estimate-box{border-left:4px solid #dc2626;background:#fff6f6;border-radius:9px;padding:10px 11px;margin-bottom:12px}
+.estimate-box:empty{display:none}
 .estimate-box .estimate-price{color:#dc2626;font-size:18px;font-weight:800}
 
 /* COLIS 17 — Accueil, splash et accès transverses */
@@ -255,3 +256,6 @@ img.msg-missing{display:none}
 .install-cta{position:fixed;right:max(14px,calc(12px + var(--safe-r)));bottom:calc(78px + var(--safe-b));z-index:75;display:flex;align-items:center;gap:7px;border:0;border-radius:999px;padding:11px 15px;background:var(--p);color:#fff;font:700 13px/1.1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 8px 22px rgba(7,94,82,.34);cursor:pointer;max-width:calc(100vw - 28px)}
 .install-cta span{font-size:20px;line-height:.7}.install-cta:active{transform:translateY(1px);background:var(--p-dark)}.install-cta:disabled{opacity:.82;cursor:wait}
 @media(min-width:600px){.install-cta{right:24px;bottom:24px}}@media(max-width:360px){.install-cta{padding:10px 12px;font-size:12px;bottom:calc(73px + var(--safe-b))}}
+/* COLIS 21 : repères prix des grandes catégories — rouge, uniquement si fiable */
+.price-from{display:block;color:#dc2626;font-size:.78rem;font-weight:800;margin-top:4px}
+#home-fixe .searchbar{max-width:680px}

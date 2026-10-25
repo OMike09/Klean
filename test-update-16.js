@@ -32,7 +32,7 @@ const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '
   r = await api(admin.token, '/admin/taches', 'POST', { service_id: leak.id, name: 'Contrôle dynamique de fuite ' + suffix });
   const dynamicTaskId = r.d.id;
   const afterTask = await api(null, '/services/' + leak.id + '/questions');
-  yes(r.r.status === 200 && afterTask.d.taches.some(t => t.id === dynamicTaskId), 'nouvelle tâche ajoutée au catalogue central');
+  yes(r.r.status === 201 && afterTask.d.taches.some(t => t.id === dynamicTaskId), 'nouvelle tâche ajoutée au catalogue central');
 
   const ruleBouake = await api(admin.token, '/admin/estimation-rules', 'POST', { service_id: leak.id, task_id: leak.task_id, city: bouake, base_price: 6500, source_type: 'pdg', source_note: 'Référence validée par la direction pour le test.', verified_at:'2026-10-25', active: true, priority: 10, factors: { includes: 'Main-d’œuvre de départ uniquement.' } });
   const ruleAbidjan = await api(admin.token, '/admin/estimation-rules', 'POST', { service_id: leak.id, task_id: leak.task_id, city: 'Abidjan', base_price: 8000, source_type: 'pdg', source_note: 'Référence direction Abidjan pour le test.', verified_at:'2026-10-25', active: true, priority: 10, factors: {} });

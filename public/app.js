@@ -579,7 +579,7 @@ function adsBandHtml(list) {
 routes.home = async () => {
   // Les prix et services populaires affichés viennent toujours de la configuration actuelle du tableau de bord.
   const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
-  try { SERVICES = await api('/services' + cityQuery); POPULAIRES = await api('/services/populaires' + cityQuery); }
+  try { SERVICES = await api('/services' + cityQuery); POPULAIRES = await api('/grand-categories/populaires' + cityQuery); }
   catch (e) { $app.innerHTML = header('Accueil', { brand: true }) + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home'); return; }
   try { GAMES = await api('/games/config'); } catch { }
   try { ADS = await api('/ads'); } catch { }
@@ -614,9 +614,9 @@ routes.home = async () => {
     <div class="hint">Ex : « mon eau coule », « ma clime est gâtée », « je veux laver ma maison »…</div>
     ${POPULAIRES.length ? `<div class="sec-title">Services populaires</div>
     <div class="svc-grid">
-      ${POPULAIRES.map(s => `<div class="svc-card" onclick="nav('#/request/${s.id}')"><span class="ic">${esc(s.icon || '🔹')}</span><span class="nm">${esc(s.name)}</span>${prixHtml(s, true)}</div>`).join('')}
+      ${POPULAIRES.map(s => `<div class="svc-card" onclick="nav('#/categories/${s.id}')"><span class="ic">${esc(s.icon || '🧩')}</span><span class="nm">${esc(s.name)}</span>${s.price_from ? `<span class="price-from">À partir de ${fmtFCFA(s.price_from)}</span>` : ''}</div>`).join('')}
     </div>` : ''}
-    <button class="btn sec mt" onclick="nav('#/services')">Voir tous les services</button>
+    <button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>
     <div class="home-shortcuts" aria-label="Accès rapides">
       <button class="home-shortcut" onclick="nav('#/jobs')"><span>💼</span><div><b>Trouver ou proposer un job</b><small>Consulter les offres ou publier la vôtre</small></div><i>›</i></button>
       <button class="home-shortcut" onclick="nav('#/avis-recherche')"><span>📢</span><div><b>Avis de recherche</b><small>Publier ou consulter un avis</small></div><i>›</i></button>
@@ -655,6 +655,35 @@ routes.search = async (params) => {
   inp.addEventListener('input', () => A.liveSearch('s-q', 's-results', false));
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') A.doSearch(); });
   if (q) A.doSearch(); else inp.focus();
+  updateBadges();
+};
+
+/* ---------- Grandes catégories : seules cartes du parcours public ---------- */
+routes.categories = async (param) => {
+  const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
+  const id = Number(param || 0);
+  if (id) {
+    let cat; try { cat = await api('/grand-categories/' + id + '/catalogue' + cityQuery); }
+    catch (e) { toast(e.message, 'err'); nav('#/categories'); return; }
+    const serviceChoices = cat.categories.flatMap(c => c.services.map(s => ({...s, category:c.name})));
+    $app.innerHTML = `${header(cat.name, { bell: !!USER })}<div class="content">
+      <div class="card" style="margin-bottom:12px"><div class="row"><span class="mi-ic">${esc(cat.icon || '🧩')}</span><div class="grow"><div class="bold">${esc(cat.name)}</div>${cat.description ? `<div class="small muted">${esc(cat.description)}</div>` : ''}</div></div>
+        ${cat.price_from ? `<div class="price-from">À partir de ${fmtFCFA(cat.price_from)}</div>` : ''}
+      </div>
+      <div class="card"><div class="bold mb">Je décris mon besoin</div><div class="small muted mb">Vous ne trouvez pas une tâche précise ? Décrivez simplement ce dont vous avez besoin.</div>
+        <button class="btn" onclick="A.describeGrandCategory(${cat.id})">Décrire mon besoin</button></div>
+      <div class="sec-title">Je choisis mon/mes besoins <span class="muted small">(facultatif)</span></div>
+      ${cat.categories.map(c => `<section class="card"><div class="bold mb">${esc(c.icon || '🔹')} ${esc(c.name)}</div>${c.services.map(s => `<div style="padding:8px 0;border-top:1px solid #edf0f2"><b class="small">${esc(s.name)}</b>${s.taches.length ? `<div class="choices" style="margin-top:6px">${s.taches.map(t=>`<button type="button" class="chip" onclick="A.openSearchResult(${s.id},${t.id})">${esc(t.name)}</button>`).join('')}</div>` : `<button class="btn sec sm" style="margin-top:6px" onclick="A.chooseGrandDescription(${s.id})">Décrire ce besoin</button>`}</div>`).join('')}</section>`).join('') || emptyState('📋','Aucune prestation n’est disponible dans cette catégorie pour le moment.')}
+    </div>${bottomNav('search')}`;
+    window._grandCategoryServices = serviceChoices;
+    updateBadges(); return;
+  }
+  let cats; try { cats = await api('/grand-categories' + cityQuery); }
+  catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}</div>` + bottomNav('search'); return; }
+  $app.innerHTML = `${header('Tous les services', { bell: !!USER })}<div class="content">
+    <div class="hint">Toutes les grandes catégories actives, classées de A à Z.</div>
+    ${cats.map(c => `<div class="menu-item" onclick="nav('#/categories/${c.id}')"><span class="mi-ic">${esc(c.icon || '🧩')}</span><div class="grow"><b>${esc(c.name)}</b>${c.description ? `<div class="small muted">${esc(c.description)}</div>` : ''}${c.price_from ? `<div class="price-from">À partir de ${fmtFCFA(c.price_from)}</div>` : ''}</div><span class="mi-arr">›</span></div>`).join('') || emptyState('📋','Aucune grande catégorie active pour le moment.')}
+  </div>${bottomNav('search')}`;
   updateBadges();
 };
 
@@ -735,7 +764,7 @@ routes.services = async (params) => {
   if (q) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
 };
 
-/* ---------- Demande de service (formulaire adaptatif) ---------- */
+/* ---------- Demande de service : tâche facultative, besoin libre prioritaire ---------- */
 let REQ = { photos: [], audio: null, lat: null, lng: null };
 routes.request = async (serviceId) => {
   let data;
@@ -746,57 +775,64 @@ routes.request = async (serviceId) => {
   sessionStorage.removeItem('ks_search_selection');
   let savedDraft = {}; try { savedDraft = JSON.parse(sessionStorage.getItem('ks_pending_request_draft') || '{}'); } catch { savedDraft = {}; }
   if (Number(savedDraft.service_id) !== Number(data.service.id)) savedDraft = {};
-  const selectedTask = (data.taches || []).find(t => Number(t.id) === Number(savedDraft.task_id || selection.task_id));
-  REQ = { photos: [], audio: null, lat: savedDraft.lat ?? (USER && USER.lat), lng: savedDraft.lng ?? (USER && USER.lng), service_id: data.service.id,
-    task_id: selectedTask ? selectedTask.id : ((data.taches || []).length === 1 ? data.taches[0].id : null), has_tasks: (data.taches || []).length > 0,
+  const selectedIds = new Set((savedDraft.taches || []).map(t => Number(t.id || t)).concat(savedDraft.task_id ? [Number(savedDraft.task_id)] : [], selection.task_id ? [Number(selection.task_id)] : []));
+  REQ = { photos: savedDraft.photos || [], audio: savedDraft.audio || null, lat: savedDraft.lat ?? (USER && USER.lat), lng: savedDraft.lng ?? (USER && USER.lng), service_id: data.service.id,
+    task_id: [...selectedIds][0] || null, has_tasks: (data.taches || []).length > 0,
     photo_limit: Math.min(3, Number(data.limits && data.limits.photos || 3)), audio_max: Math.min(25, Number(data.limits && data.limits.audio_seconds || 25) || 25) };
   const initialCity = savedDraft.intervention_city || (USER && USER.ville) || '';
   const initialCommune = savedDraft.intervention_commune || '';
-  const tasksHtml = (data.taches || []).length ? `<div class="field"><label>Tâche <span class="req">*</span></label>
-    <select id="r-task" onchange="A.requestTaskChanged()"><option value="">Choisir la tâche</option>${data.taches.map(t => `<option value="${t.id}" ${Number(REQ.task_id) === Number(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>` : '';
+  const tasksHtml = (data.taches || []).length ? `<div class="field"><label>Je choisis mon/mes besoins <span class="muted small">(facultatif)</span></label>
+    <div class="choices" id="r-taches">${data.taches.map(t => `<button type="button" class="chip task-chip ${selectedIds.has(Number(t.id)) ? 'on' : ''}" data-task-id="${t.id}" data-task-name="${esc(t.name)}" onclick="A.requestToggleTask(this)">${selectedIds.has(Number(t.id)) ? '☑ ' : '☐ '}${esc(t.name)}</button>`).join('')}</div>
+    <div id="r-task-details"></div></div>` : '';
   $app.innerHTML = `
   ${header(data.service.name, { bell: !!USER })}
   <div class="content"><div class="card">
       <div class="small muted mb">${esc(data.service.grand_category || data.service.category || '')}${data.service.category && data.service.grand_category ? ' › ' + esc(data.service.category) : ''} › ${esc(data.service.name)}</div>
       ${tasksHtml}
-      <div class="field"><label>Décrivez votre tache ou ce que vous voulez. <span class="req">*</span></label>
+      <div class="field"><label>Je décris mon besoin ci-dessous. <span class="req">*</span></label>
         <textarea id="r-desc" maxlength="5000" placeholder="Ex : Le robinet de ma cuisine coule depuis ce matin…" oninput="A.requestDescriptionChanged()">${esc(savedDraft.description || selection.query || '')}</textarea></div>
+      <div class="field"><label>Photos <span class="muted small">facultatif · 3 maximum</span></label><div class="photo-strip" id="r-photos"><button class="ph-add" onclick="A.pickPhotos('r-photos')">＋</button></div><input type="file" id="file-input" accept="image/*" multiple style="display:none"></div>
+      <div class="field"><label>Note vocale <span class="muted small">facultatif · ${REQ.audio_max} secondes maximum</span></label><div id="r-audio-zone"><button class="btn sec sm" id="r-rec" onclick="A.toggleRec('r-audio-zone')">🎤 Enregistrer une note vocale</button></div></div>
       <div class="field"><label>Ville d’intervention <span class="req">*</span></label>
         <input type="text" id="r-city" placeholder="👆 Choisir la ville de l’intervention" readonly style="cursor:pointer;background:#fff" value="${esc(initialCity)}" onclick="A.villePick('r-city')">
       </div>
       <div class="field" id="r-commune-field" style="display:${initialCity === 'Abidjan' ? 'block' : 'none'}"><label>Commune <span class="req">*</span></label>
         <input type="text" id="r-commune" placeholder="👆 Choisir la commune" readonly style="cursor:pointer;background:#fff" value="${esc(initialCommune)}" onclick="A.communePick()">
       </div>
-      <div id="r-estimate" class="estimate-box" aria-live="polite"></div>
-      <div class="sec-title">Localisation précise</div>
-      <div class="gps-row mb"><button class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Utiliser ma position GPS</button></div>
-      <div class="small muted mb">La position GPS aide à localiser, mais ne remplace jamais la ville choisie.</div>
       <div class="field"><label>Adresse / Quartier <span class="req">*</span></label><input type="text" id="r-addr" placeholder="Ex : quartier Air France, près de…" value="${esc(savedDraft.address || (USER && USER.address) || '')}"></div>
-      <div class="field"><label>Photos (facultatif) <span class="muted small">3 maximum</span></label><div class="photo-strip" id="r-photos"><button class="ph-add" onclick="A.pickPhotos('r-photos')">＋</button></div><input type="file" id="file-input" accept="image/*" multiple style="display:none"></div>
-      <div class="field"><label>Note vocale (facultatif) <span class="muted small">${REQ.audio_max} secondes maximum</span></label><div id="r-audio-zone"><button class="btn sec sm" id="r-rec" onclick="A.toggleRec('r-audio-zone')">🎤 Enregistrer une note vocale</button></div></div>
-      <div class="field"><label>Disponibilité souhaitée</label><select id="r-schedule" onchange="A.requestSchedule()"><option value="asap">Dès que possible</option><option value="today">Aujourd’hui</option><option value="date">À une date précise</option></select><input type="datetime-local" id="r-date" style="display:none;margin-top:8px"></div>
+      <div class="gps-row mb"><button class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Ajouter ma position GPS <span class="muted">(facultatif)</span></button></div>
+      <div class="field"><label>Disponibilité</label><select id="r-schedule" onchange="A.requestSchedule()"><option value="asap">Dès que possible</option><option value="today">Aujourd’hui</option><option value="date">À une date précise</option></select><input type="datetime-local" id="r-date" style="display:none;margin-top:8px"></div>
+      <div id="r-estimate" class="estimate-box" aria-live="polite"></div>
       <label class="check-line"><input type="checkbox" id="r-urgent" ${savedDraft.urgence ? 'checked' : ''}> 🔥 C'est urgent</label>
-      <button class="btn" id="b-send">Envoyer ma demande</button>
+      <button class="btn" id="b-send">Trouver un professionnel</button>
   </div></div>${bottomNav('search')}`;
   updateBadges();
   if (initialCity === 'Abidjan') await A.requestLocationChanged(true);
+  // Recrée les éventuelles précisions sauvegardées, sans imposer une tâche.
+  document.querySelectorAll('#r-taches .task-chip.on').forEach(el => {
+    A.toggleTask(el, true);
+    const saved = (savedDraft.taches || []).find(t => Number(t.id || t) === Number(el.dataset.taskId));
+    const detail = document.getElementById('r-task-detail-' + el.dataset.taskId);
+    if (saved && detail) detail.value = saved.detail || '';
+  });
   A.requestEstimate();
   if (savedDraft.schedule_type) { document.getElementById('r-schedule').value = savedDraft.schedule_type; document.getElementById('r-date').value = savedDraft.date_souhaitee || ''; A.requestSchedule(); }
   document.getElementById('b-send').onclick = async () => {
     const addr = document.getElementById('r-addr').value, description = document.getElementById('r-desc').value;
     const interventionCity = document.getElementById('r-city').value, interventionCommune = (document.getElementById('r-commune') || {}).value || '';
-    const taskEl = document.getElementById('r-task'); if (taskEl) REQ.task_id = Number(taskEl.value) || null;
-    if (taskEl && !REQ.task_id) { toast('Choisissez la tâche.', 'err'); return; }
-    if (!description.trim()) { toast('Décrivez votre tache ou ce que vous voulez.', 'err'); return; }
+    const taches = [...document.querySelectorAll('#r-taches .task-chip.on')].map(el => ({ id:Number(el.dataset.taskId), detail:((document.getElementById('r-task-detail-'+el.dataset.taskId)||{}).value||'').trim() }));
+    REQ.task_id = taches[0] ? taches[0].id : null;
+    if (!description.trim()) { toast('Décrivez votre besoin.', 'err'); return; }
     if (!interventionCity.trim()) { toast('Choisissez la ville d’intervention.', 'err'); return; }
     if (interventionCity === 'Abidjan' && !interventionCommune.trim()) { toast('Choisissez la commune d’intervention.', 'err'); return; }
     if (!addr.trim()) { toast('Indiquez l’adresse ou le quartier de l’intervention.', 'err'); return; }
-    REQ.draft = { service_id: REQ.service_id, task_id: REQ.task_id, answers: {}, description, address: addr, intervention_city: interventionCity, intervention_commune: interventionCommune, lat: REQ.lat, lng: REQ.lng,
+    REQ.draft = { service_id: REQ.service_id, task_id: REQ.task_id, taches, answers: {}, description, address: addr, intervention_city: interventionCity, intervention_commune: interventionCommune, lat: REQ.lat, lng: REQ.lng,
       urgence: document.getElementById('r-urgent').checked, schedule_type: document.getElementById('r-schedule').value, date_souhaitee: document.getElementById('r-date').value || null, photos: REQ.photos, audio: REQ.audio };
     if (!USER) { sessionStorage.setItem('ks_pending_request_draft', JSON.stringify(REQ.draft)); authRequired('#/request/' + data.service.id); return; }
     sessionStorage.removeItem('ks_pending_request_draft'); A.chooseProviderForRequest();
   };
 };
+
 function renderQuestion(q) {
   const req = q.required ? '<span class="req">*</span>' : '';
   const attrs = `data-q="${q.id}" data-req="${q.required}" data-label="${esc(q.label)}" data-type="${q.type}"`;
@@ -2251,6 +2287,27 @@ const A = {
     sessionStorage.setItem('ks_search_selection', JSON.stringify({ service_id: Number(serviceId), task_id: taskId ? Number(taskId) : null, query: A._lastSearchQuery || '' }));
     nav('#/request/' + Number(serviceId));
   },
+  searchCategoryCard(c) {
+    return `<div class="menu-item" onclick="A.openSearchCategory(${Number(c.id)})"><span class="mi-ic">${esc(c.icon || '🧩')}</span><div class="grow"><b>${esc(c.name)}</b><div class="small muted">Grande catégorie${c.description ? ' · ' + esc(c.description) : ''}</div></div><span class="mi-arr">›</span></div>`;
+  },
+  openSearchCategory(id) { nav('#/categories/' + Number(id)); },
+  describeGrandCategory(id) {
+    const services = (window._grandCategoryServices || []).filter(s => Number(s.id));
+    if (!services.length) return toast('Aucune prestation active n’est disponible dans cette catégorie.', 'err');
+    if (services.length === 1) return A.chooseGrandDescription(services[0].id);
+    openModal(`<h3>Décrire mon besoin</h3><p class="small muted">Choisissez la prestation la plus proche. Vous pourrez écrire votre besoin librement, sans sélectionner de tâche.</p><div style="max-height:52vh;overflow:auto">${services.map(s=>`<div class="menu-item" onclick="A.chooseGrandDescription(${s.id})"><span class="mi-ic">🔹</span><div><b>${esc(s.name)}</b><div class="small muted">${esc(s.category || '')}</div></div><span class="mi-arr">›</span></div>`).join('')}</div>`);
+  },
+  chooseGrandDescription(serviceId) {
+    sessionStorage.setItem('ks_search_selection', JSON.stringify({ service_id:Number(serviceId), task_id:null, query:sessionStorage.getItem('ks_category_need') || A._lastSearchQuery || '' }));
+    sessionStorage.removeItem('ks_category_need'); closeModal(); nav('#/request/' + Number(serviceId));
+  },
+  async describeAnyNeed() {
+    const query = A._lastSearchQuery || ((document.getElementById('s-q') || {}).value || (document.getElementById('home-q') || {}).value || '').trim();
+    sessionStorage.setItem('ks_category_need', query);
+    let cats=[]; try { cats=await api('/grand-categories' + (USER && USER.ville ? '?ville='+encodeURIComponent(USER.ville) : '')); } catch(e) { return toast(e.message,'err'); }
+    openModal(`<h3>Décrire mon besoin</h3><p class="small muted">Choisissez le grand domaine le plus proche. Aucune tâche prédéfinie ne sera obligatoire.</p><div style="max-height:52vh;overflow:auto">${cats.map(c=>`<div class="menu-item" onclick="closeModal();nav('#/categories/${c.id}')"><span class="mi-ic">${esc(c.icon||'🧩')}</span><b>${esc(c.name)}</b><span class="mi-arr">›</span></div>`).join('')}</div>`);
+  },
+  requestToggleTask(el) { A.toggleTask(el); const on=[...document.querySelectorAll('#r-taches .task-chip.on')]; REQ.task_id=on[0] ? Number(on[0].dataset.taskId) : null; A.requestEstimate(); },
   async liveSearch(inputId, zoneId, compact) {
     const input = document.getElementById(inputId), zone = document.getElementById(zoneId);
     if (!input || !zone) return;
@@ -2265,9 +2322,12 @@ const A = {
         const r = await api('/search?q=' + encodeURIComponent(q) + city);
         if (sequence !== A._searchSeq) return;
         A._lastSearchQuery = q;
-        zone.innerHTML = r.results.length
-          ? (compact ? r.results.slice(0, 5).map(s => A.searchResultCard(s, true)).join('') : `<div class="sec-title">Prestations correspondantes</div>${r.results.map(s => A.searchResultCard(s, false)).join('')}`)
-          : (compact ? '<div class="hint">Aucune correspondance certaine — vous pouvez continuer à décrire votre besoin.</div>' : emptyState('🔍', 'Aucun résultat suffisamment fiable. Vous pouvez préciser votre besoin ou parcourir les services.') + `<button class="btn sec" onclick="nav('#/services')">Voir tous les services</button>`);
+        const categories = Array.isArray(r.categories) ? r.categories : [];
+        const catHtml = categories.length ? `<div class="sec-title">Grandes catégories</div>${categories.map(c=>A.searchCategoryCard(c)).join('')}` : '';
+        const serviceHtml = r.results.length ? `<div class="sec-title">Prestations et tâches</div>${(compact ? r.results.slice(0,5) : r.results).map(s => A.searchResultCard(s, compact)).join('')}` : '';
+        zone.innerHTML = (categories.length || r.results.length)
+          ? (compact ? `${categories.slice(0,2).map(c=>A.searchCategoryCard(c)).join('')}${r.results.slice(0,4).map(s=>A.searchResultCard(s,true)).join('')}` : catHtml + serviceHtml)
+          : (compact ? '<div class="hint">Aucune correspondance certaine. <button class="btn ghost sm" onclick="A.describeAnyNeed()">Décrire mon besoin</button></div>' : emptyState('🔍', 'Aucun résultat suffisamment fiable.') + `<button class="btn" onclick="A.describeAnyNeed()">Décrire mon besoin</button><button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>`);
       } catch (e) { if (sequence === A._searchSeq) zone.innerHTML = compact ? '<div class="hint">Recherche momentanément indisponible.</div>' : emptyState('📶', e.message); }
     }, 180);
   },
@@ -2392,12 +2452,13 @@ const A = {
     const description = ((document.getElementById('r-desc') || {}).value || '').trim();
     const commune = ((document.getElementById('r-commune') || {}).value || '').trim();
     const zone = document.getElementById('r-estimate'); if (!zone) return;
-    // Aucun prix ni texte sur le prix avant tâche + description + lieu complet.
-    if ((REQ.has_tasks && !REQ.task_id) || !description || !city || (city === 'Abidjan' && !commune)) { zone.innerHTML = ''; return; }
+    // Une estimation n’est affichée que lorsqu’une règle vérifiable donne un montant.
+    // L’absence de référence reste silencieuse : aucun montant fictif, aucun « Prix à confirmer ».
+    if (!description || !city || (city === 'Abidjan' && !commune)) { zone.innerHTML = ''; return; }
     try {
-      const r = await api('/estimates?service_id=' + encodeURIComponent(REQ.service_id) + '&task_id=' + encodeURIComponent(REQ.task_id) + '&city=' + encodeURIComponent(city) + '&zone=' + encodeURIComponent(commune) + '&details=' + encodeURIComponent(description));
-      zone.innerHTML = r.status === 'estimated' && r.amount ? `<div class="estimate-price">À partir de ${fmtFCFA(r.amount)}</div>` : '<div class="estimate-price">Prix à confirmer</div>';
-    } catch { zone.innerHTML = '<div class="estimate-price">Prix à confirmer</div>'; }
+      const r = await api('/estimates?service_id=' + encodeURIComponent(REQ.service_id) + '&task_id=' + encodeURIComponent(REQ.task_id || '') + '&city=' + encodeURIComponent(city) + '&zone=' + encodeURIComponent(commune) + '&details=' + encodeURIComponent(description));
+      zone.innerHTML = r.status === 'estimated' && r.amount ? `<div class="estimate-price">Estimation disponible : à partir de ${fmtFCFA(r.amount)}</div>` : '';
+    } catch { zone.innerHTML = ''; }
   },
   mTab(t) { sessionStorage.setItem('ks_mtab', t); render(); },
   toggleSound(el) {
@@ -3007,7 +3068,7 @@ function render() {
   const param = rest.join('/');
   if (route !== 'home') { const install=document.getElementById('install-cta'); if (install) install.remove(); }
   if (MAINT.active && MAINT.scope === 'F' && (!USER || USER.role !== 'pdg')) { maintenanceScreen(); return; }
-  const publicRoutes = ['home','search','services','request','jobs','avis-recherche','urgence','about','login','register','account'];
+  const publicRoutes = ['home','search','services','categories','request','jobs','avis-recherche','urgence','about','login','register','account'];
   if (!TOKEN && !publicRoutes.includes(route)) { publicAuthGate(); return; }
   if (USER && USER.must_change_password) { setTimeout(forcePasswordModal, 50); }
   const fn = routes[route] || routes.home;

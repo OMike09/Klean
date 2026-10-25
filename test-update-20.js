@@ -62,8 +62,8 @@ async function api(token, path, method = 'GET', body) {
   yes(invalidNoCommune.r.status === 400 && /commune/.test(invalidNoCommune.d.error || ''), 'le serveur bloque une demande Abidjan sans commune, même si le client contourne l’interface');
 
   const app = fs.readFileSync('public/app.js','utf8'), css = fs.readFileSync('public/styles.css','utf8'), adminJs = fs.readFileSync('public/admin/admin.js','utf8');
-  yes(app.includes('Décrivez votre tache ou ce que vous voulez.') && app.includes('requestLocationChanged') && app.includes('communePick'), 'parcours client réordonné : tâche, description, ville, commune Abidjan, estimation');
-  yes(app.includes("zone.innerHTML = r.status === 'estimated' && r.amount ? `<div class=\"estimate-price\">À partir de ${fmtFCFA(r.amount)}</div>` : '<div class=\"estimate-price\">Prix à confirmer</div>'") && !app.includes('Prix à confirmer après précision de votre besoin.'), 'l’interface n’affiche que À partir de X FCFA ou Prix à confirmer');
+  yes(app.includes('Je décris mon besoin ci-dessous.') && app.includes('Je choisis mon/mes besoins') && app.includes('Trouver un professionnel') && app.includes('requestLocationChanged') && app.includes('communePick'), 'nouveau parcours client : tâche facultative, description, pièces jointes, ville, localisation, disponibilité et estimation');
+  yes(app.includes("zone.innerHTML = r.status === 'estimated' && r.amount ? `<div class=\"estimate-price\">Estimation disponible : à partir de ${fmtFCFA(r.amount)}</div>` : ''") && !app.includes("'<div class=\"estimate-price\">Prix à confirmer</div>'"), 'le nouveau parcours affiche seulement une estimation fiable, sans prix à confirmer');
   yes(app.includes('function prixHtml() { return \'\'; }') && css.includes('.estimate-box:empty{display:none}') && adminJs.includes('Gestion des tarifs'), 'prix masqués sur les listes ordinaires et bloc d’estimation invisible tant qu’il est vide');
   console.log(`RESULT ${n-fail}/${n}, failed=${fail}`); process.exitCode = fail ? 1 : 0;
 } catch (e) { console.error(e); process.exitCode = 1; } })();

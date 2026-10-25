@@ -1646,4 +1646,30 @@ if (getSetting('colis20_pricing_safety') === null) {
   setSetting('colis20_pricing_safety', '1');
 }
 
+// ============================================================
+// COLIS 21 — grandes catégories client et tâches enrichies
+// ============================================================
+ensureColumn('grand_categories', 'popular', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('grand_categories', 'popular_sort', 'INTEGER');
+ensureColumn('taches', 'description', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('taches', 'updated_at', 'TEXT');
+(function seedPopularGrandCategories() {
+  if (getSetting('grand_categories_popular_v1') !== null) return;
+  // Migration de la sélection historique de prestations populaires vers leurs
+  // grandes catégories, sans supprimer ni renuméroter les prestations existantes.
+  let ids = db.prepare(`SELECT c.grand_category_id id, MIN(COALESCE(s.popular_sort,9999)) popular_order, MIN(g.sort) category_order
+    FROM services s JOIN service_categories c ON c.id=s.category_id
+    JOIN grand_categories g ON g.id=c.grand_category_id
+    WHERE s.popular=1 AND s.active=1 AND c.active=1 AND g.active=1
+    GROUP BY c.grand_category_id
+    ORDER BY popular_order, category_order, c.grand_category_id`).all().map(r => r.id);
+  if (!ids.length) ids = db.prepare('SELECT id FROM grand_categories WHERE active=1 ORDER BY sort,id LIMIT 12').all().map(r => r.id);
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE grand_categories SET popular=0,popular_sort=NULL').run();
+    ids.forEach((id,index) => db.prepare('UPDATE grand_categories SET popular=1,popular_sort=? WHERE id=?').run(index + 1,id));
+  });
+  tx();
+  setSetting('grand_categories_popular_v1','1');
+})();
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

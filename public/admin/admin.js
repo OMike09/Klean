@@ -362,6 +362,7 @@ views.catalog = async () => {
   const nTaches = {}; d.taches.forEach(t => nTaches[t.service_id] = (nTaches[t.service_id] || 0) + 1);
   const svcRow = (s, path) => `<tr>
     <td><b>${esc(s.name)}</b>${path ? `<div class="small muted">${esc(path)}</div>` : ''}
+      <div class="small" style="color:#111;font-weight:700">${s.price_show && s.price_from ? esc(s.price_prefix || 'Dès') + ' ' + Number(s.price_from).toLocaleString('fr-FR') + ' FCFA' : '<span class="muted" style="font-weight:400">prix masqué</span>'}</div>
       <div class="small muted">${s.popular ? '⭐ populaire ' : ''}${s.seasonal ? '📅 saisonnier ' : ''}${s.cities.length ? '📍 ' + s.cities.map(esc).join(', ') : ''}</div></td>
     <td class="small muted" style="max-width:220px">${esc(s.keywords)}</td>
     <td><button class="btn sm sec" onclick="A.taches(${s.id})">📝 Tâches (${nTaches[s.id] || 0})</button></td>
@@ -402,11 +403,15 @@ views.catalog = async () => {
     </div>`;
   }
 
-  shell(`<h1>🗂️ Services & catégories</h1>
+  shell(`<h1>🗂️ Gestion des catégories et des tâches</h1>
   <div class="tabs">
     <button class="on">🗂️ Catalogue</button>
-    <button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Services populaires</button>
+    <button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Catégories populaires</button>
     <button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes (${'villes' in STATS ? STATS.villes : '…'})</button>
+  </div>
+  <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Grandes catégories</h2><button class="btn sm" onclick="A.grandCategoryForm(0)">＋ Créer</button></div>
+    <div class="small muted" style="margin:7px 0">Ces catégories organisent l'accueil, la recherche et les tâches. Une catégorie utilisée ne peut être supprimée qu'après réaffectation de ses métiers.</div>
+    <table><tr><th>Ordre</th><th>Grande catégorie</th><th>Accueil</th><th>État</th><th>Actions</th></tr>${d.grand_categories.sort((a,b)=>a.sort-b.sort||a.id-b.id).map((g,i)=>`<tr><td><button class="btn sm sec" ${i===0?'disabled':''} onclick="A.grandMove(${g.id},${i},-1)">↑</button><button class="btn sm sec" ${i===d.grand_categories.length-1?'disabled':''} onclick="A.grandMove(${g.id},${i},1)">↓</button></td><td><b>${esc(g.icon||'🧩')} ${esc(g.name)}</b>${g.description?`<div class="small muted">${esc(g.description)}</div>`:''}</td><td>${g.popular?'<span class="pill ok">Populaire</span>':'—'}</td><td>${g.active?'<span class="pill ok">Publiée</span>':'<span class="pill off">Inactive</span>'}</td><td><button class="btn sm sec" onclick="A.grandCategoryForm(${g.id})">Modifier</button><button class="btn sm ${g.active?'warn':''}" onclick="A.toggleGrand(${g.id},${g.active?0:1})">${g.active?'Désactiver':'Publier'}</button><button class="btn sm warn" onclick="A.deleteGrand(${g.id})">🗑️</button></td></tr>`).join('')||'<tr><td colspan="5" class="muted">Aucune grande catégorie.</td></tr>'}</table>
   </div>
   <div class="frow">
     <div style="flex:1;min-width:220px"><label>🔎 Rechercher dans le catalogue (catégorie, service, tâche, mot-clé)</label>
@@ -441,20 +446,20 @@ views.estimates = async () => {
   const source = r => r.source_type === 'pdg' ? 'Règle direction' : 'Donnée locale vérifiée';
   const cities = villes.filter(v => v.active).map(v => v.name);
   const allServices = catalog.services.filter(s => s.active);
-  shell(`<h1>🧠 Gestion des tarifs</h1>
-    <div class="panel small muted">Le moteur applique les règles PDG documentées, les références locales vérifiées et, si elles sont comparables, les historiques validés. Sans donnée fiable, il affiche « Prix à confirmer ». Aucun prix de marché n’est inventé.</div>
+  shell(`<h1>🧠 Gestion des tarifs et estimations intelligentes</h1>
+    <div class="panel small muted">Le moteur applique d’abord les règles explicites de la direction, puis les données locales vérifiées, ensuite l’historique suffisamment documenté, puis le tarif de référence autorisé. Sans donnée fiable, il affiche « Prix à confirmer ». Aucun prix de marché n’est inventé.</div>
     <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Grandes catégories centrales</h2><button class="btn sm" onclick="A.grandCategoryForm(0)">＋ Ajouter</button></div>
       <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">${catalog.grand_categories.map(g => `<span class="pill ${g.active ? 'ok' : 'off'}">${esc(g.icon || '🧩')} ${esc(g.name)} <button type="button" style="border:0;background:transparent;cursor:pointer" onclick="A.grandCategoryForm(${g.id})">✏️</button></span>`).join('')}</div></div>
     <div class="panel"><h2 style="margin-top:0">Règles globales</h2><div class="frow">
       <label><input type="checkbox" id="est-geo" ${cfg.geo_enabled ? 'checked' : ''}> Ajustements géographiques par ville actifs</label>
-      <span class="small muted">Sans donnée fiable : <b>Prix à confirmer</b></span>
+      <label>Repli si aucune donnée locale <select id="est-fallback"><option value="reference" ${cfg.fallback === 'reference' ? 'selected' : ''}>Tarif de référence PDG (provisoire)</option><option value="confirmer" ${cfg.fallback === 'confirmer' ? 'selected' : ''}>Prix à confirmer</option></select></label>
       <label>Historique minimum <input id="est-samples" type="number" min="3" max="100" value="${cfg.history_min_samples}" style="width:78px"> interventions validées</label>
       <button class="btn" onclick="A.saveEstimationConfig()">Enregistrer</button>
     </div></div>
     <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Règles tarifaires (${rules.length})</h2><button class="btn" onclick="A.estimateRuleForm(0)">＋ Nouvelle règle</button></div>
       <div class="small muted" style="margin:8px 0">Une règle peut cibler une grande catégorie, un métier, une sous-catégorie, une prestation ou une tâche, et éventuellement une ville/zone. Les facteurs JSON permettent par exemple un ajustement fixe ou un pourcentage.</div>
       <div style="overflow:auto"><table><tr><th>Cible</th><th>Ville / zone</th><th>Estimation</th><th>Source / actualisation</th><th>État</th><th></th></tr>
-      ${rules.map(r => `<tr><td><b>${esc(target(r))}</b><div class="small muted">Priorité ${r.priority || 0}</div></td><td>${esc(r.city || 'Toutes villes')}${r.zone ? '<br><span class="small muted">' + esc(r.zone) + '</span>' : ''}</td><td><b>${r.base_price ? fcfa(r.base_price) : '—'}</b>${r.min_price || r.max_price ? `<div class="small muted">${r.min_price ? fcfa(r.min_price) : '—'} → ${r.max_price ? fcfa(r.max_price) : '—'}</div>` : ''}</td><td>${esc(source(r))}<div class="small muted">${esc(r.source_date || r.verified_at || r.updated_at || '')}</div></td><td>${r.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.estimateRuleForm(${r.id})">Modifier</button><button class="btn sm sec" onclick="A.estimationRuleHistory(${r.id})">Historique</button><button class="btn sm ${r.active ? 'warn' : ''}" onclick="A.toggleEstimationRule(${r.id},${r.active ? 0 : 1})">${r.active ? 'Désactiver' : 'Restaurer'}</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Aucune règle : le moteur utilisera seulement le repli éventuellement autorisé.</td></tr>'}
+      ${rules.map(r => `<tr><td><b>${esc(target(r))}</b><div class="small muted">Priorité ${r.priority || 0}</div></td><td>${esc(r.city || 'Toutes villes')}${r.zone ? '<br><span class="small muted">' + esc(r.zone) + '</span>' : ''}</td><td><b>${r.base_price ? fcfa(r.base_price) : '—'}</b>${r.min_price || r.max_price ? `<div class="small muted">${r.min_price ? fcfa(r.min_price) : '—'} → ${r.max_price ? fcfa(r.max_price) : '—'}</div>` : ''}</td><td>${esc(source(r))}<div class="small muted">${esc(r.source_date || r.verified_at || r.updated_at || '')}</div></td><td>${r.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.estimateRuleForm(${r.id})">Modifier</button><button class="btn sm warn" onclick="A.deleteEstimationRule(${r.id})">🗑️</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Aucune règle : le moteur utilisera seulement le repli éventuellement autorisé.</td></tr>'}
       </table></div></div>
     <div class="panel"><h2 style="margin-top:0">Tester une estimation avant publication</h2><div class="frow"><select id="est-test-service" style="min-width:230px"><option value="">Choisir une prestation</option>${allServices.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><select id="est-test-city" style="min-width:180px"><option value="">Choisir une ville</option>${cities.map(c => `<option>${esc(c)}</option>`).join('')}</select><button class="btn" onclick="A.testEstimation()">Tester</button></div><div id="est-test-result" class="small muted" style="margin-top:9px">Aucun test en cours.</div></div>
     <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Dictionnaire de recherche (${terms.length})</h2><button class="btn" onclick="A.searchTermForm()">＋ Ajouter une expression</button></div>
@@ -462,53 +467,29 @@ views.estimates = async () => {
       <div style="max-height:340px;overflow:auto"><table><tr><th>Expression</th><th>Destination</th><th>Source</th><th>État</th><th></th></tr>${terms.map(t => `<tr><td>${esc(t.term)}</td><td>${esc(t.service_name)}${t.task_name ? ' › ' + esc(t.task_name) : ''}</td><td class="small">${esc(t.source)}</td><td>${t.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.toggleSearchTerm(${t.id},${t.active ? 0 : 1})">${t.active ? 'Désactiver' : 'Activer'}</button><button class="btn sm warn" onclick="A.deleteSearchTerm(${t.id})">🗑️</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucune expression.</td></tr>'}</table></div></div>`);
 };
 
-/* ---------- Services populaires (sélection et ordre de l'accueil) ---------- */
+/* ---------- Grandes catégories populaires : seules cartes de l'accueil ---------- */
 views._populaires = async () => {
   const d = CATD = await api('/admin/catalog');
-  const pops = d.services.filter(s => s.popular)
-    .sort((a, b) => (a.popular_sort ?? 999) - (b.popular_sort ?? 999) || a.sort - b.sort || a.id - b.id);
-  const catOf = s => d.categories.find(c => c.id === s.category_id) || {};
-  const options = d.categories.map(c => {
-    const svcs = d.services.filter(s => s.category_id === c.id && !s.popular && s.active);
-    return svcs.length ? `<optgroup label="${esc((c.icon || '') + ' ' + c.name)}">${svcs.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup>` : '';
-  }).join('');
-  shell(`<h1>🗂️ Services & catégories</h1>
-  <div class="tabs">
-    <button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button>
-    <button class="on">⭐ Services populaires</button>
-    <button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes (${'villes' in STATS ? STATS.villes : '…'})</button>
-  </div>
-  <div class="panel">
-    <p class="small muted">Les services populaires apparaissent en haut de l'accueil de l'application, dans l'ordre ci-dessous.
-    Ce sont les mêmes services que dans le catalogue — une sélection, jamais des doublons. Tout changement est visible immédiatement sur l'accueil.</p>
-    <div class="frow">
-      <div style="min-width:280px"><label>＋ Ajouter un service aux populaires</label>
-        <select id="pop-add" style="width:100%">${options || '<option value="">(tous les services actifs sont déjà populaires)</option>'}</select></div>
-      <button class="btn" onclick="A.popAdd()">Ajouter</button>
-    </div>
-    <table><tr><th style="width:52px">Ordre</th><th>Service</th><th>Catégorie</th><th>État</th><th>Actions</th></tr>
-    ${pops.map((s, i) => { const c = catOf(s); return `<tr>
-      <td><b>${i + 1}</b></td>
-      <td><b>${esc(s.name)}</b></td>
-      <td>${esc((c.icon || '') + ' ' + (c.name || ''))}</td>
-      <td>${s.active ? '<span class="pill ok">Actif</span>' : '<span class="pill off">Inactif</span>'}</td>
-      <td style="white-space:nowrap">
-        <button class="btn sm sec" title="Monter" ${i === 0 ? 'disabled' : ''} onclick="A.popMove(${s.id},-1)">↑</button>
-        <button class="btn sm sec" title="Descendre" ${i === pops.length - 1 ? 'disabled' : ''} onclick="A.popMove(${s.id},1)">↓</button>
-        <button class="btn sm warn" onclick="A.popRemove(${s.id})">✕ Retirer</button></td></tr>`; }).join('') || '<tr><td colspan="5" class="muted small">Aucun service populaire — ajoutez-en un ci-dessus.</td></tr>'}
-    </table>
-  </div>`);
+  const pops = d.grand_categories.filter(g => g.popular).sort((a,b)=>(a.popular_sort??999)-(b.popular_sort??999)||a.sort-b.sort||a.id-b.id);
+  const available = d.grand_categories.filter(g => g.active && !g.popular);
+  shell(`<h1>🗂️ Gestion des catégories et des tâches</h1>
+  <div class="tabs"><button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button><button class="on">⭐ Catégories populaires</button><button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes (${'villes' in STATS ? STATS.villes : '…'})</button></div>
+  <div class="panel"><p class="small muted">L'accueil affiche uniquement les grandes catégories actives sélectionnées ici — jamais une prestation ni une tâche. Le prix n'apparaît côté client que si une règle tarifaire vérifiée le permet.</p>
+    <div class="frow"><div style="min-width:280px"><label>＋ Ajouter une grande catégorie</label><select id="pop-add" style="width:100%">${available.map(g=>`<option value="${g.id}">${esc(g.icon||'🧩')} ${esc(g.name)}</option>`).join('') || '<option value="">(toutes les catégories actives sont déjà sélectionnées)</option>'}</select></div><button class="btn" onclick="A.popAdd()">Ajouter</button></div>
+    <table><tr><th style="width:52px">Ordre</th><th>Grande catégorie</th><th>État</th><th>Actions</th></tr>
+      ${pops.map((g,i)=>`<tr><td><b>${i+1}</b></td><td><b>${esc(g.icon||'🧩')} ${esc(g.name)}</b>${g.description?`<div class="small muted">${esc(g.description)}</div>`:''}</td><td>${g.active?'<span class="pill ok">Publiée</span>':'<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" ${i===0?'disabled':''} onclick="A.popMove(${g.id},-1)">↑</button><button class="btn sm sec" ${i===pops.length-1?'disabled':''} onclick="A.popMove(${g.id},1)">↓</button><button class="btn sm warn" onclick="A.popRemove(${g.id})">✕ Retirer</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted small">Aucune grande catégorie sélectionnée.</td></tr>'}
+    </table></div>`);
 };
 
 /* ---------- Villes ---------- */
 views._villes = async () => {
-  const [list, communes] = await Promise.all([api('/admin/villes'), api('/admin/communes')]);
+  const list = await api('/admin/villes');
   const q = (sessionStorage.getItem('adm_v_q') || '').toLowerCase();
   const show = q ? list.filter(v => v.name.toLowerCase().includes(q)) : list;
-  shell(`<h1>🗂️ Services & catégories</h1>
+  shell(`<h1>🗂️ Gestion des catégories et des tâches</h1>
   <div class="tabs">
     <button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button>
-    <button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Services populaires</button>
+    <button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Catégories populaires</button>
     <button class="on">🏙️ Villes (${list.length})</button>
   </div>
   <div class="frow">
@@ -523,10 +504,7 @@ views._villes = async () => {
     <td>${v.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
     <td><button class="btn sm sec" onclick="A.villeToggle(${v.id},${v.active ? 0 : 1})">${v.active ? 'Désactiver' : 'Activer'}</button>
     <button class="btn sm warn" onclick="A.villeDel(${v.id})">🗑️</button></td></tr>`).join('')}
-  ${!show.length ? '<tr><td colspan="3" class="muted">Aucune ville trouvée.</td></tr>' : ''}</table></div>
-  <div class="panel"><div class="frow" style="align-items:center"><div class="grow"><h2 style="margin:0">Communes</h2><div class="small muted">Source centrale utilisée par le formulaire client et les règles tarifaires. Les communes d’Abidjan sont séparées de la ville, sans surcote automatique.</div></div></div>
-    <div class="frow" style="margin:10px 0"><div><label>Ville</label><input id="cm-city" value="Abidjan"></div><div><label>Commune</label><input id="cm-name" placeholder="Nom de la commune"></div><button class="btn" onclick="A.communeAdd()">Ajouter</button></div>
-    <table><tr><th>Ville</th><th>Commune</th><th>État</th><th>Action</th></tr>${communes.map(c=>`<tr><td>${esc(c.city_name)}</td><td><b>${esc(c.name)}</b></td><td>${c.active?'<span class="pill ok">Active</span>':'<span class="pill off">Inactive</span>'}</td><td><button class="btn sm sec" onclick="A.communeToggle(${c.id},${c.active?0:1})">${c.active?'Désactiver':'Activer'}</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted">Aucune commune.</td></tr>'}</table></div>`);
+  ${!show.length ? '<tr><td colspan="3" class="muted">Aucune ville trouvée.</td></tr>' : ''}</table></div>`);
 };
 
 /* ---------- Questions dynamiques ---------- */
@@ -915,15 +893,15 @@ views.reports = async () => {
 /* ---------- Urgences ---------- */
 views.urgences = async () => {
   const list = await api('/admin/urgences');
-  let contacts = []; if (ME && ME.role === 'pdg') contacts = await api('/admin/emergency-contacts');
-  window._EMERGENCY_CONTACTS = contacts;
-  const row = c => `<tr><td><b>${esc(c.service_name)}</b>${c.label ? `<div class="small muted">${esc(c.label)}</div>` : ''}</td><td><a href="tel:${esc(c.phone)}">${esc(c.phone)}</a></td><td><a class="small" href="${esc(c.source_url)}" target="_blank" rel="noopener">${esc(c.source_name)}</a><div class="small muted">Source : ${esc(c.source_date || 'date non renseignée')} · vérifié : ${esc(c.verified_at || '')}</div></td><td>${c.active ? '<span class="pill ok">Actif</span>' : '<span class="pill off">Désactivé</span>'}</td><td><button class="btn sm sec" onclick="A.emergencyContactForm(${c.id})">Modifier</button> <button class="btn sm sec" onclick="A.emergencyContactHistory(${c.id})">Historique</button> <button class="btn sm ${c.active ? 'warn' : ''}" onclick="A.emergencyContactToggle(${c.id},${c.active ? 0 : 1})">${c.active ? 'Désactiver' : 'Restaurer'}</button></td></tr>`;
   shell(`<h1>🚨 Urgences</h1>
-  ${ME && ME.role === 'pdg' ? `<div class="panel"><div class="frow" style="align-items:center"><div class="grow"><h2 style="margin:0">Répertoire officiel public</h2><div class="small muted">Seuls les contacts dotés d’une source institutionnelle, d’une date de vérification et actifs sont publiés. Les contacts désactivés restent historisés.</div></div><button class="btn" onclick="A.emergencyContactForm(0)">＋ Ajouter un contact officiel</button></div>
-    <h3>Urgences vitales</h3><div style="overflow:auto"><table><tr><th>Service</th><th>Appeler</th><th>Source / vérification</th><th>État</th><th>Gestion PDG</th></tr>${contacts.filter(c=>c.group_key==='vital').map(row).join('') || '<tr><td colspan="5" class="muted">Aucun contact vital officiel enregistré.</td></tr>'}</table></div>
-    <h3>Services publics et assistance</h3><div style="overflow:auto"><table><tr><th>Service</th><th>Appeler</th><th>Source / vérification</th><th>État</th><th>Gestion PDG</th></tr>${contacts.filter(c=>c.group_key==='public_assistance').map(row).join('') || '<tr><td colspan="5" class="muted">Aucun contact public officiel enregistré.</td></tr>'}</table></div></div>` : ''}
-  <div class="panel"><h2 style="margin-top:0">Demandes d’assistance Klean Services</h2><table><tr><th>Utilisateur</th><th>Téléphone</th><th>Message</th><th>Position</th><th>Date</th><th>Statut</th><th></th></tr>
-  ${list.map(u => `<tr><td><b>${esc(u.name)}</b></td><td><a href="tel:${esc(u.phone)}">${esc(u.phone)}</a></td><td class="small">${esc(u.message || '—')}</td><td class="small">${u.lat ? `<a href="https://maps.google.com/?q=${u.lat},${u.lng}" target="_blank" rel="noopener">📍 Carte</a>` : '—'}</td><td class="small">${fmtD(u.created_at)}</td><td>${u.handled ? '<span class="pill ok">Traitée</span>' : '<span class="pill bad">À traiter</span>'}</td><td>${!u.handled ? `<button class="btn sm" onclick="A.treatUrg(${u.id})">Marquer traitée</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Aucune urgence.</td></tr>'}</table></div>`);
+  <div class="panel"><table><tr><th>Utilisateur</th><th>Téléphone</th><th>Message</th><th>Position</th><th>Date</th><th>Statut</th><th></th></tr>
+  ${list.map(u => `<tr><td><b>${esc(u.name)}</b></td><td><a href="tel:${esc(u.phone)}">${esc(u.phone)}</a></td>
+    <td class="small">${esc(u.message || '—')}</td>
+    <td class="small">${u.lat ? `<a href="https://maps.google.com/?q=${u.lat},${u.lng}" target="_blank">📍 Carte</a>` : '—'}</td>
+    <td class="small">${fmtD(u.created_at)}</td>
+    <td>${u.handled ? '<span class="pill ok">Traitée</span>' : '<span class="pill bad">À traiter</span>'}</td>
+    <td>${!u.handled ? `<button class="btn sm" onclick="A.treatUrg(${u.id})">Marquer traitée</button>` : ''}</td></tr>`).join('')}
+  ${!list.length ? '<tr><td colspan="7" class="muted">Aucune urgence.</td></tr>' : ''}</table></div>`);
 };
 
 /* ---------- Échanges & fichiers, organisés par client ---------- */
@@ -1097,6 +1075,7 @@ views.prooptions = async () => {
 /* ---------- Paramètres ---------- */
 views.settings = async () => {
   const [s, dispatch] = await Promise.all([api('/admin/settings'), api('/admin/dispatch/overview')]);
+  const contacts = JSON.parse(s.urgence_contacts || '[]');
   const ps = dispatch.professionals || {};
   shell(`<h1>⚙️ Paramètres généraux</h1>
   <div class="panel"><h2 style="margin-top:0">Suivi des demandes</h2><div class="cards"><div class="kpi"><div class="v">${dispatch.searching || 0}</div><div class="l">Recherches en cours</div></div><div class="kpi"><div class="v">${dispatch.unanswered || 0}</div><div class="l">Sans réponse</div></div><div class="kpi"><div class="v">${ps.disponible || 0}</div><div class="l">Pros disponibles</div></div><div class="kpi"><div class="v">${ps.en_mission || 0}</div><div class="l">Pros en mission</div></div></div><div class="small muted">Les demandes sans réponse sont aussi consultables dans Demandes & missions. Les services et capacités autorisés d’un professionnel se règlent dans Utilisateurs → Fiche → Autorisations pro.</div></div>
@@ -1157,25 +1136,14 @@ views.settings = async () => {
     <div class="small muted" style="margin:4px 0 10px">Désactivée par défaut : aucun bouton d’alerte n’est affiché. Klean Services ne remplace jamais les secours publics.</div>
     <div class="frow"><div style="flex:1"><label>Message d'information affiché dans l'application</label><textarea id="st-urginfo">${esc(s.urgence_info || '')}</textarea></div></div>
     <label class="small muted">Catégories / services (une par ligne : Nom | description)</label><textarea id="st-urgcats">${(() => { try { return JSON.parse(s.urgence_categories || '[]').map(c => c.name + (c.description ? ' | ' + c.description : '')).join('\n'); } catch { return ''; } })()}</textarea>
-    <div class="small muted" style="margin:10px 0">Les numéros publics officiels se gèrent dans Sécurité → Urgences, avec leur source et leur historique. Ils ne peuvent pas être modifiés ici.</div>
+    <label class="small muted">Contacts vérifiés (une par ligne : Nom | Numéro | oui). Seuls les contacts marqués « oui » sont affichés publiquement.</label>
+    <textarea id="st-urgc">${contacts.map(c => c.nom + ' | ' + c.tel + ' | ' + (c.verified ? 'oui' : 'non')).join('\n')}</textarea>
     <button class="btn" style="margin-top:8px" onclick="A.saveUrgence()">Enregistrer la configuration d’urgence</button>
   </div>`);
 };
 
 /* ---------- Actions ---------- */
 const A = {
-  emergencyContactForm(id) {
-    const c = id ? (window._EMERGENCY_CONTACTS || []).find(x => x.id === id) : { group_key:'vital', service_name:'', phone:'', label:'', source_name:'', source_url:'', source_date:'', verified_at:new Date().toISOString().slice(0,10), active:1, sort:99 };
-    if (!c) return;
-    openModal(`<h3>${id ? 'Modifier' : 'Ajouter'} un contact officiel</h3><div class="small muted">N’ajoutez que des coordonnées publiées par une institution ou le service public concerné. Une source HTTPS et une date de vérification sont obligatoires.</div>
-      <div class="field"><label>Classement</label><select id="ec-group"><option value="vital" ${c.group_key==='vital'?'selected':''}>Urgence vitale</option><option value="public_assistance" ${c.group_key==='public_assistance'?'selected':''}>Service public / assistance</option></select></div>
-      <div class="field"><label>Service <span class="req">*</span></label><input id="ec-service" value="${esc(c.service_name)}"></div><div class="field"><label>Numéro <span class="req">*</span></label><input id="ec-phone" value="${esc(c.phone)}"></div><div class="field"><label>Précision (facultative)</label><input id="ec-label" value="${esc(c.label || '')}"></div>
-      <div class="field"><label>Source institutionnelle <span class="req">*</span></label><input id="ec-source-name" value="${esc(c.source_name)}" placeholder="Ex : ONPC — communiqué …"></div><div class="field"><label>URL HTTPS de la source <span class="req">*</span></label><input id="ec-source-url" value="${esc(c.source_url)}" placeholder="https://…"></div><div class="frow"><div><label>Date de la source</label><input id="ec-source-date" type="date" value="${esc(c.source_date || '')}"></div><div><label>Date de vérification <span class="req">*</span></label><input id="ec-verified" type="date" value="${esc(c.verified_at || '')}"></div><div><label>Ordre</label><input id="ec-sort" type="number" min="0" value="${Number(c.sort || 99)}"></div></div>
-      <button class="btn" onclick="A.saveEmergencyContact(${id || 0})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button>`);
-  },
-  async saveEmergencyContact(id) { const body={group_key:document.getElementById('ec-group').value,service_name:document.getElementById('ec-service').value,phone:document.getElementById('ec-phone').value,label:document.getElementById('ec-label').value,source_name:document.getElementById('ec-source-name').value,source_url:document.getElementById('ec-source-url').value,source_date:document.getElementById('ec-source-date').value,verified_at:document.getElementById('ec-verified').value,sort:document.getElementById('ec-sort').value}; try { await api('/admin/emergency-contacts'+(id?'/'+id:''),{method:id?'PUT':'POST',body}); closeModal(); toast('Contact officiel enregistré ✓','ok'); render(); } catch(e){toast(e.message,'err');} },
-  async emergencyContactToggle(id, active) { const c=(window._EMERGENCY_CONTACTS||[]).find(x=>x.id===id); if(!c)return; try{await api('/admin/emergency-contacts/'+id,{method:'PUT',body:{...c,active}});toast(active?'Contact restauré ✓':'Contact désactivé ✓','ok');render();}catch(e){toast(e.message,'err');} },
-  async emergencyContactHistory(id) { try { const h=await api('/admin/emergency-contacts/'+id+'/history'); const rows=h.map(x=>`<tr><td>${fmtD(x.changed_at)}</td><td>${esc(x.action)}</td><td>${esc(x.changed_by_name||'Système')}</td><td class="small" style="max-width:300px;word-break:break-word">${esc(x.previous_data||'')}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Aucun historique.</td></tr>'; openModal(`<h3>Historique du contact</h3><div style="max-height:50vh;overflow:auto"><table><tr><th>Date</th><th>Action</th><th>Par</th><th>Données</th></tr>${rows}</table></div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`); }catch(e){toast(e.message,'err');} },
   async userDetail(id) {
     try {
       const u = await api('/admin/users/' + id);
@@ -1345,12 +1313,12 @@ const A = {
   async _doReject(id) { try { await api(`/admin/pros/${id}/reject`, { method: 'POST', body: { reason: document.getElementById('rej-reason').value } }); closeModal(); toast('Demande refusée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
 
   grandCategoryForm(id) {
-    const g=id ? ESTD.catalog.grand_categories.find(x=>x.id===id) : {name:'',icon:'🧩',description:'',active:1,sort:99};
-    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3><label>Nom</label><input id="gc-name" style="width:100%" value="${esc(g.name||'')}"><label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px"><label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea><div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div><button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+    const source=(ESTD&&ESTD.catalog)||CATD; const g=id ? source.grand_categories.find(x=>x.id===id) : {name:'',icon:'🧩',description:'',active:1,popular:0,sort:99};
+    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3><label>Nom</label><input id="gc-name" style="width:100%" value="${esc(g.name||'')}"><label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px"><label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea><div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Publiée / active</label><label class="check-line"><input id="gc-popular" type="checkbox" ${g.popular?'checked':''}> Accueil populaire</label></div><button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
-  async saveGrandCategory(id) { const body={name:document.getElementById('gc-name').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked};try{await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Grande catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');} },
+  async saveGrandCategory(id) { const body={name:document.getElementById('gc-name').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked,popular:document.getElementById('gc-popular').checked};try{await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Grande catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');} },
   async saveEstimationConfig() {
-    try { await api('/admin/estimation-config', { method:'PUT', body:{ geo_enabled:document.getElementById('est-geo').checked, history_min_samples:document.getElementById('est-samples').value } }); toast('Paramètres d’estimation enregistrés ✓','ok'); render(); } catch(e){toast(e.message,'err');}
+    try { await api('/admin/estimation-config', { method:'PUT', body:{ geo_enabled:document.getElementById('est-geo').checked, fallback:document.getElementById('est-fallback').value, history_min_samples:document.getElementById('est-samples').value } }); toast('Paramètres d’estimation enregistrés ✓','ok'); render(); } catch(e){toast(e.message,'err');}
   },
   estimateRuleForm(id) {
     const d=ESTD, r=id ? d.rules.find(x=>x.id===id) : { grand_category_id:'',category_id:'',sub_id:'',service_id:'',task_id:'',city:'',zone:'',base_price:'',min_price:'',max_price:'',factors:'{}',source_type:'pdg',source_note:'',source_url:'',source_date:'',verified_at:'',active:1,priority:0 };
@@ -1361,23 +1329,22 @@ const A = {
       <label>Sous-catégorie</label><select id="er-sub" style="width:100%;margin-bottom:7px">${opt(d.catalog.sous_categories,'id','Toutes les sous-catégories',r.sub_id)}</select>
       <label>Prestation</label><select id="er-service" style="width:100%;margin-bottom:7px">${opt(d.catalog.services,'id','Toutes les prestations',r.service_id)}</select>
       <label>Tâche</label><select id="er-task" style="width:100%;margin-bottom:7px">${opt(d.catalog.taches,'id','Toutes les tâches',r.task_id)}</select>
-      <div class="frow"><div style="flex:1"><label>Ville(s) <span class="muted">(virgules, vide = toutes)</span></label><input id="er-city" list="er-cities" value="${esc(r.city||'')}"><datalist id="er-cities">${d.villes.filter(v=>v.active).map(v=>`<option value="${esc(v.name)}">`).join('')}</datalist></div><div style="flex:1"><label>Commune d’Abidjan <span class="muted">(facultatif)</span></label><input id="er-zone" value="${esc(r.zone||'')}"></div></div>
+      <div class="frow"><div style="flex:1"><label>Ville <span class="muted">(vide = toutes)</span></label><select id="er-city" style="width:100%"><option value="">Toutes les villes</option>${d.villes.filter(v=>v.active).map(v=>`<option ${r.city===v.name?'selected':''}>${esc(v.name)}</option>`).join('')}</select></div><div style="flex:1"><label>Zone <span class="muted">(facultatif)</span></label><input id="er-zone" value="${esc(r.zone||'')}"></div></div>
       <div class="frow"><div><label>Prix de départ</label><input id="er-base" type="number" min="1" value="${esc(r.base_price??'')}"></div><div><label>Minimum</label><input id="er-min" type="number" min="1" value="${esc(r.min_price??'')}"></div><div><label>Maximum</label><input id="er-max" type="number" min="1" value="${esc(r.max_price??'')}"></div><div><label>Priorité</label><input id="er-priority" type="number" value="${esc(r.priority??0)}" style="width:75px"></div></div>
       <label>Source</label><select id="er-source"><option value="pdg" ${r.source_type==='pdg'?'selected':''}>Règle explicite de la direction</option><option value="local_verifie" ${r.source_type==='local_verifie'?'selected':''}>Donnée locale vérifiée</option></select>
       <label>Note / source vérifiable</label><textarea id="er-note" rows="2" placeholder="Ex : relevé validé par la direction, période et origine…">${esc(r.source_note||'')}</textarea>
-      <div class="frow"><div style="flex:1"><label>URL source <span class="muted">(si disponible)</span></label><input id="er-url" value="${esc(r.source_url||'')}"></div><div><label>Date source</label><input id="er-date" type="date" value="${esc(r.source_date||'')}"></div><div><label>Vérifié le <span class="req">*</span></label><input id="er-verified" type="date" value="${esc(r.verified_at||new Date().toISOString().slice(0,10))}"></div></div>
+      <div class="frow"><div style="flex:1"><label>URL source <span class="muted">(facultatif)</span></label><input id="er-url" value="${esc(r.source_url||'')}"></div><div><label>Date source</label><input id="er-date" type="date" value="${esc(r.source_date||'')}"></div></div>
       <label>Facteurs JSON <span class="muted">(facultatif : fixed_adjustment, percent_adjustment, includes)</span></label><textarea id="er-factors" rows="3">${esc(typeof r.factors==='string'?r.factors:JSON.stringify(r.factors||{}))}</textarea>
       <label class="check-line"><input id="er-active" type="checkbox" ${r.active?'checked':''}> Règle active</label>
       <button class="btn" onclick="A.saveEstimationRule(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
   async saveEstimationRule(id) {
     const num=k=>{const v=document.getElementById(k).value;return v===''?null:Number(v);};
-    const body={grand_category_id:num('er-grand'),category_id:num('er-cat'),sub_id:num('er-sub'),service_id:num('er-service'),task_id:num('er-task'),city:document.getElementById('er-city').value,zone:document.getElementById('er-zone').value,base_price:num('er-base'),min_price:num('er-min'),max_price:num('er-max'),priority:num('er-priority'),source_type:document.getElementById('er-source').value,source_note:document.getElementById('er-note').value,source_url:document.getElementById('er-url').value,source_date:document.getElementById('er-date').value,verified_at:document.getElementById('er-verified').value,factors:document.getElementById('er-factors').value,active:document.getElementById('er-active').checked};
+    const body={grand_category_id:num('er-grand'),category_id:num('er-cat'),sub_id:num('er-sub'),service_id:num('er-service'),task_id:num('er-task'),city:document.getElementById('er-city').value,zone:document.getElementById('er-zone').value,base_price:num('er-base'),min_price:num('er-min'),max_price:num('er-max'),priority:num('er-priority'),source_type:document.getElementById('er-source').value,source_note:document.getElementById('er-note').value,source_url:document.getElementById('er-url').value,source_date:document.getElementById('er-date').value,factors:document.getElementById('er-factors').value,active:document.getElementById('er-active').checked};
     try { await api('/admin/estimation-rules'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Règle tarifaire enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');}
   },
-  async toggleEstimationRule(id,active) { const r=(ESTD.rules||[]).find(x=>x.id===id);if(!r)return;try{await api('/admin/estimation-rules/'+id,{method:'PUT',body:{...r,active}});toast(active?'Règle restaurée ✓':'Règle désactivée ✓','ok');render();}catch(e){toast(e.message,'err');} },
-  async estimationRuleHistory(id) { try{const h=await api('/admin/estimation-rules/'+id+'/history');openModal(`<h3>Historique de la règle</h3><div style="max-height:50vh;overflow:auto"><table><tr><th>Date</th><th>Action</th><th>Par</th><th>Données</th></tr>${h.map(x=>`<tr><td>${fmtD(x.changed_at)}</td><td>${esc(x.action)}</td><td>${esc(x.changed_by_name||'—')}</td><td class="small" style="max-width:280px;word-break:break-word">${esc(x.snapshot)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">Aucun historique.</td></tr>'}</table></div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`);}catch(e){toast(e.message,'err');} },
-  async testEstimation() { const sid=document.getElementById('est-test-service').value,city=document.getElementById('est-test-city').value,z=document.getElementById('est-test-result');if(!sid||!city){toast('Choisissez une prestation et une ville.','err');return;}z.textContent='Calcul en cours…';try{const r=await api('/admin/estimation-test?service_id='+encodeURIComponent(sid)+'&city='+encodeURIComponent(city));z.innerHTML=r.status==='estimated'?`<b style="color:#dc2626">À partir de ${fcfa(r.amount)}</b>`:`<b>Prix à confirmer</b>`;}catch(e){z.textContent=e.message;} },
+  async deleteEstimationRule(id) { if(!confirm('Supprimer définitivement cette règle tarifaire ?'))return;try{await api('/admin/estimation-rules/'+id,{method:'DELETE'});toast('Règle supprimée.','ok');render();}catch(e){toast(e.message,'err');} },
+  async testEstimation() { const sid=document.getElementById('est-test-service').value,city=document.getElementById('est-test-city').value,z=document.getElementById('est-test-result');if(!sid||!city){toast('Choisissez une prestation et une ville.','err');return;}z.textContent='Calcul en cours…';try{const r=await api('/admin/estimation-test?service_id='+encodeURIComponent(sid)+'&city='+encodeURIComponent(city));z.innerHTML=r.status==='estimated'?`<b style="color:#dc2626">À partir de ${fcfa(r.amount)}</b> — ${esc(r.source||'')}${r.provisional?' (provisoire)':''}<br><span class="muted">${esc(r.includes||'')}</span>`:`<b>Prix à confirmer</b> — ${esc(r.reason||'Aucune donnée fiable.')}`;}catch(e){z.textContent=e.message;} },
   searchTermForm() {
     const d=ESTD, serviceOpts=d.catalog.services.filter(s=>s.active).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
     const taskOpts=d.catalog.taches.filter(t=>t.active).map(t=>{const s=d.catalog.services.find(v=>v.id===t.service_id)||{};return `<option value="${t.id}" data-service="${t.service_id}">${esc(s.name||'')} › ${esc(t.name)}</option>`;}).join('');
@@ -1386,6 +1353,10 @@ const A = {
   async saveSearchTerm() { const service_id=Number(document.getElementById('st-service').value),task_id=Number(document.getElementById('st-task').value)||null;if(!service_id)return toast('Choisissez une prestation.','err');try{await api('/admin/search-terms',{method:'POST',body:{term:document.getElementById('st-term').value,service_id,task_id}});closeModal();toast('Expression ajoutée ✓','ok');render();}catch(e){toast(e.message,'err');} },
   async toggleSearchTerm(id,active) { try{await api('/admin/search-terms/'+id,{method:'PUT',body:{active}});render();}catch(e){toast(e.message,'err');} },
   async deleteSearchTerm(id) {if(!confirm('Supprimer cette expression du dictionnaire ?'))return;try{await api('/admin/search-terms/'+id,{method:'DELETE'});render();}catch(e){toast(e.message,'err');}},
+  async toggleGrand(id,active){try{await api('/admin/grand-categories/'+id,{method:'PUT',body:{active}});toast(active?'Grande catégorie publiée ✓':'Grande catégorie désactivée.','ok');render();}catch(e){toast(e.message,'err');}},
+  async deleteGrand(id){if(!confirm('Supprimer cette grande catégorie ? Si elle contient des métiers, le serveur exigera leur réaffectation ou une désactivation.'))return;try{await api('/admin/grand-categories/'+id,{method:'DELETE'});toast('Grande catégorie supprimée.','ok');render();}catch(e){toast(e.message,'err');}},
+  async grandMove(id,i,dir){const list=CATD.grand_categories.slice().sort((a,b)=>a.sort-b.sort||a.id-b.id),j=i+dir;if(j<0||j>=list.length)return;try{const a=list[i],b=list[j];await api('/admin/grand-categories/'+a.id,{method:'PUT',body:{sort:b.sort}});await api('/admin/grand-categories/'+b.id,{method:'PUT',body:{sort:a.sort}});render();}catch(e){toast(e.message,'err');}},
+
   async addCat() {
     const name = document.getElementById('c-name').value.trim();
     if (!name) return toast('Indiquez le nom de la catégorie.', 'err');
@@ -1422,16 +1393,12 @@ const A = {
     } catch (e) { toast(e.message, 'err'); }
   },
 
-  // Ordre et sélection des services populaires (accueil)
-  _popIds() {
-    return CATD.services.filter(s => s.popular)
-      .sort((a, b) => (a.popular_sort ?? 999) - (b.popular_sort ?? 999) || a.sort - b.sort || a.id - b.id)
-      .map(s => s.id);
-  },
-  async _popSave(ids) { try { await api('/admin/services-populaires/ordre', { method: 'PUT', body: { ids } }); toast('Services populaires mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
-  popMove(id, dir) { const ids = A._popIds(); const i = ids.indexOf(id), j = i + dir; if (i < 0 || j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; A._popSave(ids); },
-  popRemove(id) { A._popSave(A._popIds().filter(x => x !== id)); },
-  popAdd() { const v = parseInt((document.getElementById('pop-add') || {}).value, 10); if (!v) return toast('Choisissez un service.', 'err'); const ids = A._popIds(); if (!ids.includes(v)) ids.push(v); A._popSave(ids); },
+  // Ordre et sélection des grandes catégories populaires (accueil)
+  _popIds() { return CATD.grand_categories.filter(g => g.popular).sort((a,b)=>(a.popular_sort ?? 999)-(b.popular_sort ?? 999)||a.sort-b.sort||a.id-b.id).map(g=>g.id); },
+  async _popSave(ids) { try { await api('/admin/grand-categories/populaires/ordre', { method: 'PUT', body: { ids } }); toast('Catégories populaires mises à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  popMove(id, dir) { const ids=A._popIds(), i=ids.indexOf(id), j=i+dir; if(i<0||j<0||j>=ids.length)return;[ids[i],ids[j]]=[ids[j],ids[i]];A._popSave(ids); },
+  popRemove(id) { A._popSave(A._popIds().filter(x=>x!==id)); },
+  popAdd() { const v=Number((document.getElementById('pop-add')||{}).value); if(!v)return toast('Choisissez une grande catégorie.','err'); const ids=A._popIds();if(!ids.includes(v))ids.push(v);A._popSave(ids); },
 
   // Formulaire service complet (création si id=0, sinon modification)
   svcForm(id, catId) {
@@ -1443,6 +1410,15 @@ const A = {
       <div class="frow">
         <div style="flex:1"><label>Catégorie</label><select id="es-cat" style="width:100%">${CATD.categories.map(c => `<option value="${c.id}" ${c.id === s.category_id ? 'selected' : ''}>${esc(c.icon || '')} ${esc(c.name)}</option>`).join('')}</select></div>
       </div>
+      <div class="frow" style="align-items:flex-end">
+        <div><label>💰 Prix de départ indicatif (FCFA)</label><input type="number" id="es-prix" min="0" step="500" style="width:130px" value="${s.price_from ?? ''}" placeholder="Ex : 10000"></div>
+        <div><label>Texte affiché</label><select id="es-prix-pre">
+          <option value="Dès" ${(s.price_prefix || 'Dès') === 'Dès' ? 'selected' : ''}>Dès</option>
+          <option value="À partir de" ${s.price_prefix === 'À partir de' ? 'selected' : ''}>À partir de</option>
+        </select></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;margin:0 0 8px"><input type="checkbox" id="es-prix-show" ${s.price_show === 0 ? '' : 'checked'}> Afficher le prix aux clients</label>
+      </div>
+      <div class="small muted" style="margin-bottom:10px">Prix de départ indicatif, jamais définitif : le montant final de la prestation dépend de la demande du client et de la proposition du professionnel.</div>
       <div class="frow">
         <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;margin:0"><input type="checkbox" id="es-pop" ${s.popular ? 'checked' : ''}> ⭐ Populaire (affiché sur l'accueil)</label>
         <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;margin:0"><input type="checkbox" id="es-sea" ${s.seasonal ? 'checked' : ''}> 📅 Saisonnier</label>
@@ -1458,6 +1434,9 @@ const A = {
       category_id: parseInt(document.getElementById('es-cat').value, 10),
       popular: document.getElementById('es-pop').checked ? 1 : 0,
       seasonal: document.getElementById('es-sea').checked ? 1 : 0,
+      price_from: parseInt(document.getElementById('es-prix').value, 10) || 0,
+      price_prefix: document.getElementById('es-prix-pre').value,
+      price_show: document.getElementById('es-prix-show').checked ? 1 : 0,
       cities: document.getElementById('es-cities').value.split(',').map(x => x.trim()).filter(Boolean)
     };
     if (!body.name) return toast('Indiquez le nom du service.', 'err');
@@ -1473,41 +1452,23 @@ const A = {
     try { await api('/admin/services/' + id, { method: 'DELETE' }); toast('Service supprimé.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
   },
 
-  // Fenêtre de gestion des tâches d'un service
+  // Gestion PDG des tâches : recherche, description, déplacement et conservation de l'historique.
   async taches(serviceId) {
-    try {
-      CATD = await api('/admin/catalog');
-      const s = CATD.services.find(x => x.id === serviceId);
-      const list = CATD.taches.filter(t => t.service_id === serviceId).sort((a, b) => a.sort - b.sort || a.id - b.id);
-      openModal(`<h3>📝 Tâches — ${esc(s.name)}</h3>
-        <p class="small muted">Ces tâches sont proposées au client quand il choisit ce service. La tâche choisie est transmise au professionnel.</p>
-        <table><tr><th>Tâche</th><th>État</th><th>Actions</th></tr>
-        ${list.map(t => `<tr><td>${esc(t.name)}</td>
-          <td>${t.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
-          <td style="white-space:nowrap"><button class="btn sm sec" onclick="A.tacheEdit(${t.id})">✏️</button>
-          <button class="btn sm sec" onclick="A.tacheToggle(${t.id},${t.active ? 0 : 1},${serviceId})">${t.active ? 'Désactiver' : 'Activer'}</button>
-          <button class="btn sm warn" onclick="A.tacheDel(${t.id},${serviceId})">🗑️</button></td></tr>`).join('')}
-        ${!list.length ? '<tr><td colspan="3" class="muted small">Aucune tâche.</td></tr>' : ''}</table>
-        <div class="frow" style="margin-top:12px">
-          <div style="flex:1"><input id="t-new" style="width:100%" placeholder="Nouvelle tâche (ex : Remplacement d\u2019un robinet)"></div>
-          <button class="btn" onclick="A.tacheAdd(${serviceId})">＋ Ajouter</button>
-        </div>
-        <button class="btn sec" style="margin-top:10px" onclick="closeModal();render()">Fermer</button>`);
-    } catch (e) { toast(e.message, 'err'); }
+    try { CATD=await api('/admin/catalog'); const s=CATD.services.find(x=>x.id===serviceId); const list=CATD.taches.filter(t=>t.service_id===serviceId).sort((a,b)=>a.sort-b.sort||a.id-b.id);
+      openModal(`<h3>📝 Tâches — ${esc(s.name)}</h3><p class="small muted">Une tâche est facultative pour le client. Sa suppression est refusée si elle est déjà présente dans l’historique.</p>
+      <label class="small muted">🔎 Rechercher une tâche de cette prestation</label><input id="task-filter" style="width:100%;margin-bottom:8px" placeholder="Nom ou description" oninput="A.filterTasks(${serviceId})">
+      <div id="task-list"><table><tr><th>Tâche et description</th><th>État</th><th>Actions</th></tr>${A.taskRows(list,serviceId)}</table></div>
+      <div class="frow" style="margin-top:12px"><div style="flex:1"><input id="t-new" style="width:100%" placeholder="Nouvelle tâche"></div><button class="btn" onclick="A.tacheAdd(${serviceId})">＋ Ajouter</button></div><label class="small muted">Description de la nouvelle tâche <span class="muted">(facultatif)</span></label><textarea id="t-new-desc" rows="2" style="width:100%" placeholder="Ex : intervention sur une fuite visible…"></textarea>
+      <button class="btn sec" style="margin-top:10px" onclick="closeModal();render()">Fermer</button>`);
+    } catch(e){toast(e.message,'err');}
   },
-  async tacheAdd(serviceId) {
-    const name = document.getElementById('t-new').value.trim();
-    if (!name) return toast('Écrivez le nom de la tâche.', 'err');
-    try { await api('/admin/taches', { method: 'POST', body: { service_id: serviceId, name } }); toast('Tâche ajoutée ✓', 'ok'); A.taches(serviceId); } catch (e) { toast(e.message, 'err'); }
-  },
-  tacheEdit(id) {
-    const t = CATD.taches.find(x => x.id === id);
-    const nv = prompt('Nom de la tâche :', t.name);
-    if (nv === null || !nv.trim()) return;
-    api('/admin/taches/' + id, { method: 'PUT', body: { name: nv.trim() } }).then(() => { toast('Tâche modifiée ✓', 'ok'); A.taches(t.service_id); }).catch(e => toast(e.message, 'err'));
-  },
-  async tacheToggle(id, v, sid) { try { await api('/admin/taches/' + id, { method: 'PUT', body: { active: v } }); A.taches(sid); } catch (e) { toast(e.message, 'err'); } },
-  async tacheDel(id, sid) { if (!confirm('Supprimer cette tâche ?')) return; try { await api('/admin/taches/' + id, { method: 'DELETE' }); A.taches(sid); } catch (e) { toast(e.message, 'err'); } },
+  taskRows(list,sid) { return list.map(t=>`<tr><td><b>${esc(t.name)}</b>${t.description?`<div class="small muted">${esc(t.description)}</div>`:''}</td><td>${t.active?'<span class="pill ok">Active</span>':'<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.tacheEdit(${t.id})">✏️</button><button class="btn sm sec" onclick="A.tacheToggle(${t.id},${t.active?0:1},${sid})">${t.active?'Désactiver':'Activer'}</button><button class="btn sm warn" onclick="A.tacheDel(${t.id},${sid})">🗑️</button></td></tr>`).join('')||'<tr><td colspan="3" class="muted small">Aucune tâche.</td></tr>'; },
+  filterTasks(sid) { const q=(document.getElementById('task-filter').value||'').toLowerCase();const list=CATD.taches.filter(t=>t.service_id===sid&&(`${t.name} ${t.description||''}`).toLowerCase().includes(q)).sort((a,b)=>a.sort-b.sort||a.id-b.id);document.getElementById('task-list').innerHTML=`<table><tr><th>Tâche et description</th><th>État</th><th>Actions</th></tr>${A.taskRows(list,sid)}</table>`; },
+  async tacheAdd(serviceId) { const name=document.getElementById('t-new').value.trim();if(!name)return toast('Écrivez le nom de la tâche.','err');try{await api('/admin/taches',{method:'POST',body:{service_id:serviceId,name,description:document.getElementById('t-new-desc').value}});toast('Tâche ajoutée ✓','ok');A.taches(serviceId);}catch(e){toast(e.message,'err');} },
+  tacheEdit(id) { const t=CATD.taches.find(x=>x.id===id);openModal(`<h3>Modifier la tâche</h3><label>Nom</label><input id="te-name" style="width:100%" value="${esc(t.name)}"><label>Description <span class="muted">(facultatif)</span></label><textarea id="te-desc" rows="3" style="width:100%">${esc(t.description||'')}</textarea><label>Déplacer vers une prestation</label><select id="te-service" style="width:100%">${CATD.services.map(s=>`<option value="${s.id}" ${Number(s.id)===Number(t.service_id)?'selected':''}>${esc(s.name)}</option>`).join('')}</select><button class="btn mt" onclick="A.tacheSave(${id})">Enregistrer</button><button class="btn sec mt" onclick="A.taches(${t.service_id})">Annuler</button>`); },
+  async tacheSave(id) { const old=CATD.taches.find(t=>t.id===id), sid=Number(document.getElementById('te-service').value);try{await api('/admin/taches/'+id,{method:'PUT',body:{name:document.getElementById('te-name').value,description:document.getElementById('te-desc').value,service_id:sid}});toast('Tâche modifiée ✓','ok');A.taches(sid);}catch(e){toast(e.message,'err');} },
+  async tacheToggle(id,v,sid){try{await api('/admin/taches/'+id,{method:'PUT',body:{active:v}});A.taches(sid);}catch(e){toast(e.message,'err');}},
+  async tacheDel(id,sid){if(!confirm('Supprimer définitivement cette tâche ? Les demandes historiques seront protégées : si elle a déjà été utilisée, désactivez-la plutôt.'))return;try{await api('/admin/taches/'+id,{method:'DELETE'});toast('Tâche supprimée.','ok');A.taches(sid);}catch(e){toast(e.message,'err');}},
 
   // Grande recherche
   gsGo() {
@@ -1672,8 +1633,6 @@ const A = {
   },
   async villeToggle(id, v) { try { await api('/admin/villes/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
   async villeDel(id) { if (!confirm('Supprimer cette ville de la liste ?')) return; try { await api('/admin/villes/' + id, { method: 'DELETE' }); toast('Ville supprimée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
-  async communeAdd() { const city = document.getElementById('cm-city').value.trim(), name = document.getElementById('cm-name').value.trim(); if (!city || !name) return toast('Ville et commune requises.', 'err'); try { await api('/admin/communes', { method:'POST', body:{ city_name:city, name } }); toast('Commune ajoutée ✓', 'ok'); render(); } catch(e) { toast(e.message,'err'); } },
-  async communeToggle(id, active) { try { await api('/admin/communes/' + id, { method:'PUT', body:{ active } }); render(); } catch(e) { toast(e.message,'err'); } },
 
   qForm(sid, q) {
     openModal(`<h3>${q ? 'Modifier' : 'Ajouter'} une question</h3>
@@ -2212,8 +2171,9 @@ const A = {
     } catch (e) { toast(e.message, 'err'); }
   },
   async saveUrgence() {
+    const contacts = document.getElementById('st-urgc').value.split('\n').map(l => { const [nom,tel,verified] = l.split('|').map(s=>(s||'').trim()); return nom&&tel ? {nom,tel,verified:/^(oui|yes|true|1)$/i.test(verified||'')} : null; }).filter(Boolean);
     const categories = document.getElementById('st-urgcats').value.split('\n').map(l => { const [name,description] = l.split('|').map(s=>(s||'').trim()); return name ? {name,description,active:true} : null; }).filter(Boolean);
-    try { await api('/admin/settings',{method:'PUT',body:{urgence_info:document.getElementById('st-urginfo').value,urgence_categories:JSON.stringify(categories),urgence_assistance_enabled:document.getElementById('st-urgavailable').checked?'1':'0'}});toast('Configuration d’urgence enregistrée ✓','ok');render(); } catch(e){toast(e.message,'err');}
+    try { await api('/admin/settings',{method:'PUT',body:{urgence_info:document.getElementById('st-urginfo').value,urgence_contacts:JSON.stringify(contacts),urgence_categories:JSON.stringify(categories),urgence_assistance_enabled:document.getElementById('st-urgavailable').checked?'1':'0'}});toast('Configuration d’urgence enregistrée ✓','ok');render(); } catch(e){toast(e.message,'err');}
   },
 };
 window.A = A;
