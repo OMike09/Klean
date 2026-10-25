@@ -218,7 +218,7 @@ function armDraftProtection(root, scope, reset) {
   });
 }
 function pageNeedsDraftProtection(route) {
-  return ['register', 'request', 'infos', 'addresses', 'security', 'settings', 'pro'].includes(route);
+  return ['register', 'request', 'categories', 'infos', 'addresses', 'security', 'settings', 'pro'].includes(route);
 }
 function forceCloseModal() {
   if (window._supportPoll) { clearInterval(window._supportPoll); window._supportPoll = null; }
@@ -658,6 +658,87 @@ routes.search = async (params) => {
   updateBadges();
 };
 
+/* ---------- Demande unifiée depuis une grande catégorie ---------- */
+function categoryDraftKey(categoryId) { return 'ks_category_request_draft_' + Number(categoryId); }
+function readCategoryDraft(categoryId) {
+  let draft = {};
+  try { draft = JSON.parse(sessionStorage.getItem(categoryDraftKey(categoryId)) || '{}'); } catch { draft = {}; }
+  if (Number(draft.category_id) === Number(categoryId)) return draft;
+  try { draft = JSON.parse(sessionStorage.getItem('ks_pending_request_draft') || '{}'); } catch { draft = {}; }
+  return Number(draft.category_id) === Number(categoryId) ? draft : {};
+}
+function renderCategoryRequestForm(cat, serviceChoices) {
+  const services = (serviceChoices || []).filter(s => Number(s.id));
+  if (!services.length) {
+    $app.innerHTML = `${header(cat.name, { bell: !!USER })}<div class="content">${emptyState('📋','Aucune prestation active n’est disponible dans cette catégorie pour le moment.')}</div>${bottomNav('search')}`;
+    updateBadges(); return;
+  }
+  const allTasks = services.flatMap(s => (s.taches || []).map(t => ({ id:Number(t.id), name:t.name, description:t.description || '', service_id:Number(s.id), service_name:s.name, category:s.category || '' })));
+  const savedDraft = readCategoryDraft(cat.id);
+  const taskById = new Map(allTasks.map(t => [Number(t.id), t]));
+  let selectedTasks = (savedDraft.taches || []).map(raw => {
+    const task = taskById.get(Number(raw && (raw.id ?? raw)));
+    return task ? { ...task, detail:String(raw && raw.detail || '').slice(0,500) || '' } : null;
+  }).filter(Boolean);
+  // Les missions historiques restent compatibles : une seule prestation porte la demande.
+  if (selectedTasks.length) selectedTasks = selectedTasks.filter(t => t.service_id === selectedTasks[0].service_id);
+  const savedServiceId = Number(savedDraft.service_id);
+  const defaultService = selectedTasks[0] || services.find(s => Number(s.id) === savedServiceId) || services[0];
+  REQ = {
+    mode:'category', category_id:cat.id, category_name:cat.name, category_draft_key:categoryDraftKey(cat.id),
+    category_services:services, category_tasks:allTasks, selected_tasks:selectedTasks,
+    service_id:Number(defaultService.id), task_id:selectedTasks[0] ? selectedTasks[0].id : null,
+    photos:savedDraft.photos || [], audio:savedDraft.audio || null,
+    lat:savedDraft.lat ?? (USER && USER.lat), lng:savedDraft.lng ?? (USER && USER.lng),
+    photo_limit:3, audio_max:25
+  };
+  const initialCity = savedDraft.intervention_city || (USER && USER.ville) || '';
+  const initialCommune = savedDraft.intervention_commune || '';
+  const initialQuartier = savedDraft.quartier || (USER && USER.quartier) || '';
+  const initialAddress = savedDraft.address || (USER && USER.address) || '';
+  $app.innerHTML = `${header(cat.name, { bell: !!USER })}
+    <div class="content category-request-page">
+      ${cat.description ? `<div class="category-request-intro">${esc(cat.description)}</div>` : ''}
+      <div class="card category-request-card">
+        <section class="request-section request-needs-section">
+          <label class="request-label">Je choisis mon/mes besoins <span class="muted small">(facultatif)</span></label>
+          <button type="button" class="need-picker" id="category-needs-btn" onclick="A.openCategoryNeeds()"><span class="need-picker-icon">☑</span><span class="grow"><b id="category-needs-title">Choisir des besoins</b><small id="category-needs-summary">Aucun besoin sélectionné</small></span><span class="need-picker-arrow">›</span></button>
+        </section>
+        <section class="request-section">
+          <div class="field"><label>Je décris mon besoin ci-dessous. <span class="req">*</span></label>
+            <textarea id="r-desc" maxlength="5000" placeholder="Ex : Je souhaite nettoyer mon canapé et les fauteuils du salon…" oninput="A.requestDescriptionChanged()">${esc(savedDraft.description || '')}</textarea></div>
+        </section>
+        <section class="request-section media-request-section">
+          <div class="field"><label>Photos <span class="muted small">facultatif · 3 maximum</span></label><div class="photo-strip" id="r-photos"><button type="button" class="ph-add" onclick="A.pickPhotos('r-photos')" aria-label="Ajouter des photos">＋</button></div><input type="file" id="file-input" accept="image/*" multiple style="display:none"></div>
+          <div class="field"><label>Message vocal <span class="muted small">facultatif · 25 secondes maximum</span></label><div id="r-audio-zone"><button type="button" class="btn sec sm" id="r-rec" onclick="A.toggleRec('r-audio-zone')">🎤 Enregistrer un message vocal</button></div></div>
+        </section>
+        <section class="request-section">
+          <div class="field"><label>Ville d’intervention <span class="req">*</span></label><input type="text" id="r-city" placeholder="👆 Choisir la ville de l’intervention" readonly style="cursor:pointer;background:#fff" value="${esc(initialCity)}" onclick="A.villePick('r-city')"></div>
+          <div class="field" id="r-commune-field" style="display:${initialCity === 'Abidjan' ? 'block' : 'none'}"><label>Commune <span class="req">*</span></label><input type="text" id="r-commune" placeholder="👆 Choisir la commune" readonly style="cursor:pointer;background:#fff" value="${esc(initialCommune)}" onclick="A.communePick()"></div>
+          <div class="field"><label>Quartier / repère <span class="muted small">facultatif</span></label><input type="text" id="r-quartier" maxlength="250" placeholder="Ex : Air France, près du marché…" value="${esc(initialQuartier)}"></div>
+          <div class="field"><label>Adresse précise <span class="req">*</span></label><input type="text" id="r-addr" maxlength="1000" placeholder="Ex : rue, immeuble, porte ou autre repère" value="${esc(initialAddress)}"></div>
+          <div class="gps-row mb"><button type="button" class="btn outline sm" onclick="A.useGPS()" id="b-gps">📍 Ajouter ma position GPS <span class="muted">(facultatif)</span></button></div>
+        </section>
+        <section class="request-section">
+          <div class="field"><label>Disponibilité</label><select id="r-schedule" onchange="A.requestSchedule()"><option value="asap">Dès que possible</option><option value="today">Aujourd’hui</option><option value="date">À une date précise</option></select><input type="datetime-local" id="r-date" style="display:none;margin-top:8px"></div>
+          ${cat.price_from ? `<div class="category-price-reference"><span>Prix indicatif</span><b>À partir de ${fmtFCFA(cat.price_from)}</b><small>Le montant réel dépend du besoin et du lieu.</small></div>` : ''}
+          <div id="r-estimate" class="estimate-box" aria-live="polite"></div>
+        </section>
+        <label class="check-line"><input type="checkbox" id="r-urgent" ${savedDraft.urgence ? 'checked' : ''}> <span>🔥 C'est urgent</span></label>
+        <button class="btn category-submit" id="b-send">Trouver un professionnel</button>
+      </div>
+    </div>${bottomNav('search')}`;
+  updateBadges();
+  REQ.photos.forEach(file => document.getElementById('r-photos').insertAdjacentHTML('afterbegin', `<img src="${esc(mediaUrl(file))}" alt="Photo jointe">`));
+  if (REQ.audio) document.getElementById('r-audio-zone').innerHTML = `<audio controls preload="metadata" src="${esc(mediaUrl(REQ.audio))}"></audio><div class="small muted">Message vocal joint.</div><button type="button" class="btn ghost sm" onclick="A.clearRequestAudio('r-audio-zone')">🗑️ Supprimer</button>`;
+  A.updateCategoryNeedSummary();
+  if (initialCity === 'Abidjan') A.requestLocationChanged(true);
+  if (savedDraft.schedule_type) { document.getElementById('r-schedule').value=savedDraft.schedule_type; document.getElementById('r-date').value=savedDraft.date_souhaitee || ''; A.requestSchedule(); }
+  document.querySelectorAll('.category-request-page input, .category-request-page textarea, .category-request-page select').forEach(el => el.addEventListener('input', () => A.saveCategoryDraft(), { passive:true }));
+  document.querySelectorAll('.category-request-page select, .category-request-page input[type=checkbox]').forEach(el => el.addEventListener('change', () => A.saveCategoryDraft(), { passive:true }));
+  document.getElementById('b-send').onclick = () => A.submitCategoryRequest(cat.id);
+}
+
 /* ---------- Grandes catégories : seules cartes du parcours public ---------- */
 routes.categories = async (param) => {
   const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
@@ -665,18 +746,9 @@ routes.categories = async (param) => {
   if (id) {
     let cat; try { cat = await api('/grand-categories/' + id + '/catalogue' + cityQuery); }
     catch (e) { toast(e.message, 'err'); nav('#/categories'); return; }
-    const serviceChoices = cat.categories.flatMap(c => c.services.map(s => ({...s, category:c.name})));
-    $app.innerHTML = `${header(cat.name, { bell: !!USER })}<div class="content">
-      <div class="card" style="margin-bottom:12px"><div class="row"><span class="mi-ic">${esc(cat.icon || '🧩')}</span><div class="grow"><div class="bold">${esc(cat.name)}</div>${cat.description ? `<div class="small muted">${esc(cat.description)}</div>` : ''}</div></div>
-        ${cat.price_from ? `<div class="price-from">À partir de ${fmtFCFA(cat.price_from)}</div>` : ''}
-      </div>
-      <div class="card"><div class="bold mb">Je décris mon besoin</div><div class="small muted mb">Vous ne trouvez pas une tâche précise ? Décrivez simplement ce dont vous avez besoin.</div>
-        <button class="btn" onclick="A.describeGrandCategory(${cat.id})">Décrire mon besoin</button></div>
-      <div class="sec-title">Je choisis mon/mes besoins <span class="muted small">(facultatif)</span></div>
-      ${cat.categories.map(c => `<section class="card"><div class="bold mb">${esc(c.icon || '🔹')} ${esc(c.name)}</div>${c.services.map(s => `<div style="padding:8px 0;border-top:1px solid #edf0f2"><b class="small">${esc(s.name)}</b>${s.taches.length ? `<div class="choices" style="margin-top:6px">${s.taches.map(t=>`<button type="button" class="chip" onclick="A.openSearchResult(${s.id},${t.id})">${esc(t.name)}</button>`).join('')}</div>` : `<button class="btn sec sm" style="margin-top:6px" onclick="A.chooseGrandDescription(${s.id})">Décrire ce besoin</button>`}</div>`).join('')}</section>`).join('') || emptyState('📋','Aucune prestation n’est disponible dans cette catégorie pour le moment.')}
-    </div>${bottomNav('search')}`;
-    window._grandCategoryServices = serviceChoices;
-    updateBadges(); return;
+    const serviceChoices = cat.categories.flatMap(c => c.services.map(s => ({ ...s, category:c.name, category_icon:c.icon || '' })));
+    renderCategoryRequestForm(cat, serviceChoices);
+    return;
   }
   let cats; try { cats = await api('/grand-categories' + cityQuery); }
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}</div>` + bottomNav('search'); return; }
@@ -2202,7 +2274,8 @@ const A = {
     const i = document.getElementById(inputId);
     if (i) i.value = v;
     closeModal();
-    if (inputId === 'r-city' && A.requestLocationChanged) A.requestLocationChanged(false);
+    if (inputId === 'r-city' && A.requestLocationChanged) Promise.resolve(A.requestLocationChanged(false)).finally(() => A.saveCategoryDraft());
+    else A.saveCategoryDraft();
   },
   async maintRetry() { await checkMaintenance(); render(); },
   eye(id, btn) {
@@ -2308,6 +2381,82 @@ const A = {
     openModal(`<h3>Décrire mon besoin</h3><p class="small muted">Choisissez le grand domaine le plus proche. Aucune tâche prédéfinie ne sera obligatoire.</p><div style="max-height:52vh;overflow:auto">${cats.map(c=>`<div class="menu-item" onclick="closeModal();nav('#/categories/${c.id}')"><span class="mi-ic">${esc(c.icon||'🧩')}</span><b>${esc(c.name)}</b><span class="mi-arr">›</span></div>`).join('')}</div>`);
   },
   requestToggleTask(el) { A.toggleTask(el); const on=[...document.querySelectorAll('#r-taches .task-chip.on')]; REQ.task_id=on[0] ? Number(on[0].dataset.taskId) : null; A.requestEstimate(); },
+  /* Formulaire compact d'une grande catégorie : les tâches restent cachées tant que le client ne les choisit pas. */
+  openCategoryNeeds(serviceId) {
+    const services = REQ.category_services || [];
+    if (!services.length) return toast('Aucun besoin prédéfini n’est disponible dans cette catégorie.', 'err');
+    const target = Number(serviceId || 0);
+    if (!target) {
+      openModal(`<h3>Choisir mes besoins</h3><p class="small muted">Choisissez d’abord la prestation la plus proche. Vous pourrez ensuite sélectionner plusieurs besoins, sans obligation.</p>
+        <label class="small muted">Prestation</label><select id="category-service-select" style="width:100%;margin:6px 0 12px" onchange="A.categoryPickService(this.value)"><option value="">Choisir une prestation</option>${services.map(s => `<option value="${s.id}" ${Number(REQ.service_id)===Number(s.id)?'selected':''}>${esc([s.category,s.name].filter(Boolean).join(' — '))}</option>`).join('')}</select>
+        <button class="btn sec" onclick="closeModal()">Annuler</button>`);
+      return;
+    }
+    const prior = (REQ.selected_tasks || [])[0];
+    if (prior && Number(prior.service_id) !== target) {
+      REQ.selected_tasks = []; REQ.task_id = null;
+      toast('Les besoins de la prestation précédente ont été retirés.', 'ok');
+      A.updateCategoryNeedSummary();
+    }
+    REQ.service_id = target;
+    const service = services.find(s => Number(s.id) === target) || {};
+    openModal(`<h3>Choisir mes besoins</h3><div class="small muted mb">${esc([service.category,service.name].filter(Boolean).join(' — '))}</div>
+      <div class="searchbar" style="margin-bottom:9px"><input id="category-task-q" placeholder="Rechercher un besoin" oninput="A.filterCategoryNeeds(${target})"></div>
+      <div id="category-task-list" class="category-task-list"></div>
+      <div class="btn-row mt"><button class="btn sec" onclick="A.openCategoryNeeds()">Changer de prestation</button><button class="btn" onclick="closeModal()">Terminer</button></div>`);
+    A.renderCategoryNeedTasks(target);
+  },
+  categoryPickService(value) { const id=Number(value); if(id) A.openCategoryNeeds(id); },
+  renderCategoryNeedTasks(serviceId) {
+    const zone = document.getElementById('category-task-list'); if (!zone) return;
+    const query = normalize((document.getElementById('category-task-q') || {}).value || '');
+    const selected = new Set((REQ.selected_tasks || []).map(t => Number(t.id)));
+    const tasks = (REQ.category_tasks || []).filter(t => Number(t.service_id) === Number(serviceId) && (!query || normalize(`${t.name} ${t.description || ''}`).includes(query)));
+    zone.innerHTML = tasks.length ? tasks.map(t => `<button type="button" class="category-task-choice ${selected.has(Number(t.id)) ? 'on' : ''}" onclick="A.toggleCategoryNeed(${t.id})"><span>${selected.has(Number(t.id)) ? '☑' : '☐'}</span><div><b>${esc(t.name)}</b>${t.description ? `<small>${esc(t.description)}</small>` : ''}</div></button>`).join('') : '<div class="hint">Aucun besoin trouvé. Vous pouvez décrire votre demande librement.</div>';
+  },
+  filterCategoryNeeds(serviceId) { A.renderCategoryNeedTasks(serviceId); },
+  toggleCategoryNeed(taskId) {
+    const task = (REQ.category_tasks || []).find(t => Number(t.id) === Number(taskId)); if (!task) return;
+    const chosen = REQ.selected_tasks || [];
+    const index = chosen.findIndex(t => Number(t.id) === Number(task.id));
+    if (index >= 0) chosen.splice(index,1); else {
+      if (chosen.length && Number(chosen[0].service_id) !== Number(task.service_id)) { toast('Sélectionnez plusieurs besoins dans la même prestation.', 'err'); return; }
+      chosen.push({ ...task, detail:'' }); REQ.service_id=task.service_id;
+    }
+    REQ.selected_tasks=chosen; REQ.task_id=chosen[0] ? chosen[0].id : null;
+    A.renderCategoryNeedTasks(task.service_id); A.updateCategoryNeedSummary(); A.saveCategoryDraft(); A.requestEstimate();
+  },
+  updateCategoryNeedSummary() {
+    if (REQ.mode !== 'category') return;
+    const picked = REQ.selected_tasks || [], title=document.getElementById('category-needs-title'), summary=document.getElementById('category-needs-summary');
+    if (title) title.textContent = picked.length ? `${picked.length} besoin${picked.length>1?'s':''} sélectionné${picked.length>1?'s':''}` : 'Choisir des besoins';
+    if (summary) summary.textContent = picked.length ? picked.map(t=>t.name).join(' · ') : 'Aucun besoin sélectionné — vous pouvez décrire votre demande librement.';
+  },
+  saveCategoryDraft() {
+    if (REQ.mode !== 'category' || !REQ.category_id) return;
+    const val = id => (document.getElementById(id) || {}).value || '';
+    const draft = { category_id:REQ.category_id, service_id:REQ.service_id, task_id:REQ.task_id, taches:(REQ.selected_tasks || []).map(t=>({id:t.id,detail:t.detail || ''})), description:val('r-desc'), intervention_city:val('r-city'), intervention_commune:val('r-commune'), quartier:val('r-quartier'), address:val('r-addr'), lat:REQ.lat, lng:REQ.lng, photos:REQ.photos || [], audio:REQ.audio || null, urgence:!!((document.getElementById('r-urgent') || {}).checked), schedule_type:val('r-schedule') || 'asap', date_souhaitee:val('r-date') || null };
+    sessionStorage.setItem(REQ.category_draft_key || categoryDraftKey(REQ.category_id), JSON.stringify(draft));
+  },
+  submitCategoryRequest(categoryId) {
+    const description=((document.getElementById('r-desc') || {}).value || '').trim();
+    const city=((document.getElementById('r-city') || {}).value || '').trim();
+    const commune=((document.getElementById('r-commune') || {}).value || '').trim();
+    const quartier=((document.getElementById('r-quartier') || {}).value || '').trim();
+    const address=((document.getElementById('r-addr') || {}).value || '').trim();
+    const selected=REQ.selected_tasks || [];
+    if (selected[0]) { REQ.service_id=selected[0].service_id; REQ.task_id=selected[0].id; }
+    if (!description) return toast('Décrivez votre besoin.', 'err');
+    if (!city) return toast('Choisissez la ville d’intervention.', 'err');
+    if (city === 'Abidjan' && !commune) return toast('Choisissez la commune d’intervention.', 'err');
+    if (!address) return toast('Indiquez l’adresse précise de l’intervention.', 'err');
+    const fullAddress=[quartier,address].filter(Boolean).join(' — ');
+    REQ.draft={ category_id:Number(categoryId), service_id:REQ.service_id, task_id:REQ.task_id || null, taches:selected.map(t=>({id:t.id,detail:t.detail || ''})), answers:{}, description, address:fullAddress, quartier, intervention_city:city, intervention_commune:commune, lat:REQ.lat, lng:REQ.lng, urgence:!!document.getElementById('r-urgent').checked, schedule_type:document.getElementById('r-schedule').value, date_souhaitee:document.getElementById('r-date').value || null, photos:REQ.photos, audio:REQ.audio };
+    A.saveCategoryDraft();
+    if (!USER) { sessionStorage.setItem('ks_pending_request_draft',JSON.stringify(REQ.draft)); authRequired('#/categories/' + Number(categoryId)); return; }
+    sessionStorage.removeItem('ks_pending_request_draft'); A.chooseProviderForRequest();
+  },
+
   async liveSearch(inputId, zoneId, compact) {
     const input = document.getElementById(inputId), zone = document.getElementById(zoneId);
     if (!input || !zone) return;
@@ -2353,6 +2502,7 @@ const A = {
     try {
       const r = await api('/missions', { method: 'POST', body: { ...REQ.draft, provider_type, duplicate_confirmed: !!duplicate_confirmed } });
       closeModal(); delete REQ.draft; sessionStorage.removeItem('ks_pending_request_draft');
+      if (REQ.category_draft_key) sessionStorage.removeItem(REQ.category_draft_key);
       toast('Demande envoyée ! Recherche de prestataires en cours…', 'ok');
       navStack = ['#/home', '#/missions']; navCursor = 1; currentHash = '#/missions'; nav('#/mission/' + r.id);
     } catch (err) {
@@ -2427,9 +2577,9 @@ const A = {
     catch (e) { toast(e.message, 'err'); }
   },
   collap(id) { document.getElementById(id).classList.toggle('open'); },
-  requestSchedule() { const s=document.getElementById('r-schedule'), d=document.getElementById('r-date'); if (!s || !d) return; d.style.display=s.value==='date'?'block':'none'; if(s.value!=='date') d.value=''; },
+  requestSchedule() { const s=document.getElementById('r-schedule'), d=document.getElementById('r-date'); if (!s || !d) return; d.style.display=s.value==='date'?'block':'none'; if(s.value!=='date') d.value=''; A.saveCategoryDraft(); },
   requestTaskChanged() { const task = document.getElementById('r-task'); REQ.task_id = task ? (Number(task.value) || null) : null; A.requestEstimate(); },
-  requestDescriptionChanged() { clearTimeout(A._estimateTimer); A._estimateTimer = setTimeout(() => A.requestEstimate(), 300); },
+  requestDescriptionChanged() { A.saveCategoryDraft(); clearTimeout(A._estimateTimer); A._estimateTimer = setTimeout(() => A.requestEstimate(), 300); },
   async requestLocationChanged(keepCommune) {
     const city = ((document.getElementById('r-city') || {}).value || '').trim();
     const field = document.getElementById('r-commune-field'); const input = document.getElementById('r-commune');
@@ -2446,15 +2596,17 @@ const A = {
     openModal(`<h3>📍 Choisir la commune</h3><div class="searchbar" style="margin-bottom:8px"><input id="commune-q" placeholder="Rechercher une commune"></div><div id="commune-liste" style="max-height:52vh;overflow:auto">${rows(communes)}</div>`);
     const q = document.getElementById('commune-q'), zone = document.getElementById('commune-liste'); q.addEventListener('input', () => { const text = q.value.toLowerCase(); zone.innerHTML = rows(communes.filter(v => v.toLowerCase().includes(text))) || '<div class="hint">Aucune commune trouvée.</div>'; }); q.focus();
   },
-  _communeSet(value) { const input = document.getElementById('r-commune'); if (input) input.value = value; closeModal(); A.requestEstimate(); },
+  _communeSet(value) { const input = document.getElementById('r-commune'); if (input) input.value = value; closeModal(); A.saveCategoryDraft(); A.requestEstimate(); },
   async requestEstimate() {
     const city = ((document.getElementById('r-city') || {}).value || '').trim();
     const description = ((document.getElementById('r-desc') || {}).value || '').trim();
     const commune = ((document.getElementById('r-commune') || {}).value || '').trim();
     const zone = document.getElementById('r-estimate'); if (!zone) return;
     // Une estimation n’est affichée que lorsqu’une règle vérifiable donne un montant.
+    // Depuis une grande catégorie, un besoin sélectionné identifie la prestation : sans lui,
+    // un prix dynamique serait arbitraire et reste donc silencieux.
     // L’absence de référence reste silencieuse : aucun montant fictif, aucun « Prix à confirmer ».
-    if (!description || !city || (city === 'Abidjan' && !commune)) { zone.innerHTML = ''; return; }
+    if (!description || !city || (city === 'Abidjan' && !commune) || (REQ.mode === 'category' && !(REQ.selected_tasks || []).length)) { zone.innerHTML = ''; return; }
     try {
       const r = await api('/estimates?service_id=' + encodeURIComponent(REQ.service_id) + '&task_id=' + encodeURIComponent(REQ.task_id || '') + '&city=' + encodeURIComponent(city) + '&zone=' + encodeURIComponent(commune) + '&details=' + encodeURIComponent(description));
       zone.innerHTML = r.status === 'estimated' && r.amount ? `<div class="estimate-price">Estimation disponible : à partir de ${fmtFCFA(r.amount)}</div>` : '';
@@ -2485,7 +2637,7 @@ const A = {
       toast('Envoi des fichiers…');
       try {
         const r = await api('/upload', { method: 'POST', body: fd });
-        REQ.photos.push(...r.files);
+        REQ.photos.push(...r.files); A.saveCategoryDraft();
         const zone = document.getElementById(zoneId);
         r.files.forEach(f => zone.insertAdjacentHTML('afterbegin', `<img src="${esc(mediaUrl(f))}">`));
         toast('Fichier(s) ajouté(s) ✓', 'ok');
@@ -2528,7 +2680,7 @@ const A = {
         if (!blob.size) return toast('Aucun son n’a été enregistré. Réessayez.', 'err');
         const fd = new FormData(); fd.append('files', blob, 'vocal.' + audioExtension(mime));
         try {
-          const r = await api('/upload', { method: 'POST', body: fd }); REQ.audio = r.files[0];
+          const r = await api('/upload', { method: 'POST', body: fd }); REQ.audio = r.files[0]; A.saveCategoryDraft();
           const zone = document.getElementById(zoneId); if (!zone) return;
           zone.innerHTML = `<audio controls preload="metadata" src="${esc(mediaUrl(REQ.audio))}"></audio><div class="small muted">Écoutez puis envoyez votre demande.</div><button class="btn ghost sm" onclick="A.clearRequestAudio('${zoneId}')">🗑️ Supprimer</button>`;
           toast('Message vocal enregistré. Vous pouvez l’écouter avant l’envoi ✓', 'ok');
@@ -2538,7 +2690,7 @@ const A = {
     } catch (e) { if (stream) stream.getTracks().forEach(t => t.stop()); toast(microphoneError(e), 'err'); }
   },
   clearRequestAudio(zoneId) {
-    REQ.audio = null; const zone = document.getElementById(zoneId); if (zone) zone.innerHTML = `<button class="btn sec sm" id="r-rec" onclick="A.toggleRec('${zoneId}')">🎤 Enregistrer un message vocal</button>`;
+    REQ.audio = null; A.saveCategoryDraft(); const zone = document.getElementById(zoneId); if (zone) zone.innerHTML = `<button class="btn sec sm" id="r-rec" onclick="A.toggleRec('${zoneId}')">🎤 Enregistrer un message vocal</button>`;
   },
 
   /* GPS */
@@ -2548,7 +2700,7 @@ const A = {
     btn.textContent = '📍 Localisation…'; btn.disabled = true;
     navigator.geolocation.getCurrentPosition(
       pos => {
-        REQ.lat = pos.coords.latitude; REQ.lng = pos.coords.longitude;
+        REQ.lat = pos.coords.latitude; REQ.lng = pos.coords.longitude; A.saveCategoryDraft();
         btn.textContent = '📍 Position enregistrée ✓'; btn.disabled = false;
         const addr = document.getElementById('r-addr');
         if (!addr.value.trim()) addr.placeholder = 'Position GPS enregistrée — précisez le quartier/repère';

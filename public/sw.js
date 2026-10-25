@@ -1,6 +1,6 @@
 /* Klean Services — Service Worker public, sans données privées */
-const CACHE = 'ks-v5-public-shell';
-const SHELL = ['/', '/index.html', '/styles.css', '/modern-ui.css', '/app.js', '/manifest.json', '/logo.png', '/icon-192.png', '/icon-512.png'];
+const CACHE = 'ks-v6-public-shell';
+const SHELL = ['/', '/index.html', '/styles.css', '/modern-ui.css', '/category-request.css', '/app.js', '/manifest.json', '/logo.png', '/icon-192.png', '/icon-512.png'];
 const SAFE_ASSETS = new Set(SHELL);
 
 self.addEventListener('install', event => {

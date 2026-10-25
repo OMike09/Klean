@@ -4529,7 +4529,7 @@ for (const m of db.prepare("SELECT id FROM missions WHERE status='recherche'").a
 
 // ---------- STATIQUE + AUTO-DIAGNOSTIC DES FICHIERS ----------
 const REQUIRED_FILES = [
-  'public/index.html', 'public/app.js', 'public/styles.css', 'public/modern-ui.css', 'public/sw.js',
+  'public/index.html', 'public/app.js', 'public/styles.css', 'public/modern-ui.css', 'public/category-request.css', 'public/sw.js',
   'public/manifest.json', 'public/admin/index.html', 'public/admin/admin.js', 'public/admin/admin.css'
 ];
 const missingFiles = REQUIRED_FILES.filter(f => !fs.existsSync(path.join(__dirname, f)));
