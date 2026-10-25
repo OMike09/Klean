@@ -2381,40 +2381,31 @@ const A = {
     openModal(`<h3>Décrire mon besoin</h3><p class="small muted">Choisissez le grand domaine le plus proche. Aucune tâche prédéfinie ne sera obligatoire.</p><div style="max-height:52vh;overflow:auto">${cats.map(c=>`<div class="menu-item" onclick="closeModal();nav('#/categories/${c.id}')"><span class="mi-ic">${esc(c.icon||'🧩')}</span><b>${esc(c.name)}</b><span class="mi-arr">›</span></div>`).join('')}</div>`);
   },
   requestToggleTask(el) { A.toggleTask(el); const on=[...document.querySelectorAll('#r-taches .task-chip.on')]; REQ.task_id=on[0] ? Number(on[0].dataset.taskId) : null; A.requestEstimate(); },
-  /* Formulaire compact d'une grande catégorie : les tâches restent cachées tant que le client ne les choisit pas. */
-  openCategoryNeeds(serviceId) {
+  /* Formulaire compact d'une grande catégorie : le panneau présente directement les tâches,
+     sans répéter le nom de la grande catégorie devant chaque ligne. */
+  openCategoryNeeds() {
     const services = REQ.category_services || [];
-    if (!services.length) return toast('Aucun besoin prédéfini n’est disponible dans cette catégorie.', 'err');
-    const target = Number(serviceId || 0);
-    if (!target) {
-      openModal(`<h3>Choisir mes besoins</h3><p class="small muted">Choisissez d’abord la prestation la plus proche. Vous pourrez ensuite sélectionner plusieurs besoins, sans obligation.</p>
-        <label class="small muted">Prestation</label><select id="category-service-select" style="width:100%;margin:6px 0 12px" onchange="A.categoryPickService(this.value)"><option value="">Choisir une prestation</option>${services.map(s => `<option value="${s.id}" ${Number(REQ.service_id)===Number(s.id)?'selected':''}>${esc([s.category,s.name].filter(Boolean).join(' — '))}</option>`).join('')}</select>
-        <button class="btn sec" onclick="closeModal()">Annuler</button>`);
-      return;
-    }
-    const prior = (REQ.selected_tasks || [])[0];
-    if (prior && Number(prior.service_id) !== target) {
-      REQ.selected_tasks = []; REQ.task_id = null;
-      toast('Les besoins de la prestation précédente ont été retirés.', 'ok');
-      A.updateCategoryNeedSummary();
-    }
-    REQ.service_id = target;
-    const service = services.find(s => Number(s.id) === target) || {};
-    openModal(`<h3>Choisir mes besoins</h3><div class="small muted mb">${esc([service.category,service.name].filter(Boolean).join(' — '))}</div>
-      <div class="searchbar" style="margin-bottom:9px"><input id="category-task-q" placeholder="Rechercher un besoin" oninput="A.filterCategoryNeeds(${target})"></div>
+    const tasks = REQ.category_tasks || [];
+    if (!services.length || !tasks.length) return toast('Aucun besoin prédéfini n’est disponible dans cette catégorie.', 'err');
+    openModal(`<h3>Choisir mes besoins</h3><p class="small muted">Recherchez ou sélectionnez directement les besoins concernés. Plusieurs besoins sont possibles lorsqu’ils appartiennent à la même prestation.</p>
+      <div class="searchbar" style="margin-bottom:9px"><input id="category-task-q" placeholder="Rechercher un besoin" oninput="A.filterCategoryNeeds()" autocomplete="off"></div>
       <div id="category-task-list" class="category-task-list"></div>
-      <div class="btn-row mt"><button class="btn sec" onclick="A.openCategoryNeeds()">Changer de prestation</button><button class="btn" onclick="closeModal()">Terminer</button></div>`);
-    A.renderCategoryNeedTasks(target);
+      <div class="btn-row mt"><button class="btn" onclick="closeModal()">Terminer</button></div>`);
+    A.renderCategoryNeedTasks();
   },
-  categoryPickService(value) { const id=Number(value); if(id) A.openCategoryNeeds(id); },
-  renderCategoryNeedTasks(serviceId) {
+  renderCategoryNeedTasks() {
     const zone = document.getElementById('category-task-list'); if (!zone) return;
     const query = normalize((document.getElementById('category-task-q') || {}).value || '');
     const selected = new Set((REQ.selected_tasks || []).map(t => Number(t.id)));
-    const tasks = (REQ.category_tasks || []).filter(t => Number(t.service_id) === Number(serviceId) && (!query || normalize(`${t.name} ${t.description || ''}`).includes(query)));
-    zone.innerHTML = tasks.length ? tasks.map(t => `<button type="button" class="category-task-choice ${selected.has(Number(t.id)) ? 'on' : ''}" onclick="A.toggleCategoryNeed(${t.id})"><span>${selected.has(Number(t.id)) ? '☑' : '☐'}</span><div><b>${esc(t.name)}</b>${t.description ? `<small>${esc(t.description)}</small>` : ''}</div></button>`).join('') : '<div class="hint">Aucun besoin trouvé. Vous pouvez décrire votre demande librement.</div>';
+    const choice = t => `<button type="button" class="category-task-choice ${selected.has(Number(t.id)) ? 'on' : ''}" onclick="A.toggleCategoryNeed(${t.id})"><span>${selected.has(Number(t.id)) ? '☑' : '☐'}</span><div><b>${esc(t.name)}</b>${t.description ? `<small>${esc(t.description)}</small>` : ''}</div></button>`;
+    const groups = (REQ.category_services || []).map(service => {
+      const tasks = (REQ.category_tasks || []).filter(t => Number(t.service_id) === Number(service.id) && (!query || normalize(`${t.name} ${t.description || ''}`).includes(query)));
+      // Le nom de la prestation organise les tâches ; le nom de la grande catégorie reste seulement dans l’en-tête vert.
+      return tasks.length ? `<section class="category-task-group"><h4>${esc(service.name)}</h4>${tasks.map(choice).join('')}</section>` : '';
+    }).filter(Boolean);
+    zone.innerHTML = groups.length ? groups.join('') : '<div class="hint">Aucun besoin trouvé. Vous pouvez décrire votre demande librement.</div>';
   },
-  filterCategoryNeeds(serviceId) { A.renderCategoryNeedTasks(serviceId); },
+  filterCategoryNeeds() { A.renderCategoryNeedTasks(); },
   toggleCategoryNeed(taskId) {
     const task = (REQ.category_tasks || []).find(t => Number(t.id) === Number(taskId)); if (!task) return;
     const chosen = REQ.selected_tasks || [];
@@ -2424,7 +2415,7 @@ const A = {
       chosen.push({ ...task, detail:'' }); REQ.service_id=task.service_id;
     }
     REQ.selected_tasks=chosen; REQ.task_id=chosen[0] ? chosen[0].id : null;
-    A.renderCategoryNeedTasks(task.service_id); A.updateCategoryNeedSummary(); A.saveCategoryDraft(); A.requestEstimate();
+    A.renderCategoryNeedTasks(); A.updateCategoryNeedSummary(); A.saveCategoryDraft(); A.requestEstimate();
   },
   updateCategoryNeedSummary() {
     if (REQ.mode !== 'category') return;
