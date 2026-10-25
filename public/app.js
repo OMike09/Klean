@@ -406,9 +406,9 @@ function logout(manual = true) {
 function header(title, opts = {}) {
   const showBack = opts.back === 'contextual' ? hasNavigationHistory() : opts.back !== false;
   return `<div class="hdr">
-    ${showBack ? `<button class="back-btn" onclick="back()" aria-label="Retour à l’écran précédent">←<span>Retour</span></button>` : ''}
+    ${showBack ? `<button type="button" class="back-btn" onclick="back()" aria-label="Retour à l’écran précédent">←<span>Retour</span></button>` : ''}
     ${opts.brand ? `<div class="brand" aria-label="Klean Services"><img src="/logo.png" alt=""> <span>Klean Services</span></div>` : `<div class="title">${esc(title)}</div>`}
-    ${opts.bell !== false ? `<button class="bell" onclick="nav('#/notifications')">🔔<span class="js-bell-badge"></span></button>` : ''}
+    ${opts.bell !== false ? `<button type="button" class="bell" onclick="nav('#/notifications')" aria-label="Voir les notifications">🔔<span class="js-bell-badge"></span></button>` : ''}
   </div>`;
 }
 function bottomNav(active) {
@@ -417,7 +417,7 @@ function bottomNav(active) {
     ['messages', '💬', 'Messages'], ['account', '👤', 'Compte']
   ];
   return `<div class="bottomnav">` + items.map(([id, ic, lb]) =>
-    `<button class="${active === id ? 'on' : ''}" onclick="nav('#/${id}')"><span class="ni">${ic}</span>${lb}${id === 'messages' ? '<span class="js-msg-badge"></span>' : ''}</button>`
+    `<button type="button" class="${active === id ? 'on' : ''}" aria-label="${lb}" onclick="nav('#/${id}')"><span class="ni" aria-hidden="true">${ic}</span><span>${lb}</span>${id === 'messages' ? '<span class="js-msg-badge"></span>' : ''}</button>`
   ).join('') + `</div>`;
 }
 function emptyState(ic, msg) { return `<div class="empty"><div class="e-ic">${ic}</div>${esc(msg)}</div>`; }

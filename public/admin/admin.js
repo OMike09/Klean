@@ -78,7 +78,7 @@ function renderLogin() {
 const MENU = [
   ['TABLEAU DE BORD', [['dashboard', '📊 Vue d\u2019ensemble', null, null], ['frequentation', '📈 Statistiques de fréquentation', null, 'frequentation']]],
   ['UTILISATEURS', [['users', '👥 Tous les comptes', null, 'comptes'], ['pros', '✅ Validations pro', 'pros_pending', 'pros']]],
-  ['SERVICES', [['catalog', '🗂️ Services & catégories', null, 'catalogue'], ['questions', '❓ Questions dynamiques', null, 'questions']]],
+  ['SERVICES', [['catalog', '🗂️ Gestion des catégories et des tâches', null, 'catalogue'], ['questions', '❓ Questions dynamiques', null, 'questions']]],
   ['MISSIONS', [['missions', '🧰 Demandes & missions', null, 'missions'], ['payments', '💰 Paiements & commissions', null, 'paiements'], ['finances', '📈 Finances & revenus', null, 'paiements']]],
   ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['support', '📩 Messages Klean Services', null, 'communication'], ['broadcast', '📨 Messages généraux', null, 'communication']]],
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
