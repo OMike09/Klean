@@ -259,3 +259,8 @@ img.msg-missing{display:none}
 /* COLIS 21 : repères prix des grandes catégories — rouge, uniquement si fiable */
 .price-from{display:block;color:#dc2626;font-size:.78rem;font-weight:800;margin-top:4px}
 #home-fixe .searchbar{max-width:680px}
+/* COLIS 27 — sélection professionnelle hiérarchique, compatible petits écrans. */
+.pro-skill-root{margin:8px 0;border:1px solid var(--line,#dfe9e7);border-radius:12px;background:#fff;overflow:hidden}
+.pro-skill-root summary{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:12px;cursor:pointer;color:var(--txt,#173a35);list-style:none}.pro-skill-root summary::-webkit-details-marker{display:none}.pro-skill-root summary:after{content:'⌄';color:var(--p,#0b7a6b);font-weight:800}.pro-skill-root[open] summary:after{transform:rotate(180deg)}
+.pro-skill-body{padding:0 12px 10px;border-top:1px solid var(--line,#e8efed)}.pro-skill-category{padding:10px 0;border-bottom:1px solid #edf2f1}.pro-skill-category:last-child{border-bottom:0}.pro-skill-options{display:flex;flex-wrap:wrap;gap:7px;margin-top:7px}.pro-skill-options .check-line{margin:0;padding:7px 9px;border-radius:8px;background:#f5faf8;font-size:13px;min-width:calc(50% - 4px)}
+@media(max-width:520px){.pro-skill-root summary{padding:11px 10px}.pro-skill-options{display:block}.pro-skill-options .check-line{display:flex;margin:5px 0;width:100%}}

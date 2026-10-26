@@ -18,7 +18,8 @@
     "test:update24": "node test-update-24.js",
     "test:update25": "node test-update-25.js",
     "test:update26": "node test-update-26.js",
-    "test:update26:complement": "node test-update-26-complement.js"
+    "test:update26:complement": "node test-update-26-complement.js",
+    "test:update27": "node test-update-27.js"
   },
   "keywords": [],
   "author": "",

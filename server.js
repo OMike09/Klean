@@ -442,6 +442,7 @@ function me(u) {
     pro: pro ? { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents),
       domain_categories: (() => { try { const v = JSON.parse(pro.domain_categories || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })(),
       authorized_domain_categories: pro.authorized_domain_categories === null || pro.authorized_domain_categories === undefined ? null : (() => { try { const v = JSON.parse(pro.authorized_domain_categories || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })(),
+      selected_subcategories:numberIds(pro.selected_subcategories), authorized_subcategories:pro.authorized_subcategories===null?null:numberIds(pro.authorized_subcategories),
       service_cities: (() => { try { const v = JSON.parse(pro.service_cities || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })() } : null,
     perms: isStaff(u) ? effectivePerms(u) : undefined
   };
@@ -1054,11 +1055,33 @@ app.get('/api/estimates', (req, res) => {
 // ============================================================
 // ESPACE PROFESSIONNEL
 // ============================================================
-function declaredDomainsFromPayload(body) {
+// Source unique du sélecteur de compétences : aucune liste UI parallèle.
+app.get('/api/pro-skill-catalogue', auth, (req,res) => {
+  const roots=frenchSort(db.prepare('SELECT id,name,short_label,icon FROM grand_categories WHERE active=1').all());
+  const categories=frenchSort(db.prepare(`SELECT c.id,c.name,c.icon,c.grand_category_id FROM service_categories c JOIN grand_categories g ON g.id=c.grand_category_id WHERE c.active=1 AND g.active=1`).all());
+  const subs=frenchSort(db.prepare(`SELECT sc.id,sc.name,sc.metier_id FROM sous_categories sc JOIN service_categories c ON c.id=sc.metier_id JOIN grand_categories g ON g.id=c.grand_category_id WHERE sc.active=1 AND c.active=1 AND g.active=1`).all());
+  const activeSubIds=new Set(db.prepare('SELECT DISTINCT sub_id FROM services WHERE active=1 AND sub_id IS NOT NULL').all().map(r=>Number(r.sub_id)));
+  res.json(roots.map(root=>({ ...root, categories:categories.filter(c=>Number(c.grand_category_id)===Number(root.id)).map(cat=>({ ...cat, subcategories:subs.filter(sub=>Number(sub.metier_id)===Number(cat.id)&&activeSubIds.has(Number(sub.id))) })).filter(cat=>cat.subcategories.length) })).filter(root=>root.categories.length));
+});
+function activeSubcategoryIds(raw) {
+  const ids=[...new Set((Array.isArray(raw)?raw:[]).map(Number).filter(Number.isInteger))].slice(0,300);
+  if (!ids.length) return [];
+  const marks=ids.map(()=>'?').join(',');
+  return db.prepare(`SELECT sc.id FROM sous_categories sc JOIN service_categories c ON c.id=sc.metier_id JOIN grand_categories g ON g.id=c.grand_category_id
+    WHERE sc.active=1 AND c.active=1 AND g.active=1 AND sc.id IN (${marks})`).all(...ids).map(r=>Number(r.id));
+}
+function domainsForSubcategoryIds(ids) {
+  const unique=[...new Set((ids||[]).map(Number).filter(Number.isInteger))]; if(!unique.length)return [];
+  const marks=unique.map(()=>'?').join(','); return db.prepare(`SELECT DISTINCT c.grand_category_id id FROM sous_categories sc JOIN service_categories c ON c.id=sc.metier_id WHERE sc.id IN (${marks})`).all(...unique).map(r=>Number(r.id));
+}
+function declaredSubcategoriesFromPayload(body) { return activeSubcategoryIds(body && body.selected_subcategories); }
+function declaredDomainsFromPayload(body, selectedSubs) {
   const raw = Array.isArray(body && body.domain_categories) ? body.domain_categories : [];
   const direct = activeDomainIds(raw);
-  // Compatibilité API avec les comptes/profils créés avant la sélection simplifiée.
-  return direct.length ? direct : domainsForServiceIds(Array.isArray(body && body.services) ? body.services : []);
+  // Les sous-catégories cochées définissent toujours leur domaine parent. Compatibilité des anciens clients conservée.
+  const fromSubs=domainsForSubcategoryIds(selectedSubs || []);
+  const fallback=domainsForServiceIds(Array.isArray(body && body.services) ? body.services : []);
+  return [...new Set([...(direct.length?direct:fallback),...fromSubs])];
 }
 function effectiveDomains(profile) {
   if (!profile) return null;
@@ -1066,14 +1089,21 @@ function effectiveDomains(profile) {
   const declared = numberIds(profile.domain_categories);
   return declared.length ? declared : null; // null laisse les anciens profils sur la logique services.
 }
+function effectiveSubcategories(profile) {
+  if (!profile) return null;
+  const raw=profile.authorized_subcategories !== null && profile.authorized_subcategories !== undefined && profile.authorized_subcategories !== '' ? profile.authorized_subcategories : profile.selected_subcategories;
+  const ids=numberIds(raw); return ids.length ? ids : null; // aucun choix fin historique : repli contrôlé sur le domaine.
+}
 
 app.post('/api/pro/apply', auth, (req, res) => {
   const { profession, description, experience, zone, services, documents, accept_rules } = req.body || {};
   const proType = req.body.pro_type === 'entreprise' ? 'entreprise' : 'particulier';
-  const domainCategories = declaredDomainsFromPayload(req.body || {});
+  const selectedSubcategories = declaredSubcategoriesFromPayload(req.body || {});
+  const domainCategories = declaredDomainsFromPayload(req.body || {}, selectedSubcategories);
   if (req.user.pro_status === 'approved') return res.status(400).json({ error: 'Vous êtes déjà professionnel.' });
   if (req.user.pro_status === 'pending') return res.status(400).json({ error: 'Votre demande est déjà en cours de validation.' });
   if (!profession || !profession.trim()) return res.status(400).json({ error: proType === 'entreprise' ? 'Indiquez le domaine d\u2019activité de l\u2019entreprise.' : 'Indiquez votre profession.' });
+  if (!selectedSubcategories.length) return res.status(400).json({ error: 'Sélectionnez au moins une sous-catégorie que vous maîtrisez.' });
   if (!domainCategories.length) return res.status(400).json({ error: 'Sélectionnez au moins un domaine d’activité actif.' });
   if (!zone || !zone.trim()) return res.status(400).json({ error: 'Indiquez votre zone d\u2019intervention.' });
   if (!accept_rules) return res.status(400).json({ error: 'Vous devez accepter les règles professionnelles.' });
@@ -1086,13 +1116,13 @@ app.post('/api/pro/apply', auth, (req, res) => {
       : 'Un document justificatif est requis (CNI, attestation…).' });
   // Les domaines sont la source d’autorisation fonctionnelle. Le champ services
   // historique est conservé pour les anciens profils, sans obliger le nouveau pro à cocher chaque prestation.
-  db.prepare(`INSERT INTO pro_profiles(user_id, profession, description, experience, zone, services, authorized_services, domain_categories, authorized_domain_categories, documents, pro_type, company_name, company_rccm, company_size)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  db.prepare(`INSERT INTO pro_profiles(user_id, profession, description, experience, zone, services, authorized_services, domain_categories, authorized_domain_categories, selected_subcategories, authorized_subcategories, documents, pro_type, company_name, company_rccm, company_size)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(user_id) DO UPDATE SET profession=excluded.profession, description=excluded.description,
                 experience=excluded.experience, zone=excluded.zone, domain_categories=excluded.domain_categories,
-                authorized_domain_categories=NULL, documents=excluded.documents, pro_type=excluded.pro_type,
-                company_name=excluded.company_name, company_rccm=excluded.company_rccm, company_size=excluded.company_size, rejected_reason=NULL`)
-    .run(req.user.id, profession.trim(), description || '', experience || '', zone.trim(), JSON.stringify(Array.isArray(services) ? services.map(Number).filter(Number.isInteger) : []), '[]', JSON.stringify(domainCategories), null, JSON.stringify(documents || []),
+                selected_subcategories=excluded.selected_subcategories, authorized_domain_categories=NULL, authorized_subcategories=NULL,
+                documents=excluded.documents, pro_type=excluded.pro_type, company_name=excluded.company_name, company_rccm=excluded.company_rccm, company_size=excluded.company_size, rejected_reason=NULL`)
+    .run(req.user.id, profession.trim(), description || '', experience || '', zone.trim(), JSON.stringify(Array.isArray(services) ? services.map(Number).filter(Number.isInteger) : []), '[]', JSON.stringify(domainCategories), null, JSON.stringify(selectedSubcategories), null, JSON.stringify(documents || []),
       proType, companyName || null, (req.body.company_rccm || '').trim() || null, (req.body.company_size || '').trim() || null);
   db.prepare(`UPDATE users SET pro_status='pending', pro_rules_accepted_at=datetime('now') WHERE id=?`).run(req.user.id);
   notifyAdmins('compte', 'Nouvelle demande professionnelle', `${req.user.name} souhaite devenir professionnel (${proType === 'entreprise' ? '🏢 Entreprise « ' + companyName + ' » — ' : '👤 Particulier — '}${profession}).`, 'admin:pros');
@@ -1156,14 +1186,16 @@ app.post('/api/pro/domain-change-request', auth, (req, res) => {
   if (req.user.pro_status !== 'approved') return res.status(403).json({ error: 'Espace réservé aux professionnels validés.' });
   const profile = db.prepare('SELECT * FROM pro_profiles WHERE user_id=?').get(req.user.id);
   if (!profile) return res.status(404).json({ error: 'Profil professionnel introuvable.' });
-  const requested = activeDomainIds((req.body || {}).domain_categories);
+  const requestedSubs=declaredSubcategoriesFromPayload(req.body || {});
+  const requested = declaredDomainsFromPayload(req.body || {}, requestedSubs);
+  if (!requestedSubs.length) return res.status(400).json({ error: 'Sélectionnez au moins une sous-catégorie que vous maîtrisez.' });
   if (!requested.length) return res.status(400).json({ error: 'Sélectionnez au moins un domaine d’activité actif.' });
-  const current = effectiveDomains(profile) || numberIds(profile.domain_categories);
-  if (requested.length === current.length && requested.every(id => current.includes(id))) return res.status(409).json({ error: 'Ces domaines sont déjà ceux autorisés sur votre profil.' });
+  const current = effectiveDomains(profile) || numberIds(profile.domain_categories), currentSubs=effectiveSubcategories(profile)||[];
+  if (requested.length === current.length && requested.every(id => current.includes(id)) && requestedSubs.length===currentSubs.length && requestedSubs.every(id=>currentSubs.includes(id))) return res.status(409).json({ error: 'Ces compétences sont déjà celles autorisées sur votre profil.' });
   if (db.prepare("SELECT 1 FROM pro_domain_change_requests WHERE user_id=? AND status='en_attente'").get(req.user.id)) return res.status(409).json({ error: 'Une demande de modification de domaines est déjà en attente.' });
   const note = String((req.body || {}).note || '').trim().slice(0, 1000);
-  const id = db.prepare('INSERT INTO pro_domain_change_requests(user_id,requested_domains,previous_domains,note) VALUES(?,?,?,?)')
-    .run(req.user.id, JSON.stringify(requested), JSON.stringify(current), note || null).lastInsertRowid;
+  const id = db.prepare('INSERT INTO pro_domain_change_requests(user_id,requested_domains,previous_domains,requested_subcategories,previous_subcategories,note) VALUES(?,?,?,?,?,?)')
+    .run(req.user.id, JSON.stringify(requested), JSON.stringify(current),JSON.stringify(requestedSubs),JSON.stringify(currentSubs), note || null).lastInsertRowid;
   notifyAdmins('compte', 'Modification de domaines professionnels', `${req.user.name} demande une modification de ses domaines d’activité.`, 'admin:users');
   notify(req.user.id, 'compte', 'Demande de modification envoyée', 'Vos domaines d’activité restent inchangés jusqu’à la décision de l’administration.', '#/pro');
   res.status(201).json({ id, status: 'en_attente', requested_domains: requested });
@@ -1211,6 +1243,7 @@ app.get('/api/pro/dashboard', auth, (req, res) => {
   res.json({
     available: pro.available, availability_status: pro.availability_status || (pro.available ? 'disponible' : 'indisponible'), profile: { ...pro, services: JSON.parse(pro.services), documents: JSON.parse(pro.documents),
       domain_categories: numberIds(pro.domain_categories), authorized_domain_categories: pro.authorized_domain_categories === null ? null : numberIds(pro.authorized_domain_categories),
+      selected_subcategories:numberIds(pro.selected_subcategories),authorized_subcategories:pro.authorized_subcategories===null?null:numberIds(pro.authorized_subcategories),
       service_cities: (() => { try { const v = JSON.parse(pro.service_cities || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })() },
     offers, missions,
     stats: {
@@ -1303,8 +1336,9 @@ function proMatchesMission(p, mission, client) {
   // rattachée au domaine reste éligible, y compris si elle est ajoutée après l'inscription.
   const domains = effectiveDomains(p);
   if (domains !== null) {
-    const serviceDomain = db.prepare('SELECT c.grand_category_id id FROM services s JOIN service_categories c ON c.id=s.category_id WHERE s.id=? AND s.active=1 AND c.active=1').get(mission.service_id);
+    const serviceDomain = db.prepare('SELECT c.grand_category_id id,s.sub_id FROM services s JOIN service_categories c ON c.id=s.category_id WHERE s.id=? AND s.active=1 AND c.active=1').get(mission.service_id);
     if (!serviceDomain || !domains.includes(Number(serviceDomain.id))) return false;
+    const subs=effectiveSubcategories(p); if(subs!==null && (!serviceDomain.sub_id || !subs.includes(Number(serviceDomain.sub_id)))) return false;
   } else {
     // Compatibilité stricte des anciens profils choisis prestation par prestation.
     const declared = numberIds(p.svc || p.services);
@@ -1333,7 +1367,7 @@ function professionalLocationScore(mission, p, client) {
   return { dist, same_city:sameCity ? 1 : 0, nearby:hasPreciseDistance && dist <= nearbyKm ? 1 : 0, tier };
 }
 function findMatchingPros(mission) {
-  const pros = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id
+  const pros = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.selected_subcategories, p.authorized_subcategories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id
     WHERE u.pro_status='approved' AND u.suspended=0 AND COALESCE(u.blocked,0)=0 AND u.id != ?`).all(mission.client_id);
   const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
   return pros.filter(p => proMatchesMission(p, mission, client))
@@ -1341,7 +1375,7 @@ function findMatchingPros(mission) {
     .sort((a, b) => (a.tier - b.tier) || (a.dist - b.dist) || (visibiliteNiveau(b.id) - visibiliteNiveau(a.id)) || a.id - b.id);
 }
 function candidateStillEligible(mission, proId) {
-  const p = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(proId);
+  const p = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.selected_subcategories, p.authorized_subcategories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(proId);
   const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
   return !!(p && proMatchesMission(p, mission, client));
 }
@@ -1388,7 +1422,7 @@ function offerNext(missionId) {
   }
   if (db.prepare("SELECT 1 FROM mission_candidates WHERE mission_id=? AND status='offered'").get(missionId)) return;
   const client = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
-  const allPending = db.prepare(`SELECT mc.id AS candidate_id, mc.*, u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM mission_candidates mc
+  const allPending = db.prepare(`SELECT mc.id AS candidate_id, mc.*, u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.selected_subcategories, p.authorized_subcategories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM mission_candidates mc
     JOIN pro_profiles p ON p.user_id=mc.pro_id JOIN users u ON u.id=mc.pro_id WHERE mc.mission_id=? AND mc.status='pending' ORDER BY mc.rank ASC`).all(missionId);
   const pending = allPending.filter(c => proMatchesMission(c, mission, client)).slice(0, alertWaveSize(missionId));
   if (!pending.length) {
@@ -1748,7 +1782,7 @@ app.post('/api/missions/:id/accept', auth, (req, res) => {
       if (!mission) throw new Error('NOT_FOUND');
       if (mission.status !== 'recherche') throw new Error('TAKEN');
       if (!proCanReceiveMission(req.user.id)) throw new Error('BUSY');
-      const profile = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(req.user.id);
+      const profile = db.prepare(`SELECT u.*, p.services svc, p.authorized_services, p.domain_categories, p.authorized_domain_categories, p.selected_subcategories, p.authorized_subcategories, p.pro_type, p.capacity_level, p.available, p.zone, p.service_city, p.service_cities, p.service_lat, p.service_lng, p.availability_status FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.id=?`).get(req.user.id);
       const clientForMatch = db.prepare('SELECT ville FROM users WHERE id=?').get(mission.client_id);
       if (!profile || !proMatchesMission(profile, mission, clientForMatch)) throw new Error('INELIGIBLE');
       const cand = db.prepare("SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=? AND status='offered'").get(mission.id, req.user.id);
@@ -2689,25 +2723,34 @@ function viewerForAds(req) {
   const payload = verifyToken(token);
   return payload ? db.prepare('SELECT ville FROM users WHERE id=?').get(payload.id) : null;
 }
-// Publicités actives, avec leur nombre de vues (une vue par compte maximum), filtrées géographiquement.
+// Publicités actives et statistiques : chaque personne/appareil ne compte qu'une fois
+// par publicité et par jour. Cela évite les rafraîchissements techniques tout en permettant
+// de distinguer vues totales et visiteurs uniques sans stocker d'adresse IP.
+function adViewer(req) {
+  const token=(req.headers.authorization||'').replace('Bearer ',''); const payload=verifyToken(token);
+  return payload ? db.prepare('SELECT id,ville FROM users WHERE id=?').get(payload.id) : null;
+}
+function adStats(kind,id) { return db.prepare(`SELECT COUNT(*) total_views,COUNT(DISTINCT viewer_key) unique_viewers FROM ad_view_events WHERE ad_kind=? AND ad_id=?`).get(kind,Number(id)); }
+function activeAdTarget(kind,id) { return kind==='ad' ? db.prepare('SELECT id FROM ads WHERE id=? AND active=1').get(id) : db.prepare("SELECT id FROM ad_campaigns WHERE id=? AND status='active'").get(id); }
 app.get('/api/ads', (req, res) => {
-  pubTick();
-  const viewer = viewerForAds(req);
-  const rows = db.prepare(`SELECT a.id, a.type, a.title, a.content, a.file, a.placement, a.duration, a.zones,
-    (SELECT COUNT(*) FROM view_seen v WHERE v.key = 'ad:' || a.id) AS views
-    FROM ads a WHERE a.active=1 ORDER BY a.sort, a.id`).all()
-    .filter(a => adZoneAllowed(a.zones, viewer && viewer.ville));
-  if (getSetting('pub_campagnes_enabled', '1') === '1') {
-    const dur = Math.max(3, parseInt(getSetting('pub_duree_affichage', '6'), 10) || 6);
-    for (const c of db.prepare(`SELECT * FROM ad_campaigns WHERE status='active' ORDER BY id`).all()) {
-      // Anciennes campagnes avec « zone » unique sont conservées et ciblées correctement.
-      const zones = cleanZones(c.zones).length ? c.zones : (c.zone ? [c.zone] : []);
-      if (!adZoneAllowed(zones, viewer && viewer.ville)) continue;
-      const entry = { id: 'c' + c.id, type: c.type, title: c.title, content: c.content, file: c.file, placement: c.placement, duration: dur, zones, views: 0, sponsor: true };
-      for (let i = 0; i < pubPoids(c.priorite); i++) rows.push(entry);
-    }
+  pubTick(); const viewer=adViewer(req);
+  const rows=db.prepare(`SELECT a.id,a.type,a.title,a.content,a.file,a.placement,a.duration,a.zones,
+    COALESCE((SELECT COUNT(*) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) AS views,
+    COALESCE((SELECT COUNT(DISTINCT viewer_key) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) AS unique_views
+    FROM ads a WHERE a.active=1 ORDER BY a.sort,a.id`).all().filter(a=>adZoneAllowed(a.zones,viewer&&viewer.ville));
+  if(getSetting('pub_campagnes_enabled','1')==='1') { const dur=Math.max(3,parseInt(getSetting('pub_duree_affichage','6'),10)||6);
+    for(const c of db.prepare("SELECT * FROM ad_campaigns WHERE status='active' ORDER BY id").all()) { const zones=cleanZones(c.zones).length?c.zones:(c.zone?[c.zone]:[]);if(!adZoneAllowed(zones,viewer&&viewer.ville))continue;const stats=adStats('campaign',c.id),entry={id:'c'+c.id,analytics_key:'campaign:'+c.id,type:c.type,title:c.title,content:c.content,file:c.file,placement:c.placement,duration:dur,zones,views:Number(stats.total_views||0),unique_views:Number(stats.unique_viewers||0),sponsor:true};for(let i=0;i<pubPoids(c.priorite);i++)rows.push(entry); }
   }
-  res.json(rows);
+  res.json(rows.map(a=>({...a,analytics_key:a.analytics_key||'ad:'+a.id})));
+});
+// Utilisable connecté ou anonyme. Le navigateur ne fournit qu'un identifiant aléatoire local,
+// jamais un téléphone, une adresse ou une empreinte technique.
+app.post('/api/ad-views', (req,res) => {
+  const viewer=adViewer(req), raw=Array.isArray((req.body||{}).keys)?(req.body||{}).keys.slice(0,30):[], anon=String((req.body||{}).anonymous_key||'');
+  const anonOk=/^[a-z0-9_-]{18,120}$/i.test(anon), viewerKey=viewer?'user:'+viewer.id:(anonOk?'anon:'+anon:null); if(!viewerKey)return res.status(400).json({error:'Identifiant de consultation invalide.'});
+  const add=db.prepare("INSERT OR IGNORE INTO ad_view_events(ad_kind,ad_id,user_id,viewer_key) VALUES(?,?,?,?)"); let recorded=0;
+  [...new Set(raw)].forEach(key=>{const m=/^(ad|campaign):(\d+)$/.exec(String(key));if(!m||!activeAdTarget(m[1],Number(m[2])))return;const r=add.run(m[1],Number(m[2]),viewer?viewer.id:null,viewerKey);recorded+=r.changes||0;});
+  res.json({ok:true,recorded});
 });
 
 // Bandeau d'annonces défilantes (bas de l'accueil) — visible aussi sans compte
@@ -2923,6 +2966,7 @@ A.get('/users/:id', (req, res) => {
   res.json({ ...u, pro: pro ? { ...pro, services: JSON.parse(pro.services), authorized_services: jsonNumberIds(pro.authorized_services || pro.services),
     domain_categories: (() => { try { const v=JSON.parse(pro.domain_categories || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })(),
     authorized_domain_categories: pro.authorized_domain_categories === null || pro.authorized_domain_categories === undefined ? null : (() => { try { const v=JSON.parse(pro.authorized_domain_categories || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })(),
+    selected_subcategories:numberIds(pro.selected_subcategories),authorized_subcategories:pro.authorized_subcategories===null?null:numberIds(pro.authorized_subcategories),
     service_cities: (() => { try { return JSON.parse(pro.service_cities || '[]'); } catch { return []; } })(), documents: JSON.parse(pro.documents) } : null, missions, history });
 });
 
@@ -3200,15 +3244,19 @@ A.get('/journal', (req, res) => {
 // VALIDATION DES PROFESSIONNELS
 A.get('/pros/pending', (req, res) => {
   const rows = db.prepare(`SELECT u.id, u.name, u.phone, u.address, u.created_at, p.* FROM users u JOIN pro_profiles p ON p.user_id=u.id WHERE u.pro_status='pending' ORDER BY u.id DESC`).all();
-  res.json(rows.map(r => ({ ...r, services: JSON.parse(r.services), domain_categories: numberIds(r.domain_categories), documents: JSON.parse(r.documents) })));
+  res.json(rows.map(r => ({ ...r, services: JSON.parse(r.services), domain_categories: numberIds(r.domain_categories), selected_subcategories:numberIds(r.selected_subcategories), documents: JSON.parse(r.documents) })));
 });
 A.put('/pros/:id/eligibility', (req, res) => {
   const u = db.prepare("SELECT * FROM users WHERE id=? AND pro_status='approved'").get(req.params.id);
   const profile = db.prepare('SELECT * FROM pro_profiles WHERE user_id=?').get(req.params.id);
   if (!u || !profile) return res.status(404).json({ error: 'Professionnel validé introuvable.' });
   const body = req.body || {};
-  const hasDomains = Array.isArray(body.authorized_domain_categories);
+  const hasDomains = Array.isArray(body.authorized_domain_categories), hasSubs=Array.isArray(body.authorized_subcategories);
+  let authorizedSubs=hasSubs ? activeSubcategoryIds(body.authorized_subcategories) : effectiveSubcategories(profile);
+  if(hasSubs && body.authorized_subcategories.length!==authorizedSubs.length) return res.status(400).json({error:'Une ou plusieurs sous-catégories sélectionnées sont invalides ou inactives.'});
   let authorizedDomains = hasDomains ? activeDomainIds(body.authorized_domain_categories) : effectiveDomains(profile);
+  const legacyNoDomain=authorizedDomains===null && !hasSubs && authorizedSubs===null;
+  authorizedDomains=legacyNoDomain ? null : [...new Set([...(authorizedDomains||[]),...domainsForSubcategoryIds(authorizedSubs||[])])];
   if (hasDomains && body.authorized_domain_categories.length && !authorizedDomains.length) return res.status(400).json({ error: 'Un ou plusieurs domaines sélectionnés sont invalides ou inactifs.' });
   let requested = Array.isArray(body.authorized_services) ? [...new Set(body.authorized_services.map(Number).filter(Number.isInteger))].slice(0, 200) : numberIds(profile.authorized_services || profile.services);
   // Les anciens comptes conservent le contrôle historique service par service. Pour un compte
@@ -3231,16 +3279,16 @@ A.put('/pros/:id/eligibility', (req, res) => {
   if ((serviceCities.length > 1 || serviceCities.includes('*')) && !['pdg','admin'].includes(req.user.role)) return res.status(403).json({ error: 'Seul un administrateur ou le PDG peut autoriser plusieurs villes ou toutes les villes.' });
   if (!serviceCities.length) serviceCities = oldCities.length ? oldCities : (profile.service_city ? [profile.service_city] : []);
   const defaultCity = serviceCities.includes('*') ? profile.service_city : (serviceCities.includes(profile.service_city) ? profile.service_city : serviceCities[0] || null);
-  db.prepare('UPDATE pro_profiles SET authorized_services=?, authorized_domain_categories=?, pro_type=?, capacity_level=?, service_cities=?, service_city=? WHERE user_id=?')
-    .run(JSON.stringify(requested), authorizedDomains === null ? profile.authorized_domain_categories : JSON.stringify(authorizedDomains), type, capacity, JSON.stringify(serviceCities), defaultCity, u.id);
+  db.prepare('UPDATE pro_profiles SET authorized_services=?, authorized_domain_categories=?, authorized_subcategories=?, pro_type=?, capacity_level=?, service_cities=?, service_city=? WHERE user_id=?')
+    .run(JSON.stringify(requested), authorizedDomains === null ? profile.authorized_domain_categories : JSON.stringify(authorizedDomains),authorizedSubs===null?profile.authorized_subcategories:JSON.stringify(authorizedSubs), type, capacity, JSON.stringify(serviceCities), defaultCity, u.id);
   db.prepare("SELECT * FROM missions WHERE status='recherche' AND id IN (SELECT mission_id FROM mission_candidates WHERE pro_id=? AND status='offered')").all(u.id).forEach(revokeIneligibleOffers);
   notify(u.id, 'compte', 'Autorisation professionnelle mise à jour', 'La direction a actualisé vos domaines, autorisations et capacité de mission.', '#/pro');
   push(u.id, 'account', { pro_status: 'approved' });
-  res.json({ ok: true, authorized_services: requested, authorized_domain_categories: authorizedDomains, pro_type: type, capacity_level: capacity, service_cities: serviceCities, service_city: defaultCity });
+  res.json({ ok: true, authorized_services: requested, authorized_domain_categories: authorizedDomains,authorized_subcategories:authorizedSubs, pro_type: type, capacity_level: capacity, service_cities: serviceCities, service_city: defaultCity });
 });
 A.get('/pros/:id/domain-requests', (req,res) => {
   const rows=db.prepare(`SELECT r.*,u.name reviewer_name FROM pro_domain_change_requests r LEFT JOIN users u ON u.id=r.reviewed_by WHERE r.user_id=? ORDER BY r.id DESC LIMIT 100`).all(req.params.id)
-    .map(r=>({...r,requested_domains:numberIds(r.requested_domains),previous_domains:numberIds(r.previous_domains)}));
+    .map(r=>({...r,requested_domains:numberIds(r.requested_domains),previous_domains:numberIds(r.previous_domains),requested_subcategories:numberIds(r.requested_subcategories),previous_subcategories:numberIds(r.previous_subcategories)}));
   res.json(rows);
 });
 A.post('/pros/:id/domain-requests/:rid/review', (req,res) => {
@@ -3251,10 +3299,11 @@ A.post('/pros/:id/domain-requests/:rid/review', (req,res) => {
   const decision=(req.body||{}).decision==='approuver'?'approuvee':(req.body||{}).decision==='refuser'?'refusee':null;
   if(!decision)return res.status(400).json({error:'Décision invalide.'});
   const note=String((req.body||{}).note||'').trim().slice(0,1000);
-  const domains=numberIds(request.requested_domains);
+  const domains=numberIds(request.requested_domains),subs=numberIds(request.requested_subcategories);
   if(decision==='approuvee') {
-    const valid=activeDomainIds(domains); if(valid.length!==domains.length)return res.status(400).json({error:'Un domaine demandé est devenu inactif ou introuvable.'});
-    db.prepare('UPDATE pro_profiles SET domain_categories=?,authorized_domain_categories=? WHERE user_id=?').run(JSON.stringify(valid),JSON.stringify(valid),u.id);
+    const valid=activeDomainIds(domains),validSubs=activeSubcategoryIds(subs); if(valid.length!==domains.length||validSubs.length!==subs.length)return res.status(400).json({error:'Un choix demandé est devenu inactif ou introuvable.'});
+    const allDomains=[...new Set([...valid,...domainsForSubcategoryIds(validSubs)])];
+    db.prepare('UPDATE pro_profiles SET domain_categories=?,authorized_domain_categories=?,selected_subcategories=?,authorized_subcategories=? WHERE user_id=?').run(JSON.stringify(allDomains),JSON.stringify(allDomains),JSON.stringify(validSubs),JSON.stringify(validSubs),u.id);
     db.prepare("SELECT * FROM missions WHERE status='recherche' AND id IN (SELECT mission_id FROM mission_candidates WHERE pro_id=? AND status='offered')").all(u.id).forEach(revokeIneligibleOffers);
   }
   db.prepare("UPDATE pro_domain_change_requests SET status=?,note=?,reviewed_by=?,reviewed_at=datetime('now') WHERE id=?").run(decision,note||request.note||null,req.user.id,request.id);
@@ -3265,7 +3314,7 @@ A.post('/pros/:id/approve', (req, res) => {
   const u = db.prepare("SELECT * FROM users WHERE id=? AND pro_status='pending'").get(req.params.id);
   if (!u) return res.status(404).json({ error: 'Demande introuvable.' });
   db.prepare("UPDATE users SET pro_status='approved', is_pro=1, verified=1 WHERE id=?").run(u.id);
-  db.prepare("UPDATE pro_profiles SET validated_at=datetime('now'), authorized_domain_categories=CASE WHEN domain_categories IS NOT NULL AND domain_categories!='' AND domain_categories!='[]' THEN domain_categories ELSE authorized_domain_categories END WHERE user_id=?").run(u.id);
+  db.prepare("UPDATE pro_profiles SET validated_at=datetime('now'), authorized_domain_categories=CASE WHEN domain_categories IS NOT NULL AND domain_categories!='' AND domain_categories!='[]' THEN domain_categories ELSE authorized_domain_categories END, authorized_subcategories=CASE WHEN selected_subcategories IS NOT NULL AND selected_subcategories!='' THEN selected_subcategories ELSE authorized_subcategories END WHERE user_id=?").run(u.id);
   // Attribution du code professionnel unique (KP######)
   let kp = db.prepare('SELECT kp_code FROM users WHERE id=?').get(u.id).kp_code;
   if (!kp) {
@@ -3285,6 +3334,18 @@ A.post('/pros/:id/reject', (req, res) => {
   notify(u.id, 'compte', 'Demande professionnelle refusée', (req.body.reason || 'Dossier incomplet') + '. Vous pouvez compléter votre dossier et renvoyer votre demande.', '#/pro');
   push(u.id, 'account', { pro_status: 'rejected' });
   res.json({ ok: true });
+});
+
+// File de correction PDG : uniquement les anciens services que la migration ne peut classer sans certitude.
+A.get('/pros/catalogue-reviews', pdgOnly, (req,res) => res.json(db.prepare(`SELECT r.*,u.name user_name,s.name legacy_service_name FROM pro_profile_catalogue_reviews r JOIN users u ON u.id=r.user_id LEFT JOIN services s ON s.id=r.legacy_service_id WHERE r.status='a_verifier' ORDER BY r.created_at,r.id LIMIT 500`).all()));
+A.get('/catalogue-merge-audit', pdgOnly, (req,res) => res.json(db.prepare('SELECT * FROM catalogue_merge_audit ORDER BY merged_at DESC,id DESC LIMIT 500').all()));
+A.post('/pros/catalogue-reviews/:id/resolve', pdgOnly, (req,res) => {
+  const row=db.prepare("SELECT * FROM pro_profile_catalogue_reviews WHERE id=? AND status='a_verifier'").get(req.params.id); if(!row)return res.status(404).json({error:'Élément à vérifier introuvable.'});
+  const subId=Number((req.body||{}).sub_id||0), status=(req.body||{}).status==='ignore'?'ignore':'corrige';
+  if(status==='corrige' && !activeSubcategoryIds([subId]).length)return res.status(400).json({error:'Choisissez une sous-catégorie active.'});
+  if(status==='corrige') { const p=db.prepare('SELECT selected_subcategories,authorized_subcategories,domain_categories,authorized_domain_categories FROM pro_profiles WHERE user_id=?').get(row.user_id); if(!p)return res.status(404).json({error:'Profil professionnel introuvable.'}); const subs=[...new Set([...numberIds(p.selected_subcategories),subId])],domains=[...new Set([...numberIds(p.domain_categories),...domainsForSubcategoryIds(subs)])]; db.prepare('UPDATE pro_profiles SET selected_subcategories=?,authorized_subcategories=?,domain_categories=?,authorized_domain_categories=? WHERE user_id=?').run(JSON.stringify(subs),JSON.stringify(subs),JSON.stringify(domains),JSON.stringify(domains),row.user_id); }
+  db.prepare("UPDATE pro_profile_catalogue_reviews SET status=?,note=?,reviewed_by=?,reviewed_at=datetime('now') WHERE id=?").run(status,String((req.body||{}).note||'').trim().slice(0,1000)||null,req.user.id,row.id);
+  res.json({ok:true});
 });
 
 // SERVICES / CATÉGORIES / QUESTIONS
@@ -4084,8 +4145,23 @@ A.post('/support/conversations/:id/status', (req, res) => {
   res.json({ ok: true, status });
 });
 A.get('/ads', (req, res) => res.json(db.prepare(`SELECT a.*,
-  (SELECT COUNT(*) FROM view_seen v WHERE v.key = 'ad:' || a.id) AS views
+  COALESCE((SELECT COUNT(*) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) AS views,
+  COALESCE((SELECT COUNT(DISTINCT viewer_key) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) AS unique_views
   FROM ads a ORDER BY a.sort, a.id DESC`).all()));
+A.get('/ads/analytics', pdgOnly, (req,res) => {
+  const core=db.prepare(`SELECT a.id,'ad' kind,a.title,a.content,a.created_at,NULL published_at,a.active,
+    COALESCE((SELECT COUNT(*) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) total_views,
+    COALESCE((SELECT COUNT(DISTINCT viewer_key) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) unique_viewers FROM ads a`).all().map(x=>({...x,status:x.active?'active':'suspendue',advertiser:'Klean Services'}));
+  const campaigns=db.prepare(`SELECT c.id,'campaign' kind,c.title,c.content,c.created_at,c.start_at published_at,c.status,u.name advertiser,
+    COALESCE((SELECT COUNT(*) FROM ad_view_events v WHERE v.ad_kind='campaign' AND v.ad_id=c.id),0) total_views,
+    COALESCE((SELECT COUNT(DISTINCT viewer_key) FROM ad_view_events v WHERE v.ad_kind='campaign' AND v.ad_id=c.id),0) unique_viewers FROM ad_campaigns c JOIN users u ON u.id=c.user_id`).all();
+  res.json([...core,...campaigns].sort((a,b)=>String(b.published_at||b.created_at).localeCompare(String(a.published_at||a.created_at))));
+});
+A.get('/ads/analytics/:kind/:id/views', pdgOnly, (req,res) => {
+  const kind=['ad','campaign'].includes(req.params.kind)?req.params.kind:null,id=Number(req.params.id);if(!kind||!Number.isInteger(id))return res.status(400).json({error:'Publicité invalide.'});
+  const totals=adStats(kind,id),known=db.prepare(`SELECT e.user_id,u.name,MIN(e.viewed_at) first_view,MAX(e.viewed_at) last_view,COUNT(*) views FROM ad_view_events e JOIN users u ON u.id=e.user_id WHERE e.ad_kind=? AND e.ad_id=? AND e.user_id IS NOT NULL GROUP BY e.user_id,u.name ORDER BY last_view DESC`).all(kind,id),anonymous=db.prepare(`SELECT COUNT(*) views,COUNT(DISTINCT viewer_key) unique_viewers,MIN(viewed_at) first_view,MAX(viewed_at) last_view FROM ad_view_events WHERE ad_kind=? AND ad_id=? AND user_id IS NULL`).get(kind,id);
+  res.json({kind,id,total_views:Number(totals.total_views||0),unique_viewers:Number(totals.unique_viewers||0),known,anonymous:{views:Number(anonymous.views||0),unique_viewers:Number(anonymous.unique_viewers||0),first_view:anonymous.first_view||null,last_view:anonymous.last_view||null}});
+});
 A.get('/game-plays/vues', (req, res) => {
   const gv = k => db.prepare('SELECT COUNT(*) n FROM view_seen WHERE key=?').get(k).n;
   res.json({ quiz: gv('game:quiz'), flipfizz: gv('game:flipfizz'), kdo: gv('game:kdo') });
@@ -4094,7 +4170,7 @@ A.post('/ads', (req, res) => {
   const { type, title, content, file, placement, duration, active } = req.body || {};
   let zones; try { zones = assertValidZones((req.body || {}).zones); } catch (e) { return res.status(400).json({ error: e.message }); }
   const info = db.prepare('INSERT INTO ads(type, title, content, file, placement, duration, active, zones) VALUES(?,?,?,?,?,?,?,?)')
-    .run(type || 'texte', title || '', content || '', file || null, placement || 'accueil', duration || 6, active ?? 1, JSON.stringify(zones));
+    .run(type || 'texte', title || '', content || '', file || null, placement || 'accueil', Number(duration) || 6, active === undefined ? 1 : (active ? 1 : 0), JSON.stringify(zones || []));
   res.json({ id: info.lastInsertRowid, zones });
 });
 A.put('/ads/:id', (req, res) => {

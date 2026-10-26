@@ -78,15 +78,21 @@ function renderLogin() {
 const MENU = [
   ['TABLEAU DE BORD', [['dashboard', '📊 Vue d\u2019ensemble', null, null], ['frequentation', '📈 Statistiques de fréquentation', null, 'frequentation']]],
   ['UTILISATEURS', [['users', '👥 Tous les comptes', null, 'comptes'], ['pros', '✅ Validations pro', 'pros_pending', 'pros']]],
-  ['SERVICES', [['catalog', '🗂️ Services, catégories & tâches', null, 'catalogue'], ['questions', '❓ Questions dynamiques', null, 'questions']]],
+  ['SERVICES', [['catalog', '🗂️ Services & catégories', null, 'catalogue'], ['questions', '❓ Questions dynamiques', null, 'questions']]],
   ['MISSIONS', [['missions', '🧰 Demandes & missions', null, 'missions'], ['payments', '💰 Paiements & commissions', null, 'paiements'], ['finances', '📈 Finances & revenus', null, 'paiements']]],
   ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['support', '📩 Messages Klean Services', null, 'communication'], ['broadcast', '📨 Messages généraux', null, 'communication']]],
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
   ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Trouver ou proposer un job', null, 'contenu'], ['ecole', '🏫 École & famille', null, 'contenu'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
   ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
-  ['CONFIGURATION', [['estimates', '🧠 Tarifs & estimations intelligentes', null, 'PDG'], ['commerce', '💰 Paramètres commerciaux', null, 'parametres'], ['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
+  ['PARAMÈTRES', [['settings', '⚙️ Paramètres', null, 'parametres']]],
 ];
 function menuVisible(perm) { return !perm || (perm === 'PDG' ? ME && ME.role === 'pdg' : can(perm)); }
+// Une seule entrée principale « Paramètres ». Les anciennes vues restent accessibles par lien
+// direct, mais sont désormais des sous-sections pour ne retirer aucune configuration existante.
+const SETTINGS_SECTIONS=[
+  ['settings','⚙️ Application & comptes','parametres'],['catalog','🗂️ Catégories & photos','catalogue'],['broadcast','🔔 Notifications & messages','communication'],['ads','📣 Publicités','communication'],['commerce','💰 Commercial','parametres'],['estimates','🧠 Prix & estimations','PDG'],['rules','🔒 Sécurité & règles','securite']
+];
+function settingsTabs(active) { const items=SETTINGS_SECTIONS.filter(x=>menuVisible(x[2])); return `<div class="tabs settings-hub-tabs">${items.map(([id,label])=>`<button class="${active===id?'on':''}" onclick="go('${id}')">${label}</button>`).join('')}</div>`; }
 
 function shell(content) {
   root.innerHTML = `
@@ -354,6 +360,7 @@ views.catalog = async () => {
   const tab = sessionStorage.getItem('adm_cat_tab') || 'cat';
   if (tab === 'villes') return views._villes();
   if (tab === 'pop') return views._populaires();
+  if (tab === 'roots') return views._grandCategories();
   const d = CATD = await api('/admin/catalog');
   const q = (sessionStorage.getItem('adm_cat_q') || '').toLowerCase();
   let sel = parseInt(sessionStorage.getItem('adm_cat_sel') || 0, 10);
@@ -403,9 +410,10 @@ views.catalog = async () => {
     </div>`;
   }
 
-  shell(`<h1>🗂️ Services & catégories</h1>
+  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('catalog')}<h2>🗂️ Services & catégories</h2>
   <div class="tabs">
     <button class="on">🗂️ Catalogue</button>
+    <button onclick="sessionStorage.setItem('adm_cat_tab','roots');render()">🖼️ Catégories & photos</button>
     <button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Services populaires</button>
     <button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes (${'villes' in STATS ? STATS.villes : '…'})</button>
   </div>
@@ -445,7 +453,7 @@ views.estimates = async () => {
   shell(`<h1>🧠 Gestion des tarifs et estimations intelligentes</h1>
     <div class="panel small muted">Le moteur applique d’abord les règles explicites de la direction, puis les données locales vérifiées, ensuite l’historique suffisamment documenté, puis le tarif de référence autorisé. Sans donnée fiable, il affiche « Prix à confirmer ». Aucun prix de marché n’est inventé.</div>
     <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Grandes catégories centrales</h2><button class="btn sm" onclick="A.grandCategoryForm(0)">＋ Ajouter</button></div>
-      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">${catalog.grand_categories.map(g => `<span class="pill ${g.active ? 'ok' : 'off'}">${esc(g.icon || '🧩')} ${esc(g.short_label || g.name)} <button type="button" style="border:0;background:transparent;cursor:pointer" onclick="A.grandCategoryForm(${g.id})">✏️</button></span>`).join('')}</div></div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">${catalog.grand_categories.map(g => `<span class="pill ${g.active ? 'ok' : 'off'}">${esc(g.icon || '🧩')} ${esc(g.name)} <button type="button" style="border:0;background:transparent;cursor:pointer" onclick="A.grandCategoryForm(${g.id})">✏️</button></span>`).join('')}</div></div>
     <div class="panel"><h2 style="margin-top:0">Règles globales</h2><div class="frow">
       <label><input type="checkbox" id="est-geo" ${cfg.geo_enabled ? 'checked' : ''}> Ajustements géographiques par ville actifs</label>
       <label>Repli si aucune donnée locale <select id="est-fallback"><option value="reference" ${cfg.fallback === 'reference' ? 'selected' : ''}>Tarif de référence PDG (provisoire)</option><option value="confirmer" ${cfg.fallback === 'confirmer' ? 'selected' : ''}>Prix à confirmer</option></select></label>
@@ -459,23 +467,58 @@ views.estimates = async () => {
       </table></div></div>
     <div class="panel"><h2 style="margin-top:0">Tester une estimation avant publication</h2><div class="frow"><select id="est-test-service" style="min-width:230px"><option value="">Choisir une prestation</option>${allServices.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><select id="est-test-city" style="min-width:180px"><option value="">Choisir une ville</option>${cities.map(c => `<option>${esc(c)}</option>`).join('')}</select><button class="btn" onclick="A.testEstimation()">Tester</button></div><div id="est-test-result" class="small muted" style="margin-top:9px">Aucun test en cours.</div></div>
     <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Dictionnaire de recherche (${terms.length})</h2><button class="btn" onclick="A.searchTermForm()">＋ Ajouter une expression</button></div>
-      <div class="small muted" style="margin:8px 0">Gérez sans code les synonymes, tournures locales, fautes et descriptions. Une expression peut cibler une grande catégorie, un métier, une sous-catégorie, une prestation ou une tâche réelle — jamais une liste parallèle.</div>
-      <div style="max-height:340px;overflow:auto"><table><tr><th>Expression</th><th>Destination</th><th>Source</th><th>État</th><th></th></tr>${terms.map(t => `<tr><td>${esc(t.term)}</td><td>${esc(target(t))}</td><td class="small">${t.source === 'direction' ? 'Direction' : 'Catalogue'}</td><td>${t.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.searchTermForm(${t.id})">Modifier</button><button class="btn sm sec" onclick="A.toggleSearchTerm(${t.id},${t.active ? 0 : 1})">${t.active ? 'Désactiver' : 'Activer'}</button><button class="btn sm warn" onclick="A.deleteSearchTerm(${t.id})">🗑️</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucune expression.</td></tr>'}</table></div></div>`);
+      <div class="small muted" style="margin:8px 0">Synonymes, formulations familières et fautes connues reliés à une prestation/tâche réelle. Les expressions du catalogue restent modifiables ou désactivables.</div>
+      <div style="max-height:340px;overflow:auto"><table><tr><th>Expression</th><th>Destination</th><th>Source</th><th>État</th><th></th></tr>${terms.map(t => `<tr><td>${esc(t.term)}</td><td>${esc(t.service_name)}${t.task_name ? ' › ' + esc(t.task_name) : ''}</td><td class="small">${esc(t.source)}</td><td>${t.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.toggleSearchTerm(${t.id},${t.active ? 0 : 1})">${t.active ? 'Désactiver' : 'Activer'}</button><button class="btn sm warn" onclick="A.deleteSearchTerm(${t.id})">🗑️</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucune expression.</td></tr>'}</table></div></div>`);
+};
+
+/* ---------- Grandes catégories et photos : administration visible du PDG ---------- */
+views._grandCategories = async () => {
+  const d=CATD=await api('/admin/catalog'); const counts={}; (d.categories||[]).forEach(c=>counts[c.grand_category_id]=(counts[c.grand_category_id]||0)+1);
+  const reviews=ME&&ME.role==='pdg'?await api('/admin/pros/catalogue-reviews').catch(()=>[]):[];
+  const audit=ME&&ME.role==='pdg'?await api('/admin/catalogue-merge-audit').catch(()=>[]):[];
+  shell(`<h1>🖼️ Grandes catégories & photos</h1>
+  <div class="tabs"><button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button><button class="on">🖼️ Catégories & photos</button><button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Catégories populaires</button><button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes</button></div>
+  <div class="panel small muted">Chaque visuel est lié à l’identifiant de la grande catégorie, jamais à son nom. Après enregistrement, l’image est utilisée automatiquement sur les cartes de l’application. Une suppression ne retire ni services, ni missions, ni historique.</div>
+  <div class="grand-photo-grid">${(d.grand_categories||[]).map(g=>`<article class="grand-photo-card ${g.active?'':'inactive'}"><div class="grand-photo-preview">${g.image_url?`<img src="${esc(mediaUrl(g.image_url))}" alt="Photo ${esc(g.name)}">`:`<span>${esc(g.icon||'🧩')}</span>`}</div><div class="grand-photo-copy"><b>${esc(g.short_label||g.name)}</b><small>${esc(g.name)} · ${counts[g.id]||0} métier(s)</small><div class="btn-row"><button class="btn sm ${g.image_url?'sec':''}" onclick="A.grandCategoryPhotoForm(${g.id})">${g.image_url?'Modifier la photo':'Ajouter une photo'}</button>${g.image_url?`<button class="btn sm warn" onclick="A.deleteGrandCategoryPhoto(${g.id})">Supprimer la photo</button>`:''}<button class="btn sm sec" onclick="A.grandCategoryForm(${g.id})">✏️ Détails</button></div></div></article>`).join('')}</div>
+  ${ME&&ME.role==='pdg'?`<div class="panel"><h2 style="margin-top:0">🧭 Profils historiques à corriger</h2><div class="small muted">Ces anciens services ne sont pas classés automatiquement lorsqu’aucune correspondance certaine n’existe. Corrigez-les ici ou conservez-les sans nouvelle compétence.</div><table><tr><th>Professionnel</th><th>Ancien service</th><th>Motif</th><th>Depuis</th><th></th></tr>${reviews.map(r=>`<tr><td><b>${esc(r.user_name)}</b></td><td>${esc(r.legacy_service_name||'Service introuvable')}</td><td class="small">${esc(r.reason)}</td><td class="small">${fmtD(r.created_at)}</td><td><button class="btn sm" onclick="A.resolveCatalogueReview(${r.id})">Corriger</button> <button class="btn sm sec" onclick="A.ignoreCatalogueReview(${r.id})">Ne pas attribuer</button></td></tr>`).join('')||'<tr><td colspan="5" class="muted">Aucun profil à vérifier.</td></tr>'}</table></div><div class="panel"><h2 style="margin-top:0">Traçabilité des dédoublonnages exacts</h2><div class="small muted">Les rapprochements par ressemblance ne sont jamais fusionnés automatiquement. Cette piste conserve le snapshot des seules fusions de noms strictement identiques après normalisation.</div><table><tr><th>Type</th><th>Référence conservée</th><th>Référence fusionnée</th><th>Date</th></tr>${audit.map(x=>`<tr><td>${esc(x.entity_type)}</td><td>#${x.canonical_id}</td><td>#${x.merged_id}</td><td class="small">${fmtD(x.merged_at)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">Aucune fusion exacte enregistrée.</td></tr>'}</table></div>`:''}`);
 };
 
 /* ---------- Services populaires (sélection et ordre de l'accueil) ---------- */
-/* ---------- Grandes catégories populaires : seules cartes de l'accueil ---------- */
 views._populaires = async () => {
   const d = CATD = await api('/admin/catalog');
-  const pops = d.grand_categories.filter(g => g.popular).sort((a,b)=>(a.popular_sort??999)-(b.popular_sort??999)||a.sort-b.sort||a.id-b.id);
-  const available = d.grand_categories.filter(g => g.active && !g.popular);
-  shell(`<h1>🗂️ Gestion des catégories et des tâches</h1>
-  <div class="tabs"><button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button><button class="on">⭐ Catégories populaires</button><button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes (${'villes' in STATS ? STATS.villes : '…'})</button></div>
-  <div class="panel"><p class="small muted">L'accueil affiche uniquement les grandes catégories actives sélectionnées ici — jamais une prestation ni une tâche. Le prix n'apparaît côté client que si une règle tarifaire vérifiée le permet.</p>
-    <div class="frow"><div style="min-width:280px"><label>＋ Ajouter une grande catégorie</label><select id="pop-add" style="width:100%">${available.map(g=>`<option value="${g.id}">${esc(g.icon||'🧩')} ${esc(g.name)}</option>`).join('') || '<option value="">(toutes les catégories actives sont déjà sélectionnées)</option>'}</select></div><button class="btn" onclick="A.popAdd()">Ajouter</button></div>
-    <table><tr><th style="width:52px">Ordre</th><th>Grande catégorie</th><th>État</th><th>Actions</th></tr>
-      ${pops.map((g,i)=>`<tr><td><b>${i+1}</b></td><td><b>${esc(g.icon||'🧩')} ${esc(g.name)}</b>${g.description?`<div class="small muted">${esc(g.description)}</div>`:''}</td><td>${g.active?'<span class="pill ok">Publiée</span>':'<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" ${i===0?'disabled':''} onclick="A.popMove(${g.id},-1)">↑</button><button class="btn sm sec" ${i===pops.length-1?'disabled':''} onclick="A.popMove(${g.id},1)">↓</button><button class="btn sm warn" onclick="A.popRemove(${g.id})">✕ Retirer</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted small">Aucune grande catégorie sélectionnée.</td></tr>'}
-    </table></div>`);
+  const pops = d.services.filter(s => s.popular)
+    .sort((a, b) => (a.popular_sort ?? 999) - (b.popular_sort ?? 999) || a.sort - b.sort || a.id - b.id);
+  const catOf = s => d.categories.find(c => c.id === s.category_id) || {};
+  const options = d.categories.map(c => {
+    const svcs = d.services.filter(s => s.category_id === c.id && !s.popular && s.active);
+    return svcs.length ? `<optgroup label="${esc((c.icon || '') + ' ' + c.name)}">${svcs.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup>` : '';
+  }).join('');
+  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('catalog')}<h2>🗂️ Services & catégories</h2>
+  <div class="tabs">
+    <button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button>
+    <button class="on">⭐ Services populaires</button>
+    <button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes (${'villes' in STATS ? STATS.villes : '…'})</button>
+  </div>
+  <div class="panel">
+    <p class="small muted">Les services populaires apparaissent en haut de l'accueil de l'application, dans l'ordre ci-dessous.
+    Ce sont les mêmes services que dans le catalogue — une sélection, jamais des doublons. Tout changement est visible immédiatement sur l'accueil.</p>
+    <div class="frow">
+      <div style="min-width:280px"><label>＋ Ajouter un service aux populaires</label>
+        <select id="pop-add" style="width:100%">${options || '<option value="">(tous les services actifs sont déjà populaires)</option>'}</select></div>
+      <button class="btn" onclick="A.popAdd()">Ajouter</button>
+    </div>
+    <table><tr><th style="width:52px">Ordre</th><th>Service</th><th>Catégorie</th><th>État</th><th>Actions</th></tr>
+    ${pops.map((s, i) => { const c = catOf(s); return `<tr>
+      <td><b>${i + 1}</b></td>
+      <td><b>${esc(s.name)}</b><div class="small" style="color:#111;font-weight:700">${s.price_show && s.price_from ? esc(s.price_prefix || 'Dès') + ' ' + Number(s.price_from).toLocaleString('fr-FR') + ' FCFA' : ''}</div></td>
+      <td>${esc((c.icon || '') + ' ' + (c.name || ''))}</td>
+      <td>${s.active ? '<span class="pill ok">Actif</span>' : '<span class="pill off">Inactif</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm sec" title="Monter" ${i === 0 ? 'disabled' : ''} onclick="A.popMove(${s.id},-1)">↑</button>
+        <button class="btn sm sec" title="Descendre" ${i === pops.length - 1 ? 'disabled' : ''} onclick="A.popMove(${s.id},1)">↓</button>
+        <button class="btn sm warn" onclick="A.popRemove(${s.id})">✕ Retirer</button></td></tr>`; }).join('') || '<tr><td colspan="5" class="muted small">Aucun service populaire — ajoutez-en un ci-dessus.</td></tr>'}
+    </table>
+  </div>`);
 };
 
 /* ---------- Villes ---------- */
@@ -483,7 +526,7 @@ views._villes = async () => {
   const list = await api('/admin/villes');
   const q = (sessionStorage.getItem('adm_v_q') || '').toLowerCase();
   const show = q ? list.filter(v => v.name.toLowerCase().includes(q)) : list;
-  shell(`<h1>🗂️ Services & catégories</h1>
+  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('catalog')}<h2>🗂️ Services & catégories</h2>
   <div class="tabs">
     <button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button>
     <button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Services populaires</button>
@@ -548,8 +591,7 @@ views.missions = async () => {
     <td>${m.status === 'litige'
       ? `<button class="btn sm" onclick="A.litige(${m.id},false)">Résoudre</button>`
       : `<button class="btn sm warn" onclick="A.litige(${m.id},true)">Litige</button>`}
-      <button class="btn sm sec" onclick="A.conversationLock(${m.id},${m.conversation_locked_at ? 0 : 1})">${m.conversation_locked_at ? '🔓 Réactiver échanges' : '🔒 Suspendre échanges'}</button>
-      ${m.pro_id && can('reassign_missions') && !['annulee','payee'].includes(m.status) ? `<button class="btn sm" onclick="A.reassignMission(${m.id})">🔄 Réattribuer</button>` : ''}</td></tr>`; }).join('')}
+      <button class="btn sm sec" onclick="A.conversationLock(${m.id},${m.conversation_locked_at ? 0 : 1})">${m.conversation_locked_at ? '🔓 Réactiver échanges' : '🔒 Suspendre échanges'}</button></td></tr>`; }).join('')}
   ${!list.length ? '<tr><td colspan="8" class="muted">Aucune mission.</td></tr>' : ''}</table></div>`);
 };
 
@@ -584,7 +626,7 @@ views.commerce = async () => {
   try { niveaux = JSON.parse(s.pub_niveaux || '[]'); } catch { }
   const onoff = (k, lb) => `<button class="btn sm ${s[k] === '1' ? '' : 'sec'}" onclick="A.toggleSetting('${k}','${s[k] === '1' ? '0' : '1'}')">${lb} : ${s[k] === '1' ? '🟢 ACTIVÉE' : '🔴 DÉSACTIVÉE'}</button>`;
   const num = (k, label, w = 110) => `<div><label>${label}</label><input type="number" id="cm-${k}" value="${esc(s[k] || '')}" style="width:${w}px" onchange="A.cmNum('${k}')"></div>`;
-  shell(`<h1>💰 Paramètres commerciaux</h1>
+  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('commerce')}<h2>💰 Paramètres commerciaux</h2>
   <div class="small muted" style="margin-bottom:10px">Modèle Klean Services : <b>prestation → commission obligatoire</b> • <b>visibilité → paiement facultatif</b> • <b>publicité → campagne payante</b> • <b>avis de recherche → gratuit ou payant selon vos réglages</b> • <b>recherche d'emploi → gratuite + mise en avant facultative</b>. Toute modification est journalisée (qui, ancienne et nouvelle valeur).</div>
 
   <div class="panel"><h2 style="margin-top:0">A. 💰 Commission sur les prestations</h2>
@@ -756,6 +798,7 @@ views.finances = async () => {
 /* ---------- Publicités ---------- */
 views.ads = async () => {
   const list = await api('/admin/ads');
+  const analytics = ME && ME.role === 'pdg' ? await api('/admin/ads/analytics').catch(() => []) : [];
   const s = await api('/admin/settings');
   const annonces = await api('/admin/annonces');
   const villes = await api('/villes');
@@ -766,7 +809,7 @@ views.ads = async () => {
   const liste = F === 'toutes' ? annonces : annonces.filter(a => (a.type || 'info') === F);
   const apercu = a => { const t = TB[a.type] || TB.info;
     return `<span style="background:#0b1320;color:${esc(a.color)};padding:3px 10px;border-radius:6px"><b style="${(a.type || 'info') === 'urgence' ? 'color:#ff6b6b' : ''}">${t.ic} ${t.lb}${(a.theme || '').trim() ? ' (' + esc(a.theme) + ')' : ''} :</b> ${esc(a.content || a.title || '')}</span>`; };
-  shell(`<h1>📣 Publicités & informations</h1>
+  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('ads')}<h2>📣 Publicités & informations</h2>
   <div class="panel">
     <h2 style="margin-top:0">📺 Bandeau fixe en bas de l'accueil — publicités, informations et urgences (défilement style chaîne info)</h2>
     <div class="frow" style="align-items:center">
@@ -834,7 +877,8 @@ views.ads = async () => {
     <td>${a.placement}</td><td class="small">${esc(zonesLabel(a.zones))}</td><td><b>${Number(a.views || 0).toLocaleString('fr-FR')}</b></td><td>${a.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
     <td><button class="btn sm sec" onclick="A.toggleAd(${a.id},${a.active ? 0 : 1})">${a.active ? 'Désactiver' : 'Activer'}</button>
     <button class="btn sm warn" onclick="A.delAd(${a.id})">🗑️</button></td></tr>`).join('')}
-  ${!list.length ? '<tr><td colspan="8" class="muted">Aucune publicité.</td></tr>' : ''}</table></div>`);
+  ${!list.length ? '<tr><td colspan="8" class="muted">Aucune publicité.</td></tr>' : ''}</table></div>
+  ${ME && ME.role === 'pdg' ? `<div class="panel"><h2 style="margin-top:0">📊 Statistiques de vues des publicités</h2><div class="small muted">Une vue est enregistrée au plus une fois par publicité, par personne ou navigateur anonyme et par jour. Les vues totales et les visiteurs uniques sont donc distincts ; aucune adresse IP ou donnée technique n’est affichée.</div><div style="overflow:auto"><table><tr><th>Publicité</th><th>Annonceur</th><th>Vues totales</th><th>Utilisateurs uniques</th><th>Publication</th><th>Statut</th><th></th></tr>${analytics.map(a=>`<tr><td><b>${esc(a.title||'Sans titre')}</b><div class="small muted">${esc((a.content||'').slice(0,100))}</div></td><td>${esc(a.advertiser||'Klean Services')}</td><td><b>${Number(a.total_views||0).toLocaleString('fr-FR')}</b></td><td>${Number(a.unique_viewers||0).toLocaleString('fr-FR')}</td><td class="small">${a.published_at||a.created_at?fmtD(a.published_at||a.created_at):'—'}</td><td>${a.status==='active'?'<span class="pill ok">Active</span>':a.status==='suspendue'?'<span class="pill warn">Suspendue</span>':a.status==='expiree'?'<span class="pill off">Terminée</span>':'<span class="pill info">'+esc(a.status||'—')+'</span>'}</td><td><button class="btn sm sec" onclick="A.adViews('${a.kind}',${a.id},'${esc(a.title||'Publicité').replace(/'/g,"\'")}')">Voir les vues</button></td></tr>`).join('')||'<tr><td colspan="7" class="muted">Aucune publicité ou campagne à analyser.</td></tr>'}</table></div></div>`:''}`);
 };
 
 /* ---------- Messagerie Klean Services ---------- */
@@ -854,7 +898,7 @@ views.support = async () => {
 views.broadcast = async () => {
   const [list, villes] = await Promise.all([api('/admin/general-messages'), api('/admin/villes')]);
   const st = { draft:'Brouillon', scheduled:'Programmé', sent:'Envoyé', cancelled:'Annulé' };
-  shell(`<h1>📨 Messages généraux</h1>
+  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('broadcast')}<h2>🔔 Notifications & messages</h2>
   <div class="panel"><div class="small muted mb">Les destinataires sont calculés et enregistrés côté serveur, sans doublon. « Notification enregistrée » signifie qu’elle est dans l’application ; la livraison système (push) dépend des autorisations de l’appareil.</div>
     <div class="frow"><div style="flex:1"><label>Titre</label><input id="gm-title" maxlength="160" style="width:100%" placeholder="Ex : Information importante"></div></div>
     <div class="frow"><div style="flex:1"><label>Message</label><textarea id="gm-body" maxlength="2000" placeholder="Votre message…"></textarea></div></div>
@@ -869,7 +913,7 @@ views.broadcast = async () => {
 /* ---------- Règles ---------- */
 views.rules = async () => {
   const [s, about] = await Promise.all([api('/admin/settings'), ME && ME.role === 'pdg' ? api('/admin/about') : Promise.resolve(null)]);
-  shell(`<h1>📜 Règles & conditions</h1>
+  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('rules')}<h2>🔒 Sécurité & règles</h2>
   <div class="panel"><h2 style="margin-top:0">Règles client</h2><textarea class="rules-ta" id="r-client">${esc(s.rules_client || '')}</textarea><button class="btn" style="margin-top:8px" onclick="A.saveRules('rules_client','r-client')">Enregistrer les règles client</button></div>
   <div class="panel"><h2 style="margin-top:0">Règles professionnel</h2><textarea class="rules-ta" id="r-pro">${esc(s.rules_pro || '')}</textarea><button class="btn" style="margin-top:8px" onclick="A.saveRules('rules_pro','r-pro')">Enregistrer les règles professionnel</button></div>
   ${about ? `<div class="panel"><h2 style="margin-top:0">ℹ️ À propos de Klean Services <span class="pill info">Paramètre PDG</span></h2><div class="small muted mb">Le brouillon n’est visible dans l’application qu’après publication. Ajoutez, modifiez ou supprimez des paragraphes avant l’aperçu.</div><label>Titre</label><input id="about-title" style="width:100%" value="${esc(about.title||'')}"><div id="about-paragraphs">${about.draft.map((p,i)=>aboutParagraphHtml(p,i)).join('')}</div><div class="btn-row mt"><button class="btn sec" onclick="A.addAboutParagraph()">＋ Paragraphe</button><button class="btn outline" onclick="A.previewAbout()">👁️ Aperçu du brouillon</button><button class="btn" onclick="A.saveAbout(false)">💾 Enregistrer le brouillon</button><button class="btn" onclick="A.saveAbout(true)">📢 Publier</button></div><div class="small muted mt">Dernière publication : ${about.published_at ? fmtD(about.published_at) : 'jamais'}</div><div style="border-top:1px solid #e4eeeb;margin-top:14px;padding-top:12px"><h3 style="margin:0 0 8px">↗️ Partager l’application</h3><label>Lien officiel (https://…)</label><input id="share-url" style="width:100%" value="${esc(s.share_official_url||'')}" placeholder="https://votre-domaine…"><label style="margin-top:8px">Texte de partage</label><textarea id="share-text" maxlength="500">${esc(s.share_text||'Découvrez Klean Services : exprimez votre besoin, un professionnel arrive.')}</textarea><button class="btn sec mt" onclick="A.saveShareSettings()">Enregistrer le partage</button></div></div>` : ''}
@@ -1075,7 +1119,7 @@ views.settings = async () => {
   const [s, dispatch] = await Promise.all([api('/admin/settings'), api('/admin/dispatch/overview')]);
   const contacts = JSON.parse(s.urgence_contacts || '[]');
   const ps = dispatch.professionals || {};
-  shell(`<h1>⚙️ Paramètres généraux</h1>
+  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('settings')}<h2>Application & comptes</h2>
   <div class="panel"><h2 style="margin-top:0">Suivi des demandes</h2><div class="cards"><div class="kpi"><div class="v">${dispatch.searching || 0}</div><div class="l">Recherches en cours</div></div><div class="kpi"><div class="v">${dispatch.unanswered || 0}</div><div class="l">Sans réponse</div></div><div class="kpi"><div class="v">${ps.disponible || 0}</div><div class="l">Pros disponibles</div></div><div class="kpi"><div class="v">${ps.en_mission || 0}</div><div class="l">Pros en mission</div></div></div><div class="small muted">Les demandes sans réponse sont aussi consultables dans Demandes & missions. Les services et capacités autorisés d’un professionnel se règlent dans Utilisateurs → Fiche → Autorisations pro.</div></div>
   <div class="panel">
     <h2 style="margin-top:0">Missions & paiements</h2>
@@ -1310,71 +1354,30 @@ const A = {
   },
   async _doReject(id) { try { await api(`/admin/pros/${id}/reject`, { method: 'POST', body: { reason: document.getElementById('rej-reason').value } }); closeModal(); toast('Demande refusée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
 
+  grandCategory(id) { const d=(ESTD&&ESTD.catalog)||CATD||{}; return (d.grand_categories||[]).find(x=>Number(x.id)===Number(id)); },
   grandCategoryForm(id) {
-    const g=id ? ESTD.catalog.grand_categories.find(x=>x.id===id) : {name:'',short_label:'',icon:'🧩',description:'',active:1,sort:99,image_url:''};
-    const preview=g.image_url ? `src="${esc(mediaUrl(g.image_url))}"` : '';
-    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3>
-      <label>Nom complet <span class="muted">(administration, recherche)</span></label><input id="gc-name" style="width:100%" maxlength="120" value="${esc(g.name||'')}">
-      <label>Libellé court <span class="muted">(cartes et téléphone)</span></label><input id="gc-short" style="width:100%" maxlength="60" value="${esc(g.short_label||'')}" placeholder="Ex : Solaire & énergie">
-      <label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px">
-      <label>Photo indépendante de la carte <span class="muted">(paysage, recommandée 4:3)</span></label>
-      <input id="gc-image" style="width:100%" value="${esc(g.image_url||'')}" placeholder="Photo téléversée ou URL HTTPS" oninput="A.previewGrandCategoryImage(false)">
-      <div class="btn-row mt"><input id="gc-image-file" type="file" accept="image/jpeg,image/png,image/webp" style="max-width:100%" onchange="A.previewGrandCategoryImage(true)"><button type="button" class="btn outline sm" onclick="A.uploadGrandCategoryImage()">Importer et préparer</button><button type="button" class="btn ghost sm" onclick="A.clearGrandCategoryImage()">Supprimer la photo</button></div>
-      <div class="small muted" style="margin:6px 0">L’aperçu reste local tant que vous n’enregistrez pas. L’import prépare une image légère pour les cartes mobiles, puis la publication intervient à l’enregistrement.</div>
-      <img id="gc-image-preview" ${preview} alt="Aperçu de la photo de catégorie" style="display:${g.image_url?'block':'none'};width:100%;height:150px;object-fit:cover;border-radius:10px;margin:6px 0;background:#eef2f1">
-      <label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea>
-      <div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div>
-      <button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer et publier</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+    const g=id ? A.grandCategory(id) : {name:'',short_label:'',icon:'🧩',description:'',active:1,sort:99,image_url:''};
+    if(!g)return toast('Grande catégorie introuvable.','err');
+    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3><label>Nom complet</label><input id="gc-name" style="width:100%" maxlength="120" value="${esc(g.name||'')}"><label>Libellé court <span class="muted">(cartes mobiles)</span></label><input id="gc-short" style="width:100%" maxlength="60" value="${esc(g.short_label||'')}"><label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px"><label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea><div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div><div class="small muted mt">La photo se gère depuis « Catégories & photos » afin de la prévisualiser avant publication.</div><button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
-  previewGrandCategoryImage(fromFile) {
-    const image=document.getElementById('gc-image-preview'), input=document.getElementById('gc-image'), fileInput=document.getElementById('gc-image-file'); if(!image) return;
-    let src='';
-    if (fromFile && fileInput && fileInput.files && fileInput.files[0]) {
-      const file=fileInput.files[0]; if (!/^image\/(jpeg|png|webp)$/i.test(file.type||'')) return toast('Choisissez une photo JPG, PNG ou WebP.', 'err');
-      if (file.size>12*1024*1024) return toast('La photo ne doit pas dépasser 12 Mo avant préparation.', 'err');
-      if (A._gcPreviewObjectUrl) URL.revokeObjectURL(A._gcPreviewObjectUrl);
-      A._gcPreviewObjectUrl=URL.createObjectURL(file); src=A._gcPreviewObjectUrl;
-    } else src=(input&&input.value.trim()) || '';
-    image.style.display=src?'block':'none'; image.src=src || '';
+  grandCategoryPhotoForm(id) {
+    const g=A.grandCategory(id); if(!g)return toast('Grande catégorie introuvable.','err');
+    openModal(`<h3>🖼️ Photo — ${esc(g.name)}</h3><div class="small muted">Choisissez une image paysage JPG, PNG ou WebP. L’aperçu est local : rien n’est publié avant votre confirmation.</div><input id="gcp-id" type="hidden" value="${g.id}"><input id="gcp-original" type="hidden" value="${esc(g.image_url||'')}"><input id="gcp-url" type="hidden" value="${esc(g.image_url||'')}"><div class="grand-photo-modal-preview">${g.image_url?`<img id="gcp-preview" src="${esc(mediaUrl(g.image_url))}" alt="Aperçu">`:`<div id="gcp-empty">Aucune photo enregistrée</div><img id="gcp-preview" alt="Aperçu" style="display:none">`}</div><input id="gcp-file" type="file" accept="image/jpeg,image/png,image/webp" onchange="A.previewGrandCategoryPhoto()" style="width:100%;margin:8px 0"><div class="btn-row"><button class="btn sec" onclick="A.uploadGrandCategoryPhoto()">Importer cette photo</button><button class="btn" onclick="A.saveGrandCategoryPhoto()">Enregistrer et publier</button><button class="btn sec" onclick="closeModal()">Annuler</button></div><div class="small muted mt">L’import prépare l’image pour les cartes ; le remplacement définitif demande une confirmation.</div>`);
   },
-  clearGrandCategoryImage() {
-    const field=document.getElementById('gc-image'), file=document.getElementById('gc-image-file'), preview=document.getElementById('gc-image-preview');
-    if(field)field.value=''; if(file)file.value=''; if(preview){preview.removeAttribute('src');preview.style.display='none';}
-    if(A._gcPreviewObjectUrl){URL.revokeObjectURL(A._gcPreviewObjectUrl);A._gcPreviewObjectUrl=null;}
-  },
-  async prepareGrandCategoryImage(file) {
-    if (!/^image\/(jpeg|png|webp)$/i.test(file.type||'')) throw new Error('Choisissez une photo JPG, PNG ou WebP.');
-    if(file.size>12*1024*1024) throw new Error('La photo ne doit pas dépasser 12 Mo avant préparation.');
-    // Compression locale, sans service externe : maximum 1400 × 1050 (ratio de carte 4:3).
-    if (!window.createImageBitmap || !document.createElement) return file;
-    let bitmap;
-    try { bitmap=await createImageBitmap(file); } catch { return file; }
-    const maxW=1400,maxH=1050,ratio=Math.min(1,maxW/bitmap.width,maxH/bitmap.height),w=Math.max(1,Math.round(bitmap.width*ratio)),h=Math.max(1,Math.round(bitmap.height*ratio));
-    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d');ctx.drawImage(bitmap,0,0,w,h); if(bitmap.close)bitmap.close();
-    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.84));
-    return blob ? new File([blob],(file.name||'categorie').replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}) : file;
-  },
-  async uploadGrandCategoryImage() {
-    const input=document.getElementById('gc-image-file'), file=input && input.files && input.files[0];
-    if(!file) return toast('Choisissez une photo avant l’import.','err');
-    try {
-      const prepared=await A.prepareGrandCategoryImage(file), form=new FormData(); form.append('files',prepared);
-      const response=await fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+TOKEN},body:form}); const data=await response.json().catch(()=>({})); if(!response.ok)throw new Error(data.error||'Import impossible.');
-      const url=(data.files||[])[0]||''; document.getElementById('gc-image').value=url;
-      const image=document.getElementById('gc-image-preview'); if(image){image.src=mediaUrl(url);image.style.display='block';}
-      if(A._gcPreviewObjectUrl){URL.revokeObjectURL(A._gcPreviewObjectUrl);A._gcPreviewObjectUrl=null;}
-      toast('Photo importée et prête. Enregistrez pour la publier.','ok');
-    } catch(e){toast(e.message,'err');}
-  },
-  async saveGrandCategory(id) {
-    const body={name:document.getElementById('gc-name').value,short_label:document.getElementById('gc-short').value,icon:document.getElementById('gc-icon').value,image_url:document.getElementById('gc-image').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked};
-    try{await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});if(A._gcPreviewObjectUrl){URL.revokeObjectURL(A._gcPreviewObjectUrl);A._gcPreviewObjectUrl=null;}closeModal();toast(body.image_url?'Grande catégorie et photo publiées ✓':'Grande catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');}
-  },
+  previewGrandCategoryPhoto() { const f=(document.getElementById('gcp-file')||{}).files?.[0],img=document.getElementById('gcp-preview'),empty=document.getElementById('gcp-empty');if(!f||!img)return;if(!/^image\/(jpeg|png|webp)$/i.test(f.type||''))return toast('Choisissez une image JPG, PNG ou WebP.','err');if(f.size>12*1024*1024)return toast('La photo ne doit pas dépasser 12 Mo avant préparation.','err');if(A._gcpUrl)URL.revokeObjectURL(A._gcpUrl);A._gcpUrl=URL.createObjectURL(f);img.src=A._gcpUrl;img.style.display='block';if(empty)empty.style.display='none';},
+  async compactGrandCategoryPhoto(file) { if(!window.createImageBitmap)return file;let bitmap;try{bitmap=await createImageBitmap(file);}catch{return file;}const ratio=Math.min(1,1400/bitmap.width,1050/bitmap.height),w=Math.max(1,Math.round(bitmap.width*ratio)),h=Math.max(1,Math.round(bitmap.height*ratio)),canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;canvas.getContext('2d').drawImage(bitmap,0,0,w,h);if(bitmap.close)bitmap.close();const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.84));return blob?new File([blob],(file.name||'categorie').replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}):file; },
+  // Alias conservés pour les anciens parcours PDG : ils utilisent le même aperçu et la même préparation.
+  previewGrandCategoryImage() { return A.previewGrandCategoryPhoto(); },
+  async prepareGrandCategoryImage(file) { return A.compactGrandCategoryPhoto(file); },
+  async uploadGrandCategoryPhoto() { const file=(document.getElementById('gcp-file')||{}).files?.[0];if(!file)return toast('Choisissez une photo.','err');try{const prepared=await A.compactGrandCategoryPhoto(file),form=new FormData();form.append('files',prepared);const r=await fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+TOKEN},body:form}),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Import impossible.');const url=(d.files||[])[0];document.getElementById('gcp-url').value=url;const img=document.getElementById('gcp-preview');img.src=mediaUrl(url);img.style.display='block';const empty=document.getElementById('gcp-empty');if(empty)empty.style.display='none';if(A._gcpUrl){URL.revokeObjectURL(A._gcpUrl);A._gcpUrl=null;}toast('Photo importée. Confirmez « Enregistrer et publier ».','ok');}catch(e){toast(e.message,'err');}},
+  async saveGrandCategoryPhoto() { const id=Number(document.getElementById('gcp-id').value),original=document.getElementById('gcp-original').value,url=document.getElementById('gcp-url').value;if(!url)return toast('Importez une photo avant de publier.','err');if(original&&original!==url&&!confirm('Remplacer définitivement la photo actuelle sur toutes les cartes de cette catégorie ?'))return;try{await api('/admin/grand-categories/'+id,{method:'PUT',body:{image_url:url}});if(A._gcpUrl){URL.revokeObjectURL(A._gcpUrl);A._gcpUrl=null;}closeModal();toast('Photo enregistrée et publiée ✓','ok');sessionStorage.setItem('adm_cat_tab','roots');render();}catch(e){toast(e.message,'err');}},
+  async deleteGrandCategoryPhoto(id) { const g=A.grandCategory(id);if(!g||!g.image_url)return;if(!confirm(`Supprimer la photo de « ${g.name} » ? La catégorie, ses services et son historique seront conservés.`))return;try{await api('/admin/grand-categories/'+id,{method:'PUT',body:{image_url:''}});toast('Photo retirée.','ok');sessionStorage.setItem('adm_cat_tab','roots');render();}catch(e){toast(e.message,'err');}},
+  async saveGrandCategory(id) { const body={name:document.getElementById('gc-name').value,short_label:document.getElementById('gc-short').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked};try{await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Grande catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');} },
   async saveEstimationConfig() {
     try { await api('/admin/estimation-config', { method:'PUT', body:{ geo_enabled:document.getElementById('est-geo').checked, fallback:document.getElementById('est-fallback').value, history_min_samples:document.getElementById('est-samples').value } }); toast('Paramètres d’estimation enregistrés ✓','ok'); render(); } catch(e){toast(e.message,'err');}
   },
   estimateRuleForm(id) {
-    const d=ESTD, r=id ? d.rules.find(x=>x.id===id) : { grand_category_id:'',category_id:'',sub_id:'',service_id:'',task_id:'',city:'',zone:'',base_price:'',min_price:'',max_price:'',factors:'{}',source_type:'pdg',source_note:'',source_url:'',source_date:'',verified_at:'',public_unit:'',active:1,priority:0 };
+    const d=ESTD, r=id ? d.rules.find(x=>x.id===id) : { grand_category_id:'',category_id:'',sub_id:'',service_id:'',task_id:'',city:'',zone:'',base_price:'',min_price:'',max_price:'',factors:'{}',source_type:'pdg',source_note:'',source_url:'',source_date:'',verified_at:'',active:1,priority:0 };
     const opt=(rows,key,label,cur)=>`<option value="">${label}</option>`+rows.map(v=>`<option value="${v.id}" ${Number(cur)===Number(v.id)?'selected':''}>${esc(v.name)}</option>`).join('');
     openModal(`<h3>${id?'Modifier':'Nouvelle'} règle tarifaire</h3><div class="small muted">Plus la cible est précise, plus elle est prioritaire à source et priorité égales. Laissez les niveaux inutiles vides.</div>
       <label>Grande catégorie</label><select id="er-grand" style="width:100%;margin-bottom:7px">${opt(d.catalog.grand_categories,'id','Toutes les grandes catégories',r.grand_category_id)}</select>
@@ -1385,43 +1388,27 @@ const A = {
       <div class="frow"><div style="flex:1"><label>Ville <span class="muted">(vide = toutes)</span></label><select id="er-city" style="width:100%"><option value="">Toutes les villes</option>${d.villes.filter(v=>v.active).map(v=>`<option ${r.city===v.name?'selected':''}>${esc(v.name)}</option>`).join('')}</select></div><div style="flex:1"><label>Zone <span class="muted">(facultatif)</span></label><input id="er-zone" value="${esc(r.zone||'')}"></div></div>
       <div class="frow"><div><label>Prix de départ</label><input id="er-base" type="number" min="1" value="${esc(r.base_price??'')}"></div><div><label>Minimum</label><input id="er-min" type="number" min="1" value="${esc(r.min_price??'')}"></div><div><label>Maximum</label><input id="er-max" type="number" min="1" value="${esc(r.max_price??'')}"></div><div><label>Priorité</label><input id="er-priority" type="number" value="${esc(r.priority??0)}" style="width:75px"></div></div>
       <label>Source</label><select id="er-source"><option value="pdg" ${r.source_type==='pdg'?'selected':''}>Règle explicite de la direction</option><option value="local_verifie" ${r.source_type==='local_verifie'?'selected':''}>Donnée locale vérifiée</option></select>
-      <label>Note / source vérifiable</label><textarea id="er-note" rows="2" placeholder="Ex : fournisseur CI, offre publiée, période et origine…">${esc(r.source_note||'')}</textarea>
-      <div class="frow"><div style="flex:1"><label>URL source <span class="muted">(requise pour afficher ce prix aux clients)</span></label><input id="er-url" value="${esc(r.source_url||'')}" placeholder="https://…"></div><div><label>Date source</label><input id="er-date" type="date" value="${esc(r.source_date||'')}"></div></div>
-      <label>Unité / condition visible <span class="muted">(facultatif)</span></label><input id="er-unit" value="${esc(r.public_unit||'')}" placeholder="Ex : par intervention, hors pièce / par appareil">
+      <label>Note / source vérifiable</label><textarea id="er-note" rows="2" placeholder="Ex : relevé validé par la direction, période et origine…">${esc(r.source_note||'')}</textarea>
+      <div class="frow"><div style="flex:1"><label>URL source <span class="muted">(facultatif)</span></label><input id="er-url" value="${esc(r.source_url||'')}"></div><div><label>Date source</label><input id="er-date" type="date" value="${esc(r.source_date||'')}"></div></div>
       <label>Facteurs JSON <span class="muted">(facultatif : fixed_adjustment, percent_adjustment, includes)</span></label><textarea id="er-factors" rows="3">${esc(typeof r.factors==='string'?r.factors:JSON.stringify(r.factors||{}))}</textarea>
       <label class="check-line"><input id="er-active" type="checkbox" ${r.active?'checked':''}> Règle active</label>
       <button class="btn" onclick="A.saveEstimationRule(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
   async saveEstimationRule(id) {
     const num=k=>{const v=document.getElementById(k).value;return v===''?null:Number(v);};
-    const body={grand_category_id:num('er-grand'),category_id:num('er-cat'),sub_id:num('er-sub'),service_id:num('er-service'),task_id:num('er-task'),city:document.getElementById('er-city').value,zone:document.getElementById('er-zone').value,base_price:num('er-base'),min_price:num('er-min'),max_price:num('er-max'),priority:num('er-priority'),source_type:document.getElementById('er-source').value,source_note:document.getElementById('er-note').value,source_url:document.getElementById('er-url').value,source_date:document.getElementById('er-date').value,public_unit:document.getElementById('er-unit').value,factors:document.getElementById('er-factors').value,active:document.getElementById('er-active').checked};
+    const body={grand_category_id:num('er-grand'),category_id:num('er-cat'),sub_id:num('er-sub'),service_id:num('er-service'),task_id:num('er-task'),city:document.getElementById('er-city').value,zone:document.getElementById('er-zone').value,base_price:num('er-base'),min_price:num('er-min'),max_price:num('er-max'),priority:num('er-priority'),source_type:document.getElementById('er-source').value,source_note:document.getElementById('er-note').value,source_url:document.getElementById('er-url').value,source_date:document.getElementById('er-date').value,factors:document.getElementById('er-factors').value,active:document.getElementById('er-active').checked};
     try { await api('/admin/estimation-rules'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Règle tarifaire enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');}
   },
   async deleteEstimationRule(id) { if(!confirm('Supprimer définitivement cette règle tarifaire ?'))return;try{await api('/admin/estimation-rules/'+id,{method:'DELETE'});toast('Règle supprimée.','ok');render();}catch(e){toast(e.message,'err');} },
   async testEstimation() { const sid=document.getElementById('est-test-service').value,city=document.getElementById('est-test-city').value,z=document.getElementById('est-test-result');if(!sid||!city){toast('Choisissez une prestation et une ville.','err');return;}z.textContent='Calcul en cours…';try{const r=await api('/admin/estimation-test?service_id='+encodeURIComponent(sid)+'&city='+encodeURIComponent(city));z.innerHTML=r.status==='estimated'?`<b style="color:#dc2626">À partir de ${fcfa(r.amount)}</b> — ${esc(r.source||'')}${r.provisional?' (provisoire)':''}<br><span class="muted">${esc(r.includes||'')}</span>`:`<b>Prix à confirmer</b> — ${esc(r.reason||'Aucune donnée fiable.')}`;}catch(e){z.textContent=e.message;} },
-  searchTermForm(id) {
-    const d=ESTD, current=id ? (d.terms||[]).find(t=>Number(t.id)===Number(id)) : null;
-    const options=[
-      ...(d.catalog.grand_categories||[]).filter(x=>x.active).map(x=>({value:'grand:'+x.id,label:'Grande catégorie › '+x.name})),
-      ...(d.catalog.categories||[]).filter(x=>x.active).map(x=>({value:'category:'+x.id,label:'Métier › '+x.name})),
-      ...(d.catalog.sous_categories||[]).filter(x=>x.active).map(x=>({value:'sub:'+x.id,label:'Sous-catégorie › '+x.name})),
-      ...(d.catalog.services||[]).filter(x=>x.active).map(x=>({value:'service:'+x.id,label:'Prestation › '+x.name})),
-      ...(d.catalog.taches||[]).filter(x=>x.active).map(x=>{const svc=(d.catalog.services||[]).find(v=>Number(v.id)===Number(x.service_id))||{};return {value:'task:'+x.id,label:'Tâche › '+(svc.name||'')+' › '+x.name};})
-    ];
-    const ref=current ? (current.task_id ? 'task:'+current.task_id : current.service_id ? 'service:'+current.service_id : current.sub_id ? 'sub:'+current.sub_id : current.category_id ? 'category:'+current.category_id : current.grand_category_id ? 'grand:'+current.grand_category_id : '') : '';
-    openModal(`<h3>${current?'Modifier':'Ajouter'} une expression de recherche</h3><div class="small muted">Exemple : « mon eau coule » peut viser une tâche de fuite ; « maison à faire briller » peut viser le domaine Nettoyage. La recherche suggère : elle ne sélectionne jamais un besoin à la place du client.</div>
-      <label>Expression, synonyme, faute ou formulation familière</label><input id="st-term" style="width:100%" maxlength="300" value="${esc(current&&current.term||'')}" placeholder="Ex : mon eau coule">
-      <label>Destination dans le catalogue</label><select id="st-target" style="width:100%"><option value="">Choisir une destination</option>${options.map(o=>`<option value="${o.value}" ${o.value===ref?'selected':''}>${esc(o.label)}</option>`).join('')}</select>
-      <label class="check-line"><input id="st-active" type="checkbox" ${!current||current.active?'checked':''}> Expression active</label>
-      <button class="btn mt" onclick="A.saveSearchTerm(${current?current.id:0})">${current?'Enregistrer':'Ajouter'}</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+  searchTermForm() {
+    const d=ESTD, serviceOpts=d.catalog.services.filter(s=>s.active).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    const taskOpts=d.catalog.taches.filter(t=>t.active).map(t=>{const s=d.catalog.services.find(v=>v.id===t.service_id)||{};return `<option value="${t.id}" data-service="${t.service_id}">${esc(s.name||'')} › ${esc(t.name)}</option>`;}).join('');
+    openModal(`<h3>Ajouter une expression de recherche</h3><div class="small muted">Exemple : « mon eau coule » peut pointer vers une tâche de réparation de fuite.</div><label>Expression, synonyme ou formulation familière</label><input id="st-term" style="width:100%" placeholder="Ex : mon eau coule"><label>Prestation</label><select id="st-service" style="width:100%"><option value="">Choisir</option>${serviceOpts}</select><label>Tâche <span class="muted">(facultatif)</span></label><select id="st-task" style="width:100%"><option value="">Toute la prestation</option>${taskOpts}</select><button class="btn mt" onclick="A.saveSearchTerm()">Ajouter</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
-  async saveSearchTerm(id) {
-    const raw=document.getElementById('st-target').value, [target_type,target_id]=raw.split(':');
-    if(!target_type||!target_id)return toast('Choisissez une destination dans le catalogue.','err');
-    try{await api('/admin/search-terms'+(id?'/'+id:''),{method:id?'PUT':'POST',body:{term:document.getElementById('st-term').value,target_type,target_id:Number(target_id),active:document.getElementById('st-active').checked}});closeModal();toast(id?'Expression modifiée ✓':'Expression ajoutée ✓','ok');render();}catch(e){toast(e.message,'err');}
-  },
-  async toggleSearchTerm(id,active) { try{await api('/admin/search-terms/'+id,{method:'PUT',body:{active}});toast(active?'Expression activée ✓':'Expression désactivée.','ok');render();}catch(e){toast(e.message,'err');} },
-  async deleteSearchTerm(id) {if(!confirm('Supprimer cette expression du dictionnaire ?'))return;try{await api('/admin/search-terms/'+id,{method:'DELETE'});toast('Expression supprimée.','ok');render();}catch(e){toast(e.message,'err');}},
+  async saveSearchTerm() { const service_id=Number(document.getElementById('st-service').value),task_id=Number(document.getElementById('st-task').value)||null;if(!service_id)return toast('Choisissez une prestation.','err');try{await api('/admin/search-terms',{method:'POST',body:{term:document.getElementById('st-term').value,service_id,task_id}});closeModal();toast('Expression ajoutée ✓','ok');render();}catch(e){toast(e.message,'err');} },
+  async toggleSearchTerm(id,active) { try{await api('/admin/search-terms/'+id,{method:'PUT',body:{active}});render();}catch(e){toast(e.message,'err');} },
+  async deleteSearchTerm(id) {if(!confirm('Supprimer cette expression du dictionnaire ?'))return;try{await api('/admin/search-terms/'+id,{method:'DELETE'});render();}catch(e){toast(e.message,'err');}},
   async addCat() {
     const name = document.getElementById('c-name').value.trim();
     if (!name) return toast('Indiquez le nom de la catégorie.', 'err');
@@ -1458,12 +1445,16 @@ const A = {
     } catch (e) { toast(e.message, 'err'); }
   },
 
-  // Ordre et sélection des grandes catégories populaires (accueil)
-  _popIds() { return (CATD.grand_categories || []).filter(g => g.popular).sort((a,b)=>(a.popular_sort ?? 999)-(b.popular_sort ?? 999)||a.sort-b.sort||a.id-b.id).map(g => g.id); },
-  async _popSave(ids) { try { await api('/admin/grand-categories/populaires/ordre', { method:'PUT', body:{ ids } }); toast('Catégories populaires mises à jour ✓', 'ok'); render(); } catch(e) { toast(e.message,'err'); } },
-  popMove(id,dir) { const ids=A._popIds(),i=ids.indexOf(id),j=i+dir;if(i<0||j<0||j>=ids.length)return;[ids[i],ids[j]]=[ids[j],ids[i]];A._popSave(ids); },
-  popRemove(id) { A._popSave(A._popIds().filter(x=>x!==id)); },
-  popAdd() { const id=Number((document.getElementById('pop-add')||{}).value);if(!id)return toast('Choisissez une grande catégorie.','err');const ids=A._popIds();if(!ids.includes(id))ids.push(id);A._popSave(ids); },
+  // Ordre et sélection des services populaires (accueil)
+  _popIds() {
+    return CATD.services.filter(s => s.popular)
+      .sort((a, b) => (a.popular_sort ?? 999) - (b.popular_sort ?? 999) || a.sort - b.sort || a.id - b.id)
+      .map(s => s.id);
+  },
+  async _popSave(ids) { try { await api('/admin/services-populaires/ordre', { method: 'PUT', body: { ids } }); toast('Services populaires mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+  popMove(id, dir) { const ids = A._popIds(); const i = ids.indexOf(id), j = i + dir; if (i < 0 || j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; A._popSave(ids); },
+  popRemove(id) { A._popSave(A._popIds().filter(x => x !== id)); },
+  popAdd() { const v = parseInt((document.getElementById('pop-add') || {}).value, 10); if (!v) return toast('Choisissez un service.', 'err'); const ids = A._popIds(); if (!ids.includes(v)) ids.push(v); A._popSave(ids); },
 
   // Formulaire service complet (création si id=0, sinon modification)
   svcForm(id, catId) {
@@ -1517,25 +1508,41 @@ const A = {
     try { await api('/admin/services/' + id, { method: 'DELETE' }); toast('Service supprimé.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
   },
 
-  // Fenêtre de gestion des tâches d'une prestation : description et déplacement sont persistés par l'API PDG.
+  // Fenêtre de gestion des tâches d'un service
   async taches(serviceId) {
     try {
-      CATD=await api('/admin/catalog'); const s=CATD.services.find(x=>x.id===serviceId)||{};
-      const list=CATD.taches.filter(t=>t.service_id===serviceId).sort((a,b)=>a.sort-b.sort||a.id-b.id);
-      openModal(`<h3>📝 Tâches — ${esc(s.name||'')}</h3><p class="small muted">Les besoins proposés au client restent rattachés à une seule prestation. Chaque tâche peut être décrite, déplacée ou désactivée.</p>
-        <div style="overflow:auto"><table><tr><th>Tâche / description</th><th>État</th><th>Actions</th></tr>${list.map(t=>`<tr><td><b>${esc(t.name)}</b>${t.description?`<div class="small muted">${esc(t.description)}</div>`:''}</td><td>${t.active?'<span class="pill ok">Active</span>':'<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.tacheEdit(${t.id})">✏️</button><button class="btn sm sec" onclick="A.tacheToggle(${t.id},${t.active?0:1},${serviceId})">${t.active?'Désactiver':'Activer'}</button><button class="btn sm warn" onclick="A.tacheDel(${t.id},${serviceId})">🗑️</button></td></tr>`).join('')||'<tr><td colspan="3" class="muted small">Aucune tâche.</td></tr>'}</table></div>
-        <div class="frow" style="margin-top:12px"><div style="flex:1"><input id="t-new" style="width:100%" placeholder="Nouvelle tâche"></div><button class="btn" onclick="A.tacheAdd(${serviceId})">＋ Ajouter</button></div><button class="btn sec" style="margin-top:10px" onclick="closeModal();render()">Fermer</button>`);
-    } catch(e){toast(e.message,'err');}
+      CATD = await api('/admin/catalog');
+      const s = CATD.services.find(x => x.id === serviceId);
+      const list = CATD.taches.filter(t => t.service_id === serviceId).sort((a, b) => a.sort - b.sort || a.id - b.id);
+      openModal(`<h3>📝 Tâches — ${esc(s.name)}</h3>
+        <p class="small muted">Ces tâches sont proposées au client quand il choisit ce service. La tâche choisie est transmise au professionnel.</p>
+        <table><tr><th>Tâche</th><th>État</th><th>Actions</th></tr>
+        ${list.map(t => `<tr><td>${esc(t.name)}</td>
+          <td>${t.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
+          <td style="white-space:nowrap"><button class="btn sm sec" onclick="A.tacheEdit(${t.id})">✏️</button>
+          <button class="btn sm sec" onclick="A.tacheToggle(${t.id},${t.active ? 0 : 1},${serviceId})">${t.active ? 'Désactiver' : 'Activer'}</button>
+          <button class="btn sm warn" onclick="A.tacheDel(${t.id},${serviceId})">🗑️</button></td></tr>`).join('')}
+        ${!list.length ? '<tr><td colspan="3" class="muted small">Aucune tâche.</td></tr>' : ''}</table>
+        <div class="frow" style="margin-top:12px">
+          <div style="flex:1"><input id="t-new" style="width:100%" placeholder="Nouvelle tâche (ex : Remplacement d\u2019un robinet)"></div>
+          <button class="btn" onclick="A.tacheAdd(${serviceId})">＋ Ajouter</button>
+        </div>
+        <button class="btn sec" style="margin-top:10px" onclick="closeModal();render()">Fermer</button>`);
+    } catch (e) { toast(e.message, 'err'); }
   },
-  async tacheAdd(serviceId) { const name=(document.getElementById('t-new')||{}).value?.trim();if(!name)return toast('Écrivez le nom de la tâche.','err');try{await api('/admin/taches',{method:'POST',body:{service_id:serviceId,name}});toast('Tâche ajoutée ✓','ok');A.taches(serviceId);}catch(e){toast(e.message,'err');} },
+  async tacheAdd(serviceId) {
+    const name = document.getElementById('t-new').value.trim();
+    if (!name) return toast('Écrivez le nom de la tâche.', 'err');
+    try { await api('/admin/taches', { method: 'POST', body: { service_id: serviceId, name } }); toast('Tâche ajoutée ✓', 'ok'); A.taches(serviceId); } catch (e) { toast(e.message, 'err'); }
+  },
   tacheEdit(id) {
-    const t=CATD.taches.find(x=>x.id===id);if(!t)return;const name=prompt('Nom de la tâche :',t.name);if(name===null||!name.trim())return;const description=prompt('Description courte (facultative) :',t.description||'');if(description===null)return;
-    const choices=CATD.services.filter(s=>s.active).map(s=>`${s.id} — ${s.name}`).join('\n'); const dest=prompt(`Déplacer vers une prestation ?\nLaissez vide pour conserver la prestation actuelle.\n${choices}`,''); let service_id=t.service_id;
-    if(dest&&Number(dest)){service_id=Number(dest);if(!CATD.services.some(s=>s.id===service_id))return toast('Prestation de destination invalide.','err');}
-    api('/admin/taches/'+id,{method:'PUT',body:{name:name.trim(),description:description.trim(),service_id}}).then(()=>{toast('Tâche enregistrée ✓','ok');A.taches(service_id);}).catch(e=>toast(e.message,'err'));
+    const t = CATD.taches.find(x => x.id === id);
+    const nv = prompt('Nom de la tâche :', t.name);
+    if (nv === null || !nv.trim()) return;
+    api('/admin/taches/' + id, { method: 'PUT', body: { name: nv.trim() } }).then(() => { toast('Tâche modifiée ✓', 'ok'); A.taches(t.service_id); }).catch(e => toast(e.message, 'err'));
   },
-  async tacheToggle(id,v,sid) { try{await api('/admin/taches/'+id,{method:'PUT',body:{active:v}});A.taches(sid);}catch(e){toast(e.message,'err');} },
-  async tacheDel(id,sid) {if(!confirm('Supprimer cette tâche ?'))return;try{await api('/admin/taches/'+id,{method:'DELETE'});A.taches(sid);}catch(e){toast(e.message,'err');}},
+  async tacheToggle(id, v, sid) { try { await api('/admin/taches/' + id, { method: 'PUT', body: { active: v } }); A.taches(sid); } catch (e) { toast(e.message, 'err'); } },
+  async tacheDel(id, sid) { if (!confirm('Supprimer cette tâche ?')) return; try { await api('/admin/taches/' + id, { method: 'DELETE' }); A.taches(sid); } catch (e) { toast(e.message, 'err'); } },
 
   // Grande recherche
   gsGo() {
@@ -1739,39 +1746,6 @@ const A = {
 
   async conversationLock(id, locked) { const reason = locked ? prompt('Motif de suspension des échanges :') : ''; if (locked && reason === null) return; try { await api(`/admin/missions/${id}/conversation-lock`, { method: 'POST', body: { locked: !!locked, reason: reason || '' } }); toast(locked ? 'Échanges suspendus.' : 'Échanges rétablis.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
   async litige(id, open) { try { await api(`/admin/missions/${id}/litige`, { method: 'POST', body: { open } }); toast(open ? 'Litige ouvert.' : 'Litige résolu.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
-  async reassignMission(id) {
-    try {
-      const [mission, data] = await Promise.all([api('/missions/' + id), api('/missions/' + id + '/reassignment-candidates')]);
-      A._reassignMission = mission; A._reassignCandidates = data.candidates || []; A._reassignSelected = null;
-      openModal(`<h3>🔄 Réattribuer la mission ${esc(mission.code)}</h3>
-        <p class="small muted">Professionnel actuel : <b>${esc(mission.pro && mission.pro.name || '—')}</b>. Seuls les professionnels disponibles, autorisés et compatibles sont proposés. L’ancien prestataire, les événements et les paiements restent archivés.</p>
-        <label class="small muted">Rechercher par nom, métier, ville ou zone</label><input id="ra-q" style="width:100%;margin:5px 0 9px" placeholder="Ex : Mariam, plomberie, Bouaké…" oninput="A.filterReassignmentCandidates()">
-        <div id="ra-candidates" style="max-height:40vh;overflow:auto"></div>
-        <label class="small muted">Motif de la réattribution <span class="req">*</span></label><textarea id="ra-reason" rows="3" maxlength="1000" placeholder="Ex : indisponibilité du professionnel initial…"></textarea>
-        <button class="btn mt" id="ra-submit" onclick="A.submitReassignment(${id})">Confirmer la réattribution</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
-      A.filterReassignmentCandidates();
-    } catch(e) { toast(e.message,'err'); }
-  },
-  filterReassignmentCandidates() {
-    const zone=document.getElementById('ra-candidates'); if(!zone)return;
-    const q=((document.getElementById('ra-q')||{}).value||'').trim().toLocaleLowerCase('fr');
-    const rows=(A._reassignCandidates||[]).filter(p=>!q||`${p.name} ${p.profession||''} ${p.service_city||''} ${p.zone||''} ${p.available?'disponible':''}`.toLocaleLowerCase('fr').includes(q));
-    zone.innerHTML=rows.length?rows.map(p=>`<button type="button" class="menu-item ${A._reassignSelected===p.id?'selected':''}" style="width:100%;text-align:left" onclick="A.pickReassignmentPro(${p.id})"><span class="mi-ic">🧑‍🔧</span><div class="grow"><b>${esc(p.name)}</b><div class="small muted">${esc(p.profession||'Professionnel')} · ${esc(p.service_city||'Ville non renseignée')}${p.zone?' · '+esc(p.zone):''}</div><div class="small">${p.same_city?'📍 Même ville':p.nearby&&p.distance_km!=null?`📍 À environ ${p.distance_km} km`:'📍 Autre zone'} · 🟢 Disponible</div></div><span>${A._reassignSelected===p.id?'☑':'›'}</span></button>`).join(''):'<div class="hint">Aucun professionnel disponible ne correspond à cette recherche.</div>';
-  },
-  pickReassignmentPro(id) { A._reassignSelected=Number(id); A.filterReassignmentCandidates(); },
-  async submitReassignment(id, confirmed=false) {
-    const reason=((document.getElementById('ra-reason')||{}).value||'').trim();
-    if(!A._reassignSelected)return toast('Choisissez un nouveau professionnel.','err');
-    if(!reason)return toast('Indiquez le motif de la réattribution.','err');
-    const btn=document.getElementById('ra-submit'); if(btn)busy(btn,true);
-    try { await api('/missions/'+id+'/reassign',{method:'POST',body:{new_pro_id:A._reassignSelected,reason,confirm_sensitive:confirmed}}); closeModal();toast('Mission réattribuée et personnes concernées notifiées ✓','ok');render(); }
-    catch(e) {
-      if(e.data&&e.data.requires_confirmation) {
-        if(confirm('Cette mission a déjà commencé, est terminée ou comporte un paiement en attente. Confirmez-vous la réattribution avec conservation complète de son historique ?')) return A.submitReassignment(id,true);
-      }
-      toast(e.message,'err'); if(btn)busy(btn,false);
-    }
-  },
 
   supportFilter(v) { window._supportFilter = v; render(); },
   async supportOpen(id) {
@@ -1989,6 +1963,10 @@ const A = {
       toast('Publication modifiée ✓', 'ok'); closeModal(); render();
     } catch (e) { toast(e.message, 'err'); }
   },
+  resolveCatalogueReview(id) { const opts=(CATD.categories||[]).flatMap(c=>(c.subcategories||[]).map(sc=>`<option value="${sc.id}">${esc((c.grand_category_name||'')+' › '+c.name+' › '+sc.name)}</option>`)).join('');openModal(`<h3>Corriger une compétence historique</h3><div class="small muted">Attribuez une sous-catégorie seulement si elle correspond avec certitude au service historique. Cette décision est tracée.</div><label>Sous-catégorie certaine</label><select id="review-sub"><option value="">Choisir…</option>${opts}</select><label>Note de décision <span class="muted">(facultatif)</span></label><textarea id="review-note" rows="3" placeholder="Motif de la correspondance"></textarea><button class="btn" onclick="A.saveCatalogueReview(${id})">Valider cette compétence</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`); },
+  async saveCatalogueReview(id) { const sub_id=Number(document.getElementById('review-sub').value);if(!sub_id)return toast('Choisissez une sous-catégorie certaine.','err');try{await api('/admin/pros/catalogue-reviews/'+id+'/resolve',{method:'POST',body:{status:'corrige',sub_id,note:document.getElementById('review-note').value}});closeModal();toast('Profil corrigé et compétence attribuée.','ok');sessionStorage.setItem('adm_cat_tab','roots');render();}catch(e){toast(e.message,'err');} },
+  async ignoreCatalogueReview(id) { if(!confirm('Confirmer : aucune nouvelle compétence ne sera attribuée à ce professionnel ?'))return;try{await api('/admin/pros/catalogue-reviews/'+id+'/resolve',{method:'POST',body:{status:'ignore'}});toast('Élément conservé sans attribution.','ok');sessionStorage.setItem('adm_cat_tab','roots');render();}catch(e){toast(e.message,'err');} },
+  async adViews(kind,id,title) { try { const d=await api('/admin/ads/analytics/'+encodeURIComponent(kind)+'/'+id+'/views'); const people=(d.known||[]).map(v=>`<tr><td>${esc(v.name||'Utilisateur')}</td><td>${fmtD(v.first_view)}</td><td>${fmtD(v.last_view)}</td><td><b>${v.views}</b></td></tr>`).join(''); const anon=d.anonymous||{}; openModal(`<h3>👁️ Vues — ${esc(title||'Publicité')}</h3><div class="stat-grid"><div class="stat"><div class="v">${Number(d.total_views||0).toLocaleString('fr-FR')}</div><div class="l">Vues totales</div></div><div class="stat"><div class="v">${Number(d.unique_viewers||0).toLocaleString('fr-FR')}</div><div class="l">Visiteurs uniques</div></div></div><div class="small muted mt">Les personnes identifiables apparaissent uniquement parce qu’elles étaient connectées. Les visiteurs anonymes restent agrégés.</div><div style="max-height:42vh;overflow:auto"><table><tr><th>Utilisateur</th><th>Première vue</th><th>Dernière vue</th><th>Consultations</th></tr>${people||'<tr><td colspan="4" class="muted">Aucun utilisateur connecté enregistré.</td></tr>'}${Number(anon.views||0)?`<tr><td>Visiteur non identifié</td><td>${anon.first_view?fmtD(anon.first_view):'—'}</td><td>${anon.last_view?fmtD(anon.last_view):'—'}</td><td><b>${anon.views}</b> <span class="muted small">(${anon.unique_viewers} unique(s))</span></td></tr>`:''}</table></div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`); }catch(e){toast(e.message,'err');} },
   async toggleAd(id, v) { try { await api('/admin/ads/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
   async delAd(id) { if (!confirm('Supprimer cette publicité ?')) return; try { await api('/admin/ads/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
   previewGeneralMessage() {

@@ -2,9 +2,8 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Administration — Klean Services</title>
-<link rel="stylesheet" href="/admin/admin.css">
 <style>
 :root{--p:#0b7a6b;--p-dark:#075e52;--bg:#f1f5f4;--line:#e2e8e6;--txt:#152420;--muted:#64748b;--danger:#dc2626;--ok:#16a34a}
 *{box-sizing:border-box}
@@ -68,6 +67,12 @@ textarea{width:100%;min-height:90px;resize:vertical}
 .rules-ta{min-height:220px;font-size:13px}
 .admin-topbar{display:flex;gap:8px;margin-bottom:16px;align-items:center}.admin-back{white-space:nowrap}.admin-topbar>div{min-width:0}
 @media(max-width:520px){.admin-topbar{align-items:stretch}.admin-topbar>div{flex-wrap:wrap}.admin-back{padding:8px 10px}.admin-topbar input{min-width:0;width:100%}}
+
+/* COLIS 27 : cartes de photos des grandes catégories. */
+.grand-photo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.grand-photo-card{display:flex;gap:10px;min-width:0;padding:10px;border:1px solid #dce9e6;border-radius:13px;background:#fff}.grand-photo-card.inactive{opacity:.62}.grand-photo-preview{flex:0 0 92px;width:92px;height:76px;border-radius:9px;overflow:hidden;display:grid;place-items:center;background:#eef5f3;color:#35786e;font-size:26px}.grand-photo-preview img,.grand-photo-modal-preview img{width:100%;height:100%;object-fit:cover}.grand-photo-copy{min-width:0;flex:1}.grand-photo-copy>b,.grand-photo-copy small{display:block}.grand-photo-copy small{color:#67817c;font-size:12px;margin:3px 0 8px}.grand-photo-copy .btn-row{gap:5px;flex-wrap:wrap}.grand-photo-copy .btn-row .btn{flex:initial}.grand-photo-modal-preview{width:100%;height:165px;display:grid;place-items:center;overflow:hidden;border-radius:10px;background:#eff5f3;color:#607b75;margin:9px 0}
+@media(max-width:520px){.grand-photo-grid{grid-template-columns:1fr}.grand-photo-copy .btn-row{display:grid;grid-template-columns:1fr}.grand-photo-copy .btn-row .btn{width:100%}}
+.settings-hub-tabs{margin:-3px 0 18px;position:sticky;top:0;z-index:5;background:#f7fbfa;padding:8px 0}.settings-hub-tabs button{white-space:nowrap}
+
 </style>
 </head>
 <body>

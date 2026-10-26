@@ -1987,4 +1987,123 @@ CREATE INDEX IF NOT EXISTS idx_mission_reassignments_mission ON mission_reassign
   Object.entries(images).forEach(([name,image]) => set.run(image,name));
 })();
 
+
+// ============================================================
+// COLIS 27 — classement professionnel fin, migrations contrôlées
+// et traçabilité des éventuels doublons de catalogue.
+// ============================================================
+ensureColumn('pro_profiles', 'selected_subcategories', "TEXT NOT NULL DEFAULT '[]'");
+ensureColumn('pro_profiles', 'authorized_subcategories', 'TEXT');
+ensureColumn('pro_domain_change_requests', 'requested_subcategories', "TEXT NOT NULL DEFAULT '[]'");
+ensureColumn('pro_domain_change_requests', 'previous_subcategories', "TEXT NOT NULL DEFAULT '[]'");
+db.exec(`
+CREATE TABLE IF NOT EXISTS pro_profile_catalogue_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  legacy_service_id INTEGER,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'a_verifier' CHECK(status IN ('a_verifier','corrige','ignore')),
+  note TEXT,
+  reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, legacy_service_id, reason)
+);
+CREATE INDEX IF NOT EXISTS idx_pro_catalogue_reviews_status ON pro_profile_catalogue_reviews(status,user_id);
+CREATE TABLE IF NOT EXISTS catalogue_merge_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_type TEXT NOT NULL,
+  canonical_id INTEGER NOT NULL,
+  merged_id INTEGER NOT NULL,
+  snapshot TEXT NOT NULL DEFAULT '{}',
+  merged_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(entity_type, merged_id)
+);
+CREATE TABLE IF NOT EXISTS ad_view_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ad_kind TEXT NOT NULL CHECK(ad_kind IN ('ad','campaign')),
+  ad_id INTEGER NOT NULL,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  viewer_key TEXT NOT NULL,
+  viewed_day TEXT NOT NULL DEFAULT (date('now')),
+  viewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(ad_kind, ad_id, viewer_key, viewed_day)
+);
+CREATE INDEX IF NOT EXISTS idx_ad_view_events_ad ON ad_view_events(ad_kind,ad_id,viewed_at);
+CREATE INDEX IF NOT EXISTS idx_ad_view_events_user ON ad_view_events(user_id,viewed_at);
+`);
+
+function catalogueNormalise(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
+}
+function catalogueJsonIds(raw) {
+  try { const a=JSON.parse(raw || '[]'); return Array.isArray(a) ? [...new Set(a.map(Number).filter(Number.isInteger))] : []; } catch { return []; }
+}
+function catalogueReplaceIds(raw, fromId, toId) {
+  return JSON.stringify([...new Set(catalogueJsonIds(raw).map(id => id === Number(fromId) ? Number(toId) : id))]);
+}
+function catalogueAudit(type, canonical, merged, row) {
+  db.prepare('INSERT OR IGNORE INTO catalogue_merge_audit(entity_type,canonical_id,merged_id,snapshot) VALUES(?,?,?,?)')
+    .run(type, canonical, merged, JSON.stringify(row || {}));
+}
+// Seules les égalités certaines sont fusionnées : accents, casse, ponctuation et espaces.
+// Deux intitulés seulement proches restent distincts et ne perdent aucune tâche ni mission.
+(function cleanCertainCatalogueDuplicates() {
+  if (getSetting('colis27_catalogue_exact_dedup_v1') !== null) return;
+  const canonical = rows => {
+    const groups=new Map(); rows.forEach(r => { const key=catalogueNormalise(r.name); if (!key) return; const a=groups.get(key)||[];a.push(r);groups.set(key,a); });
+    return [...groups.values()].filter(a=>a.length>1).map(a=>a.sort((x,y)=>(Number(y.active)-Number(x.active)) || Number(x.id)-Number(y.id)));
+  };
+  const transferPhoto=(winner, loser) => { if (!winner.image_url && loser.image_url) db.prepare('UPDATE grand_categories SET image_url=?,updated_at=datetime(\'now\') WHERE id=?').run(loser.image_url,winner.id); };
+  const replaceProfileColumn=(column, from, to) => db.prepare(`SELECT user_id,${column} value FROM pro_profiles`).all().forEach(p=>db.prepare(`UPDATE pro_profiles SET ${column}=? WHERE user_id=?`).run(catalogueReplaceIds(p.value,from,to),p.user_id));
+  // Les options de compte pro gardent leurs associations de catégories lorsqu'un doublon exact est fusionné.
+  const replaceOptionCategory=(from,to) => db.prepare('SELECT id,categories FROM pro_account_options').all().forEach(row=>{
+    const before=catalogueJsonIds(row.categories), after=[...new Set(before.map(id=>id===Number(from)?Number(to):id))];
+    if(JSON.stringify(before)!==JSON.stringify(after)) db.prepare('UPDATE pro_account_options SET categories=? WHERE id=?').run(JSON.stringify(after),row.id);
+  });
+  db.transaction(() => {
+    // Grandes catégories : les métiers, prix, dictionnaire et autorisations suivent la racine canonique.
+    canonical(db.prepare('SELECT * FROM grand_categories').all()).forEach(group => { const winner=group[0]; group.slice(1).forEach(loser=>{
+      transferPhoto(winner,loser); db.prepare('UPDATE service_categories SET grand_category_id=? WHERE grand_category_id=?').run(winner.id,loser.id);
+      db.prepare('UPDATE price_estimation_rules SET grand_category_id=? WHERE grand_category_id=?').run(winner.id,loser.id);
+      db.prepare('UPDATE search_dictionary_entries SET grand_category_id=? WHERE grand_category_id=?').run(winner.id,loser.id);
+      replaceProfileColumn('domain_categories',loser.id,winner.id); replaceProfileColumn('authorized_domain_categories',loser.id,winner.id);
+      catalogueAudit('grand_category',winner.id,loser.id,loser); db.prepare('DELETE FROM grand_categories WHERE id=?').run(loser.id);
+    }); });
+    // Métiers / catégories : services et sous-catégories sont d'abord déplacés, puis les références ciblées.
+    const catGroups=new Map(); db.prepare('SELECT * FROM service_categories').all().forEach(r=>{const k=String(r.grand_category_id||0)+'|'+catalogueNormalise(r.name);const a=catGroups.get(k)||[];a.push(r);catGroups.set(k,a);});
+    [...catGroups.values()].filter(a=>a.length>1).forEach(group=>{group.sort((x,y)=>(Number(y.active)-Number(x.active))||x.id-y.id);const winner=group[0];group.slice(1).forEach(loser=>{
+      db.prepare('UPDATE sous_categories SET metier_id=? WHERE metier_id=?').run(winner.id,loser.id); db.prepare('UPDATE services SET category_id=? WHERE category_id=?').run(winner.id,loser.id);
+      db.prepare('UPDATE price_estimation_rules SET category_id=? WHERE category_id=?').run(winner.id,loser.id); db.prepare('UPDATE search_dictionary_entries SET category_id=? WHERE category_id=?').run(winner.id,loser.id);
+      replaceOptionCategory(loser.id,winner.id);
+      catalogueAudit('category',winner.id,loser.id,loser); db.prepare('DELETE FROM service_categories WHERE id=?').run(loser.id);
+    });});
+    // Sous-catégories : seuls les liens certains sont remplacés. Les anciennes compétences restent exactes.
+    const subGroups=new Map(); db.prepare('SELECT * FROM sous_categories').all().forEach(r=>{const k=String(r.metier_id)+'|'+catalogueNormalise(r.name);const a=subGroups.get(k)||[];a.push(r);subGroups.set(k,a);});
+    [...subGroups.values()].filter(a=>a.length>1).forEach(group=>{group.sort((x,y)=>(Number(y.active)-Number(x.active))||x.id-y.id);const winner=group[0];group.slice(1).forEach(loser=>{
+      db.prepare('UPDATE services SET sub_id=? WHERE sub_id=?').run(winner.id,loser.id); db.prepare('UPDATE price_estimation_rules SET sub_id=? WHERE sub_id=?').run(winner.id,loser.id); db.prepare('UPDATE search_dictionary_entries SET sub_id=? WHERE sub_id=?').run(winner.id,loser.id);
+      replaceProfileColumn('selected_subcategories',loser.id,winner.id); replaceProfileColumn('authorized_subcategories',loser.id,winner.id);
+      catalogueAudit('sub_category',winner.id,loser.id,loser); db.prepare('DELETE FROM sous_categories WHERE id=?').run(loser.id);
+    });});
+    // Prestations identiques au même endroit : missions et profils gardent leur sens, seul l'identifiant est réaligné.
+    const svcGroups=new Map(); db.prepare('SELECT * FROM services').all().forEach(r=>{const k=String(r.category_id)+'/'+String(r.sub_id||0)+'|'+catalogueNormalise(r.name);const a=svcGroups.get(k)||[];a.push(r);svcGroups.set(k,a);});
+    [...svcGroups.values()].filter(a=>a.length>1).forEach(group=>{group.sort((x,y)=>(Number(y.active)-Number(x.active))||x.id-y.id);const winner=group[0];group.slice(1).forEach(loser=>{
+      db.prepare('UPDATE missions SET service_id=? WHERE service_id=?').run(winner.id,loser.id); db.prepare('UPDATE taches SET service_id=? WHERE service_id=?').run(winner.id,loser.id); db.prepare('UPDATE service_questions SET service_id=? WHERE service_id=?').run(winner.id,loser.id);
+      db.prepare('UPDATE price_estimation_rules SET service_id=? WHERE service_id=?').run(winner.id,loser.id); db.prepare('UPDATE search_dictionary_entries SET service_id=? WHERE service_id=?').run(winner.id,loser.id);
+      replaceProfileColumn('services',loser.id,winner.id); replaceProfileColumn('authorized_services',loser.id,winner.id);
+      catalogueAudit('service',winner.id,loser.id,loser); db.prepare('DELETE FROM services WHERE id=?').run(loser.id);
+    });});
+    // Migration précise des anciens profils : une prestation existante devient sa sous-catégorie ;
+    // une prestation inconnue ou sans classement reste dans la file PDG, sans compétence inventée.
+    const serviceInfo=db.prepare('SELECT s.id,s.sub_id,c.grand_category_id FROM services s JOIN service_categories c ON c.id=s.category_id WHERE s.id=?');
+    const insReview=db.prepare("INSERT OR IGNORE INTO pro_profile_catalogue_reviews(user_id,legacy_service_id,reason) VALUES(?,?,?)");
+    db.prepare('SELECT user_id,services,selected_subcategories,authorized_subcategories FROM pro_profiles').all().forEach(p=>{
+      const ids=catalogueJsonIds(p.services), subs=[]; ids.forEach(id=>{const r=serviceInfo.get(id);if(!r) insReview.run(p.user_id,id,'prestation_historique_introuvable'); else if(!r.sub_id) insReview.run(p.user_id,id,'prestation_sans_sous_categorie'); else subs.push(Number(r.sub_id));});
+      if (!catalogueJsonIds(p.selected_subcategories).length && subs.length) db.prepare('UPDATE pro_profiles SET selected_subcategories=? WHERE user_id=?').run(JSON.stringify([...new Set(subs)]),p.user_id);
+      if ((p.authorized_subcategories===null || p.authorized_subcategories===undefined || p.authorized_subcategories==='') && subs.length) db.prepare('UPDATE pro_profiles SET authorized_subcategories=? WHERE user_id=?').run(JSON.stringify([...new Set(subs)]),p.user_id);
+    });
+  })();
+  setSetting('colis27_catalogue_exact_dedup_v1','1');
+})();
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

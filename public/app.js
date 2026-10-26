@@ -10,6 +10,7 @@ let SERVICES = null;        // cache catalogue
 let POPULAIRES = [];        // services populaires (accueil)
 let CATALOGUE = null;       // catalogue complet métiers → sous-catégories → services → tâches
 let GRAND_CATEGORIES = [];   // domaines professionnels centraux
+let PRO_SKILLS = [];         // arbre central catégorie → sous-catégorie des compétences pro
 let GAMES = { quiz: false, flipfizz: false, kdo: false };
 let MAINT = { active: false }; // état de maintenance de la plateforme
 let ADS = [];
@@ -47,6 +48,15 @@ function mediaUrl(src) {
   const s = String(src || '');
   if (!s || !s.startsWith('/uploads/') || !TOKEN) return s;
   return s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+}
+function anonymousAdViewerKey() {
+  let key=localStorage.getItem('ks_ad_viewer');
+  if(!/^[a-z0-9_-]{18,120}$/i.test(key||'')) { key=(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)).replace(/[^a-z0-9_-]/gi,''); localStorage.setItem('ks_ad_viewer',key); }
+  return key;
+}
+function recordAdViews(items) {
+  const keys=[...new Set((items||[]).map(a=>String(a.analytics_key||((a.sponsor?'campaign:':'ad:')+String(a.id||'').replace(/^c/,'')))).filter(k=>/^(ad|campaign):\d+$/.test(k)))];
+  if(keys.length) api('/ad-views',{method:'POST',body:{keys,anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});
 }
 function fmtDate(s) { if (!s) return ''; const d = new Date(s.replace(' ', 'T') + (s.includes('Z') || s.includes('+') ? '' : 'Z')); return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function fmtFCFA(n) { return (n ?? 0).toLocaleString('fr-FR') + ' FCFA'; }
@@ -543,6 +553,13 @@ function proDomainChips(selectedIds) {
       <span><b>${esc(c.icon || '🧩')} ${esc(c.name)}</b>${c.description ? `<span class="muted small" style="display:block;margin-top:2px">${esc(c.description)}</span>` : ''}</span>
     </label>`).join('');
 }
+// Sélecteur hiérarchique : le professionnel ouvre une grande catégorie, puis coche
+// uniquement les sous-catégories réellement maîtrisées. Les ids, pas les noms, sont enregistrés.
+function proSkillPicker(selectedIds) {
+  const selected=new Set((selectedIds||[]).map(Number));
+  return (PRO_SKILLS||[]).map(root=>{const open=root.categories.some(c=>(c.subcategories||[]).some(sc=>selected.has(Number(sc.id))));return `<details class="pro-skill-root" ${open?'open':''}><summary><span>${esc(root.icon||'🧩')} <b>${esc(root.short_label||root.name)}</b></span><span class="muted small">Choisir mes sous-catégories</span></summary><div class="pro-skill-body">${root.categories.map(cat=>`<div class="pro-skill-category"><b>${esc(cat.icon||'🔹')} ${esc(cat.name)}</b><div class="pro-skill-options">${(cat.subcategories||[]).map(sub=>`<label class="check-line"><input class="pro-sub-skill" type="checkbox" value="${sub.id}" data-root="${root.id}" ${selected.has(Number(sub.id))?'checked':''}> ${esc(sub.name)}</label>`).join('')}</div></div>`).join('')}</div></details>`;}).join('') || '<div class="hint">Aucune sous-catégorie active n’est disponible pour le moment.</div>';
+}
+function selectedProSubcategories() { return [...document.querySelectorAll('.pro-sub-skill:checked')].map(c=>Number(c.value)).filter(Number.isInteger); }
 /* Ancienne aide conservée pour les écrans historiques non encore concernés. */
 function proServiceChips(selectedIds) {
   const sel = selectedIds || [];
@@ -630,11 +647,9 @@ routes.home = async () => {
   installCtaMount();
   quizLiveMount(); // le quiz actif s'affiche automatiquement, sans aucun clic
   bandeauMount();  // bandeau d'annonces défilantes en bas de l'accueil
-  // comptage des vues (pub/infos/urgences + jeux affichés)
-  const vues = homeAds.map(a => 'ad:' + a.id);
-  if (GAMES.quiz) vues.push('game:quiz');
-  if (GAMES.flipfizz) vues.push('game:flipfizz');
-  if (GAMES.kdo) vues.push('game:kdo');
+  // Consultation publicitaire dédupliquée par jour ; les jeux gardent leur comptage historique connecté.
+  recordAdViews(homeAds);
+  const vues=[]; if (GAMES.quiz) vues.push('game:quiz'); if (GAMES.flipfizz) vues.push('game:flipfizz'); if (GAMES.kdo) vues.push('game:kdo');
   if (vues.length && USER) api('/vues', { method: 'POST', body: { keys: vues } }).catch(() => { });
   const q = document.getElementById('home-q');
   q.addEventListener('input', () => A.liveSearch('home-q', 'home-search-results', true));
@@ -768,7 +783,7 @@ routes.services = async (params) => {
   if (!ADS.length) try { ADS = await api('/ads'); } catch { }
   const pubsServices = ADS.filter(a => a.placement === 'services');
   const bandePub = adsBandHtml(pubsServices.map(adCardHtml));
-  if (pubsServices.length && USER) api('/vues', { method: 'POST', body: { keys: pubsServices.map(a => 'ad:' + a.id) } }).catch(() => { });
+  if (pubsServices.length) recordAdViews(pubsServices);
   const catId = parseInt(params || 0, 10);
   const q = (sessionStorage.getItem('ks_cat_q') || '').toLowerCase().trim();
   const hit = x => (x || '').toLowerCase().includes(q);
@@ -1346,6 +1361,7 @@ routes.pro = async () => {
   // Devenir professionnel
   SERVICES = await api('/services' + (USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : ''));
   try { GRAND_CATEGORIES = await api('/grand-categories'); } catch { GRAND_CATEGORIES = []; }
+  try { PRO_SKILLS = await api('/pro-skill-catalogue'); } catch { PRO_SKILLS = []; }
   let rules = { pro: '' };
   try { rules = await api('/rules'); } catch { }
   const rejected = USER.pro_status === 'rejected';
@@ -1389,9 +1405,9 @@ routes.pro = async () => {
         ${['','2 à 5 personnes','6 à 10 personnes','11 à 50 personnes','Plus de 50 personnes'].map(v => `<option value="${esc(v)}" ${USER.pro && USER.pro.company_size === v ? 'selected' : ''}>${v || 'Choisir…'}</option>`).join('')}
       </select></div>` : ''}
       <div class="field"><label>${estEnt ? "Domaine d'activité de l'entreprise" : 'Votre profession'} <span class="req">*</span></label><input type="text" id="p-prof" placeholder="${estEnt ? 'Ex : Bâtiment, nettoyage industriel, événementiel…' : "Ex : Plombier, Électricien, Agent d'entretien…"}" value="${esc(USER.pro ? USER.pro.profession : '')}"></div>
-      <div class="field"><label>Sélectionnez votre ou vos domaines d’activité <span class="req">*</span></label>
-        <div class="muted small mb">Choisissez seulement les grandes catégories que vous maîtrisez. Les prestations actives rattachées à ces domaines seront automatiquement prises en compte après validation.</div>
-        <div id="p-domains">${proDomainChips(USER.pro ? USER.pro.domain_categories : [])}</div></div>
+      <div class="field"><label>Mes compétences : catégorie puis sous-catégorie <span class="req">*</span></label>
+        <div class="muted small mb">Ouvrez une catégorie principale, puis cochez une ou plusieurs sous-catégories que vous maîtrisez réellement. Vous pouvez en choisir dans plusieurs catégories.</div>
+        <div id="p-domains">${proSkillPicker(USER.pro ? (USER.pro.selected_subcategories || []) : [])}</div></div>
       <div class="field"><label>Zone d'intervention <span class="req">*</span></label><input type="text" id="p-zone" placeholder="Ex : Bouaké et environs" value="${esc(USER.pro ? USER.pro.zone : '')}"></div>
       <div class="field"><label>Expérience</label><input type="text" id="p-exp" placeholder="Ex : 5 ans d'expérience" value="${esc(USER.pro ? USER.pro.experience : '')}"></div>
       <div class="field"><label>Description</label><textarea id="p-desc" placeholder="Présentez-vous en quelques lignes…">${esc(USER.pro ? USER.pro.description : '')}</textarea></div>
@@ -1407,12 +1423,12 @@ routes.pro = async () => {
   </div>${bottomNav('account')}`;
   REQ = { photos: [] };
   document.getElementById('b-apply').onclick = async e => {
-    const domain_categories = [...document.querySelectorAll('#p-domains .domain-chip:checked')].map(c => parseInt(c.value, 10));
+    const selected_subcategories = selectedProSubcategories();
     busy(e.target, true);
     try {
       await api('/pro/apply', {
         method: 'POST', body: {
-          profession: document.getElementById('p-prof').value, domain_categories,
+          profession: document.getElementById('p-prof').value, selected_subcategories,
           zone: document.getElementById('p-zone').value, experience: document.getElementById('p-exp').value,
           description: document.getElementById('p-desc').value, documents: REQ.photos,
           accept_rules: document.getElementById('p-accept').checked,
@@ -1478,6 +1494,7 @@ routes['pro-edit'] = async () => {
   if (!USER || USER.pro_status !== 'approved') { nav('#/pro'); return; }
   SERVICES = await api('/services' + (USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : ''));
   try { GRAND_CATEGORIES = await api('/grand-categories'); } catch { GRAND_CATEGORIES = []; }
+  try { PRO_SKILLS = await api('/pro-skill-catalogue'); } catch { PRO_SKILLS = []; }
   const p = USER.pro;
   const estEnt = p.pro_type === 'entreprise';
   $app.innerHTML = `${header('Mon profil professionnel')}
@@ -1490,9 +1507,9 @@ routes['pro-edit'] = async () => {
       ${['','2 à 5 personnes','6 à 10 personnes','11 à 50 personnes','Plus de 50 personnes'].map(v => `<option value="${esc(v)}" ${p.company_size === v ? 'selected' : ''}>${v || 'Choisir…'}</option>`).join('')}
     </select></div>` : ''}
     <div class="field"><label>${estEnt ? "Domaine d'activité" : 'Profession'}</label><input type="text" id="p-prof" value="${esc(p.profession)}"></div>
-    <div class="field"><label>Mes domaines d’activité</label>
-      <div class="muted small mb">Toute modification est envoyée à l’administration pour validation. Les domaines déjà autorisés restent actifs jusque-là.</div>
-      <div id="p-domains">${proDomainChips(p.authorized_domain_categories || p.domain_categories || [])}</div></div>
+    <div class="field"><label>Mes compétences : catégories et sous-catégories</label>
+      <div class="muted small mb">Toute modification est envoyée à l’administration pour validation. Les compétences déjà autorisées restent actives jusque-là.</div>
+      <div id="p-domains">${proSkillPicker(p.authorized_subcategories || p.selected_subcategories || [])}</div></div>
     <div class="field"><label>Zone d'intervention</label><input type="text" id="p-zone" value="${esc(p.zone)}"></div>
     <div class="field"><label>Expérience</label><input type="text" id="p-exp" value="${esc(p.experience || '')}"></div>
     <div class="field"><label>Description</label><textarea id="p-desc">${esc(p.description || '')}</textarea></div>
@@ -1511,12 +1528,12 @@ routes['pro-edit'] = async () => {
           company_size: document.getElementById('p-csize') ? document.getElementById('p-csize').value : null
         }
       });
-      const selectedDomains = [...document.querySelectorAll('#p-domains .domain-chip:checked')].map(c => parseInt(c.value, 10));
-      const currentDomains = (p.authorized_domain_categories || p.domain_categories || []).map(Number).sort((a,b) => a-b);
-      const wantedDomains = [...new Set(selectedDomains)].sort((a,b) => a-b);
-      if (JSON.stringify(currentDomains) !== JSON.stringify(wantedDomains)) {
-        await api('/pro/domain-change-request', { method: 'POST', body: { domain_categories: wantedDomains } });
-        toast('Profil mis à jour ✓ Demande de nouveaux domaines envoyée à l’administration.', 'ok');
+      const selectedSubs=selectedProSubcategories();
+      const currentSubs=(p.authorized_subcategories || p.selected_subcategories || []).map(Number).sort((a,b)=>a-b);
+      const wantedSubs=[...new Set(selectedSubs)].sort((a,b)=>a-b);
+      if (JSON.stringify(currentSubs)!==JSON.stringify(wantedSubs)) {
+        await api('/pro/domain-change-request', { method: 'POST', body: { selected_subcategories:wantedSubs } });
+        toast('Profil mis à jour ✓ Demande de nouvelles compétences envoyée à l’administration.', 'ok');
       } else toast('Profil mis à jour ✓', 'ok');
       back();
     } catch (err) { toast(err.message, 'err'); busy(e.target, false); }
