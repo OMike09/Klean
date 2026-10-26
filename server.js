@@ -762,17 +762,27 @@ function publicTaskPriceMap(taskRows, city) {
   return prices;
 }
 function grandCategoryCatalogue(grandId, city) {
-  const grand = db.prepare('SELECT id,name,description,icon,image_url,sort,popular,popular_sort FROM grand_categories WHERE id=? AND active=1').get(grandId);
+  const grand = db.prepare('SELECT id,name,short_label,description,icon,image_url,sort,popular,popular_sort FROM grand_categories WHERE id=? AND active=1').get(grandId);
   if (!grand) return null;
   const categories = frenchSort(db.prepare('SELECT id,name,icon,sort FROM service_categories WHERE active=1 AND grand_category_id=?').all(grand.id));
   const svcs = catalogueServiceRows().filter(s => Number(s.grand_category_id) === Number(grand.id) && villeOk(s, city));
   const taskRows = frenchSort(db.prepare('SELECT id,service_id,name,description,sort FROM taches WHERE active=1').all());
   const taskPrices = publicTaskPriceMap(taskRows, city);
+  // Les alias actifs sont transmis avec leurs tâches pour que la recherche dans le
+  // sélecteur d'un domaine comprenne aussi les formulations familières hors connexion.
+  const dictionary = db.prepare('SELECT * FROM search_dictionary_entries WHERE active=1').all();
+  const termsFor = (service, task) => [...new Set(dictionary.filter(d =>
+    Number(d.task_id || 0) === Number(task.id) ||
+    (!d.task_id && Number(d.service_id || 0) === Number(service.id)) ||
+    (!d.task_id && !d.service_id && Number(d.sub_id || 0) === Number(service.sub_id || 0)) ||
+    (!d.task_id && !d.service_id && !d.sub_id && Number(d.category_id || 0) === Number(service.category_id)) ||
+    (!d.task_id && !d.service_id && !d.sub_id && !d.category_id && Number(d.grand_category_id || 0) === Number(grand.id))
+  ).map(d => d.term))];
   return { ...grand, price_from: categoryReferencePrice(grand.id, city), categories: categories.map(c => ({ ...c,
     services: svcs.filter(s => Number(s.category_id) === Number(c.id)).map(s => ({ id:s.id,name:s.name,icon:s.icon,description:s.description || '',
       taches: taskRows.filter(t => Number(t.service_id) === Number(s.id)).map(t => {
         const price = taskPrices.get(Number(t.id));
-        return { id:t.id,name:t.name,description:t.description || '',price_from:price && price.amount || null,price_unit:price && price.unit || null };
+        return { id:t.id,name:t.name,description:t.description || '',search_terms:termsFor(s,t),price_from:price && price.amount || null,price_unit:price && price.unit || null };
       })
     }))
   })).filter(c => c.services.length) };
@@ -863,9 +873,12 @@ function levenshtein(a, b) {
 }
 function relevanceForTerm(query, words, candidate) {
   const c = normalize(candidate); if (!c) return 0;
-  if (c === query) return 120;
-  if (c.includes(query) || (query.length > 3 && query.includes(c))) return 64;
   const candidateWords = c.split(' ').filter(Boolean);
+  if (c === query) return 120;
+  // Une phrase longue qui contient une expression de plusieurs mots est un signal fort.
+  // Un mot banal seul (« eau », « maison », « faire ») ne doit jamais écraser un vrai besoin.
+  if (query.length >= 3 && c.includes(query)) return 92;
+  if (query.length > 3 && candidateWords.length >= 2 && c.length >= 6 && query.includes(c)) return 72;
   let score = 0;
   words.forEach(w => {
     if (candidateWords.includes(w)) score += 14;
@@ -874,56 +887,95 @@ function relevanceForTerm(query, words, candidate) {
   });
   return score;
 }
-function intelligentSearch(query, city) {
+function searchEntryGrandIds(entry, categoryGrand, subGrand, serviceGrand, taskService) {
+  const ids = new Set();
+  if (entry.grand_category_id) ids.add(Number(entry.grand_category_id));
+  if (entry.category_id && categoryGrand.get(Number(entry.category_id))) ids.add(categoryGrand.get(Number(entry.category_id)));
+  if (entry.sub_id && subGrand.get(Number(entry.sub_id))) ids.add(subGrand.get(Number(entry.sub_id)));
+  const serviceId = Number(entry.service_id || taskService.get(Number(entry.task_id)) || 0);
+  if (serviceId && serviceGrand.get(serviceId)) ids.add(serviceGrand.get(serviceId));
+  return ids;
+}
+function entryTargetsService(entry, service, taskService) {
+  const serviceId = Number(entry.service_id || taskService.get(Number(entry.task_id)) || 0);
+  return (!!entry.category_id && Number(entry.category_id) === Number(service.category_id)) ||
+    (!!entry.sub_id && Number(entry.sub_id) === Number(service.sub_id)) ||
+    (!!serviceId && serviceId === Number(service.id));
+}
+function intelligentSearch(query, city, contextGrandId) {
   const q = normalize(query);
   const words = q.split(/\s+/).filter(w => w.length > 1 && !STOPWORDS.has(w));
-  if (q.length < 2 || !words.length) return [];
-  const svcs = catalogueServiceRows().filter(s => villeOk(s, city));
-  const tasks = db.prepare('SELECT id,service_id,name FROM taches WHERE active=1').all();
-  const terms = db.prepare(`SELECT st.service_id,st.task_id,st.term,t.name task_name FROM service_search_terms st
-    LEFT JOIN taches t ON t.id=st.task_id WHERE st.active=1`).all();
-  const tasksByService = new Map(), termsByService = new Map();
-  tasks.forEach(t => { const a = tasksByService.get(t.service_id) || []; a.push(t); tasksByService.set(t.service_id, a); });
-  terms.forEach(t => { const a = termsByService.get(t.service_id) || []; a.push(t); termsByService.set(t.service_id, a); });
-  return svcs.map(s => {
+  if (q.length < 2 || !words.length) return { results: [], categoryScores: new Map() };
+  const requestedGrand = Number(contextGrandId) || null;
+  const svcs = catalogueServiceRows().filter(s => villeOk(s, city) && (!requestedGrand || Number(s.grand_category_id) === requestedGrand));
+  const allTasks = db.prepare('SELECT id,service_id,name FROM taches WHERE active=1').all();
+  const taskService = new Map(allTasks.map(t => [Number(t.id), Number(t.service_id)]));
+  const tasksByService = new Map();
+  allTasks.forEach(t => { const a = tasksByService.get(t.service_id) || []; a.push(t); tasksByService.set(t.service_id, a); });
+  const categoryGrand = new Map(db.prepare('SELECT id,grand_category_id FROM service_categories WHERE active=1').all().map(r => [Number(r.id), Number(r.grand_category_id)]));
+  const subGrand = new Map(db.prepare('SELECT sc.id,c.grand_category_id FROM sous_categories sc JOIN service_categories c ON c.id=sc.metier_id WHERE sc.active=1 AND c.active=1').all().map(r => [Number(r.id), Number(r.grand_category_id)]));
+  const serviceGrand = new Map(db.prepare('SELECT s.id,c.grand_category_id FROM services s JOIN service_categories c ON c.id=s.category_id WHERE s.active=1 AND c.active=1').all().map(r => [Number(r.id), Number(r.grand_category_id)]));
+  const entries = db.prepare(`SELECT * FROM search_dictionary_entries WHERE active=1`).all();
+  const scoredEntries = entries.map(entry => ({ entry, score: relevanceForTerm(q, words, entry.term) })).filter(x => x.score >= 10);
+  const categoryScores = new Map();
+  scoredEntries.forEach(({ entry, score }) => {
+    searchEntryGrandIds(entry, categoryGrand, subGrand, serviceGrand, taskService).forEach(id => {
+      if (!requestedGrand || id === requestedGrand) categoryScores.set(id, Math.max(categoryScores.get(id) || 0, score));
+    });
+  });
+  const rankedResults = svcs.map(s => {
     let bestScore = relevanceForTerm(q, words, `${s.name} ${s.cat} ${s.sous_cat || ''} ${s.keywords || ''}`), bestTask = null, bestMatch = '';
-    (termsByService.get(s.id) || []).forEach(term => {
-      const score = relevanceForTerm(q, words, term.term);
-      if (score > bestScore) { bestScore = score; bestTask = term.task_id ? { id: term.task_id, name: term.task_name } : null; bestMatch = term.term; }
+    scoredEntries.forEach(({ entry, score }) => {
+      if (!entryTargetsService(entry, s, taskService)) return;
+      if (score > bestScore) {
+        bestScore = score;
+        bestTask = entry.task_id ? (tasksByService.get(s.id) || []).find(t => Number(t.id) === Number(entry.task_id)) || null : null;
+        bestMatch = entry.term;
+      }
     });
     (tasksByService.get(s.id) || []).forEach(task => {
       const score = relevanceForTerm(q, words, task.name);
       if (score > bestScore) { bestScore = score; bestTask = task; bestMatch = task.name; }
     });
-    // Sans tâche exacte, une tâche contenant le meilleur mot reste une suggestion, jamais une certitude.
-    if (!bestTask && bestScore >= 14) {
-      const fallback = (tasksByService.get(s.id) || []).find(t => words.some(w => normalize(t.name).includes(w)));
-      if (fallback) bestTask = fallback;
-    }
     return {
       id: s.id, name: s.name, category: s.cat, grand_category: s.grand_category || null, grand_category_id: s.grand_category_id || null,
       icon: s.icon,
       task_id: bestTask && bestTask.id || null, tache_suggeree: bestTask && bestTask.name || null,
-      confidence: bestScore >= 60 ? 'élevée' : bestScore >= 18 ? 'moyenne' : 'faible', match: bestMatch || null, score: bestScore
+      confidence: bestScore >= 80 ? 'élevée' : bestScore >= 24 ? 'moyenne' : 'faible', match: bestMatch || null, score: bestScore
     };
-  }).filter(s => s.score >= 10).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, 'fr')).slice(0, 10);
+  }).filter(s => s.score >= 10).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, 'fr'));
+  // Lorsqu'une expression précise est reconnue, les simples mots communs ne doivent
+  // pas encombrer les résultats (ex. « maison », « eau »). Les réponses réellement
+  // concurrentes restent visibles pour laisser le choix au client.
+  const peak = Number(rankedResults[0] && rankedResults[0].score || 0);
+  const results = (peak >= 50 ? rankedResults.filter(r => r.score >= Math.max(18, peak * 0.45)) : rankedResults).slice(0, 10);
+  results.forEach(r => { if (r.grand_category_id) categoryScores.set(Number(r.grand_category_id), Math.max(categoryScores.get(Number(r.grand_category_id)) || 0, Number(r.score || 0))); });
+  return { results, categoryScores };
+}
+function clarificationForSearch(results, categories) {
+  if (!results.length && !categories.length) return 'Je n’ai pas identifié le métier avec certitude. Pouvez-vous préciser ce qui est concerné, par exemple l’appareil, la pièce ou le problème ?';
+  const ranked = [...categories].sort((a,b) => b.score - a.score);
+  if (ranked.length > 1 && ranked[1].score >= ranked[0].score * 0.70) return 'Plusieurs domaines peuvent convenir. Choisissez celui qui correspond le mieux à votre besoin.';
+  if (results[0] && results[0].confidence === 'faible') return 'Cette suggestion est approximative. Ajoutez l’appareil concerné ou le problème rencontré pour mieux cibler le service.';
+  return null;
 }
 app.get('/api/search', (req, res) => {
   const q = String(req.query.q || '').slice(0, 300);
-  const results = intelligentSearch(q, req.query.ville);
+  const found = intelligentSearch(q, req.query.ville, req.query.context_category_id);
   const normalized = normalize(q);
   const words = normalized.split(/\s+/).filter(Boolean);
-  const groups = new Map();
-  results.forEach(r => { if (r.grand_category_id) groups.set(Number(r.grand_category_id), Math.max(groups.get(Number(r.grand_category_id)) || 0, Number(r.score || 0))); });
-  db.prepare('SELECT id,name,description,icon FROM grand_categories WHERE active=1').all().forEach(g => {
-    const score = relevanceForTerm(normalized, words, `${g.name} ${g.description || ''}`);
-    if (score >= 10) groups.set(g.id, Math.max(groups.get(g.id) || 0, score));
+  const groups = new Map(found.categoryScores);
+  db.prepare('SELECT id,name,short_label,description,icon FROM grand_categories WHERE active=1').all().forEach(g => {
+    const score = relevanceForTerm(normalized, words, `${g.name} ${g.short_label || ''} ${g.description || ''}`);
+    if (score >= 10 && (!req.query.context_category_id || Number(req.query.context_category_id) === Number(g.id))) groups.set(g.id, Math.max(groups.get(g.id) || 0, score));
   });
-  const categories = [...groups.entries()].map(([id,score]) => {
-    const g = db.prepare('SELECT id,name,description,icon FROM grand_categories WHERE id=? AND active=1').get(id);
+  const rankedCategories = [...groups.entries()].map(([id,score]) => {
+    const g = db.prepare('SELECT id,name,short_label,description,icon FROM grand_categories WHERE id=? AND active=1').get(id);
     return g && { ...g, score };
-  }).filter(Boolean).sort((a,b) => b.score-a.score || a.name.localeCompare(b.name,'fr')).slice(0,6);
-  res.json({ results, categories, query: q });
+  }).filter(Boolean).sort((a,b) => b.score-a.score || a.name.localeCompare(b.name,'fr'));
+  const categoryPeak=Number(rankedCategories[0] && rankedCategories[0].score || 0);
+  const categories=(categoryPeak >= 50 ? rankedCategories.filter(c=>c.score>=Math.max(18,categoryPeak*0.45)) : rankedCategories).slice(0,6);
+  res.json({ results: found.results, categories, query: q, clarification: clarificationForSearch(found.results, categories) });
 });
 
 function parsedRuleFactors(raw) {
@@ -3272,6 +3324,18 @@ A.get('/catalog', (req, res) => {
   res.json({ grand_categories, categories: cats, sous_categories: subs, services: svcs, taches: tas, questions: qs });
 });
 // GRANDES CATÉGORIES : racine stable administrée exclusivement par le PDG.
+function cleanCategoryImageUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return null;
+  if (value.startsWith('/uploads/')) {
+    const record = uploadRecordFor(value);
+    if (!record || record.state !== 'active' || !/^image\//i.test(record.mime || '')) throw new Error('La photo de catégorie doit être une image active téléversée.');
+    return value;
+  }
+  // Les six visuels historiques du catalogue et une URL HTTPS explicite restent compatibles.
+  if (/^\/category-images\/[a-z0-9._-]+$/i.test(value) || /^https:\/\//i.test(value)) return value.slice(0, 1000);
+  throw new Error('Utilisez une photo téléversée, un visuel catalogue ou une URL HTTPS.');
+}
 A.get('/grand-categories', (req, res) => res.json(frenchSort(db.prepare('SELECT * FROM grand_categories ORDER BY sort,id').all())));
 A.put('/grand-categories/populaires/ordre', pdgOnly, (req,res) => {
   const ids = Array.isArray((req.body||{}).ids) ? [...new Set(req.body.ids.map(Number).filter(Number.isInteger))] : null;
@@ -3284,33 +3348,83 @@ A.put('/grand-categories/populaires/ordre', pdgOnly, (req,res) => {
 A.post('/grand-categories', pdgOnly, (req, res) => {
   const b=req.body||{}, name=String(b.name||'').trim().slice(0,120);
   if (!name) return res.status(400).json({ error:'Nom de grande catégorie requis.' });
-  try { const id=db.prepare('INSERT INTO grand_categories(name,description,icon,image_url,sort,popular) VALUES(?,?,?,?,?,?)').run(name,String(b.description||'').trim().slice(0,1000),String(b.icon||'🧩').trim().slice(0,16),String(b.image_url||'').trim().slice(0,1000)||null,Number(b.sort)||99,b.popular?1:0).lastInsertRowid;
+  let imageUrl; try { imageUrl=cleanCategoryImageUrl(b.image_url); } catch(e) { return res.status(400).json({error:e.message}); }
+  try { const id=db.prepare('INSERT INTO grand_categories(name,short_label,description,icon,image_url,sort,popular) VALUES(?,?,?,?,?,?,?)').run(name,String(b.short_label||'').trim().slice(0,60)||null,String(b.description||'').trim().slice(0,1000),String(b.icon||'🧩').trim().slice(0,16),imageUrl,Number(b.sort)||99,b.popular?1:0).lastInsertRowid;
     if (b.popular) { const max=db.prepare('SELECT COALESCE(MAX(popular_sort),0) n FROM grand_categories').get().n; db.prepare('UPDATE grand_categories SET popular_sort=? WHERE id=?').run(max+1,id); } res.status(201).json({id}); }
   catch { res.status(409).json({ error:'Cette grande catégorie existe déjà.' }); }
 });
 A.put('/grand-categories/:id', pdgOnly, (req,res) => {
   const old=db.prepare('SELECT * FROM grand_categories WHERE id=?').get(req.params.id); if(!old)return res.status(404).json({error:'Grande catégorie introuvable.'}); const b=req.body||{};
+  let imageUrl = old.image_url;
+  if (b.image_url !== undefined) { try { imageUrl=cleanCategoryImageUrl(b.image_url); } catch(e) { return res.status(400).json({error:e.message}); } }
   const popular=b.popular===undefined?old.popular:(b.popular?1:0);
-  db.prepare(`UPDATE grand_categories SET name=COALESCE(?,name),description=COALESCE(?,description),icon=COALESCE(?,icon),image_url=CASE WHEN ?=1 THEN ? ELSE image_url END,active=COALESCE(?,active),sort=COALESCE(?,sort),popular=?,popular_sort=CASE WHEN ?=0 THEN NULL WHEN popular_sort IS NULL THEN (SELECT COALESCE(MAX(popular_sort),0)+1 FROM grand_categories) ELSE popular_sort END,updated_at=datetime('now') WHERE id=?`)
-    .run(b.name === undefined ? null : String(b.name).trim().slice(0,120),b.description === undefined ? null : String(b.description).trim().slice(0,1000),b.icon === undefined ? null : String(b.icon).trim().slice(0,16),b.image_url === undefined ? 0 : 1,b.image_url === undefined ? null : (String(b.image_url || '').trim().slice(0,1000) || null),b.active === undefined ? null : (b.active ? 1 : 0),b.sort ?? null,popular,popular,old.id);
-  res.json({ok:true});
+  db.prepare(`UPDATE grand_categories SET name=COALESCE(?,name),short_label=CASE WHEN ?=1 THEN ? ELSE short_label END,description=COALESCE(?,description),icon=COALESCE(?,icon),image_url=?,active=COALESCE(?,active),sort=COALESCE(?,sort),popular=?,popular_sort=CASE WHEN ?=0 THEN NULL WHEN popular_sort IS NULL THEN (SELECT COALESCE(MAX(popular_sort),0)+1 FROM grand_categories) ELSE popular_sort END,updated_at=datetime('now') WHERE id=?`)
+    .run(b.name === undefined ? null : String(b.name).trim().slice(0,120),b.short_label === undefined ? 0 : 1,b.short_label === undefined ? null : (String(b.short_label || '').trim().slice(0,60) || null),b.description === undefined ? null : String(b.description).trim().slice(0,1000),b.icon === undefined ? null : String(b.icon).trim().slice(0,16),imageUrl,b.active === undefined ? null : (b.active ? 1 : 0),b.sort ?? null,popular,popular,old.id);
+  res.json({ok:true, image_url:imageUrl});
 });
 A.delete('/grand-categories/:id', pdgOnly, (req,res) => {
   const used=db.prepare('SELECT COUNT(*) n FROM service_categories WHERE grand_category_id=?').get(req.params.id).n;
   if (used) return res.status(400).json({error:`Cette catégorie contient ${used} sous-catégorie(s)/métier(s). Réaffectez-les ou désactivez-la plutôt.`});
   const r=db.prepare('DELETE FROM grand_categories WHERE id=?').run(req.params.id); if(!r.changes) return res.status(404).json({error:'Grande catégorie introuvable.'}); res.json({ok:true});
 });
-// Dictionnaire réel de la recherche intelligente, rattaché aux services/tâches centraux.
-A.get('/search-terms', (req,res) => res.json(db.prepare(`SELECT st.*,s.name service_name,t.name task_name FROM service_search_terms st JOIN services s ON s.id=st.service_id LEFT JOIN taches t ON t.id=st.task_id ORDER BY st.updated_at DESC,st.id DESC LIMIT 1000`).all()));
+// Dictionnaire de recherche multi-niveaux. Les cibles ne sont jamais du texte libre :
+// elles référencent directement le catalogue central (grande catégorie → métier → prestation → tâche).
+const dictionarySelect = `SELECT d.*,g.name grand_category_name,c.name category_name,sc.name sub_name,
+  s.name service_name,t.name task_name
+  FROM search_dictionary_entries d
+  LEFT JOIN grand_categories g ON g.id=d.grand_category_id
+  LEFT JOIN service_categories c ON c.id=d.category_id
+  LEFT JOIN sous_categories sc ON sc.id=d.sub_id
+  LEFT JOIN services s ON s.id=d.service_id
+  LEFT JOIN taches t ON t.id=d.task_id`;
+function dictionaryRows(where='', ...args) { return db.prepare(dictionarySelect + (where ? ' WHERE ' + where : '') + ' ORDER BY d.updated_at DESC,d.id DESC').all(...args); }
+function dictionaryTarget(body, old) {
+  const b=body || {};
+  let type = String(b.target_type || '').trim(), targetId = Number(b.target_id || 0);
+  let target = { grand_category_id: old && old.grand_category_id || null, category_id: old && old.category_id || null, sub_id: old && old.sub_id || null, service_id: old && old.service_id || null, task_id: old && old.task_id || null };
+  if (type) {
+    if (!['grand','category','sub','service','task'].includes(type) || !Number.isInteger(targetId) || targetId < 1) throw new Error('Choisissez une destination valide.');
+    target = { grand_category_id:null,category_id:null,sub_id:null,service_id:null,task_id:null };
+    target[{grand:'grand_category_id',category:'category_id',sub:'sub_id',service:'service_id',task:'task_id'}[type]] = targetId;
+  } else if (b.grand_category_id !== undefined || b.category_id !== undefined || b.sub_id !== undefined || b.service_id !== undefined || b.task_id !== undefined) {
+    target = { grand_category_id:Number(b.grand_category_id)||null,category_id:Number(b.category_id)||null,sub_id:Number(b.sub_id)||null,service_id:Number(b.service_id)||null,task_id:Number(b.task_id)||null };
+  }
+  if (target.task_id) {
+    const task=db.prepare('SELECT id,service_id FROM taches WHERE id=?').get(target.task_id); if(!task) throw new Error('La tâche choisie est introuvable.');
+    target.service_id=Number(task.service_id);
+  }
+  if (target.service_id && !db.prepare('SELECT 1 FROM services WHERE id=?').get(target.service_id)) throw new Error('La prestation choisie est introuvable.');
+  if (target.sub_id && !db.prepare('SELECT 1 FROM sous_categories WHERE id=?').get(target.sub_id)) throw new Error('La sous-catégorie choisie est introuvable.');
+  if (target.category_id && !db.prepare('SELECT 1 FROM service_categories WHERE id=?').get(target.category_id)) throw new Error('Le métier choisi est introuvable.');
+  if (target.grand_category_id && !db.prepare('SELECT 1 FROM grand_categories WHERE id=?').get(target.grand_category_id)) throw new Error('La grande catégorie choisie est introuvable.');
+  if (!target.grand_category_id && !target.category_id && !target.sub_id && !target.service_id && !target.task_id) throw new Error('Choisissez une destination dans le catalogue.');
+  return target;
+}
+function dictionaryDuplicate(term, target, exceptId) {
+  return db.prepare(`SELECT id FROM search_dictionary_entries WHERE normalized=?
+    AND grand_category_id IS ? AND category_id IS ? AND sub_id IS ? AND service_id IS ? AND task_id IS ? ${exceptId ? 'AND id<>?' : ''} LIMIT 1`)
+    .get(term,target.grand_category_id,target.category_id,target.sub_id,target.service_id,target.task_id,...(exceptId?[exceptId]:[]));
+}
+A.get('/search-terms', (req,res) => res.json(dictionaryRows('').slice(0,1000)));
 A.post('/search-terms', pdgOnly, (req,res) => {
-  const b=req.body||{}, serviceId=Number(b.service_id), taskId=b.task_id ? Number(b.task_id) : null, term=String(b.term||'').trim().slice(0,300), normalized=normalize(term);
-  const service=db.prepare('SELECT id FROM services WHERE id=?').get(serviceId); if(!service || !normalized) return res.status(400).json({error:'Service et expression sont requis.'});
-  if(taskId && !db.prepare('SELECT 1 FROM taches WHERE id=? AND service_id=?').get(taskId,serviceId)) return res.status(400).json({error:'La tâche doit appartenir au service choisi.'});
-  try { const id=db.prepare("INSERT INTO service_search_terms(service_id,task_id,term,normalized,source) VALUES(?,?,?,?, 'direction')").run(serviceId,taskId,term,normalized).lastInsertRowid; res.status(201).json({id}); }
-  catch { res.status(409).json({error:'Cette expression existe déjà pour cette cible.'}); }
+  const b=req.body||{}, term=String(b.term||'').trim().slice(0,300), normalized=normalize(term);
+  if(!normalized) return res.status(400).json({error:'Expression requise.'});
+  let target; try { target=dictionaryTarget(b); } catch(e) { return res.status(400).json({error:e.message}); }
+  if (dictionaryDuplicate(normalized,target)) return res.status(409).json({error:'Cette expression est déjà reliée à cette destination.'});
+  const id=db.prepare(`INSERT INTO search_dictionary_entries(term,normalized,grand_category_id,category_id,sub_id,service_id,task_id,source)
+    VALUES(?,?,?,?,?,?,?,'direction')`).run(term,normalized,target.grand_category_id,target.category_id,target.sub_id,target.service_id,target.task_id).lastInsertRowid;
+  res.status(201).json({id});
 });
-A.put('/search-terms/:id', pdgOnly, (req,res) => { const b=req.body||{}; const old=db.prepare('SELECT * FROM service_search_terms WHERE id=?').get(req.params.id); if(!old) return res.status(404).json({error:'Expression introuvable.'}); const term=b.term===undefined?old.term:String(b.term).trim().slice(0,300); if(!term) return res.status(400).json({error:'Expression requise.'}); db.prepare("UPDATE service_search_terms SET term=?,normalized=?,active=COALESCE(?,active),updated_at=datetime('now') WHERE id=?").run(term,normalize(term),b.active ?? null,old.id);res.json({ok:true}); });
-A.delete('/search-terms/:id', pdgOnly, (req,res) => { const r=db.prepare('DELETE FROM service_search_terms WHERE id=?').run(req.params.id); if(!r.changes)return res.status(404).json({error:'Expression introuvable.'});res.json({ok:true}); });
+A.put('/search-terms/:id', pdgOnly, (req,res) => {
+  const b=req.body||{}, old=db.prepare('SELECT * FROM search_dictionary_entries WHERE id=?').get(req.params.id); if(!old) return res.status(404).json({error:'Expression introuvable.'});
+  const term=b.term===undefined?old.term:String(b.term).trim().slice(0,300), normalized=normalize(term); if(!normalized) return res.status(400).json({error:'Expression requise.'});
+  let target; try { target=dictionaryTarget(b,old); } catch(e) { return res.status(400).json({error:e.message}); }
+  if (dictionaryDuplicate(normalized,target,old.id)) return res.status(409).json({error:'Cette expression est déjà reliée à cette destination.'});
+  db.prepare(`UPDATE search_dictionary_entries SET term=?,normalized=?,grand_category_id=?,category_id=?,sub_id=?,service_id=?,task_id=?,active=COALESCE(?,active),source=CASE WHEN source='catalogue' THEN source ELSE 'direction' END,updated_at=datetime('now') WHERE id=?`)
+    .run(term,normalized,target.grand_category_id,target.category_id,target.sub_id,target.service_id,target.task_id,b.active === undefined ? null : (b.active?1:0),old.id);
+  res.json({ok:true});
+});
+A.delete('/search-terms/:id', pdgOnly, (req,res) => { const r=db.prepare('DELETE FROM search_dictionary_entries WHERE id=?').run(req.params.id); if(!r.changes)return res.status(404).json({error:'Expression introuvable.'});res.json({ok:true}); });
 
 A.delete('/categories/:id', pdgOnly, (req, res) => {
   const n = db.prepare(`SELECT COUNT(*) n FROM missions m JOIN services s ON s.id=m.service_id WHERE s.category_id=?`).get(req.params.id).n;

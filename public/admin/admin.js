@@ -445,7 +445,7 @@ views.estimates = async () => {
   shell(`<h1>🧠 Gestion des tarifs et estimations intelligentes</h1>
     <div class="panel small muted">Le moteur applique d’abord les règles explicites de la direction, puis les données locales vérifiées, ensuite l’historique suffisamment documenté, puis le tarif de référence autorisé. Sans donnée fiable, il affiche « Prix à confirmer ». Aucun prix de marché n’est inventé.</div>
     <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Grandes catégories centrales</h2><button class="btn sm" onclick="A.grandCategoryForm(0)">＋ Ajouter</button></div>
-      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">${catalog.grand_categories.map(g => `<span class="pill ${g.active ? 'ok' : 'off'}">${esc(g.icon || '🧩')} ${esc(g.name)} <button type="button" style="border:0;background:transparent;cursor:pointer" onclick="A.grandCategoryForm(${g.id})">✏️</button></span>`).join('')}</div></div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">${catalog.grand_categories.map(g => `<span class="pill ${g.active ? 'ok' : 'off'}">${esc(g.icon || '🧩')} ${esc(g.short_label || g.name)} <button type="button" style="border:0;background:transparent;cursor:pointer" onclick="A.grandCategoryForm(${g.id})">✏️</button></span>`).join('')}</div></div>
     <div class="panel"><h2 style="margin-top:0">Règles globales</h2><div class="frow">
       <label><input type="checkbox" id="est-geo" ${cfg.geo_enabled ? 'checked' : ''}> Ajustements géographiques par ville actifs</label>
       <label>Repli si aucune donnée locale <select id="est-fallback"><option value="reference" ${cfg.fallback === 'reference' ? 'selected' : ''}>Tarif de référence PDG (provisoire)</option><option value="confirmer" ${cfg.fallback === 'confirmer' ? 'selected' : ''}>Prix à confirmer</option></select></label>
@@ -459,8 +459,8 @@ views.estimates = async () => {
       </table></div></div>
     <div class="panel"><h2 style="margin-top:0">Tester une estimation avant publication</h2><div class="frow"><select id="est-test-service" style="min-width:230px"><option value="">Choisir une prestation</option>${allServices.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><select id="est-test-city" style="min-width:180px"><option value="">Choisir une ville</option>${cities.map(c => `<option>${esc(c)}</option>`).join('')}</select><button class="btn" onclick="A.testEstimation()">Tester</button></div><div id="est-test-result" class="small muted" style="margin-top:9px">Aucun test en cours.</div></div>
     <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Dictionnaire de recherche (${terms.length})</h2><button class="btn" onclick="A.searchTermForm()">＋ Ajouter une expression</button></div>
-      <div class="small muted" style="margin:8px 0">Synonymes, formulations familières et fautes connues reliés à une prestation/tâche réelle. Les expressions du catalogue restent modifiables ou désactivables.</div>
-      <div style="max-height:340px;overflow:auto"><table><tr><th>Expression</th><th>Destination</th><th>Source</th><th>État</th><th></th></tr>${terms.map(t => `<tr><td>${esc(t.term)}</td><td>${esc(t.service_name)}${t.task_name ? ' › ' + esc(t.task_name) : ''}</td><td class="small">${esc(t.source)}</td><td>${t.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.toggleSearchTerm(${t.id},${t.active ? 0 : 1})">${t.active ? 'Désactiver' : 'Activer'}</button><button class="btn sm warn" onclick="A.deleteSearchTerm(${t.id})">🗑️</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucune expression.</td></tr>'}</table></div></div>`);
+      <div class="small muted" style="margin:8px 0">Gérez sans code les synonymes, tournures locales, fautes et descriptions. Une expression peut cibler une grande catégorie, un métier, une sous-catégorie, une prestation ou une tâche réelle — jamais une liste parallèle.</div>
+      <div style="max-height:340px;overflow:auto"><table><tr><th>Expression</th><th>Destination</th><th>Source</th><th>État</th><th></th></tr>${terms.map(t => `<tr><td>${esc(t.term)}</td><td>${esc(target(t))}</td><td class="small">${t.source === 'direction' ? 'Direction' : 'Catalogue'}</td><td>${t.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.searchTermForm(${t.id})">Modifier</button><button class="btn sm sec" onclick="A.toggleSearchTerm(${t.id},${t.active ? 0 : 1})">${t.active ? 'Désactiver' : 'Activer'}</button><button class="btn sm warn" onclick="A.deleteSearchTerm(${t.id})">🗑️</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucune expression.</td></tr>'}</table></div></div>`);
 };
 
 /* ---------- Services populaires (sélection et ordre de l'accueil) ---------- */
@@ -1311,23 +1311,65 @@ const A = {
   async _doReject(id) { try { await api(`/admin/pros/${id}/reject`, { method: 'POST', body: { reason: document.getElementById('rej-reason').value } }); closeModal(); toast('Demande refusée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
 
   grandCategoryForm(id) {
-    const g=id ? ESTD.catalog.grand_categories.find(x=>x.id===id) : {name:'',icon:'🧩',description:'',active:1,sort:99};
-    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3><label>Nom</label><input id="gc-name" style="width:100%" value="${esc(g.name||'')}"><label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px"><label>Image de la carte <span class="muted">(URL, chemin /uploads/ ou téléversement)</span></label><input id="gc-image" style="width:100%" value="${esc(g.image_url||'')}" placeholder="/category-images/… ou https://…"><div class="btn-row mt"><input id="gc-image-file" type="file" accept="image/*" style="max-width:100%"><button type="button" class="btn outline sm" onclick="A.uploadGrandCategoryImage()">Téléverser l’image</button></div>${g.image_url?`<img src="${esc(mediaUrl(g.image_url))}" alt="Aperçu" style="width:100%;height:110px;object-fit:cover;border-radius:10px;margin:6px 0">`:''}<label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea><div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div><button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+    const g=id ? ESTD.catalog.grand_categories.find(x=>x.id===id) : {name:'',short_label:'',icon:'🧩',description:'',active:1,sort:99,image_url:''};
+    const preview=g.image_url ? `src="${esc(mediaUrl(g.image_url))}"` : '';
+    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3>
+      <label>Nom complet <span class="muted">(administration, recherche)</span></label><input id="gc-name" style="width:100%" maxlength="120" value="${esc(g.name||'')}">
+      <label>Libellé court <span class="muted">(cartes et téléphone)</span></label><input id="gc-short" style="width:100%" maxlength="60" value="${esc(g.short_label||'')}" placeholder="Ex : Solaire & énergie">
+      <label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px">
+      <label>Photo indépendante de la carte <span class="muted">(paysage, recommandée 4:3)</span></label>
+      <input id="gc-image" style="width:100%" value="${esc(g.image_url||'')}" placeholder="Photo téléversée ou URL HTTPS" oninput="A.previewGrandCategoryImage(false)">
+      <div class="btn-row mt"><input id="gc-image-file" type="file" accept="image/jpeg,image/png,image/webp" style="max-width:100%" onchange="A.previewGrandCategoryImage(true)"><button type="button" class="btn outline sm" onclick="A.uploadGrandCategoryImage()">Importer et préparer</button><button type="button" class="btn ghost sm" onclick="A.clearGrandCategoryImage()">Supprimer la photo</button></div>
+      <div class="small muted" style="margin:6px 0">L’aperçu reste local tant que vous n’enregistrez pas. L’import prépare une image légère pour les cartes mobiles, puis la publication intervient à l’enregistrement.</div>
+      <img id="gc-image-preview" ${preview} alt="Aperçu de la photo de catégorie" style="display:${g.image_url?'block':'none'};width:100%;height:150px;object-fit:cover;border-radius:10px;margin:6px 0;background:#eef2f1">
+      <label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea>
+      <div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div>
+      <button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer et publier</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+  },
+  previewGrandCategoryImage(fromFile) {
+    const image=document.getElementById('gc-image-preview'), input=document.getElementById('gc-image'), fileInput=document.getElementById('gc-image-file'); if(!image) return;
+    let src='';
+    if (fromFile && fileInput && fileInput.files && fileInput.files[0]) {
+      const file=fileInput.files[0]; if (!/^image\/(jpeg|png|webp)$/i.test(file.type||'')) return toast('Choisissez une photo JPG, PNG ou WebP.', 'err');
+      if (file.size>12*1024*1024) return toast('La photo ne doit pas dépasser 12 Mo avant préparation.', 'err');
+      if (A._gcPreviewObjectUrl) URL.revokeObjectURL(A._gcPreviewObjectUrl);
+      A._gcPreviewObjectUrl=URL.createObjectURL(file); src=A._gcPreviewObjectUrl;
+    } else src=(input&&input.value.trim()) || '';
+    image.style.display=src?'block':'none'; image.src=src || '';
+  },
+  clearGrandCategoryImage() {
+    const field=document.getElementById('gc-image'), file=document.getElementById('gc-image-file'), preview=document.getElementById('gc-image-preview');
+    if(field)field.value=''; if(file)file.value=''; if(preview){preview.removeAttribute('src');preview.style.display='none';}
+    if(A._gcPreviewObjectUrl){URL.revokeObjectURL(A._gcPreviewObjectUrl);A._gcPreviewObjectUrl=null;}
+  },
+  async prepareGrandCategoryImage(file) {
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.type||'')) throw new Error('Choisissez une photo JPG, PNG ou WebP.');
+    if(file.size>12*1024*1024) throw new Error('La photo ne doit pas dépasser 12 Mo avant préparation.');
+    // Compression locale, sans service externe : maximum 1400 × 1050 (ratio de carte 4:3).
+    if (!window.createImageBitmap || !document.createElement) return file;
+    let bitmap;
+    try { bitmap=await createImageBitmap(file); } catch { return file; }
+    const maxW=1400,maxH=1050,ratio=Math.min(1,maxW/bitmap.width,maxH/bitmap.height),w=Math.max(1,Math.round(bitmap.width*ratio)),h=Math.max(1,Math.round(bitmap.height*ratio));
+    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d');ctx.drawImage(bitmap,0,0,w,h); if(bitmap.close)bitmap.close();
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.84));
+    return blob ? new File([blob],(file.name||'categorie').replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}) : file;
   },
   async uploadGrandCategoryImage() {
     const input=document.getElementById('gc-image-file'), file=input && input.files && input.files[0];
-    if(!file) return toast('Choisissez une image avant le téléversement.','err');
-    if(!String(file.type||'').startsWith('image/')) return toast('Choisissez un fichier image valide.','err');
-    if(file.size>8*1024*1024) return toast('L’image ne doit pas dépasser 8 Mo.','err');
-    const form=new FormData(); form.append('files',file);
+    if(!file) return toast('Choisissez une photo avant l’import.','err');
     try {
-      const response=await fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+TOKEN},body:form});
-      const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.error||'Téléversement impossible.');
-      document.getElementById('gc-image').value=(data.files||[])[0]||'';
-      toast('Image téléversée. Enregistrez la catégorie pour la publier.','ok');
-    } catch(e) { toast(e.message,'err'); }
+      const prepared=await A.prepareGrandCategoryImage(file), form=new FormData(); form.append('files',prepared);
+      const response=await fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+TOKEN},body:form}); const data=await response.json().catch(()=>({})); if(!response.ok)throw new Error(data.error||'Import impossible.');
+      const url=(data.files||[])[0]||''; document.getElementById('gc-image').value=url;
+      const image=document.getElementById('gc-image-preview'); if(image){image.src=mediaUrl(url);image.style.display='block';}
+      if(A._gcPreviewObjectUrl){URL.revokeObjectURL(A._gcPreviewObjectUrl);A._gcPreviewObjectUrl=null;}
+      toast('Photo importée et prête. Enregistrez pour la publier.','ok');
+    } catch(e){toast(e.message,'err');}
   },
-  async saveGrandCategory(id) { const body={name:document.getElementById('gc-name').value,icon:document.getElementById('gc-icon').value,image_url:document.getElementById('gc-image').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked};try{await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Grande catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');} },
+  async saveGrandCategory(id) {
+    const body={name:document.getElementById('gc-name').value,short_label:document.getElementById('gc-short').value,icon:document.getElementById('gc-icon').value,image_url:document.getElementById('gc-image').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked};
+    try{await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});if(A._gcPreviewObjectUrl){URL.revokeObjectURL(A._gcPreviewObjectUrl);A._gcPreviewObjectUrl=null;}closeModal();toast(body.image_url?'Grande catégorie et photo publiées ✓':'Grande catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');}
+  },
   async saveEstimationConfig() {
     try { await api('/admin/estimation-config', { method:'PUT', body:{ geo_enabled:document.getElementById('est-geo').checked, fallback:document.getElementById('est-fallback').value, history_min_samples:document.getElementById('est-samples').value } }); toast('Paramètres d’estimation enregistrés ✓','ok'); render(); } catch(e){toast(e.message,'err');}
   },
@@ -1357,14 +1399,29 @@ const A = {
   },
   async deleteEstimationRule(id) { if(!confirm('Supprimer définitivement cette règle tarifaire ?'))return;try{await api('/admin/estimation-rules/'+id,{method:'DELETE'});toast('Règle supprimée.','ok');render();}catch(e){toast(e.message,'err');} },
   async testEstimation() { const sid=document.getElementById('est-test-service').value,city=document.getElementById('est-test-city').value,z=document.getElementById('est-test-result');if(!sid||!city){toast('Choisissez une prestation et une ville.','err');return;}z.textContent='Calcul en cours…';try{const r=await api('/admin/estimation-test?service_id='+encodeURIComponent(sid)+'&city='+encodeURIComponent(city));z.innerHTML=r.status==='estimated'?`<b style="color:#dc2626">À partir de ${fcfa(r.amount)}</b> — ${esc(r.source||'')}${r.provisional?' (provisoire)':''}<br><span class="muted">${esc(r.includes||'')}</span>`:`<b>Prix à confirmer</b> — ${esc(r.reason||'Aucune donnée fiable.')}`;}catch(e){z.textContent=e.message;} },
-  searchTermForm() {
-    const d=ESTD, serviceOpts=d.catalog.services.filter(s=>s.active).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
-    const taskOpts=d.catalog.taches.filter(t=>t.active).map(t=>{const s=d.catalog.services.find(v=>v.id===t.service_id)||{};return `<option value="${t.id}" data-service="${t.service_id}">${esc(s.name||'')} › ${esc(t.name)}</option>`;}).join('');
-    openModal(`<h3>Ajouter une expression de recherche</h3><div class="small muted">Exemple : « mon eau coule » peut pointer vers une tâche de réparation de fuite.</div><label>Expression, synonyme ou formulation familière</label><input id="st-term" style="width:100%" placeholder="Ex : mon eau coule"><label>Prestation</label><select id="st-service" style="width:100%"><option value="">Choisir</option>${serviceOpts}</select><label>Tâche <span class="muted">(facultatif)</span></label><select id="st-task" style="width:100%"><option value="">Toute la prestation</option>${taskOpts}</select><button class="btn mt" onclick="A.saveSearchTerm()">Ajouter</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+  searchTermForm(id) {
+    const d=ESTD, current=id ? (d.terms||[]).find(t=>Number(t.id)===Number(id)) : null;
+    const options=[
+      ...(d.catalog.grand_categories||[]).filter(x=>x.active).map(x=>({value:'grand:'+x.id,label:'Grande catégorie › '+x.name})),
+      ...(d.catalog.categories||[]).filter(x=>x.active).map(x=>({value:'category:'+x.id,label:'Métier › '+x.name})),
+      ...(d.catalog.sous_categories||[]).filter(x=>x.active).map(x=>({value:'sub:'+x.id,label:'Sous-catégorie › '+x.name})),
+      ...(d.catalog.services||[]).filter(x=>x.active).map(x=>({value:'service:'+x.id,label:'Prestation › '+x.name})),
+      ...(d.catalog.taches||[]).filter(x=>x.active).map(x=>{const svc=(d.catalog.services||[]).find(v=>Number(v.id)===Number(x.service_id))||{};return {value:'task:'+x.id,label:'Tâche › '+(svc.name||'')+' › '+x.name};})
+    ];
+    const ref=current ? (current.task_id ? 'task:'+current.task_id : current.service_id ? 'service:'+current.service_id : current.sub_id ? 'sub:'+current.sub_id : current.category_id ? 'category:'+current.category_id : current.grand_category_id ? 'grand:'+current.grand_category_id : '') : '';
+    openModal(`<h3>${current?'Modifier':'Ajouter'} une expression de recherche</h3><div class="small muted">Exemple : « mon eau coule » peut viser une tâche de fuite ; « maison à faire briller » peut viser le domaine Nettoyage. La recherche suggère : elle ne sélectionne jamais un besoin à la place du client.</div>
+      <label>Expression, synonyme, faute ou formulation familière</label><input id="st-term" style="width:100%" maxlength="300" value="${esc(current&&current.term||'')}" placeholder="Ex : mon eau coule">
+      <label>Destination dans le catalogue</label><select id="st-target" style="width:100%"><option value="">Choisir une destination</option>${options.map(o=>`<option value="${o.value}" ${o.value===ref?'selected':''}>${esc(o.label)}</option>`).join('')}</select>
+      <label class="check-line"><input id="st-active" type="checkbox" ${!current||current.active?'checked':''}> Expression active</label>
+      <button class="btn mt" onclick="A.saveSearchTerm(${current?current.id:0})">${current?'Enregistrer':'Ajouter'}</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
-  async saveSearchTerm() { const service_id=Number(document.getElementById('st-service').value),task_id=Number(document.getElementById('st-task').value)||null;if(!service_id)return toast('Choisissez une prestation.','err');try{await api('/admin/search-terms',{method:'POST',body:{term:document.getElementById('st-term').value,service_id,task_id}});closeModal();toast('Expression ajoutée ✓','ok');render();}catch(e){toast(e.message,'err');} },
-  async toggleSearchTerm(id,active) { try{await api('/admin/search-terms/'+id,{method:'PUT',body:{active}});render();}catch(e){toast(e.message,'err');} },
-  async deleteSearchTerm(id) {if(!confirm('Supprimer cette expression du dictionnaire ?'))return;try{await api('/admin/search-terms/'+id,{method:'DELETE'});render();}catch(e){toast(e.message,'err');}},
+  async saveSearchTerm(id) {
+    const raw=document.getElementById('st-target').value, [target_type,target_id]=raw.split(':');
+    if(!target_type||!target_id)return toast('Choisissez une destination dans le catalogue.','err');
+    try{await api('/admin/search-terms'+(id?'/'+id:''),{method:id?'PUT':'POST',body:{term:document.getElementById('st-term').value,target_type,target_id:Number(target_id),active:document.getElementById('st-active').checked}});closeModal();toast(id?'Expression modifiée ✓':'Expression ajoutée ✓','ok');render();}catch(e){toast(e.message,'err');}
+  },
+  async toggleSearchTerm(id,active) { try{await api('/admin/search-terms/'+id,{method:'PUT',body:{active}});toast(active?'Expression activée ✓':'Expression désactivée.','ok');render();}catch(e){toast(e.message,'err');} },
+  async deleteSearchTerm(id) {if(!confirm('Supprimer cette expression du dictionnaire ?'))return;try{await api('/admin/search-terms/'+id,{method:'DELETE'});toast('Expression supprimée.','ok');render();}catch(e){toast(e.message,'err');}},
   async addCat() {
     const name = document.getElementById('c-name').value.trim();
     if (!name) return toast('Indiquez le nom de la catégorie.', 'err');

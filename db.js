@@ -1305,6 +1305,26 @@ CREATE TABLE IF NOT EXISTS service_search_terms (
   UNIQUE(service_id, task_id, normalized)
 );
 CREATE INDEX IF NOT EXISTS idx_search_terms_normalized ON service_search_terms(normalized);
+-- Dictionnaire extensible : contrairement à la table historique ci-dessus, une expression
+-- peut viser un grand domaine, un métier, une sous-catégorie, une prestation ou une tâche.
+-- Chaque cible reste une clé étrangère vers le catalogue central : aucune liste parallèle.
+CREATE TABLE IF NOT EXISTS search_dictionary_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  term TEXT NOT NULL,
+  normalized TEXT NOT NULL,
+  grand_category_id INTEGER REFERENCES grand_categories(id) ON DELETE CASCADE,
+  category_id INTEGER REFERENCES service_categories(id) ON DELETE CASCADE,
+  sub_id INTEGER REFERENCES sous_categories(id) ON DELETE CASCADE,
+  service_id INTEGER REFERENCES services(id) ON DELETE CASCADE,
+  task_id INTEGER REFERENCES taches(id) ON DELETE CASCADE,
+  active INTEGER NOT NULL DEFAULT 1,
+  source TEXT NOT NULL DEFAULT 'direction', -- catalogue | direction
+  legacy_term_id INTEGER UNIQUE REFERENCES service_search_terms(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (grand_category_id IS NOT NULL OR category_id IS NOT NULL OR sub_id IS NOT NULL OR service_id IS NOT NULL OR task_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_search_dictionary_normalized ON search_dictionary_entries(normalized,active);
 CREATE TABLE IF NOT EXISTS pro_domain_change_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1343,6 +1363,8 @@ CREATE TABLE IF NOT EXISTS price_estimation_rules (
 CREATE INDEX IF NOT EXISTS idx_price_rules_lookup ON price_estimation_rules(active,service_id,task_id,category_id,city);
 `);
 ensureColumn('service_categories', 'grand_category_id', 'INTEGER REFERENCES grand_categories(id) ON DELETE SET NULL');
+// COLIS 26 : libellé compact, administrable, pour les cartes et petits écrans.
+ensureColumn('grand_categories', 'short_label', 'TEXT');
 ensureColumn('pro_profiles', 'domain_categories', "TEXT NOT NULL DEFAULT '[]'");             // domaines déclarés (grandes catégories)
 ensureColumn('pro_profiles', 'authorized_domain_categories', 'TEXT');                         // décision explicite de la direction ; NULL = ancien profil
 ensureColumn('missions', 'intervention_city', 'TEXT');
@@ -1372,7 +1394,17 @@ ensureColumn('missions', 'estimate_meta', "TEXT NOT NULL DEFAULT '{}'");
     ['Services professionnels et administratifs','📋','Administration, communication, conseil et services aux entreprises.'],
     ['Cours et formation','🎓','Cours, accompagnement et formation professionnelle.'],
     ['Agriculture et élevage','🌾','Production agricole, élevage et services associés.'],
-    ['Autres services','🧩','Domaines non encore classés dans les catégories précédentes.']
+    ['Artisanat et réparations diverses','🧰','Artisanat, cordonnerie, maroquinerie et réparations d’objets.'],
+    ['Ferronnerie et soudure','🔩','Ouvrages métalliques, portails, grilles et soudure.'],
+    ['Énergie solaire et secours électrique','☀️','Solaire, batteries, onduleurs et groupes électrogènes.'],
+    ['Électroménager et appareils domestiques','🔌','Dépannage et installation d’appareils domestiques.'],
+    ['Vitrerie et miroiterie','🪟','Verre, miroirs, baies et protections vitrées.'],
+    ['Imprimerie et signalétique','🖨️','Impression, reprographie, enseignes et signalétique.'],
+    ['Photo, vidéo et sonorisation','📸','Photographie, vidéo, montage et sonorisation.'],
+    ['Toiture et étanchéité','🏘️','Toitures, fuites, étanchéité et isolation.'],
+    ['Forage et traitement de l’eau','💧','Forage, pompage, stockage et traitement de l’eau.'],
+    ['Entretien automobile','🫧','Lavage, detailing et entretien esthétique des véhicules.'],
+    ['Immobilier et conciergerie','🏢','Gestion locative, états des lieux et conciergerie.']
   ];
   const ins = db.prepare('INSERT OR IGNORE INTO grand_categories(name,icon,description,sort) VALUES(?,?,?,?)');
   rows.forEach((r, i) => ins.run(r[0], r[1], r[2], i + 1));
@@ -1389,7 +1421,10 @@ ensureColumn('missions', 'estimate_meta', "TEXT NOT NULL DEFAULT '{}'");
     if (/plomb/.test(n)) return 'Plomberie';
     if (/electric|solaire/.test(n)) return 'Électricité';
     if (/clim|froid|refriger|congel/.test(n)) return 'Climatisation et froid';
-    if (/menuiser|aluminium|vitrerie/.test(n)) return 'Menuiserie et aluminium';
+    if (/vitrerie/.test(n)) return 'Vitrerie et miroiterie';
+    if (/menuiser|aluminium/.test(n)) return 'Menuiserie et aluminium';
+    if (/electromenager/.test(n)) return 'Électroménager et appareils domestiques';
+    if (/lavage auto/.test(n)) return 'Entretien automobile';
     if (/transport|livraison|demenag|chauffeur/.test(n)) return 'Transport et déménagement';
     if (/mecan|auto|moto|garage/.test(n)) return 'Mécanique et automobile';
     if (/informat|telephon|electronique|ordinateur/.test(n)) return 'Informatique et téléphonie';
@@ -1399,17 +1434,198 @@ ensureColumn('missions', 'estimate_meta', "TEXT NOT NULL DEFAULT '{}'");
     if (/jardin|espace vert|paysag/.test(n)) return 'Jardinage et espaces verts';
     if (/securite|surveillance|gardien/.test(n)) return 'Sécurité et surveillance';
     if (/aide|domicile|famil|nounou|placement/.test(n)) return 'Aide à domicile et services familiaux';
-    if (/evenement|photo|video|sono|decoration evenement/.test(n)) return 'Événementiel';
+    if (/photo|video/.test(n)) return 'Photo, vidéo et sonorisation';
+    if (/evenement|sono|decoration evenement/.test(n)) return 'Événementiel';
     if (/cours|formation|education/.test(n)) return 'Cours et formation';
     if (/agric|elevage|agro/.test(n)) return 'Agriculture et élevage';
-    if (/maconner|construction|peinture|carrelage|platr|architecture|metaller|soudure|toiture/.test(n)) return 'Bâtiment et construction';
+    if (/metaller|soudure/.test(n)) return 'Ferronnerie et soudure';
+    if (/maconner|construction|peinture|carrelage|platr|architecture|toiture/.test(n)) return 'Bâtiment et construction';
     if (/administr|comptab|marketing|communication|redaction|traduction|jurid|conseil|immobilier/.test(n)) return 'Services professionnels et administratifs';
-    return 'Autres services';
+    return 'Artisanat et réparations diverses';
   };
   const update = db.prepare('UPDATE service_categories SET grand_category_id=? WHERE id=?');
   db.prepare('SELECT id,name,grand_category_id FROM service_categories').all().forEach(c => {
     if (!c.grand_category_id) update.run(ids.get(pick(c.name)), c.id);
   });
+})();
+
+// ============================================================
+// COLIS 26 — 30 domaines courts et sans chevauchement visuel.
+// Les métiers/tâches existants sont déplacés par identifiant : missions, profils,
+// recherches et historiques restent donc liés aux mêmes données centrales.
+// ============================================================
+(function organizeThirtyProfessionalDomains() {
+  const labels = {
+    'Nettoyage et entretien':'Nettoyage', 'Plomberie':'Plomberie', 'Électricité':'Électricité',
+    'Bâtiment et construction':'Bâtiment', 'Menuiserie et aluminium':'Menuiserie',
+    'Climatisation et froid':'Clim & froid', 'Transport et déménagement':'Transport',
+    'Mécanique et automobile':'Auto & moto', 'Informatique et téléphonie':'Numérique',
+    'Beauté, coiffure et bien-être':'Beauté & bien-être', 'Couture et mode':'Couture & mode',
+    'Restauration et alimentation':'Cuisine & traiteur', 'Jardinage et espaces verts':'Jardinage',
+    'Sécurité et surveillance':'Sécurité', 'Aide à domicile et services familiaux':'Aide à domicile',
+    'Événementiel':'Événementiel', 'Services professionnels et administratifs':'Services pro',
+    'Cours et formation':'Cours & formation', 'Agriculture et élevage':'Agriculture',
+    'Artisanat et réparations diverses':'Artisanat', 'Ferronnerie et soudure':'Ferronnerie',
+    'Énergie solaire et secours électrique':'Solaire & énergie',
+    'Électroménager et appareils domestiques':'Électroménager', 'Vitrerie et miroiterie':'Vitrerie',
+    'Imprimerie et signalétique':'Imprimerie', 'Photo, vidéo et sonorisation':'Photo, vidéo & son',
+    'Toiture et étanchéité':'Toiture & étanchéité', 'Forage et traitement de l’eau':'Eau & forage',
+    'Entretien automobile':'Entretien auto', 'Immobilier et conciergerie':'Immobilier'
+  };
+  // Renommage doux de l'ancien fourre-tout : son identifiant reste inchangé.
+  const oldOther = db.prepare("SELECT id FROM grand_categories WHERE name='Autres services'").get();
+  const artisanRoot = db.prepare("SELECT id FROM grand_categories WHERE name='Artisanat et réparations diverses'").get();
+  if (oldOther && !artisanRoot) {
+    // Base antérieure : on garde l’identifiant en renommant la racine existante.
+    db.prepare("UPDATE grand_categories SET name='Artisanat et réparations diverses', icon='🧰', description='Artisanat, cordonnerie, maroquinerie et réparations d’objets.', updated_at=datetime('now') WHERE id=?").run(oldOther.id);
+  } else if (oldOther && artisanRoot) {
+    // Base où le nouveau seed a déjà créé la racine : les services/profils sont transférés
+    // puis l'ancien fourre-tout est seulement désactivé (historique et identifiant conservés).
+    const parse = value => { try { const a=JSON.parse(value || '[]'); return Array.isArray(a)?a.map(Number).filter(Number.isInteger):[]; } catch { return []; } };
+    db.transaction(() => {
+      db.prepare('UPDATE service_categories SET grand_category_id=? WHERE grand_category_id=?').run(artisanRoot.id,oldOther.id);
+      const updateProfile=db.prepare('UPDATE pro_profiles SET domain_categories=?,authorized_domain_categories=? WHERE user_id=?');
+      db.prepare('SELECT user_id,domain_categories,authorized_domain_categories FROM pro_profiles').all().forEach(profile => {
+        const append=value => { const ids=parse(value); if(ids.includes(Number(oldOther.id)) && !ids.includes(Number(artisanRoot.id))) ids.push(Number(artisanRoot.id)); return ids; };
+        const domains=append(profile.domain_categories), authorized=profile.authorized_domain_categories===null?null:append(profile.authorized_domain_categories);
+        updateProfile.run(JSON.stringify(domains),authorized===null?null:JSON.stringify(authorized),profile.user_id);
+      });
+      db.prepare("UPDATE grand_categories SET active=0,popular=0,popular_sort=NULL,updated_at=datetime('now') WHERE id=?").run(oldOther.id);
+    })();
+  }
+  const ids = new Map(db.prepare('SELECT id,name FROM grand_categories').all().map(r => [r.name, Number(r.id)]));
+  const setLabel = db.prepare("UPDATE grand_categories SET short_label=?,updated_at=datetime('now') WHERE name=? AND (short_label IS NULL OR short_label='')");
+  Object.entries(labels).forEach(([name,label]) => setLabel.run(label,name));
+  if (getSetting('colis26_catalogue30_structure_v1') !== null) return;
+
+  const getCat = name => db.prepare('SELECT * FROM service_categories WHERE lower(name)=lower(?)').get(name);
+  const rootId = name => { const id=ids.get(name); if (!id) throw new Error('COLIS26_ROOT_'+name); return id; };
+  const updateRoot = db.prepare('UPDATE service_categories SET grand_category_id=? WHERE id=?');
+  const insertCat = db.prepare('INSERT INTO service_categories(name,icon,grand_category_id,sort) VALUES(?,?,?,?)');
+  const insertSub = db.prepare('INSERT INTO sous_categories(metier_id,name,sort) VALUES(?,?,?)');
+  const insertSvc = db.prepare('INSERT INTO services(category_id,sub_id,name,keywords,sort) VALUES(?,?,?,?,?)');
+  const insertTask = db.prepare('INSERT INTO taches(service_id,name,sort) VALUES(?,?,?)');
+  const ensureCategory = (name, icon, root, sort) => {
+    let cat=getCat(name);
+    if (!cat) { const id=insertCat.run(name,icon,rootId(root),sort).lastInsertRowid; cat={id:Number(id),name}; }
+    else updateRoot.run(rootId(root),cat.id);
+    return cat;
+  };
+  const ensureSub = (categoryId,name,sort=50) => {
+    let sub=db.prepare('SELECT * FROM sous_categories WHERE metier_id=? AND lower(name)=lower(?)').get(categoryId,name);
+    if (!sub) sub={id:Number(insertSub.run(categoryId,name,sort).lastInsertRowid)};
+    return sub;
+  };
+  const ensureService = (category,sub,name,keywords,tasks,sort=50) => {
+    let service=db.prepare('SELECT * FROM services WHERE category_id=? AND lower(name)=lower(?)').get(category.id,name);
+    if (!service) service={id:Number(insertSvc.run(category.id,sub.id,name,keywords,sort).lastInsertRowid)};
+    else db.prepare("UPDATE services SET sub_id=?,keywords=CASE WHEN keywords='' THEN ? ELSE keywords END WHERE id=?").run(sub.id,keywords,service.id);
+    tasks.forEach((task,index) => {
+      if (!db.prepare('SELECT 1 FROM taches WHERE service_id=? AND lower(name)=lower(?)').get(service.id,task)) insertTask.run(service.id,task,index);
+    });
+    return service;
+  };
+  const moveCategory = (serviceCategoryName, root) => { const cat=getCat(serviceCategoryName); if (cat) updateRoot.run(rootId(root),cat.id); return cat; };
+  const tx=db.transaction(() => {
+    // Les catégories déjà présentes sont reclassées, sans recréation de tâches ni services.
+    moveCategory('Métallerie & soudure','Ferronnerie et soudure');
+    moveCategory('Électroménager','Électroménager et appareils domestiques');
+    moveCategory('Menuiserie aluminium & vitrerie','Vitrerie et miroiterie');
+    moveCategory('Photo & vidéo','Photo, vidéo et sonorisation');
+    moveCategory('Lavage auto & moto','Entretien automobile');
+
+    // Énergie solaire : les prestations existantes sont sorties de l’électricité générale.
+    const solar=ensureCategory('Énergie solaire & secours électrique','☀️','Énergie solaire et secours électrique',61);
+    const electric=getCat('Électricité');
+    if (electric) {
+      const oldSub=db.prepare('SELECT * FROM sous_categories WHERE metier_id=? AND lower(name)=lower(?)').get(electric.id,'Énergie solaire');
+      if (oldSub) {
+        const newSub=ensureSub(solar.id,'Solaire',1);
+        db.prepare('UPDATE services SET category_id=?,sub_id=? WHERE category_id=? AND sub_id=?').run(solar.id,newSub.id,electric.id,oldSub.id);
+      }
+    }
+    const gensetSub=ensureSub(solar.id,'Groupes électrogènes',2);
+    ensureService(solar,gensetSub,'Installation et entretien de groupe électrogène','groupe electrogene,generateur,maintenance,groupe,secours electrique',[
+      'Diagnostic de groupe électrogène','Entretien préventif','Installation de groupe électrogène','Réparation de groupe électrogène'
+    ],2);
+
+    // L’impression existante est séparée de la communication numérique.
+    const printing=ensureCategory('Imprimerie & signalétique','🖨️','Imprimerie et signalétique',62);
+    const marketing=getCat('Marketing & communication');
+    if (marketing) {
+      const printingService=db.prepare('SELECT * FROM services WHERE category_id=? AND lower(name)=lower(?)').get(marketing.id,'Impression & supports');
+      if (printingService) {
+        const printSub=ensureSub(printing.id,'Impression',1);
+        db.prepare('UPDATE services SET category_id=?,sub_id=? WHERE id=?').run(printing.id,printSub.id,printingService.id);
+      }
+    }
+    const signSub=ensureSub(printing.id,'Signalétique',2);
+    ensureService(printing,signSub,'Enseignes et signalétique','enseigne,signalétique,panneau,lettrage,habillage,marquage',[
+      'Conception d’enseigne','Pose d’enseigne','Marquage de véhicule','Impression grand format'
+    ],2);
+
+    // La sonorisation existante est rattachée à l’audiovisuel, l’organisation reste à l’événementiel.
+    const audiovisual=moveCategory('Photo & vidéo','Photo, vidéo et sonorisation') || ensureCategory('Photo & vidéo','📸','Photo, vidéo et sonorisation',63);
+    const event=getCat('Événementiel');
+    if (event) {
+      const sound=db.prepare('SELECT * FROM services WHERE category_id=? AND lower(name)=lower(?)').get(event.id,'Animation & sono');
+      if (sound) { const soundSub=ensureSub(audiovisual.id,'Sonorisation',2); db.prepare('UPDATE services SET category_id=?,sub_id=? WHERE id=?').run(audiovisual.id,soundSub.id,sound.id); }
+    }
+
+    const roof=ensureCategory('Toiture, étanchéité & isolation','🏘️','Toiture et étanchéité',64);
+    const roofSub=ensureSub(roof.id,'Toiture et couverture',1);
+    ensureService(roof,roofSub,'Réparation de toiture','toiture,tuile,tôle,couverture,fuite toit',[
+      'Recherche de fuite de toiture','Réparation de couverture','Remplacement de tôle','Nettoyage de gouttières'
+    ],1);
+    const waterproofSub=ensureSub(roof.id,'Étanchéité et isolation',2);
+    ensureService(roof,waterproofSub,'Étanchéité de terrasse et murs','étanchéité,terrasse,infiltration,humidité,isolation',[
+      'Étanchéité de terrasse','Traitement d’infiltration','Isolation thermique','Réparation de fissures étanches'
+    ],2);
+
+    const water=ensureCategory('Forage, pompage & traitement d’eau','💧','Forage et traitement de l’eau',65);
+    const pumpingSub=ensureSub(water.id,'Pompage et stockage',1);
+    ensureService(water,pumpingSub,'Installation de pompe et surpresseur','pompe,surpresseur,forage,citerne,reservoir,eau',[
+      'Installation de pompe à eau','Réparation de pompe','Installation de surpresseur','Pose de citerne'
+    ],1);
+    const treatmentSub=ensureSub(water.id,'Traitement de l’eau',2);
+    ensureService(water,treatmentSub,'Filtration et traitement de l’eau','filtration,eau,traitement,adoucisseur,potable',[
+      'Installation de filtre à eau','Entretien de filtration','Diagnostic de qualité d’eau'
+    ],2);
+
+    const property=ensureCategory('Immobilier & conciergerie','🏢','Immobilier et conciergerie',66);
+    const rentalSub=ensureSub(property.id,'Gestion locative',1);
+    ensureService(property,rentalSub,'Gestion et état des lieux','immobilier,location,etat des lieux,gestion locative,proprietaire',[
+      'État des lieux d’entrée','État des lieux de sortie','Suivi de petites réparations','Remise de clés'
+    ],1);
+    const conciergeSub=ensureSub(property.id,'Conciergerie',2);
+    ensureService(property,conciergeSub,'Conciergerie de logement','conciergerie,logement,location courte durée,accueil',[
+      'Accueil de locataire','Coordination du ménage','Assistance de séjour'
+    ],2);
+
+    // Les profils déjà autorisés dans une racine large gardent leurs droits sur les métiers déplacés.
+    const expansions={
+      'Bâtiment et construction':['Ferronnerie et soudure'],
+      'Électricité':['Énergie solaire et secours électrique'],
+      'Informatique et téléphonie':['Électroménager et appareils domestiques'],
+      'Menuiserie et aluminium':['Vitrerie et miroiterie'],
+      'Services professionnels et administratifs':['Imprimerie et signalétique'],
+      'Événementiel':['Photo, vidéo et sonorisation'],
+      'Mécanique et automobile':['Entretien automobile']
+    };
+    const profileUpdate=db.prepare('UPDATE pro_profiles SET domain_categories=?,authorized_domain_categories=? WHERE user_id=?');
+    db.prepare('SELECT user_id,domain_categories,authorized_domain_categories FROM pro_profiles').all().forEach(profile => {
+      const parse=value => { try { const a=JSON.parse(value || '[]'); return Array.isArray(a)?a.map(Number).filter(Number.isInteger):[]; } catch { return []; } };
+      const expand=value => {
+        const result=parse(value); Object.entries(expansions).forEach(([from,to]) => { if (result.includes(rootId(from))) to.forEach(name => { const id=rootId(name); if (!result.includes(id)) result.push(id); }); });
+        return result;
+      };
+      const domains=expand(profile.domain_categories), authorized=profile.authorized_domain_categories === null ? null : expand(profile.authorized_domain_categories);
+      const before=JSON.stringify(parse(profile.domain_categories)), after=JSON.stringify(domains), beforeAuth=profile.authorized_domain_categories === null ? null : JSON.stringify(parse(profile.authorized_domain_categories)), afterAuth=authorized === null ? null : JSON.stringify(authorized);
+      if (before!==after || beforeAuth!==afterAuth) profileUpdate.run(after,afterAuth,profile.user_id);
+    });
+  });
+  tx();
+  setSetting('colis26_catalogue30_structure_v1','1');
 })();
 
 // Les profils historiques conservent leurs services, mais reçoivent en plus le
@@ -1451,7 +1667,35 @@ ensureColumn('missions', 'estimate_meta', "TEXT NOT NULL DEFAULT '{}'");
     ['Réparation de téléphone', 'Remplacement d’écran', ['mon phone est casse','telephone casse','mon portable est gate','ecran phone casse','phone ne s allume pas']],
     ['Ménage à domicile', 'Nettoyage complet de la maison', ['je veux laver ma maison','laver maison','maison sale','femme de menage','nettoyer chez moi']],
     ['Mécanique moto', 'Réparation de moto', ['ma moto ne demarre pas','moto gatee','moto en panne']],
-    ['Rénovation', 'Réparation de fissures', ['mon mur est gate','mur fissure','reparer mur','mur abime']]
+    ['Rénovation', 'Réparation de fissures', ['mon mur est gate','mur fissure','reparer mur','mur abime']],
+    // Vocabulaire quotidien et tournures fréquentes : chaque entrée est modifiable ou
+    // désactivable par le PDG dans le dictionnaire, après son import initial.
+    ['Réparation de fuite', 'Réparation de fuite d’eau', ['fuite eau','fuite deau','eau qui coule','eau coule partout','tuyau perce','canalisation fuit','mon robinet coule','robinet qui goutte','chasse eau fuit','wc fuit','plombier vite']],
+    ['Plomberie — dépannage', 'Débouchage de canalisation', ['canalisation bouchee','evier bouche','eau ne descend pas','toilette bouchee','wc bouche','déboucher evier','déboucher wc']],
+    ['Dépannage électrique', 'Recherche de panne', ['courant parti','coupure de courant maison','plus electricite','plus de lumiere','lumiere ne sallume pas','ampoule ne sallume pas','prise ne marche plus','interrupteur gate','ca disjoncte','disjoncteur saute','court circuit maison']],
+    ['Dépannage électrique', 'Remplacement de disjoncteur', ['disjoncteur saute tout le temps','boite electrique gatee','tableau electrique en panne']],
+    ['Dépannage climatiseur', 'Diagnostic de panne', ['clim chaude','clim souffle chaud','clim ne fait plus froid','clim ne refroidit pas','climatiseur chaud','split chaud','airco gate','climatisation en panne','clim fait du bruit']],
+    ['Entretien & recharge', 'Recharge de gaz', ['mettre gaz clim','recharger ma clim','gaz clim fini','clim manque gaz']],
+    ['Ménage à domicile', 'Nettoyage complet de la maison', ['maison a faire briller','faire briller la maison','nettoyer chez moi','nettoyage chez moi','ma maison est sale','grand nettoyage maison','laver ma cour','besoin femme menage']],
+    ['Nettoyage de fauteuils et canapés', 'Nettoyage de canapé', ['canape sale','laver canape','fauteuil tache','nettoyage fauteuil','nettoyer salon']],
+    ['Mécanique moto', 'Réparation de moto', ['moto ne demarre pas','moto ne démarre plus','ma moto est en panne','moto gatee','moto cale','scooter ne demarre pas']],
+    ['Mécanique générale', 'Diagnostic de panne', ['voiture ne demarre pas','voiture ne démarre plus','voiture en panne','auto en panne','ma voiture est gatee','moteur voiture probleme','mon vehicule est bloque']],
+    ['Dépannage / remorquage', 'Démarrage de batterie', ['batterie voiture vide','voiture batterie morte','ma voiture ne part pas']],
+    ['Dépannage / remorquage', 'Dépannage sur route', ['panne sur la route','voiture bloquee route','besoin depannage voiture']],
+    ['Rénovation', 'Reprise de murs', ['arranger ma maison','maison abimee','refaire mur','mur abime','mur casse','renover maison','petite renovation maison']],
+    ['Peinture intérieure', 'Mise en peinture complète', ['peindre maison','maison a repeindre','peinture salon','repeindre mur']],
+    ['Réparation de toiture', 'Recherche de fuite de toiture', ['toit fuit','pluie entre dans maison','fuite toit','ma toiture coule']],
+    ['Réparation d’électroménager', 'Réparation de machine à laver', ['machine a laver gatee','machine ne tourne plus','lave linge en panne']],
+    ['Réparation d’électroménager', 'Réparation de cuisinière', ['gaziniere gatee','cuisiniere en panne','four ne chauffe plus']],
+    ['Réparation de téléphone', 'Remplacement d’écran', ['ecran casse','vitre telephone cassee','portable tombe','phone casse']],
+    ['Installation solaire', 'Installation de panneaux solaires', ['mettre solaire maison','installer panneaux','panneau solaire maison','courant solaire']],
+    ['Installation et entretien de groupe électrogène', 'Réparation de groupe électrogène', ['groupe electrogene gate','groupe ne demarre pas','groupe en panne']],
+    ['Réparation de chaussures', 'Réparation de chaussures', ['chaussure gatee','chaussure decollée','reparer sandale']],
+    ['Ouverture de porte claquée', 'Ouverture de porte claquée', ['porte bloquee','cle oubliee dedans','jai perdu ma cle','serrure bloquee']],
+    ['Garde d’enfants', 'Nounou à domicile', ['garder mon enfant','chercher nounou','baby sitter','gardienne enfant']],
+    ['Organisation de mariage', 'Organisation de mariage', ['preparer mariage','organiser mon mariage','wedding planner']],
+    ['Livraison express', 'Course et achats', ['faire une course','envoyer quelquun acheter','besoin coursier']],
+    ['Déménagement', 'Déménagement complet', ['changer maison','demenager mes affaires','porter mes meubles']]
   ];
   aliases.forEach(([serviceLike, taskLike, terms]) => {
     const svc = db.prepare('SELECT id FROM services WHERE lower(name) LIKE lower(?) ORDER BY id LIMIT 1').get('%' + serviceLike + '%');
@@ -1459,6 +1703,16 @@ ensureColumn('missions', 'estimate_meta', "TEXT NOT NULL DEFAULT '{}'");
     const task = db.prepare('SELECT id FROM taches WHERE service_id=? AND lower(name) LIKE lower(?) ORDER BY id LIMIT 1').get(svc.id, '%' + taskLike + '%');
     terms.forEach(term => { const n = normal(term); if (n) add(svc.id, task && task.id || null, term, n, 'catalogue'); });
   });
+})();
+
+// Compatibilité COLIS 26 : les expressions déjà présentes restent intactes puis sont
+// projetées dans le dictionnaire multi-niveaux. L'ancienne table est conservée pour
+// les sauvegardes et modules historiques ; le moteur n'a qu'une source de lecture.
+(function migrateSearchDictionaryEntries() {
+  const add = db.prepare(`INSERT INTO search_dictionary_entries(term,normalized,service_id,task_id,active,source,legacy_term_id)
+    VALUES(?,?,?,?,?,?,?) ON CONFLICT(legacy_term_id) DO UPDATE SET
+    term=excluded.term, normalized=excluded.normalized, active=excluded.active, source=excluded.source, updated_at=datetime('now')`);
+  db.prepare('SELECT * FROM service_search_terms').all().forEach(t => add.run(t.term,t.normalized,t.service_id,t.task_id,t.active,t.source,t.id));
 })();
 
 const INTELLIGENT_SEARCH_DEFAULTS = {

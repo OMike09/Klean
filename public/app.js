@@ -50,6 +50,8 @@ function mediaUrl(src) {
 }
 function fmtDate(s) { if (!s) return ''; const d = new Date(s.replace(' ', 'T') + (s.includes('Z') || s.includes('+') ? '' : 'Z')); return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function fmtFCFA(n) { return (n ?? 0).toLocaleString('fr-FR') + ' FCFA'; }
+// Nom compact pour les cartes et en-têtes étroits ; le nom complet reste en base, dans la recherche et l’administration.
+function grandLabel(category) { return String(category && (category.short_label || category.name) || 'Service'); }
 function initials(name) { return (name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase(); }
 function avatar(u, cls) { return `<div class="avatar ${cls || ''}">${u && u.photo ? `<img src="${esc(mediaUrl(u.photo))}" alt="">` : esc(initials(u && u.name))}</div>`; }
 // iPhone Safari and Android do not necessarily record in the same container.
@@ -614,7 +616,7 @@ routes.home = async () => {
     <div class="hint">Ex : « mon eau coule », « ma clime est gâtée », « je veux laver ma maison »…</div>
     ${POPULAIRES.length ? `<div class="sec-title">Services populaires</div>
     <div class="svc-grid">
-      ${POPULAIRES.map(s => `<button type="button" class="svc-card ${s.image_url ? 'has-image' : ''}" onclick="nav('#/categories/${s.id}')" aria-label="Ouvrir ${esc(s.name)}"><span class="svc-card-media">${s.image_url ? `<img src="${esc(s.image_url)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('image-missing')">` : `<span class="ic" aria-hidden="true">${esc(s.icon || '🧩')}</span>`}</span><span class="svc-card-copy"><span class="nm">${esc(s.name)}</span>${s.price_from ? `<span class="price-from">À partir de ${fmtFCFA(s.price_from)}</span>` : ''}</span></button>`).join('')}
+      ${POPULAIRES.map(s => `<button type="button" class="svc-card ${s.image_url ? 'has-image' : ''}" onclick="nav('#/categories/${s.id}')" aria-label="Ouvrir ${esc(s.name)}"><span class="svc-card-media">${s.image_url ? `<img src="${esc(s.image_url)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('image-missing')">` : `<span class="ic" aria-hidden="true">${esc(s.icon || '🧩')}</span>`}</span><span class="svc-card-copy"><span class="nm">${esc(grandLabel(s))}</span>${s.price_from ? `<span class="price-from">À partir de ${fmtFCFA(s.price_from)}</span>` : ''}</span></button>`).join('')}
     </div>` : ''}
     <button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>
     <div class="home-shortcuts" aria-label="Accès rapides">
@@ -670,10 +672,10 @@ function readCategoryDraft(categoryId) {
 function renderCategoryRequestForm(cat, serviceChoices) {
   const services = (serviceChoices || []).filter(s => Number(s.id));
   if (!services.length) {
-    $app.innerHTML = `${header(cat.name, { bell: !!USER })}<div class="content">${emptyState('📋','Aucune prestation active n’est disponible dans cette catégorie pour le moment.')}</div>${bottomNav('search')}`;
+    $app.innerHTML = `${header(grandLabel(cat), { bell: !!USER })}<div class="content">${emptyState('📋','Aucune prestation active n’est disponible dans cette catégorie pour le moment.')}</div>${bottomNav('search')}`;
     updateBadges(); return;
   }
-  const allTasks = services.flatMap(s => (s.taches || []).map(t => ({ id:Number(t.id), name:t.name, description:t.description || '', price_from:Number(t.price_from) || null, price_unit:t.price_unit || '', service_id:Number(s.id), service_name:s.name, category:s.category || '' })));
+  const allTasks = services.flatMap(s => (s.taches || []).map(t => ({ id:Number(t.id), name:t.name, description:t.description || '', search_terms:Array.isArray(t.search_terms) ? t.search_terms : [], price_from:Number(t.price_from) || null, price_unit:t.price_unit || '', service_id:Number(s.id), service_name:s.name, category:s.category || '' })));
   const savedDraft = readCategoryDraft(cat.id);
   const taskById = new Map(allTasks.map(t => [Number(t.id), t]));
   let selectedTasks = (savedDraft.taches || []).map(raw => {
@@ -696,7 +698,7 @@ function renderCategoryRequestForm(cat, serviceChoices) {
   const initialCommune = savedDraft.intervention_commune || '';
   const initialQuartier = savedDraft.quartier || (USER && USER.quartier) || '';
   const initialAddress = savedDraft.address || (USER && USER.address) || '';
-  $app.innerHTML = `${header(cat.name, { bell: !!USER })}
+  $app.innerHTML = `${header(grandLabel(cat), { bell: !!USER })}
     <div class="content category-request-page">
       ${cat.description ? `<div class="category-request-intro">${esc(cat.description)}</div>` : ''}
       <div class="card category-request-card">
@@ -706,7 +708,7 @@ function renderCategoryRequestForm(cat, serviceChoices) {
         </section>
         <section class="request-section">
           <div class="field"><label>Je décris mon besoin ci-dessous. <span class="req">*</span></label>
-            <textarea id="r-desc" maxlength="5000" placeholder="Ex : Je souhaite nettoyer mon canapé et les fauteuils du salon…" oninput="A.requestDescriptionChanged()">${esc(savedDraft.description || '')}</textarea></div>
+            <textarea id="r-desc" maxlength="5000" placeholder="Ex : Je souhaite nettoyer mon canapé et les fauteuils du salon…" oninput="A.requestDescriptionChanged()">${esc(savedDraft.description || '')}</textarea><div id="r-language-hint" class="small muted" aria-live="polite"></div></div>
         </section>
         <section class="request-section media-request-section">
           <div class="field"><label>Photos <span class="muted small">facultatif · 3 maximum</span></label><div class="photo-strip" id="r-photos"><button type="button" class="ph-add" onclick="A.pickPhotos('r-photos')" aria-label="Ajouter des photos">＋</button></div><input type="file" id="file-input" accept="image/*" multiple style="display:none"></div>
@@ -754,7 +756,7 @@ routes.categories = async (param) => {
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}</div>` + bottomNav('search'); return; }
   $app.innerHTML = `${header('Tous les services', { bell: !!USER })}<div class="content">
     <div class="hint">Toutes les grandes catégories actives, classées de A à Z.</div>
-    ${cats.map(c => `<div class="menu-item" onclick="nav('#/categories/${c.id}')"><span class="mi-ic">${esc(c.icon || '🧩')}</span><div class="grow"><b>${esc(c.name)}</b>${c.description ? `<div class="small muted">${esc(c.description)}</div>` : ''}${c.price_from ? `<div class="price-from">À partir de ${fmtFCFA(c.price_from)}</div>` : ''}</div><span class="mi-arr">›</span></div>`).join('') || emptyState('📋','Aucune grande catégorie active pour le moment.')}
+    ${cats.map(c => `<div class="menu-item" onclick="nav('#/categories/${c.id}')"><span class="mi-ic">${esc(c.icon || '🧩')}</span><div class="grow"><b>${esc(grandLabel(c))}</b>${c.description ? `<div class="small muted">${esc(c.description)}</div>` : ''}${c.price_from ? `<div class="price-from">À partir de ${fmtFCFA(c.price_from)}</div>` : ''}</div><span class="mi-arr">›</span></div>`).join('') || emptyState('📋','Aucune grande catégorie active pour le moment.')}
   </div>${bottomNav('search')}`;
   updateBadges();
 };
@@ -862,7 +864,7 @@ routes.request = async (serviceId) => {
       <div class="small muted mb">${esc(data.service.grand_category || data.service.category || '')}${data.service.category && data.service.grand_category ? ' › ' + esc(data.service.category) : ''} › ${esc(data.service.name)}</div>
       ${tasksHtml}
       <div class="field"><label>Je décris mon besoin ci-dessous. <span class="req">*</span></label>
-        <textarea id="r-desc" maxlength="5000" placeholder="Ex : Le robinet de ma cuisine coule depuis ce matin…" oninput="A.requestDescriptionChanged()">${esc(savedDraft.description || selection.query || '')}</textarea></div>
+        <textarea id="r-desc" maxlength="5000" placeholder="Ex : Le robinet de ma cuisine coule depuis ce matin…" oninput="A.requestDescriptionChanged()">${esc(savedDraft.description || selection.query || '')}</textarea><div id="r-language-hint" class="small muted" aria-live="polite"></div></div>
       <div class="field"><label>Photos <span class="muted small">facultatif · 3 maximum</span></label><div class="photo-strip" id="r-photos"><button class="ph-add" onclick="A.pickPhotos('r-photos')">＋</button></div><input type="file" id="file-input" accept="image/*" multiple style="display:none"></div>
       <div class="field"><label>Note vocale <span class="muted small">facultatif · ${REQ.audio_max} secondes maximum</span></label><div id="r-audio-zone"><button class="btn sec sm" id="r-rec" onclick="A.toggleRec('r-audio-zone')">🎤 Enregistrer une note vocale</button></div></div>
       <div class="field"><label>Ville d’intervention <span class="req">*</span></label>
@@ -2400,7 +2402,7 @@ const A = {
     const selected = new Set((REQ.selected_tasks || []).map(t => Number(t.id)));
     const choice = t => `<button type="button" class="category-task-choice ${selected.has(Number(t.id)) ? 'on' : ''}" onclick="A.toggleCategoryNeed(${t.id})"><span>${selected.has(Number(t.id)) ? '☑' : '☐'}</span><div><b>${esc(t.name)}</b>${t.description ? `<small>${esc(t.description)}</small>` : ''}${t.price_from ? `<small class="task-price">À partir de ${fmtFCFA(t.price_from)}${t.price_unit ? ` <em>· ${esc(t.price_unit)}</em>` : ''}</small>` : ''}</div></button>`;
     const groups = (REQ.category_services || []).map(service => {
-      const tasks = (REQ.category_tasks || []).filter(t => Number(t.service_id) === Number(service.id) && (!query || normalize(`${t.name} ${t.description || ''}`).includes(query)));
+      const tasks = (REQ.category_tasks || []).filter(t => Number(t.service_id) === Number(service.id) && (!query || normalize(`${t.name} ${t.description || ''} ${(t.search_terms || []).join(' ')}`).includes(query)));
       // Le nom de la prestation organise les tâches ; le nom de la grande catégorie reste seulement dans l’en-tête vert.
       return tasks.length ? `<section class="category-task-group"><h4>${esc(service.name)}</h4>${tasks.map(choice).join('')}</section>` : '';
     }).filter(Boolean);
@@ -2466,9 +2468,10 @@ const A = {
         const categories = Array.isArray(r.categories) ? r.categories : [];
         const catHtml = categories.length ? `<div class="sec-title">Grandes catégories</div>${categories.map(c=>A.searchCategoryCard(c)).join('')}` : '';
         const serviceHtml = r.results.length ? `<div class="sec-title">Prestations et tâches</div>${(compact ? r.results.slice(0,5) : r.results).map(s => A.searchResultCard(s, compact)).join('')}` : '';
+        const clarification = r.clarification ? `<div class="hint" style="margin-top:8px">💬 ${esc(r.clarification)}</div>` : '';
         zone.innerHTML = (categories.length || r.results.length)
-          ? (compact ? `${categories.slice(0,2).map(c=>A.searchCategoryCard(c)).join('')}${r.results.slice(0,4).map(s=>A.searchResultCard(s,true)).join('')}` : catHtml + serviceHtml)
-          : (compact ? '<div class="hint">Aucune correspondance certaine. <button class="btn ghost sm" onclick="A.describeAnyNeed()">Décrire mon besoin</button></div>' : emptyState('🔍', 'Aucun résultat suffisamment fiable.') + `<button class="btn" onclick="A.describeAnyNeed()">Décrire mon besoin</button><button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>`);
+          ? ((compact ? `${categories.slice(0,2).map(c=>A.searchCategoryCard(c)).join('')}${r.results.slice(0,4).map(s=>A.searchResultCard(s,true)).join('')}` : catHtml + serviceHtml) + clarification)
+          : (compact ? `<div class="hint">${r.clarification ? esc(r.clarification) + ' ' : 'Aucune correspondance certaine. '}<button class="btn ghost sm" onclick="A.describeAnyNeed()">Décrire mon besoin</button></div>` : emptyState('🔍', r.clarification || 'Aucun résultat suffisamment fiable.') + `<button class="btn" onclick="A.describeAnyNeed()">Décrire mon besoin</button><button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>`);
       } catch (e) { if (sequence === A._searchSeq) zone.innerHTML = compact ? '<div class="hint">Recherche momentanément indisponible.</div>' : emptyState('📶', e.message); }
     }, 180);
   },
@@ -2587,7 +2590,32 @@ const A = {
   collap(id) { document.getElementById(id).classList.toggle('open'); },
   requestSchedule() { const s=document.getElementById('r-schedule'), d=document.getElementById('r-date'); if (!s || !d) return; d.style.display=s.value==='date'?'block':'none'; if(s.value!=='date') d.value=''; A.saveCategoryDraft(); },
   requestTaskChanged() { const task = document.getElementById('r-task'); REQ.task_id = task ? (Number(task.value) || null) : null; A.requestEstimate(); },
-  requestDescriptionChanged() { A.saveCategoryDraft(); clearTimeout(A._estimateTimer); A._estimateTimer = setTimeout(() => A.requestEstimate(), 300); },
+  requestDescriptionChanged() { A.saveCategoryDraft(); clearTimeout(A._estimateTimer); A._estimateTimer = setTimeout(() => A.requestEstimate(), 300); clearTimeout(A._needHintTimer); A._needHintTimer = setTimeout(() => A.requestNeedHints(), 420); },
+  async requestNeedHints() {
+    const zone=document.getElementById('r-language-hint'), input=document.getElementById('r-desc'); if (!zone || !input) return;
+    const text=input.value.trim(); if (text.length < 5) { zone.innerHTML=''; return; }
+    const seq=(A._needHintSeq||0)+1; A._needHintSeq=seq;
+    try {
+      const context=REQ && REQ.mode==='category' && REQ.category_id ? '&context_category_id='+encodeURIComponent(REQ.category_id) : '';
+      const r=await api('/search?q='+encodeURIComponent(text)+context);
+      if (seq!==A._needHintSeq) return;
+      const suggestions=(r.results||[]).filter(x=>x.task_id).slice(0,3);
+      if (REQ && REQ.mode==='category' && suggestions.length) {
+        const buttons=suggestions.map(x=>{ const task=(REQ.category_tasks||[]).find(t=>Number(t.id)===Number(x.task_id)); return task ? `<button type="button" class="btn ghost sm" onclick="A.acceptNeedSuggestion(${Number(task.id)})">${esc(task.name)}</button>` : ''; }).filter(Boolean).join(' ');
+        zone.innerHTML=buttons ? `<span>Suggestion, à confirmer :</span> ${buttons}` : (r.clarification ? esc(r.clarification) : '');
+      } else if (r.clarification) zone.textContent=r.clarification;
+      else zone.innerHTML='';
+    } catch { if (seq===A._needHintSeq) zone.innerHTML=''; }
+  },
+  acceptNeedSuggestion(taskId) {
+    const task=(REQ.category_tasks||[]).find(t=>Number(t.id)===Number(taskId)); if(!task) return;
+    if ((REQ.selected_tasks||[]).some(t=>Number(t.id)===Number(task.id))) return;
+    if ((REQ.selected_tasks||[]).length && Number(REQ.selected_tasks[0].service_id)!==Number(task.service_id)) { A.openCategoryNeeds(); return toast('La suggestion relève d’une autre prestation : choisissez-la dans la liste.', 'err'); }
+    A.toggleCategoryNeed(task.id);
+  },
+  // Réutilisable lorsqu'une transcription vocale est fournie par un appareil ou un service autorisé :
+  // elle passe par le même moteur que la description saisie, sans sélection automatique.
+  applyTranscribedNeed(text) { const input=document.getElementById('r-desc'); if (!input) return; input.value=String(text||'').slice(0,5000); A.requestDescriptionChanged(); },
   async requestLocationChanged(keepCommune) {
     const city = ((document.getElementById('r-city') || {}).value || '').trim();
     const field = document.getElementById('r-commune-field'); const input = document.getElementById('r-commune');

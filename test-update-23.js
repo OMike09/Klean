@@ -15,7 +15,7 @@ async function api(token, path, method='GET', body) { const r=await fetch(BASE+p
 
   const app=fs.readFileSync('public/app.js','utf8'), css=fs.readFileSync('public/category-request.css','utf8'), index=fs.readFileSync('public/index.html','utf8'), sw=fs.readFileSync('public/sw.js','utf8');
   const form=app.slice(app.indexOf('function renderCategoryRequestForm'),app.indexOf('/* ---------- Grandes catégories',app.indexOf('function renderCategoryRequestForm')));
-  yes(form.includes("header(cat.name") && form.includes('need-picker') && form.includes('A.openCategoryNeeds()'), 'le nom de catégorie est porté par l’en-tête et les besoins sont derrière une seule option compacte');
+  yes(form.includes('header(grandLabel(cat)') && form.includes('need-picker') && form.includes('A.openCategoryNeeds()'), 'le libellé compact de catégorie est porté par l’en-tête et les besoins sont derrière une seule option compacte');
   yes(!form.includes('cat.categories.map') && form.includes('Je décris mon besoin ci-dessous.') && form.includes('Photos') && form.includes('Message vocal') && form.includes('Ville d’intervention') && form.includes('Quartier / repère') && form.includes('Disponibilité') && form.includes('Trouver un professionnel'), 'la page unique contient le parcours complet sans liste initiale de tâches');
   const ordered=['Je choisis mon/mes besoins','Je décris mon besoin ci-dessous.','Photos','Message vocal','Ville d’intervention','Quartier / repère','Disponibilité','category-price-reference','Trouver un professionnel'];
   yes(ordered.every((x,i)=>form.indexOf(x)>=0 && (!i || form.indexOf(x)>form.indexOf(ordered[i-1]))), 'les sections suivent l’ordre simplifié demandé, jusqu’au bouton final');

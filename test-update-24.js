@@ -10,7 +10,7 @@ async function api(token,path,method='GET',body){const r=await fetch(BASE+path,{
   yes(start>0 && picker.includes('Recherchez ou sélectionnez directement les besoins concernés') && picker.includes('category-task-group'), 'le panneau affiche directement les besoins dans une liste organisée');
   yes(!picker.includes('category-service-select') && !picker.includes('[s.category,s.name]') && !picker.includes('service.category'), 'le sélecteur ne répète plus le nom de la catégorie devant chaque ligne');
   yes(picker.includes('esc(service.name)') && picker.includes('category-task-q') && picker.includes('filterCategoryNeeds()'), 'les tâches restent regroupées par prestation, sélectionnables et recherchables');
-  yes(app.includes("header(cat.name") && app.includes('Plusieurs besoins') && css.includes('.category-task-group') && sw.includes('ks-v8-public-shell'), 'le nom de la grande catégorie reste dans l’en-tête et le rendu est mobile/PWA');
+  yes(app.includes('header(grandLabel(cat)') && app.includes('Plusieurs besoins') && css.includes('.category-task-group') && sw.includes('ks-v8-public-shell'), 'le libellé compact de grande catégorie reste dans l’en-tête et le rendu est mobile/PWA');
 
   const cats=(await api(null,'/grand-categories')).d;
   const grand=cats.find(g=>g.categories.some(c=>c.services.some(s=>s.taches.length)));
