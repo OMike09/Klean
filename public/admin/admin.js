@@ -35,6 +35,25 @@ async function api(path, opts = {}) {
     return data;
   } finally { if(writing) ADMIN_WRITES=Math.max(0,ADMIN_WRITES-1); }
 }
+
+// Téléversement utilisé par la fiche d'une grande catégorie. L'association reste ensuite
+// validée par l'API PDG : téléverser un fichier ne suffit jamais à le publier.
+async function uploadImageForCategory(file) {
+  if (!file) throw new Error('Choisissez une image.');
+  if (!/^image\//i.test(file.type || '')) throw new Error('Le fichier doit être une image.');
+  if (file.size > 15 * 1024 * 1024) throw new Error('L’image dépasse la limite de 15 Mo.');
+  const form = new FormData(); form.append('files', file);
+  const headers = TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {};
+  ADMIN_WRITES++;
+  try {
+    let res; try { res = await fetch('/api/upload', { method:'POST', headers, body:form }); }
+    catch { throw new Error('Connexion impossible. Vérifiez votre connexion.'); }
+    let data={}; try { data=await res.json(); } catch { }
+    if (!res.ok) throw new Error(data.error || 'Téléversement impossible.');
+    if (!Array.isArray(data.files) || !data.files[0]) throw new Error('Aucune image valide n’a été reçue.');
+    return data.files[0];
+  } finally { ADMIN_WRITES=Math.max(0,ADMIN_WRITES-1); }
+}
 function adminResetDirty(){ ADMIN_DIRTY={enabled:false,dirty:false,modalDirty:false}; }
 function adminArmDraft(root, reset){ if(reset)adminResetDirty(); const zone=root||root; if(!zone)return; const controls=zone.querySelectorAll('input,textarea,select'); if(!controls.length)return; ADMIN_DIRTY.enabled=true; controls.forEach(el=>{ if(el.disabled||el.type==='hidden'||el.type==='button'||el.type==='submit'||el.id==='gs-q'||el.dataset.adminDraftBound)return; el.dataset.adminDraftBound='1'; const changed=()=>{ADMIN_DIRTY.dirty=true;if(el.closest('#modal'))ADMIN_DIRTY.modalDirty=true;};el.addEventListener('input',changed,{passive:true});el.addEventListener('change',changed,{passive:true}); }); }
 function adminForceCloseModal(){ if(window._supportPoll){clearInterval(window._supportPoll);window._supportPoll=null;}const m=document.getElementById('modal');if(m)m.remove();ADMIN_DIRTY.modalDirty=false; }
@@ -84,15 +103,9 @@ const MENU = [
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
   ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Trouver ou proposer un job', null, 'contenu'], ['ecole', '🏫 École & famille', null, 'contenu'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
   ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
-  ['PARAMÈTRES', [['settings', '⚙️ Paramètres', null, 'parametres']]],
+  ['CONFIGURATION', [['estimates', '🧠 Tarifs & estimations intelligentes', null, 'PDG'], ['commerce', '💰 Paramètres commerciaux', null, 'parametres'], ['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
 ];
 function menuVisible(perm) { return !perm || (perm === 'PDG' ? ME && ME.role === 'pdg' : can(perm)); }
-// Une seule entrée principale « Paramètres ». Les anciennes vues restent accessibles par lien
-// direct, mais sont désormais des sous-sections pour ne retirer aucune configuration existante.
-const SETTINGS_SECTIONS=[
-  ['settings','⚙️ Application & comptes','parametres'],['catalog','🗂️ Catégories & photos','catalogue'],['broadcast','🔔 Notifications & messages','communication'],['ads','📣 Publicités','communication'],['commerce','💰 Commercial','parametres'],['estimates','🧠 Prix & estimations','PDG'],['rules','🔒 Sécurité & règles','securite']
-];
-function settingsTabs(active) { const items=SETTINGS_SECTIONS.filter(x=>menuVisible(x[2])); return `<div class="tabs settings-hub-tabs">${items.map(([id,label])=>`<button class="${active===id?'on':''}" onclick="go('${id}')">${label}</button>`).join('')}</div>`; }
 
 function shell(content) {
   root.innerHTML = `
@@ -360,13 +373,18 @@ views.catalog = async () => {
   const tab = sessionStorage.getItem('adm_cat_tab') || 'cat';
   if (tab === 'villes') return views._villes();
   if (tab === 'pop') return views._populaires();
-  if (tab === 'roots') return views._grandCategories();
+  if (tab === 'photos') return views._grandPhotos();
   const d = CATD = await api('/admin/catalog');
   const q = (sessionStorage.getItem('adm_cat_q') || '').toLowerCase();
   let sel = parseInt(sessionStorage.getItem('adm_cat_sel') || 0, 10);
   if (!d.categories.some(c => c.id === sel)) sel = d.categories[0]?.id || 0;
 
   const nTaches = {}; d.taches.forEach(t => nTaches[t.service_id] = (nTaches[t.service_id] || 0) + 1);
+  const grandImages = (d.grand_categories || []).sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id).map(g => {
+    const photo = g.image_url ? `<img src="${esc(mediaUrl(g.image_url))}" alt="${esc(g.name)}" style="width:72px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #d3e4e0">` : '<span style="display:grid;place-items:center;width:72px;height:56px;border-radius:8px;background:#edf5f3">🖼️</span>';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px;border:1px solid #e2eeeb;border-radius:10px;min-width:245px;flex:1">${photo}<div style="min-width:0;flex:1"><b class="small" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.short_label || g.name)}</b><span class="small ${g.image_url ? 'muted' : 'bad'}">${g.image_url ? 'Photo principale publiée' : 'Photo manquante'}</span></div>${ME && ME.role==='pdg' ? `<button class="btn sm sec" onclick="A.grandCategoryForm(${g.id})">Photo</button>` : ''}</div>`;
+  }).join('');
+  const imagePanel = `<div class="panel"><div class="frow" style="align-items:center"><div><h2 style="margin:0">Photos des grandes catégories</h2><div class="small muted">Une source par identifiant de grande catégorie, partagée par les cartes publiques et le tableau PDG.</div></div>${ME && ME.role==='pdg' ? '<span class="pill ok">Modification réservée au PDG</span>' : ''}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:8px;margin-top:12px">${grandImages}</div></div>`;
   const svcRow = (s, path) => `<tr>
     <td><b>${esc(s.name)}</b>${path ? `<div class="small muted">${esc(path)}</div>` : ''}
       <div class="small" style="color:#111;font-weight:700">${s.price_show && s.price_from ? esc(s.price_prefix || 'Dès') + ' ' + Number(s.price_from).toLocaleString('fr-FR') + ' FCFA' : '<span class="muted" style="font-weight:400">prix masqué</span>'}</div>
@@ -410,12 +428,13 @@ views.catalog = async () => {
     </div>`;
   }
 
-  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('catalog')}<h2>🗂️ Services & catégories</h2>
+  shell(`<h1>🗂️ Services & catégories</h1>
+  ${imagePanel}
   <div class="tabs">
     <button class="on">🗂️ Catalogue</button>
-    <button onclick="sessionStorage.setItem('adm_cat_tab','roots');render()">🖼️ Catégories & photos</button>
     <button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Services populaires</button>
     <button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes (${'villes' in STATS ? STATS.villes : '…'})</button>
+    <button onclick="sessionStorage.setItem('adm_cat_tab','photos');render()">🖼️ Catégories & photos</button>
   </div>
   <div class="frow">
     <div style="flex:1;min-width:220px"><label>🔎 Rechercher dans le catalogue (catégorie, service, tâche, mot-clé)</label>
@@ -439,6 +458,27 @@ views.catalog = async () => {
   const qi = document.getElementById('cat-q');
   if (q && qi) { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); }
 };
+
+
+/* ---------- Photos des grandes catégories (source unique par identifiant) ---------- */
+views._grandPhotos = async () => {
+  const d = CATD = await api('/admin/catalog');
+  const rows = (d.grand_categories || []).slice().sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id);
+  const cards = rows.map(g => {
+    const photo = g.image_url
+      ? `<img src="${esc(mediaUrl(g.image_url))}" alt="${esc(g.name)}" style="width:100%;height:152px;object-fit:cover;display:block">`
+      : '<div style="height:152px;display:grid;place-items:center;background:#edf5f3;font-size:38px">🖼️</div>';
+    const action = ME && ME.role==='pdg'
+      ? `<button class="btn sm ${g.image_url ? 'sec' : ''}" onclick="A.grandCategoryPhotoForm(${g.id})">${g.image_url ? 'Modifier la photo' : 'Ajouter une photo'}</button>`
+      : '<span class="small muted">Modification réservée au PDG</span>';
+    return `<article class="grand-photo-card" style="min-width:0;overflow:hidden;background:#fff;border:1px solid #dce9e6;border-radius:12px;display:flex;flex-direction:column">${photo}<div style="padding:10px"><div style="display:flex;gap:6px;align-items:flex-start;justify-content:space-between"><b style="line-height:1.25">${esc(g.short_label || g.name)}</b>${g.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</div><div class="small muted" style="min-height:32px;margin:5px 0 9px">${g.image_url ? 'Photo principale publiée sur les cartes et associée à la catégorie #' + Number(g.id) : 'Aucune photo principale enregistrée.'}</div>${action}</div></article>`;
+  }).join('');
+  shell(`<h1>🖼️ Catégories & photos</h1>
+    <div class="tabs"><button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button><button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Services populaires</button><button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes</button><button class="on">🖼️ Catégories & photos</button></div>
+    <div class="panel small muted">Chaque carte lit l’unique champ photo de sa grande catégorie. Remplacer ou retirer une photo met donc immédiatement à jour le tableau PDG et les cartes publiques, sans toucher aux métiers, prestations, missions ni historiques.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px">${cards}</div>`);
+};
+
 
 /* ---------- Tarifs et estimations intelligentes (PDG) ---------- */
 views.estimates = async () => {
@@ -471,18 +511,6 @@ views.estimates = async () => {
       <div style="max-height:340px;overflow:auto"><table><tr><th>Expression</th><th>Destination</th><th>Source</th><th>État</th><th></th></tr>${terms.map(t => `<tr><td>${esc(t.term)}</td><td>${esc(t.service_name)}${t.task_name ? ' › ' + esc(t.task_name) : ''}</td><td class="small">${esc(t.source)}</td><td>${t.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td><td style="white-space:nowrap"><button class="btn sm sec" onclick="A.toggleSearchTerm(${t.id},${t.active ? 0 : 1})">${t.active ? 'Désactiver' : 'Activer'}</button><button class="btn sm warn" onclick="A.deleteSearchTerm(${t.id})">🗑️</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Aucune expression.</td></tr>'}</table></div></div>`);
 };
 
-/* ---------- Grandes catégories et photos : administration visible du PDG ---------- */
-views._grandCategories = async () => {
-  const d=CATD=await api('/admin/catalog'); const counts={}; (d.categories||[]).forEach(c=>counts[c.grand_category_id]=(counts[c.grand_category_id]||0)+1);
-  const reviews=ME&&ME.role==='pdg'?await api('/admin/pros/catalogue-reviews').catch(()=>[]):[];
-  const audit=ME&&ME.role==='pdg'?await api('/admin/catalogue-merge-audit').catch(()=>[]):[];
-  shell(`<h1>🖼️ Grandes catégories & photos</h1>
-  <div class="tabs"><button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button><button class="on">🖼️ Catégories & photos</button><button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Catégories populaires</button><button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes</button></div>
-  <div class="panel small muted">Chaque visuel est lié à l’identifiant de la grande catégorie, jamais à son nom. Après enregistrement, l’image est utilisée automatiquement sur les cartes de l’application. Une suppression ne retire ni services, ni missions, ni historique.</div>
-  <div class="grand-photo-grid">${(d.grand_categories||[]).map(g=>`<article class="grand-photo-card ${g.active?'':'inactive'}"><div class="grand-photo-preview">${g.image_url?`<img src="${esc(mediaUrl(g.image_url))}" alt="Photo ${esc(g.name)}">`:`<span>${esc(g.icon||'🧩')}</span>`}</div><div class="grand-photo-copy"><b>${esc(g.short_label||g.name)}</b><small>${esc(g.name)} · ${counts[g.id]||0} métier(s)</small><div class="btn-row"><button class="btn sm ${g.image_url?'sec':''}" onclick="A.grandCategoryPhotoForm(${g.id})">${g.image_url?'Modifier la photo':'Ajouter une photo'}</button>${g.image_url?`<button class="btn sm warn" onclick="A.deleteGrandCategoryPhoto(${g.id})">Supprimer la photo</button>`:''}<button class="btn sm sec" onclick="A.grandCategoryForm(${g.id})">✏️ Détails</button></div></div></article>`).join('')}</div>
-  ${ME&&ME.role==='pdg'?`<div class="panel"><h2 style="margin-top:0">🧭 Profils historiques à corriger</h2><div class="small muted">Ces anciens services ne sont pas classés automatiquement lorsqu’aucune correspondance certaine n’existe. Corrigez-les ici ou conservez-les sans nouvelle compétence.</div><table><tr><th>Professionnel</th><th>Ancien service</th><th>Motif</th><th>Depuis</th><th></th></tr>${reviews.map(r=>`<tr><td><b>${esc(r.user_name)}</b></td><td>${esc(r.legacy_service_name||'Service introuvable')}</td><td class="small">${esc(r.reason)}</td><td class="small">${fmtD(r.created_at)}</td><td><button class="btn sm" onclick="A.resolveCatalogueReview(${r.id})">Corriger</button> <button class="btn sm sec" onclick="A.ignoreCatalogueReview(${r.id})">Ne pas attribuer</button></td></tr>`).join('')||'<tr><td colspan="5" class="muted">Aucun profil à vérifier.</td></tr>'}</table></div><div class="panel"><h2 style="margin-top:0">Traçabilité des dédoublonnages exacts</h2><div class="small muted">Les rapprochements par ressemblance ne sont jamais fusionnés automatiquement. Cette piste conserve le snapshot des seules fusions de noms strictement identiques après normalisation.</div><table><tr><th>Type</th><th>Référence conservée</th><th>Référence fusionnée</th><th>Date</th></tr>${audit.map(x=>`<tr><td>${esc(x.entity_type)}</td><td>#${x.canonical_id}</td><td>#${x.merged_id}</td><td class="small">${fmtD(x.merged_at)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">Aucune fusion exacte enregistrée.</td></tr>'}</table></div>`:''}`);
-};
-
 /* ---------- Services populaires (sélection et ordre de l'accueil) ---------- */
 views._populaires = async () => {
   const d = CATD = await api('/admin/catalog');
@@ -493,7 +521,7 @@ views._populaires = async () => {
     const svcs = d.services.filter(s => s.category_id === c.id && !s.popular && s.active);
     return svcs.length ? `<optgroup label="${esc((c.icon || '') + ' ' + c.name)}">${svcs.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup>` : '';
   }).join('');
-  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('catalog')}<h2>🗂️ Services & catégories</h2>
+  shell(`<h1>🗂️ Services & catégories</h1>
   <div class="tabs">
     <button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button>
     <button class="on">⭐ Services populaires</button>
@@ -526,7 +554,7 @@ views._villes = async () => {
   const list = await api('/admin/villes');
   const q = (sessionStorage.getItem('adm_v_q') || '').toLowerCase();
   const show = q ? list.filter(v => v.name.toLowerCase().includes(q)) : list;
-  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('catalog')}<h2>🗂️ Services & catégories</h2>
+  shell(`<h1>🗂️ Services & catégories</h1>
   <div class="tabs">
     <button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button>
     <button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Services populaires</button>
@@ -626,7 +654,7 @@ views.commerce = async () => {
   try { niveaux = JSON.parse(s.pub_niveaux || '[]'); } catch { }
   const onoff = (k, lb) => `<button class="btn sm ${s[k] === '1' ? '' : 'sec'}" onclick="A.toggleSetting('${k}','${s[k] === '1' ? '0' : '1'}')">${lb} : ${s[k] === '1' ? '🟢 ACTIVÉE' : '🔴 DÉSACTIVÉE'}</button>`;
   const num = (k, label, w = 110) => `<div><label>${label}</label><input type="number" id="cm-${k}" value="${esc(s[k] || '')}" style="width:${w}px" onchange="A.cmNum('${k}')"></div>`;
-  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('commerce')}<h2>💰 Paramètres commerciaux</h2>
+  shell(`<h1>💰 Paramètres commerciaux</h1>
   <div class="small muted" style="margin-bottom:10px">Modèle Klean Services : <b>prestation → commission obligatoire</b> • <b>visibilité → paiement facultatif</b> • <b>publicité → campagne payante</b> • <b>avis de recherche → gratuit ou payant selon vos réglages</b> • <b>recherche d'emploi → gratuite + mise en avant facultative</b>. Toute modification est journalisée (qui, ancienne et nouvelle valeur).</div>
 
   <div class="panel"><h2 style="margin-top:0">A. 💰 Commission sur les prestations</h2>
@@ -798,7 +826,6 @@ views.finances = async () => {
 /* ---------- Publicités ---------- */
 views.ads = async () => {
   const list = await api('/admin/ads');
-  const analytics = ME && ME.role === 'pdg' ? await api('/admin/ads/analytics').catch(() => []) : [];
   const s = await api('/admin/settings');
   const annonces = await api('/admin/annonces');
   const villes = await api('/villes');
@@ -809,7 +836,7 @@ views.ads = async () => {
   const liste = F === 'toutes' ? annonces : annonces.filter(a => (a.type || 'info') === F);
   const apercu = a => { const t = TB[a.type] || TB.info;
     return `<span style="background:#0b1320;color:${esc(a.color)};padding:3px 10px;border-radius:6px"><b style="${(a.type || 'info') === 'urgence' ? 'color:#ff6b6b' : ''}">${t.ic} ${t.lb}${(a.theme || '').trim() ? ' (' + esc(a.theme) + ')' : ''} :</b> ${esc(a.content || a.title || '')}</span>`; };
-  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('ads')}<h2>📣 Publicités & informations</h2>
+  shell(`<h1>📣 Publicités & informations</h1>
   <div class="panel">
     <h2 style="margin-top:0">📺 Bandeau fixe en bas de l'accueil — publicités, informations et urgences (défilement style chaîne info)</h2>
     <div class="frow" style="align-items:center">
@@ -877,8 +904,7 @@ views.ads = async () => {
     <td>${a.placement}</td><td class="small">${esc(zonesLabel(a.zones))}</td><td><b>${Number(a.views || 0).toLocaleString('fr-FR')}</b></td><td>${a.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</td>
     <td><button class="btn sm sec" onclick="A.toggleAd(${a.id},${a.active ? 0 : 1})">${a.active ? 'Désactiver' : 'Activer'}</button>
     <button class="btn sm warn" onclick="A.delAd(${a.id})">🗑️</button></td></tr>`).join('')}
-  ${!list.length ? '<tr><td colspan="8" class="muted">Aucune publicité.</td></tr>' : ''}</table></div>
-  ${ME && ME.role === 'pdg' ? `<div class="panel"><h2 style="margin-top:0">📊 Statistiques de vues des publicités</h2><div class="small muted">Une vue est enregistrée au plus une fois par publicité, par personne ou navigateur anonyme et par jour. Les vues totales et les visiteurs uniques sont donc distincts ; aucune adresse IP ou donnée technique n’est affichée.</div><div style="overflow:auto"><table><tr><th>Publicité</th><th>Annonceur</th><th>Vues totales</th><th>Utilisateurs uniques</th><th>Publication</th><th>Statut</th><th></th></tr>${analytics.map(a=>`<tr><td><b>${esc(a.title||'Sans titre')}</b><div class="small muted">${esc((a.content||'').slice(0,100))}</div></td><td>${esc(a.advertiser||'Klean Services')}</td><td><b>${Number(a.total_views||0).toLocaleString('fr-FR')}</b></td><td>${Number(a.unique_viewers||0).toLocaleString('fr-FR')}</td><td class="small">${a.published_at||a.created_at?fmtD(a.published_at||a.created_at):'—'}</td><td>${a.status==='active'?'<span class="pill ok">Active</span>':a.status==='suspendue'?'<span class="pill warn">Suspendue</span>':a.status==='expiree'?'<span class="pill off">Terminée</span>':'<span class="pill info">'+esc(a.status||'—')+'</span>'}</td><td><button class="btn sm sec" onclick="A.adViews('${a.kind}',${a.id},'${esc(a.title||'Publicité').replace(/'/g,"\'")}')">Voir les vues</button></td></tr>`).join('')||'<tr><td colspan="7" class="muted">Aucune publicité ou campagne à analyser.</td></tr>'}</table></div></div>`:''}`);
+  ${!list.length ? '<tr><td colspan="8" class="muted">Aucune publicité.</td></tr>' : ''}</table></div>`);
 };
 
 /* ---------- Messagerie Klean Services ---------- */
@@ -898,7 +924,7 @@ views.support = async () => {
 views.broadcast = async () => {
   const [list, villes] = await Promise.all([api('/admin/general-messages'), api('/admin/villes')]);
   const st = { draft:'Brouillon', scheduled:'Programmé', sent:'Envoyé', cancelled:'Annulé' };
-  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('broadcast')}<h2>🔔 Notifications & messages</h2>
+  shell(`<h1>📨 Messages généraux</h1>
   <div class="panel"><div class="small muted mb">Les destinataires sont calculés et enregistrés côté serveur, sans doublon. « Notification enregistrée » signifie qu’elle est dans l’application ; la livraison système (push) dépend des autorisations de l’appareil.</div>
     <div class="frow"><div style="flex:1"><label>Titre</label><input id="gm-title" maxlength="160" style="width:100%" placeholder="Ex : Information importante"></div></div>
     <div class="frow"><div style="flex:1"><label>Message</label><textarea id="gm-body" maxlength="2000" placeholder="Votre message…"></textarea></div></div>
@@ -913,7 +939,7 @@ views.broadcast = async () => {
 /* ---------- Règles ---------- */
 views.rules = async () => {
   const [s, about] = await Promise.all([api('/admin/settings'), ME && ME.role === 'pdg' ? api('/admin/about') : Promise.resolve(null)]);
-  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('rules')}<h2>🔒 Sécurité & règles</h2>
+  shell(`<h1>📜 Règles & conditions</h1>
   <div class="panel"><h2 style="margin-top:0">Règles client</h2><textarea class="rules-ta" id="r-client">${esc(s.rules_client || '')}</textarea><button class="btn" style="margin-top:8px" onclick="A.saveRules('rules_client','r-client')">Enregistrer les règles client</button></div>
   <div class="panel"><h2 style="margin-top:0">Règles professionnel</h2><textarea class="rules-ta" id="r-pro">${esc(s.rules_pro || '')}</textarea><button class="btn" style="margin-top:8px" onclick="A.saveRules('rules_pro','r-pro')">Enregistrer les règles professionnel</button></div>
   ${about ? `<div class="panel"><h2 style="margin-top:0">ℹ️ À propos de Klean Services <span class="pill info">Paramètre PDG</span></h2><div class="small muted mb">Le brouillon n’est visible dans l’application qu’après publication. Ajoutez, modifiez ou supprimez des paragraphes avant l’aperçu.</div><label>Titre</label><input id="about-title" style="width:100%" value="${esc(about.title||'')}"><div id="about-paragraphs">${about.draft.map((p,i)=>aboutParagraphHtml(p,i)).join('')}</div><div class="btn-row mt"><button class="btn sec" onclick="A.addAboutParagraph()">＋ Paragraphe</button><button class="btn outline" onclick="A.previewAbout()">👁️ Aperçu du brouillon</button><button class="btn" onclick="A.saveAbout(false)">💾 Enregistrer le brouillon</button><button class="btn" onclick="A.saveAbout(true)">📢 Publier</button></div><div class="small muted mt">Dernière publication : ${about.published_at ? fmtD(about.published_at) : 'jamais'}</div><div style="border-top:1px solid #e4eeeb;margin-top:14px;padding-top:12px"><h3 style="margin:0 0 8px">↗️ Partager l’application</h3><label>Lien officiel (https://…)</label><input id="share-url" style="width:100%" value="${esc(s.share_official_url||'')}" placeholder="https://votre-domaine…"><label style="margin-top:8px">Texte de partage</label><textarea id="share-text" maxlength="500">${esc(s.share_text||'Découvrez Klean Services : exprimez votre besoin, un professionnel arrive.')}</textarea><button class="btn sec mt" onclick="A.saveShareSettings()">Enregistrer le partage</button></div></div>` : ''}
@@ -1119,7 +1145,7 @@ views.settings = async () => {
   const [s, dispatch] = await Promise.all([api('/admin/settings'), api('/admin/dispatch/overview')]);
   const contacts = JSON.parse(s.urgence_contacts || '[]');
   const ps = dispatch.professionals || {};
-  shell(`<h1>⚙️ Paramètres</h1>${settingsTabs('settings')}<h2>Application & comptes</h2>
+  shell(`<h1>⚙️ Paramètres généraux</h1>
   <div class="panel"><h2 style="margin-top:0">Suivi des demandes</h2><div class="cards"><div class="kpi"><div class="v">${dispatch.searching || 0}</div><div class="l">Recherches en cours</div></div><div class="kpi"><div class="v">${dispatch.unanswered || 0}</div><div class="l">Sans réponse</div></div><div class="kpi"><div class="v">${ps.disponible || 0}</div><div class="l">Pros disponibles</div></div><div class="kpi"><div class="v">${ps.en_mission || 0}</div><div class="l">Pros en mission</div></div></div><div class="small muted">Les demandes sans réponse sont aussi consultables dans Demandes & missions. Les services et capacités autorisés d’un professionnel se règlent dans Utilisateurs → Fiche → Autorisations pro.</div></div>
   <div class="panel">
     <h2 style="margin-top:0">Missions & paiements</h2>
@@ -1354,25 +1380,55 @@ const A = {
   },
   async _doReject(id) { try { await api(`/admin/pros/${id}/reject`, { method: 'POST', body: { reason: document.getElementById('rej-reason').value } }); closeModal(); toast('Demande refusée.', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
 
-  grandCategory(id) { const d=(ESTD&&ESTD.catalog)||CATD||{}; return (d.grand_categories||[]).find(x=>Number(x.id)===Number(id)); },
   grandCategoryForm(id) {
-    const g=id ? A.grandCategory(id) : {name:'',short_label:'',icon:'🧩',description:'',active:1,sort:99,image_url:''};
-    if(!g)return toast('Grande catégorie introuvable.','err');
-    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3><label>Nom complet</label><input id="gc-name" style="width:100%" maxlength="120" value="${esc(g.name||'')}"><label>Libellé court <span class="muted">(cartes mobiles)</span></label><input id="gc-short" style="width:100%" maxlength="60" value="${esc(g.short_label||'')}"><label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px"><label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea><div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div><div class="small muted mt">La photo se gère depuis « Catégories & photos » afin de la prévisualiser avant publication.</div><button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+    const source = (ESTD && ESTD.catalog) || CATD || { grand_categories:[] };
+    const g=id ? (source.grand_categories || []).find(x=>x.id===id) : {name:'',icon:'🧩',description:'',active:1,sort:99,image_url:''};
+    if (id && !g) return toast('Grande catégorie introuvable.','err');
+    const imageUrl=String(g.image_url || '');
+    openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3>
+      <label>Nom</label><input id="gc-name" style="width:100%" value="${esc(g.name||'')}">
+      <label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px">
+      <label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea>
+      <input id="gc-image-url" type="hidden" value="${esc(imageUrl)}">
+      <div style="margin:12px 0;padding:10px;border:1px solid #d9e7e4;border-radius:10px;background:#f8fcfb">
+        <b>Photo principale de la catégorie</b><div id="gc-photo-preview" style="margin-top:8px">${imageUrl ? `<img src="${esc(mediaUrl(imageUrl))}" alt="Aperçu photo catégorie" style="display:block;width:132px;height:92px;object-fit:cover;border-radius:8px;border:1px solid #cfe1dd"><div class="small muted" style="margin-top:5px">Photo actuellement publiée</div>` : '<div class="small muted">Aucune photo sélectionnée.</div>'}</div>
+        <div class="small muted" style="margin:8px 0">La même photo est utilisée sur les cartes publiques et dans ce tableau de bord. Formats image, 15 Mo maximum.</div>
+        <input id="gc-image-file" type="file" accept="image/jpeg,image/png,image/webp" style="max-width:100%">
+        <div class="frow mt"><button id="gc-upload-btn" type="button" class="btn sm sec" onclick="A.uploadGrandCategoryImage()">Téléverser et remplacer</button><button id="gc-remove-btn" type="button" class="btn sm warn" onclick="A.clearGrandCategoryImage()" ${imageUrl?'':'disabled'}>Retirer la photo</button></div>
+      </div>
+      <div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div>
+      <button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
-  grandCategoryPhotoForm(id) {
-    const g=A.grandCategory(id); if(!g)return toast('Grande catégorie introuvable.','err');
-    openModal(`<h3>🖼️ Photo — ${esc(g.name)}</h3><div class="small muted">Choisissez une image paysage JPG, PNG ou WebP. L’aperçu est local : rien n’est publié avant votre confirmation.</div><input id="gcp-id" type="hidden" value="${g.id}"><input id="gcp-original" type="hidden" value="${esc(g.image_url||'')}"><input id="gcp-url" type="hidden" value="${esc(g.image_url||'')}"><div class="grand-photo-modal-preview">${g.image_url?`<img id="gcp-preview" src="${esc(mediaUrl(g.image_url))}" alt="Aperçu">`:`<div id="gcp-empty">Aucune photo enregistrée</div><img id="gcp-preview" alt="Aperçu" style="display:none">`}</div><input id="gcp-file" type="file" accept="image/jpeg,image/png,image/webp" onchange="A.previewGrandCategoryPhoto()" style="width:100%;margin:8px 0"><div class="btn-row"><button class="btn sec" onclick="A.uploadGrandCategoryPhoto()">Importer cette photo</button><button class="btn" onclick="A.saveGrandCategoryPhoto()">Enregistrer et publier</button><button class="btn sec" onclick="closeModal()">Annuler</button></div><div class="small muted mt">L’import prépare l’image pour les cartes ; le remplacement définitif demande une confirmation.</div>`);
+  // Entrée dédiée à la galerie PDG : elle réutilise la même fiche et la même source en base.
+  grandCategoryPhotoForm(id) { this.grandCategoryForm(id); },
+  categoryImagePreview(url, message) {
+    const target=document.getElementById('gc-photo-preview'); if (!target) return;
+    if (!url) { target.innerHTML='<div class="small muted">Aucune photo sélectionnée.</div>'; return; }
+    target.innerHTML=`<img src="${esc(mediaUrl(url))}" alt="Aperçu photo catégorie" style="display:block;width:132px;height:92px;object-fit:cover;border-radius:8px;border:1px solid #cfe1dd"><div class="small muted" style="margin-top:5px">${esc(message || 'Photo actuellement sélectionnée')}</div>`;
   },
-  previewGrandCategoryPhoto() { const f=(document.getElementById('gcp-file')||{}).files?.[0],img=document.getElementById('gcp-preview'),empty=document.getElementById('gcp-empty');if(!f||!img)return;if(!/^image\/(jpeg|png|webp)$/i.test(f.type||''))return toast('Choisissez une image JPG, PNG ou WebP.','err');if(f.size>12*1024*1024)return toast('La photo ne doit pas dépasser 12 Mo avant préparation.','err');if(A._gcpUrl)URL.revokeObjectURL(A._gcpUrl);A._gcpUrl=URL.createObjectURL(f);img.src=A._gcpUrl;img.style.display='block';if(empty)empty.style.display='none';},
-  async compactGrandCategoryPhoto(file) { if(!window.createImageBitmap)return file;let bitmap;try{bitmap=await createImageBitmap(file);}catch{return file;}const ratio=Math.min(1,1400/bitmap.width,1050/bitmap.height),w=Math.max(1,Math.round(bitmap.width*ratio)),h=Math.max(1,Math.round(bitmap.height*ratio)),canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;canvas.getContext('2d').drawImage(bitmap,0,0,w,h);if(bitmap.close)bitmap.close();const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.84));return blob?new File([blob],(file.name||'categorie').replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}):file; },
-  // Alias conservés pour les anciens parcours PDG : ils utilisent le même aperçu et la même préparation.
-  previewGrandCategoryImage() { return A.previewGrandCategoryPhoto(); },
-  async prepareGrandCategoryImage(file) { return A.compactGrandCategoryPhoto(file); },
-  async uploadGrandCategoryPhoto() { const file=(document.getElementById('gcp-file')||{}).files?.[0];if(!file)return toast('Choisissez une photo.','err');try{const prepared=await A.compactGrandCategoryPhoto(file),form=new FormData();form.append('files',prepared);const r=await fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+TOKEN},body:form}),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Import impossible.');const url=(d.files||[])[0];document.getElementById('gcp-url').value=url;const img=document.getElementById('gcp-preview');img.src=mediaUrl(url);img.style.display='block';const empty=document.getElementById('gcp-empty');if(empty)empty.style.display='none';if(A._gcpUrl){URL.revokeObjectURL(A._gcpUrl);A._gcpUrl=null;}toast('Photo importée. Confirmez « Enregistrer et publier ».','ok');}catch(e){toast(e.message,'err');}},
-  async saveGrandCategoryPhoto() { const id=Number(document.getElementById('gcp-id').value),original=document.getElementById('gcp-original').value,url=document.getElementById('gcp-url').value;if(!url)return toast('Importez une photo avant de publier.','err');if(original&&original!==url&&!confirm('Remplacer définitivement la photo actuelle sur toutes les cartes de cette catégorie ?'))return;try{await api('/admin/grand-categories/'+id,{method:'PUT',body:{image_url:url}});if(A._gcpUrl){URL.revokeObjectURL(A._gcpUrl);A._gcpUrl=null;}closeModal();toast('Photo enregistrée et publiée ✓','ok');sessionStorage.setItem('adm_cat_tab','roots');render();}catch(e){toast(e.message,'err');}},
-  async deleteGrandCategoryPhoto(id) { const g=A.grandCategory(id);if(!g||!g.image_url)return;if(!confirm(`Supprimer la photo de « ${g.name} » ? La catégorie, ses services et son historique seront conservés.`))return;try{await api('/admin/grand-categories/'+id,{method:'PUT',body:{image_url:''}});toast('Photo retirée.','ok');sessionStorage.setItem('adm_cat_tab','roots');render();}catch(e){toast(e.message,'err');}},
-  async saveGrandCategory(id) { const body={name:document.getElementById('gc-name').value,short_label:document.getElementById('gc-short').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked};try{await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Grande catégorie enregistrée ✓','ok');render();}catch(e){toast(e.message,'err');} },
+  async uploadGrandCategoryImage() {
+    const field=document.getElementById('gc-image-file'), button=document.getElementById('gc-upload-btn');
+    if (!field || !field.files || !field.files[0]) return toast('Choisissez une image avant de téléverser.','err');
+    try { if(button) { button.disabled=true; button.textContent='Téléversement…'; }
+      const url=await uploadImageForCategory(field.files[0]), saved=document.getElementById('gc-image-url');
+      if (saved) saved.value=url; this.categoryImagePreview(url,'Nouvelle photo prête — cliquez sur Enregistrer pour la publier.');
+      const remove=document.getElementById('gc-remove-btn'); if(remove) remove.disabled=false;
+      toast('Photo téléversée. Enregistrez la catégorie pour la publier.','ok');
+    } catch(e) { toast(e.message,'err'); }
+    finally { if(button) { button.disabled=false; button.textContent='Téléverser et remplacer'; } }
+  },
+  clearGrandCategoryImage() {
+    const saved=document.getElementById('gc-image-url'), field=document.getElementById('gc-image-file'), remove=document.getElementById('gc-remove-btn');
+    if (saved) saved.value=''; if (field) field.value=''; if (remove) remove.disabled=true;
+    this.categoryImagePreview(''); toast('La photo sera retirée partout après Enregistrer.','ok');
+  },
+  deleteGrandCategoryPhoto() { this.clearGrandCategoryImage(); },
+  async saveGrandCategory(id) { 
+    const image=document.getElementById('gc-image-url');
+    const body={name:document.getElementById('gc-name').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked,image_url:image && image.value.trim() ? image.value.trim() : null};
+    try { await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Grande catégorie et photo enregistrées ✓','ok');render(); } catch(e) { toast(e.message,'err'); }
+  },
+  async saveGrandCategoryPhoto(id) { return this.saveGrandCategory(id); },
   async saveEstimationConfig() {
     try { await api('/admin/estimation-config', { method:'PUT', body:{ geo_enabled:document.getElementById('est-geo').checked, fallback:document.getElementById('est-fallback').value, history_min_samples:document.getElementById('est-samples').value } }); toast('Paramètres d’estimation enregistrés ✓','ok'); render(); } catch(e){toast(e.message,'err');}
   },
@@ -1963,10 +2019,6 @@ const A = {
       toast('Publication modifiée ✓', 'ok'); closeModal(); render();
     } catch (e) { toast(e.message, 'err'); }
   },
-  resolveCatalogueReview(id) { const opts=(CATD.categories||[]).flatMap(c=>(c.subcategories||[]).map(sc=>`<option value="${sc.id}">${esc((c.grand_category_name||'')+' › '+c.name+' › '+sc.name)}</option>`)).join('');openModal(`<h3>Corriger une compétence historique</h3><div class="small muted">Attribuez une sous-catégorie seulement si elle correspond avec certitude au service historique. Cette décision est tracée.</div><label>Sous-catégorie certaine</label><select id="review-sub"><option value="">Choisir…</option>${opts}</select><label>Note de décision <span class="muted">(facultatif)</span></label><textarea id="review-note" rows="3" placeholder="Motif de la correspondance"></textarea><button class="btn" onclick="A.saveCatalogueReview(${id})">Valider cette compétence</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`); },
-  async saveCatalogueReview(id) { const sub_id=Number(document.getElementById('review-sub').value);if(!sub_id)return toast('Choisissez une sous-catégorie certaine.','err');try{await api('/admin/pros/catalogue-reviews/'+id+'/resolve',{method:'POST',body:{status:'corrige',sub_id,note:document.getElementById('review-note').value}});closeModal();toast('Profil corrigé et compétence attribuée.','ok');sessionStorage.setItem('adm_cat_tab','roots');render();}catch(e){toast(e.message,'err');} },
-  async ignoreCatalogueReview(id) { if(!confirm('Confirmer : aucune nouvelle compétence ne sera attribuée à ce professionnel ?'))return;try{await api('/admin/pros/catalogue-reviews/'+id+'/resolve',{method:'POST',body:{status:'ignore'}});toast('Élément conservé sans attribution.','ok');sessionStorage.setItem('adm_cat_tab','roots');render();}catch(e){toast(e.message,'err');} },
-  async adViews(kind,id,title) { try { const d=await api('/admin/ads/analytics/'+encodeURIComponent(kind)+'/'+id+'/views'); const people=(d.known||[]).map(v=>`<tr><td>${esc(v.name||'Utilisateur')}</td><td>${fmtD(v.first_view)}</td><td>${fmtD(v.last_view)}</td><td><b>${v.views}</b></td></tr>`).join(''); const anon=d.anonymous||{}; openModal(`<h3>👁️ Vues — ${esc(title||'Publicité')}</h3><div class="stat-grid"><div class="stat"><div class="v">${Number(d.total_views||0).toLocaleString('fr-FR')}</div><div class="l">Vues totales</div></div><div class="stat"><div class="v">${Number(d.unique_viewers||0).toLocaleString('fr-FR')}</div><div class="l">Visiteurs uniques</div></div></div><div class="small muted mt">Les personnes identifiables apparaissent uniquement parce qu’elles étaient connectées. Les visiteurs anonymes restent agrégés.</div><div style="max-height:42vh;overflow:auto"><table><tr><th>Utilisateur</th><th>Première vue</th><th>Dernière vue</th><th>Consultations</th></tr>${people||'<tr><td colspan="4" class="muted">Aucun utilisateur connecté enregistré.</td></tr>'}${Number(anon.views||0)?`<tr><td>Visiteur non identifié</td><td>${anon.first_view?fmtD(anon.first_view):'—'}</td><td>${anon.last_view?fmtD(anon.last_view):'—'}</td><td><b>${anon.views}</b> <span class="muted small">(${anon.unique_viewers} unique(s))</span></td></tr>`:''}</table></div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`); }catch(e){toast(e.message,'err');} },
   async toggleAd(id, v) { try { await api('/admin/ads/' + id, { method: 'PUT', body: { active: v } }); render(); } catch (e) { toast(e.message, 'err'); } },
   async delAd(id) { if (!confirm('Supprimer cette publicité ?')) return; try { await api('/admin/ads/' + id, { method: 'DELETE' }); render(); } catch (e) { toast(e.message, 'err'); } },
   previewGeneralMessage() {

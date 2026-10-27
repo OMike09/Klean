@@ -3411,7 +3411,9 @@ A.post('/grand-categories', pdgOnly, (req, res) => {
   if (!name) return res.status(400).json({ error:'Nom de grande catégorie requis.' });
   let imageUrl; try { imageUrl=cleanCategoryImageUrl(b.image_url); } catch(e) { return res.status(400).json({error:e.message}); }
   try { const id=db.prepare('INSERT INTO grand_categories(name,short_label,description,icon,image_url,sort,popular) VALUES(?,?,?,?,?,?,?)').run(name,String(b.short_label||'').trim().slice(0,60)||null,String(b.description||'').trim().slice(0,1000),String(b.icon||'🧩').trim().slice(0,16),imageUrl,Number(b.sort)||99,b.popular?1:0).lastInsertRowid;
-    if (b.popular) { const max=db.prepare('SELECT COALESCE(MAX(popular_sort),0) n FROM grand_categories').get().n; db.prepare('UPDATE grand_categories SET popular_sort=? WHERE id=?').run(max+1,id); } res.status(201).json({id}); }
+    if (b.popular) { const max=db.prepare('SELECT COALESCE(MAX(popular_sort),0) n FROM grand_categories').get().n; db.prepare('UPDATE grand_categories SET popular_sort=? WHERE id=?').run(max+1,id); }
+    logAction(req.user, 'Création grande catégorie', { target_type:'grand_category', target_id:id, target_name:name, details:imageUrl ? 'Grande catégorie créée avec une photo principale.' : 'Grande catégorie créée sans photo principale.' });
+    res.status(201).json({id}); }
   catch { res.status(409).json({ error:'Cette grande catégorie existe déjà.' }); }
 });
 A.put('/grand-categories/:id', pdgOnly, (req,res) => {
@@ -3420,7 +3422,9 @@ A.put('/grand-categories/:id', pdgOnly, (req,res) => {
   if (b.image_url !== undefined) { try { imageUrl=cleanCategoryImageUrl(b.image_url); } catch(e) { return res.status(400).json({error:e.message}); } }
   const popular=b.popular===undefined?old.popular:(b.popular?1:0);
   db.prepare(`UPDATE grand_categories SET name=COALESCE(?,name),short_label=CASE WHEN ?=1 THEN ? ELSE short_label END,description=COALESCE(?,description),icon=COALESCE(?,icon),image_url=?,active=COALESCE(?,active),sort=COALESCE(?,sort),popular=?,popular_sort=CASE WHEN ?=0 THEN NULL WHEN popular_sort IS NULL THEN (SELECT COALESCE(MAX(popular_sort),0)+1 FROM grand_categories) ELSE popular_sort END,updated_at=datetime('now') WHERE id=?`)
-    .run(b.name === undefined ? null : String(b.name).trim().slice(0,120),b.short_label === undefined ? 0 : 1,b.short_label === undefined ? null : (String(b.short_label || '').trim().slice(0,60) || null),b.description === undefined ? null : String(b.description).trim().slice(0,1000),b.icon === undefined ? null : String(b.icon).trim().slice(0,16),imageUrl,b.active === undefined ? null : (b.active ? 1 : 0),b.sort ?? null,popular,popular,old.id);
+    .run(b.name === undefined ? null : String(b.name).trim().slice(0,120),b.short_label === undefined ? 0 : 1,b.short_label === undefined ? null : (String(b.short_label || '').trim().slice(0,60) || null),b.description === undefined ? null : String(b.description || '').trim().slice(0,1000),b.icon === undefined ? null : String(b.icon).trim().slice(0,16),imageUrl,b.active === undefined ? null : (b.active ? 1 : 0),b.sort ?? null,popular,popular,old.id);
+  const imageChanged = (old.image_url || null) !== (imageUrl || null);
+  logAction(req.user, imageChanged ? (imageUrl ? 'Remplacement photo grande catégorie' : 'Suppression photo grande catégorie') : 'Mise à jour grande catégorie', { target_type:'grand_category', target_id:old.id, target_name:b.name === undefined ? old.name : String(b.name).trim().slice(0,120), details:imageChanged ? (imageUrl ? 'Photo principale modifiée et synchronisée sur les cartes publiques.' : 'Photo principale retirée : les cartes publiques reviennent au visuel sans image.') : 'Informations de catégorie mises à jour.' });
   res.json({ok:true, image_url:imageUrl});
 });
 A.delete('/grand-categories/:id', pdgOnly, (req,res) => {

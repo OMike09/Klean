@@ -1972,19 +1972,55 @@ CREATE INDEX IF NOT EXISTS idx_mission_reassignments_mission ON mission_reassign
   setSetting('colis25_verified_task_prices_v1','1');
 })();
 
-// Visuels de départ des catégories les plus mises en avant. Ils sont des fichiers locaux,
-// non des liens externes fragiles, et restent entièrement remplaçables par le PDG.
+// COLIS 28 — visuels locaux HD des 30 grandes catégories actives. Chaque URL est
+// enregistrée sur l'identifiant de la grande catégorie : l'application publique et le
+// tableau PDG relisent donc la même source. Les choix explicites du PDG (/uploads/ ou
+// URL HTTPS) ne sont jamais écrasés au démarrage ; seules les anciennes valeurs système
+// et les valeurs absentes sont remplacées.
 (function seedCategoryImages() {
-  const images = {
-    'Nettoyage et entretien':'/category-images/nettoyage.jpg',
-    'Plomberie':'/category-images/plomberie.jpg',
-    'Climatisation et froid':'/category-images/climatisation.jpg',
-    'Électricité':'/category-images/electricite.jpg',
-    'Beauté, coiffure et bien-être':'/category-images/beaute.jpg',
-    'Agriculture et élevage':'/category-images/agriculture.svg'
-  };
-  const set = db.prepare("UPDATE grand_categories SET image_url=?,updated_at=datetime('now') WHERE name=? AND (image_url IS NULL OR image_url='')");
-  Object.entries(images).forEach(([name,image]) => set.run(image,name));
+  // Les libellés ne servent qu'à retrouver l'identifiant lors d'une installation neuve,
+  // dont la séquence SQLite peut différer. Après cette étape, la relation publiée est
+  // strictement portée par grand_categories.id → grand_categories.image_url.
+  const images = [
+    ['Nettoyage et entretien','/category-images/01-nettoyage-et-entretien.jpg'],
+    ['Plomberie','/category-images/02-plomberie.jpg'],
+    ['Électricité','/category-images/03-electricite.jpg'],
+    ['Bâtiment et construction','/category-images/04-batiment-et-construction.jpg'],
+    ['Menuiserie et aluminium','/category-images/05-menuiserie-et-aluminium.jpg'],
+    ['Climatisation et froid','/category-images/06-climatisation-et-froid.jpg'],
+    ['Transport et déménagement','/category-images/07-transport-et-demenagement.jpg'],
+    ['Mécanique et automobile','/category-images/08-mecanique-et-automobile.jpg'],
+    ['Informatique et téléphonie','/category-images/09-informatique-et-telephonie.jpg'],
+    ['Beauté, coiffure et bien-être','/category-images/10-beaute-coiffure-et-bien-etre.jpg'],
+    ['Couture et mode','/category-images/11-couture-et-mode.jpg'],
+    ['Restauration et alimentation','/category-images/12-restauration-et-alimentation.jpg'],
+    ['Jardinage et espaces verts','/category-images/13-jardinage-et-espaces-verts.jpg'],
+    ['Sécurité et surveillance','/category-images/14-securite-et-surveillance.jpg'],
+    ['Aide à domicile et services familiaux','/category-images/15-aide-a-domicile-et-services-familiaux.jpg'],
+    ['Événementiel','/category-images/16-evenementiel.jpg'],
+    ['Services professionnels et administratifs','/category-images/17-services-professionnels-et-administratifs.jpg'],
+    ['Cours et formation','/category-images/18-cours-et-formation.jpg'],
+    ['Agriculture et élevage','/category-images/19-agriculture-et-elevage.jpg'],
+    ['Artisanat et réparations diverses','/category-images/20-artisanat-et-reparations-diverses.jpg'],
+    ['Ferronnerie et soudure','/category-images/21-ferronnerie-et-soudure.jpg'],
+    ['Énergie solaire et secours électrique','/category-images/22-energie-solaire-et-secours-electrique.jpg'],
+    ['Électroménager et appareils domestiques','/category-images/23-electromenager-et-appareils-domestiques.jpg'],
+    ['Vitrerie et miroiterie','/category-images/24-vitrerie-et-miroiterie.jpg'],
+    ['Imprimerie et signalétique','/category-images/25-imprimerie-et-signaletique.jpg'],
+    ['Photo, vidéo et sonorisation','/category-images/26-photo-video-et-sonorisation.jpg'],
+    ['Toiture et étanchéité','/category-images/27-toiture-et-etancheite.jpg'],
+    ['Forage et traitement de l’eau','/category-images/28-forage-et-traitement-de-leau.jpg'],
+    ['Entretien automobile','/category-images/29-entretien-automobile.jpg'],
+    ['Immobilier et conciergerie','/category-images/30-immobilier-et-conciergerie.jpg']
+  ];
+  const legacy = ['/category-images/nettoyage.jpg','/category-images/plomberie.jpg','/category-images/climatisation.jpg','/category-images/electricite.jpg','/category-images/beaute.jpg','/category-images/agriculture.svg'];
+  const categoryByName = db.prepare('SELECT id FROM grand_categories WHERE name=? LIMIT 1');
+  const set = db.prepare(`UPDATE grand_categories SET image_url=?,updated_at=datetime('now')
+    WHERE id=? AND (image_url IS NULL OR trim(image_url)='' OR image_url IN (${legacy.map(() => '?').join(',')}))`);
+  images.forEach(([name,image]) => {
+    const category = categoryByName.get(name);
+    if (category) set.run(image,category.id,...legacy);
+  });
 })();
 
 

@@ -771,7 +771,7 @@ routes.categories = async (param) => {
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}</div>` + bottomNav('search'); return; }
   $app.innerHTML = `${header('Tous les services', { bell: !!USER })}<div class="content">
     <div class="hint">Toutes les grandes catégories actives, classées de A à Z.</div>
-    ${cats.map(c => `<div class="menu-item" onclick="nav('#/categories/${c.id}')"><span class="mi-ic">${esc(c.icon || '🧩')}</span><div class="grow"><b>${esc(grandLabel(c))}</b>${c.description ? `<div class="small muted">${esc(c.description)}</div>` : ''}${c.price_from ? `<div class="price-from">À partir de ${fmtFCFA(c.price_from)}</div>` : ''}</div><span class="mi-arr">›</span></div>`).join('') || emptyState('📋','Aucune grande catégorie active pour le moment.')}
+    ${cats.map(c => `<div class="menu-item" onclick="nav('#/categories/${c.id}')"><span class="mi-ic ${c.image_url ? 'category-list-photo' : ''}">${c.image_url ? `<img src="${esc(c.image_url)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('image-missing')">` : esc(c.icon || '🧩')}</span><div class="grow"><b>${esc(grandLabel(c))}</b>${c.description ? `<div class="small muted">${esc(c.description)}</div>` : ''}${c.price_from ? `<div class="price-from">À partir de ${fmtFCFA(c.price_from)}</div>` : ''}</div><span class="mi-arr">›</span></div>`).join('') || emptyState('📋','Aucune grande catégorie active pour le moment.')}
   </div>${bottomNav('search')}`;
   updateBadges();
 };
