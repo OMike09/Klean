@@ -1,0 +1,45 @@
+/* COLIS 32 — tests API réels : espaces vendeurs Braderie, paiements, quotas, médias et historique.
+   Lancer : KLEAN_TEST_BASE=http://127.0.0.1:3000 node test-colis32.js */
+'use strict';
+const fs=require('fs'),path=require('path');
+const BASE=(process.env.KLEAN_TEST_BASE||'http://127.0.0.1:3000').replace(/\/$/,''); const API=BASE+'/api';
+let total=0,failed=0;const ok=(value,label)=>{total++;console.log(value?'OK ':'BAD',label);if(!value)failed++;};
+async function call(token,url,method='GET',body,form=false){const h=token?{Authorization:'Bearer '+token}:{};if(body&&!form)h['Content-Type']='application/json';const r=await fetch(API+url,{method,headers:h,body:body?(form?body:JSON.stringify(body)):undefined});let d;try{d=await r.json();}catch{d={};}return {r,d};}
+(async()=>{let admin,user,uid,planId,oldEnabled,uploaded=[];const stamp=String(Date.now()).slice(-8),phone='08'+stamp;
+ try{
+  const {db,getSetting,setSetting}=require('./db');oldEnabled=getSetting('braderie_enabled','0');
+  admin=(await call(null,'/auth/login','POST',{phone:'admin',password:'Klean@2026'})).d.token;
+  ok(!!admin,'connexion Klean Services');
+  const planBody={name:'COLIS32 Test '+stamp,description:'Formule de test contrôlée',price_quarterly:3000,price_annual:10000,publication_quota:1,active_items_quota:1,photos_per_item:1,videos_allowed:true,videos_per_item:1,video_max_seconds:1,video_max_bytes:1024*1024,video_formats:['video/mp4'],benefits:'Publication contrôlée',restrictions:'Test automatisé',visible:true,active:true};
+  let x=await call(admin,'/admin/braderie/plans','POST',planBody);planId=x.d.id;ok(x.r.status===201&&x.d.active&&x.d.annual_saving===2000,'création d’une formule active, prix annuel et économie calculés');
+  x=await call(admin,'/admin/braderie/plans/'+planId,'PUT',{description:'Formule test modifiée',note:'Contrôle historique COLIS 32'});ok(x.r.status===200&&x.d.description.includes('modifiée'),'modification administrable de formule');
+  x=await call(admin,'/admin/braderie/plans/'+planId+'/history');ok(x.r.status===200&&x.d.length>=2,'historique immuable des versions de formule');
+  x=await call(null,'/auth/register','POST',{name:'Vendeur COLIS 32',phone,password:'Colis32!Pass',ville:'Abidjan',quartier:'Cocody',accept_rules:true});user=x.d.token;uid=x.d.user.id;ok(x.r.status===200&&!!user,'création du vendeur');
+  x=await call(null,'/braderie/plans');ok(x.r.status===200&&x.d.some(p=>p.id===planId&&p.quarterly.amount===3000&&p.annual.amount===10000&&p.annual_saving===2000),'formule publique avec 3 mois, 12 mois et économie');
+  x=await call(user,'/braderie/space','POST',{name:'Espace COLIS 32'});ok(x.r.status===201&&x.d.space&&x.d.space.status==='pending','création d’espace associé au propriétaire');
+  x=await call(user,'/braderie/space/subscriptions','POST',{plan_id:planId,period:'quarterly',method:'Mobile Money'});const sub1=x.d.subscription_id,tx1=x.d.transaction_id;ok(x.r.status===201&&x.d.status==='pending_payment'&&x.d.amount===3000,'souscription trimestrielle réellement en attente de paiement');
+  x=await call(admin,'/admin/transactions/'+tx1+'/statut','POST',{status:'confirme'});ok(x.r.status===200,'confirmation serveur du paiement trimestriel');
+  x=await call(user,'/braderie/space');ok(x.r.status===200&&x.d.active_subscription&&x.d.active_subscription.id===sub1&&x.d.active_subscription.status==='active','activation uniquement après paiement confirmé');
+  await call(admin,'/admin/braderie/config','PUT',{enabled:true});
+  x=await call(null,'/braderie/categories');const cat=x.d.find(c=>c.active);ok(!!cat,'catégorie Braderie disponible pour publication');
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+XQAAAABJRU5ErkJggg==','base64');
+  const fd=new FormData();fd.append('files',new Blob([png],{type:'image/png'}),'colis32.png');let up=await call(user,'/upload','POST',fd,true);const photo=up.d.files&&up.d.files[0];if(photo)uploaded.push(path.basename(photo));ok(up.r.status===200&&!!photo,'téléversement photo propriétaire');
+  const fakeVideo=new FormData();fakeVideo.append('files',new Blob([Buffer.from('not a real video')],{type:'video/mp4'}),'invalid.mp4');up=await call(user,'/upload','POST',fakeVideo,true);const video=up.d.files&&up.d.files[0];if(video)uploaded.push(path.basename(video));
+  const baseItem={title:'Article COLIS 32',description:'Article de contrôle pour les limites serveur.',price:5000,category_id:cat.id,city:'Abidjan',commune:'Cocody',quartier:'Cocody',contact_phone:phone,item_condition:'bon',visibility_mode:'city',photos:[photo],conditions_accepted:true};
+  x=await call(user,'/braderie/items','POST',{...baseItem,videos:[video]});if(!(x.r.status===400&&/durée|vidéo/i.test(x.d.error||'')))console.log('DEBUG video',x.r.status,x.d);ok(x.r.status===400&&/durée|vidéo/i.test(x.d.error||''),'durée vidéo réellement vérifiée côté serveur');
+  x=await call(user,'/braderie/items','POST',baseItem);const itemId=x.d.id;if(!(x.r.status===201&&x.d.status==='pending'&&!!itemId))console.log('DEBUG item',x.r.status,x.d);ok(x.r.status===201&&x.d.status==='pending'&&!!itemId,'publication autorisée avec espace actif');
+  x=await call(user,'/braderie/items','POST',{...baseItem,title:'Second article COLIS 32'});if(!(x.r.status===400&&/quota/i.test(x.d.error||'')))console.log('DEBUG quota',x.r.status,x.d);ok(x.r.status===400&&/quota/i.test(x.d.error||''),'quota de publications appliqué côté serveur');
+  db.prepare("UPDATE braderie_subscriptions SET end_at=datetime('now','-1 second') WHERE id=?").run(sub1);
+  x=await call(user,'/braderie/space');ok(x.r.status===200&&x.d.space.status==='expired'&&!x.d.active_subscription,'expiration conserve l’espace mais bloque la publication');
+  x=await call(user,'/braderie/space/subscriptions','POST',{plan_id:planId,period:'annual',method:'Espèces'});const tx2=x.d.transaction_id;ok(x.r.status===201&&x.d.amount===10000,'renouvellement annuel avec tarif indépendant');
+  await call(admin,'/admin/transactions/'+tx2+'/statut','POST',{status:'confirme'});
+  x=await call(user,'/braderie/space');ok(x.d.active_subscription&&x.d.active_subscription.billing_period==='annual'&&x.d.active_subscription.status==='active','renouvellement annuel active l’espace');
+  x=await call(user,'/braderie/space/subscriptions','POST',{plan_id:planId,period:'quarterly',method:'Mobile Money'});const tx3=x.d.transaction_id;await call(admin,'/admin/transactions/'+tx3+'/statut','POST',{status:'confirme'});
+  x=await call(user,'/braderie/space');ok(x.d.subscriptions.some(s=>s.transaction_id===tx3&&s.status==='payment_confirmed'),'renouvellement confirmé programmé sans écraser l’abonnement actif');
+  x=await call(admin,'/admin/braderie/subscription-stats?period=month');if(!(x.r.status===200&&typeof x.d.revenue==='number'&&Array.isArray(x.d.by_plan)))console.log('DEBUG stats',x.r.status,x.d);ok(x.r.status===200&&typeof x.d.revenue==='number'&&Array.isArray(x.d.by_plan),'statistiques espaces, abonnements, recettes et distribution par formule');
+  const app=fs.readFileSync(path.join(__dirname,'public/app.js'),'utf8');const adminUi=fs.readFileSync(path.join(__dirname,'public/admin/admin.js'),'utf8');
+  ok(app.includes('Mon espace braderie')&&!app.includes("pending:'En attente PDG'")&&app.includes('Utilisateur • Professionnel'),'remplacements visibles Utilisateur et Klean Services dans l’interface');
+  ok(adminUi.includes('Débloquer tous les comptes')&&adminUi.includes('Autoriser sélectionnés')&&adminUi.includes('Message de maintenance'),'maintenance simplifiée en trois parties');
+ }catch(e){failed++;console.error(e.stack||e);}finally{try{const {db,setSetting}=require('./db');if(uid){const files=db.prepare('SELECT name FROM file_records WHERE uploaded_by=?').all(uid);db.prepare('DELETE FROM braderie_space_events WHERE space_id IN (SELECT id FROM braderie_spaces WHERE owner_id=?)').run(uid);db.prepare('DELETE FROM braderie_items WHERE seller_id=?').run(uid);db.prepare('DELETE FROM braderie_subscriptions WHERE owner_id=?').run(uid);db.prepare('DELETE FROM transactions WHERE user_id=? AND kind=?').run(uid,'braderie_subscription');db.prepare('DELETE FROM braderie_spaces WHERE owner_id=?').run(uid);db.prepare('DELETE FROM notifications WHERE user_id=?').run(uid);db.prepare('DELETE FROM view_seen WHERE user_id=?').run(uid);db.prepare('DELETE FROM ad_view_events WHERE user_id=?').run(uid);db.prepare('DELETE FROM user_activity_events WHERE user_id=?').run(uid);db.prepare('DELETE FROM users WHERE id=?').run(uid);for(const f of files){db.prepare('DELETE FROM file_records WHERE name=?').run(f.name);try{fs.unlinkSync(path.join(__dirname,'uploads',f.name));}catch{}}}if(planId){db.prepare('DELETE FROM braderie_plan_history WHERE plan_id=?').run(planId);db.prepare('DELETE FROM braderie_plans WHERE id=?').run(planId);}if(oldEnabled!==undefined)setSetting('braderie_enabled',oldEnabled);}catch(e){console.error('Nettoyage',e.message);}}
+ console.log(`RESULT ${total-failed}/${total}, failed=${failed}`);process.exitCode=failed?1:0;
+})();

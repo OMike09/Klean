@@ -74,8 +74,8 @@ function canReadUpload(user, name) {
   if (db.prepare("SELECT 1 FROM grand_categories WHERE active=1 AND image_url LIKE ?").get('%/uploads/' + name)) return true;
   // Une photo Braderie n'est publique que pendant la diffusion validée. Les photos
   // d'articles en attente, suspendus, vendus ou supprimés restent privées.
-  const braderie = db.prepare("SELECT photos FROM braderie_items WHERE status='available' AND photos LIKE ?").all('%/uploads/' + name + '%');
-  if (braderie.some(row => fileHasName(row.photos, name))) return true;
+  const braderie = db.prepare("SELECT photos,videos FROM braderie_items WHERE status='available' AND (photos LIKE ? OR videos LIKE ?)").all('%/uploads/' + name + '%','%/uploads/' + name + '%');
+  if (braderie.some(row => fileHasName(row.photos, name) || fileHasName(row.videos, name))) return true;
   if (!user) return false;
   if (isStaff(user) && (hasPerm(user, 'securite') || hasPerm(user, 'missions') || hasPerm(user, 'communication'))) return true;
   const record = db.prepare('SELECT state, uploaded_by FROM file_records WHERE name=?').get(name);
@@ -204,7 +204,7 @@ function optionalAuth(req, res, next) {
 // ---------- HIÉRARCHIE & PERMISSIONS ----------
 // PDG → Administrateurs → Gestionnaires → Agents → Utilisateurs
 const STAFF_ROLES = ['pdg', 'admin', 'gestionnaire', 'agent'];
-const ROLE_LABELS = { pdg: 'PDG', admin: 'Administrateur', gestionnaire: 'Gestionnaire', agent: 'Agent', user: 'Utilisateur' };
+const ROLE_LABELS = { pdg: 'Klean Services', admin: 'Administrateur', gestionnaire: 'Gestionnaire', agent: 'Agent', user: 'Utilisateur' };
 // Clés de permission (sections du tableau de bord). Le PDG a toujours tout.
 const PERM_KEYS = {
   comptes: 'Gestion des comptes utilisateurs',
@@ -1948,7 +1948,7 @@ app.post('/api/missions/:id/confirm', auth, (req, res) => {
   if (mission.status !== 'acceptee') return res.status(409).json({ error: 'Cette demande ne peut pas être confirmée à ce stade.' });
   db.prepare("UPDATE missions SET status='confirmee' WHERE id=?").run(mission.id);
   addEvent(mission.id, 'confirmee', req.user.id, 'Client a confirmé — mission programmée');
-  notify(mission.pro_id, 'mission', '🎉 Mission confirmée par le client', 'La mission est programmée. Consultez les détails et contactez le client si besoin.', '#/mission/' + mission.id);
+  notify(mission.pro_id, 'mission', '🎉 Mission confirmée par l’utilisateur', 'La mission est programmée. Consultez les détails et contactez l’utilisateur si besoin.', '#/mission/' + mission.id);
   push(mission.pro_id, 'mission', { id: mission.id, status: 'confirmee' });
   res.json({ ok: true, status: 'confirmee' });
 });
@@ -1961,7 +1961,7 @@ app.post('/api/missions/:id/montant', auth, (req, res) => {
   const amount = parseInt(req.body.amount, 10);
   if (!amount || amount < 100) return res.status(400).json({ error: 'Montant invalide (minimum 100 FCFA).' });
   if (mission.amount && mission.amount !== amount)
-    return res.status(409).json({ error: `Le montant est déjà fixé à ${mission.amount.toLocaleString('fr-FR')} FCFA. Pour le modifier, utilisez « Demander une modification du prix » : le client devra l\u2019accepter.` });
+    return res.status(409).json({ error: `Le montant est déjà fixé à ${mission.amount.toLocaleString('fr-FR')} FCFA. Pour le modifier, utilisez « Demander une modification du prix » : l’utilisateur devra l\u2019accepter.` });
   db.prepare('UPDATE missions SET amount=? WHERE id=?').run(amount, mission.id);
   const fin = missionFinance({ ...mission, amount });
   addEvent(mission.id, mission.status, req.user.id, `Montant fixé : ${amount} FCFA`);
@@ -1982,7 +1982,7 @@ app.post('/api/missions/:id/prix-modif', auth, (req, res) => {
   if (newAmount === mission.amount) return res.status(400).json({ error: 'Le nouveau montant est identique au montant actuel.' });
   if (!reason) return res.status(400).json({ error: 'Indiquez la raison du changement de prix (obligatoire).' });
   if (db.prepare(`SELECT 1 FROM mission_price_changes WHERE mission_id=? AND status='en_attente'`).get(mission.id))
-    return res.status(409).json({ error: 'Une demande de modification attend déjà la réponse du client.' });
+    return res.status(409).json({ error: 'Une demande de modification attend déjà la réponse de l’utilisateur.' });
   const pcid = db.prepare(`INSERT INTO mission_price_changes(mission_id, pro_id, client_id, old_amount, new_amount, reason)
     VALUES(?,?,?,?,?,?)`).run(mission.id, req.user.id, mission.client_id, mission.amount, newAmount, reason).lastInsertRowid;
   const fin = missionFinance({ ...mission, amount: newAmount });
@@ -2009,7 +2009,7 @@ app.post('/api/missions/:id/prix-modif/:pcid/reponse', auth, (req, res) => {
       `Le client a accepté ${pc.new_amount.toLocaleString('fr-FR')} FCFA. Commission ${fin.commission_rate}% : ${fin.commission.toLocaleString('fr-FR')} FCFA — votre part : ${fin.pro_amount.toLocaleString('fr-FR')} FCFA.`, '#/mission/' + mission.id);
   } else {
     addEvent(mission.id, mission.status, req.user.id, `Nouveau prix refusé par le client (l\u2019ancien prix ${pc.old_amount} FCFA reste valable)`);
-    notify(mission.pro_id, 'paiement', 'Nouveau prix refusé', `Le client a refusé la modification. Le prix reste ${pc.old_amount.toLocaleString('fr-FR')} FCFA.`, '#/mission/' + mission.id);
+    notify(mission.pro_id, 'paiement', 'Nouveau prix refusé', `L’utilisateur a refusé la modification. Le prix reste ${pc.old_amount.toLocaleString('fr-FR')} FCFA.`, '#/mission/' + mission.id);
   }
   push(mission.pro_id, 'mission', { id: mission.id, status: mission.status });
   res.json({ ok: true, status: accepte ? 'accepte' : 'refuse' });
@@ -2032,7 +2032,7 @@ app.post('/api/missions/:id/start/confirm', auth, (req, res) => {
   if (mission.status !== 'demarrage_demande') return res.status(409).json({ error: 'Aucune demande de démarrage à confirmer.' });
   db.prepare("UPDATE missions SET status='en_cours', start_client_confirmed_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status='demarrage_demande'").run(mission.id);
   addEvent(mission.id, 'en_cours', req.user.id, 'Client a confirmé le démarrage');
-  notify(mission.pro_id, 'mission', '✅ Démarrage confirmé', 'Le client a confirmé le démarrage. La mission est maintenant en cours.', '#/mission/' + mission.id);
+  notify(mission.pro_id, 'mission', '✅ Démarrage confirmé', 'L’utilisateur a confirmé le démarrage. La mission est maintenant en cours.', '#/mission/' + mission.id);
   push(mission.pro_id, 'mission', { id: mission.id, status: 'en_cours' });
   res.json({ ok: true, status: 'en_cours' });
 });
@@ -2043,7 +2043,7 @@ app.post('/api/missions/:id/start/contest', auth, (req, res) => {
   const reason = String(req.body && req.body.reason || '').trim().slice(0, 500);
   db.prepare("UPDATE missions SET status='confirmee', updated_at=datetime('now') WHERE id=? AND status='demarrage_demande'").run(mission.id);
   addEvent(mission.id, 'demarrage_conteste', req.user.id, 'Client a contesté le démarrage' + (reason ? ' : ' + reason : ''));
-  notify(mission.pro_id, 'mission', 'Démarrage contesté', 'Le client n’a pas confirmé le démarrage' + (reason ? ' : ' + reason : '.') + ' Contactez-le avant de refaire une demande.', '#/mission/' + mission.id);
+  notify(mission.pro_id, 'mission', 'Démarrage contesté', 'L’utilisateur n’a pas confirmé le démarrage' + (reason ? ' : ' + reason : '.') + ' Contactez-le avant de refaire une demande.', '#/mission/' + mission.id);
   push(mission.pro_id, 'mission', { id: mission.id, status: 'confirmee' });
   res.json({ ok: true, status: 'confirmee' });
 });
@@ -2054,7 +2054,7 @@ app.post('/api/missions/:id/complete', auth, (req, res) => {
   if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
   if (mission.status !== 'en_cours') return res.status(409).json({ error: 'La mission doit être en cours avant la demande de fin.' });
   if (!mission.amount) return res.status(400).json({ error: 'Fixez d’abord le montant de la mission avant de demander la fin.' });
-  if (db.prepare("SELECT 1 FROM mission_price_changes WHERE mission_id=? AND status='en_attente'").get(mission.id)) return res.status(409).json({ error: 'Une modification de prix attend la réponse du client.' });
+  if (db.prepare("SELECT 1 FROM mission_price_changes WHERE mission_id=? AND status='en_attente'").get(mission.id)) return res.status(409).json({ error: 'Une modification de prix attend la réponse de l’utilisateur.' });
   db.prepare("UPDATE missions SET status='fin_demande', completion_requested_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status='en_cours'").run(mission.id);
   addEvent(mission.id, 'fin_demande', req.user.id, 'Le professionnel demande la confirmation de fin');
   notify(mission.client_id, 'mission', '✅ Fin de mission à confirmer', 'Le professionnel déclare la mission terminée. Confirmez ou contestez dans la mission.', '#/mission/' + mission.id);
@@ -2078,7 +2078,7 @@ app.post('/api/missions/:id/complete/confirm', auth, (req, res) => {
   if (!mission) return res.status(404).json({ error: 'Mission introuvable.' });
   if (mission.status !== 'fin_demande') return res.status(409).json({ error: 'Aucune fin de mission à confirmer.' });
   try { completeMissionAfterClientConfirmation(mission, req.user.id); } catch { return res.status(409).json({ error: 'Cette confirmation a déjà été traitée.' }); }
-  notify(mission.pro_id, 'paiement', '✅ Fin de mission confirmée', 'Le client a confirmé la fin. Déclarez ensuite la réception du paiement.', '#/mission/' + mission.id);
+  notify(mission.pro_id, 'paiement', '✅ Fin de mission confirmée', 'L’utilisateur a confirmé la fin. Déclarez ensuite la réception du paiement.', '#/mission/' + mission.id);
   notify(mission.client_id, 'paiement', '💵 Paiement à confirmer', `Montant : ${mission.amount.toLocaleString('fr-FR')} FCFA. Confirmez le paiement après l’avoir effectué.`, '#/mission/' + mission.id);
   push(mission.pro_id, 'mission', { id:mission.id,status:'terminee' }); push(mission.client_id, 'mission', { id:mission.id,status:'terminee' });
   res.json({ ok:true, status:'terminee' });
@@ -2090,7 +2090,7 @@ app.post('/api/missions/:id/complete/contest', auth, (req, res) => {
   const reason = String(req.body && req.body.reason || '').trim().slice(0, 500);
   db.prepare("UPDATE missions SET status='litige', updated_at=datetime('now') WHERE id=? AND status='fin_demande'").run(mission.id);
   addEvent(mission.id, 'fin_contestee', req.user.id, 'Client a contesté la fin' + (reason ? ' : ' + reason : ''));
-  notify(mission.pro_id, 'mission', '⚠️ Fin de mission contestée', 'Le client a contesté la fin' + (reason ? ' : ' + reason : '.') + ' L’administration est informée.', '#/mission/' + mission.id);
+  notify(mission.pro_id, 'mission', '⚠️ Fin de mission contestée', 'L’utilisateur a contesté la fin' + (reason ? ' : ' + reason : '.') + ' L’administration est informée.', '#/mission/' + mission.id);
   notifyAdmins('securite', '⚠️ Fin de mission contestée', `Mission ${mission.code} : ${reason || 'motif non renseigné'}`, 'admin:missions');
   push(mission.pro_id, 'mission', { id:mission.id,status:'litige' });
   res.json({ ok:true, status:'litige' });
@@ -2927,7 +2927,7 @@ function braderiePurchaseAcceptance(req, body) {
 function braderieValidateGeo(cityRaw, communeRaw, modeRaw, cfg=braderieSettings(), categoryId=null) {
   const city=activeCity(cityRaw); if(!city) throw new Error('Choisissez une ville active de Klean Services.');
   const commune=braderieValidField(communeRaw,120), mode=braderieVisibilityMode(modeRaw), categoryModes=braderieCategoryModes(categoryId);
-  if(!braderieGeoModeAllowed(mode,cfg)) throw new Error('Ce mode de diffusion est désactivé par le PDG.');
+  if(!braderieGeoModeAllowed(mode,cfg)) throw new Error('Ce mode de diffusion est désactivé par Klean Services.');
   if(categoryModes && !categoryModes.includes(mode)) throw new Error('Ce mode de diffusion est désactivé pour cette catégorie par le PDG.');
   if(normalize(city.name)!=='abidjan' && (mode==='abidjan'||mode==='commune')) throw new Error('La diffusion Abidjan ou commune nécessite la ville Abidjan.');
   if(normalize(city.name)!=='abidjan' && commune) throw new Error('Une commune ne peut être indiquée que pour Abidjan.');
@@ -2965,7 +2965,7 @@ function braderiePublicItem(row, viewer) {
   const out={
     id:row.id,title:row.title,description:row.description,price:Number(row.price),city:row.city,commune:row.commune || '',quartier:row.quartier || '',
     category_id:row.category_id || null, category_name:row.category_name || '', category_icon:row.category_icon || '🏷️',
-    item_condition:row.item_condition,visibility:row.visibility_mode || row.visibility,visibility_mode:row.visibility_mode || row.visibility,photos:braderiePhotos(row.photos),status:row.status,
+    item_condition:row.item_condition,visibility:row.visibility_mode || row.visibility,visibility_mode:row.visibility_mode || row.visibility,photos:braderiePhotos(row.photos),videos:braderiePhotos(row.videos),status:row.status,
     created_at:row.created_at,approved_at:row.approved_at,expires_at:row.expires_at,sold_at:row.sold_at,
     seller_name:row.seller_name || '', contact_mode:c.contact_mode,
     is_owner:!!(viewer && viewer.id===row.seller_id), can_offer:!!(viewer && viewer.id!==row.seller_id && row.status==='available'),
@@ -3004,6 +3004,166 @@ function braderieValidatePhotos(raw, user, max) {
 }
 function braderieValidField(v,max) { return String(v===undefined||v===null?'':v).trim().slice(0,max); }
 function braderieOfferPeriodCount(userId, period) { return db.prepare(`SELECT COUNT(*) n FROM braderie_negotiation_events WHERE actor_id=? AND event_type IN ('buyer_offer','buyer_final_offer') AND created_at>=datetime('now',?)`).get(userId,braderieModifier(period)).n; }
+
+
+// ================== COLIS 32 — Espaces vendeurs Braderie ==================
+function braderiePlanFormats(raw) {
+  const list=jsonArray(raw).map(v=>String(v||'').trim().toLowerCase()).filter(v=>/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(v));
+  return [...new Set(list)].slice(0,20);
+}
+function braderiePlanSnapshot(plan) {
+  return {
+    id:Number(plan.id), name:String(plan.name), description:String(plan.description||''),
+    publication_quota:Number(plan.publication_quota)||0, active_items_quota:Number(plan.active_items_quota)||0,
+    photos_per_item:Math.max(1,Number(plan.photos_per_item)||1), videos_allowed:!!Number(plan.videos_allowed),
+    videos_per_item:Number(plan.videos_per_item)||0, video_max_seconds:Number(plan.video_max_seconds)||0,
+    video_max_bytes:Number(plan.video_max_bytes)||0, video_formats:braderiePlanFormats(plan.video_formats),
+    benefits:String(plan.benefits||''), restrictions:String(plan.restrictions||'')
+  };
+}
+function braderiePlanCurrentPrice(plan, period) {
+  const now=new Date().toISOString().slice(0,19).replace('T',' ');
+  const promo=period==='annual'?plan.promo_annual:plan.promo_quarterly;
+  const base=period==='annual'?plan.price_annual:plan.price_quarterly;
+  const running=promo!==null&&promo!==undefined&&String(promo)!==''&&(!plan.promo_start_at||plan.promo_start_at<=now)&&(!plan.promo_end_at||plan.promo_end_at>=now);
+  return { amount:Math.max(0,Number(running?promo:base)||0), base_amount:Math.max(0,Number(base)||0), promotion:running };
+}
+function braderiePublicPlan(plan) {
+  const quarterly=braderiePlanCurrentPrice(plan,'quarterly'), annual=braderiePlanCurrentPrice(plan,'annual');
+  return {...braderiePlanSnapshot(plan),id:Number(plan.id),visible:!!plan.visible,quarterly,annual,
+    annual_saving:Math.max(0,quarterly.amount*4-annual.amount), promo_start_at:plan.promo_start_at||null,promo_end_at:plan.promo_end_at||null};
+}
+function braderieSubSnapshot(row) { return jsonObject(row&&row.plan_snapshot); }
+function braderieSpaceEvent(spaceId, subscriptionId, actorId, action, details) {
+  db.prepare('INSERT INTO braderie_space_events(space_id,subscription_id,actor_id,action,details) VALUES(?,?,?,?,?)').run(spaceId,subscriptionId||null,actorId||null,action,details||null);
+}
+function braderieExpireSubscriptions() {
+  const expired=db.prepare("SELECT * FROM braderie_subscriptions WHERE status='active' AND end_at IS NOT NULL AND end_at<=datetime('now')").all();
+  if (expired.length) {
+    const mark=db.prepare("UPDATE braderie_subscriptions SET status='expired',updated_at=datetime('now') WHERE id=?");
+    expired.forEach(s=>{mark.run(s.id);braderieSpaceEvent(s.space_id,s.id,null,'expired','Expiration automatique de l’abonnement.');});
+  }
+  const scheduled=db.prepare("SELECT * FROM braderie_subscriptions WHERE status='payment_confirmed' AND start_at IS NOT NULL AND start_at<=datetime('now') ORDER BY start_at,id").all();
+  scheduled.forEach(s=>{
+    db.transaction(()=>{db.prepare("UPDATE braderie_subscriptions SET status='active',updated_at=datetime('now') WHERE id=?").run(s.id);db.prepare("UPDATE braderie_spaces SET status='active',suspended_reason=NULL,updated_at=datetime('now') WHERE id=?").run(s.space_id);braderieSpaceEvent(s.space_id,s.id,null,'activated_scheduled','Abonnement confirmé activé à la date prévue.');})();
+    notify(s.owner_id,'braderie','Abonnement Braderie actif',`Votre formule « ${s.plan_name} » est maintenant active.`, '#/braderie-space');
+  });
+  db.prepare(`UPDATE braderie_spaces SET status='expired',updated_at=datetime('now')
+    WHERE status='active' AND NOT EXISTS(SELECT 1 FROM braderie_subscriptions s WHERE s.space_id=braderie_spaces.id AND s.status='active' AND (s.end_at IS NULL OR s.end_at>datetime('now')))` ).run();
+}
+function braderieActiveSubscription(ownerId) {
+  braderieExpireSubscriptions();
+  return db.prepare(`SELECT s.*,sp.name space_name,sp.status space_status FROM braderie_subscriptions s
+    JOIN braderie_spaces sp ON sp.id=s.space_id WHERE s.owner_id=? AND s.status='active'
+    AND (s.start_at IS NULL OR s.start_at<=datetime('now')) AND (s.end_at IS NULL OR s.end_at>datetime('now')) AND sp.status='active' ORDER BY s.end_at DESC,s.id DESC LIMIT 1`).get(ownerId);
+}
+function braderieSpaceData(ownerId) {
+  braderieExpireSubscriptions();
+  const space=db.prepare('SELECT * FROM braderie_spaces WHERE owner_id=?').get(ownerId);
+  if(!space)return {space:null,active_subscription:null,subscriptions:[],usage:null};
+  const subs=db.prepare('SELECT * FROM braderie_subscriptions WHERE space_id=? ORDER BY id DESC').all(space.id);
+  const active=subs.find(s=>s.status==='active'&&(!s.start_at||s.start_at<=new Date().toISOString().slice(0,19).replace('T',' '))&&(!s.end_at||s.end_at>new Date().toISOString().slice(0,19).replace('T',' ')))||null;
+  const snapshot=braderieSubSnapshot(active);
+  let usage=null;
+  if(active){
+    const publications=db.prepare('SELECT COUNT(*) n FROM braderie_items WHERE subscription_id=?').get(active.id).n;
+    const activeItems=db.prepare("SELECT COUNT(*) n FROM braderie_items WHERE subscription_id=? AND status IN ('pending','available')").get(active.id).n;
+    usage={publications,active_items:activeItems,publications_remaining:Math.max(0,(Number(snapshot.publication_quota)||0)-publications),active_items_remaining:Math.max(0,(Number(snapshot.active_items_quota)||0)-activeItems)};
+  }
+  return {space,active_subscription:active?{...active,plan: snapshot}:null,subscriptions:subs.map(s=>({...s,plan:braderieSubSnapshot(s)})),usage};
+}
+function braderieActivateSubscription(sub, actorId) {
+  const current=db.prepare('SELECT * FROM braderie_subscriptions WHERE id=?').get(sub.id);
+  if(!current||!['pending_payment','payment_confirmed'].includes(current.status)) return false;
+  const running=db.prepare("SELECT * FROM braderie_subscriptions WHERE space_id=? AND status='active' AND end_at>datetime('now') ORDER BY end_at DESC LIMIT 1").get(current.space_id);
+  const start=running&&running.end_at ? running.end_at : new Date().toISOString().slice(0,19).replace('T',' ');
+  const endModifier='+'+current.duration_months+' months';
+  db.transaction(()=>{
+    if(running){
+      db.prepare(`UPDATE braderie_subscriptions SET status='payment_confirmed',payment_confirmed_at=COALESCE(payment_confirmed_at,datetime('now')),start_at=?,end_at=datetime(?,?),updated_at=datetime('now') WHERE id=?`).run(start,start,endModifier,current.id);
+      braderieSpaceEvent(current.space_id,current.id,actorId,'payment_confirmed','Paiement confirmé ; activation programmée à la fin de l’abonnement actif.');
+    }else{
+      db.prepare(`UPDATE braderie_subscriptions SET status='active',payment_confirmed_at=COALESCE(payment_confirmed_at,datetime('now')),start_at=?,end_at=datetime(?,?),updated_at=datetime('now') WHERE id=?`).run(start,start,endModifier,current.id);
+      db.prepare("UPDATE braderie_spaces SET status='active',suspended_reason=NULL,updated_at=datetime('now') WHERE id=?").run(current.space_id);
+      braderieSpaceEvent(current.space_id,current.id,actorId,'payment_confirmed','Paiement confirmé par Klean Services, abonnement activé.');
+    }
+  })();
+  notify(current.owner_id,'braderie',running?'Paiement Braderie confirmé':'Abonnement Braderie actif',running?`Votre formule « ${current.plan_name} » est confirmée et prendra effet le ${start}.`:`Votre formule « ${current.plan_name} » est maintenant active.`, '#/braderie-space');
+  return true;
+}
+function braderieRequireActiveSeller(user) {
+  const sub=braderieActiveSubscription(user.id);
+  if(!sub) throw new Error('La publication nécessite un espace vendeur actif avec un abonnement valide. Ouvrez « Mon espace braderie » pour souscrire ou renouveler.');
+  return sub;
+}
+async function braderieValidateVideos(raw,user,plan) {
+  const a=Array.isArray(raw)?raw:[], videos=[...new Set(a.map(v=>String(v||'').trim()))];
+  if(!videos.length)return [];
+  if(!plan.videos_allowed) throw new Error('Votre formule ne permet pas les vidéos. Choisissez une formule supérieure si nécessaire.');
+  if(videos.length>plan.videos_per_item) throw new Error(`Votre formule autorise au maximum ${plan.videos_per_item} vidéo(s) par article.`);
+  if(!plan.video_max_seconds||!plan.video_max_bytes||!plan.video_formats.length) throw new Error('Les limites vidéo de cette formule sont incomplètes. Contactez Klean Services.');
+  for(const video of videos){
+    const rec=uploadRecordFor(video);
+    if(!rec||rec.uploaded_by!==user.id||!/^video\//i.test(String(rec.mime||'')))throw new Error('Chaque vidéo doit être un fichier vidéo envoyé depuis votre compte.');
+    if(rec.size>plan.video_max_bytes)throw new Error(`Une vidéo dépasse la taille autorisée par votre formule (${Math.round(plan.video_max_bytes/1048576)} Mo).`);
+    if(!plan.video_formats.includes(String(rec.mime||'').toLowerCase()))throw new Error(`Le format ${rec.mime||'inconnu'} n’est pas autorisé par votre formule.`);
+    const duration=await audioDurationSeconds(video);
+    if(duration===null)throw new Error('La durée de cette vidéo ne peut pas être vérifiée. Utilisez une vidéo MP4 valide.');
+    if(duration>plan.video_max_seconds+0.01)throw new Error(`Une vidéo dépasse la durée autorisée (${plan.video_max_seconds} secondes).`);
+  }
+  return videos;
+}
+function braderieValidatePlanUsage(user,sub,photos,videos) {
+  const plan=braderieSubSnapshot(sub);
+  const publicationCount=db.prepare('SELECT COUNT(*) n FROM braderie_items WHERE subscription_id=?').get(sub.id).n;
+  const activeCount=db.prepare("SELECT COUNT(*) n FROM braderie_items WHERE subscription_id=? AND status IN ('pending','available')").get(sub.id).n;
+  if(publicationCount>=plan.publication_quota)throw new Error(`Le quota de publications de votre formule est atteint (${plan.publication_quota}). Renouvelez ou choisissez une formule supérieure.`);
+  if(activeCount>=plan.active_items_quota)throw new Error(`Le quota d’articles actifs de votre formule est atteint (${plan.active_items_quota}).`);
+  if(photos.length>plan.photos_per_item)throw new Error(`Votre formule autorise au maximum ${plan.photos_per_item} photo(s) par article.`);
+  return plan;
+}
+
+app.get('/api/braderie/plans', optionalAuth, (req,res) => {
+  const rows=db.prepare('SELECT * FROM braderie_plans WHERE active=1 AND visible=1 ORDER BY id').all();
+  res.json(rows.map(braderiePublicPlan));
+});
+app.get('/api/braderie/space', auth, (req,res) => res.json(braderieSpaceData(req.user.id)));
+app.post('/api/braderie/space', auth, (req,res) => {
+  try{
+    const name=braderieValidField((req.body||{}).name,100);
+    if(name.length<3)throw new Error('Donnez un nom d’au moins 3 caractères à votre espace vendeur.');
+    let space=db.prepare('SELECT * FROM braderie_spaces WHERE owner_id=?').get(req.user.id);
+    if(space){
+      if(['suspended','cancelled'].includes(space.status))throw new Error('Cet espace est suspendu ou annulé. Contactez Klean Services.');
+      db.prepare("UPDATE braderie_spaces SET name=?,updated_at=datetime('now') WHERE id=?").run(name,space.id);
+    }else{
+      const r=db.prepare("INSERT INTO braderie_spaces(owner_id,name,status) VALUES(?,?,'pending')").run(req.user.id,name);space=db.prepare('SELECT * FROM braderie_spaces WHERE id=?').get(r.lastInsertRowid);braderieSpaceEvent(space.id,null,req.user.id,'space_created','Espace vendeur créé par son propriétaire.');
+    }
+    res.status(201).json(braderieSpaceData(req.user.id));
+  }catch(e){res.status(400).json({error:e.message||'Création impossible.'});}
+});
+app.post('/api/braderie/space/subscriptions', auth, (req,res) => {
+  try{
+    braderieExpireSubscriptions();const b=req.body||{},period=String(b.period||'');
+    if(!['quarterly','annual'].includes(period))throw new Error('Choisissez une durée trimestrielle ou annuelle.');
+    const space=db.prepare('SELECT * FROM braderie_spaces WHERE owner_id=?').get(req.user.id);
+    if(!space)throw new Error('Créez d’abord votre espace vendeur.');
+    if(['suspended','cancelled'].includes(space.status))throw new Error('Cet espace ne peut pas souscrire tant qu’il est suspendu ou annulé.');
+    const plan=db.prepare('SELECT * FROM braderie_plans WHERE id=? AND active=1 AND visible=1').get(Number(b.plan_id));
+    if(!plan)throw new Error('Cette formule n’est pas disponible.');
+    const price=braderiePlanCurrentPrice(plan,period);if(price.amount<=0)throw new Error('Cette formule doit être tarifée par Klean Services avant souscription.');
+    const pending=db.prepare("SELECT id FROM braderie_subscriptions WHERE space_id=? AND status='pending_payment'").get(space.id);if(pending)throw new Error('Un paiement est déjà en attente de confirmation pour cet espace.');
+    const duration=period==='annual'?12:3, snapshot={...braderiePlanSnapshot(plan),price:price.amount,base_price:price.base_amount,promotion:price.promotion,billing_period:period,subscribed_at:new Date().toISOString()};
+    const ins=db.prepare(`INSERT INTO braderie_subscriptions(space_id,owner_id,plan_id,plan_name,plan_snapshot,billing_period,duration_months,amount,status,source)
+      VALUES(?,?,?,?,?,?,?,?,'pending_payment','user')`).run(space.id,req.user.id,plan.id,plan.name,JSON.stringify(snapshot),period,duration,price.amount);
+    const method=braderieValidField(b.method,40)||'À confirmer';
+    const tx=addTransaction({user_id:req.user.id,kind:'braderie_subscription',ref_id:ins.lastInsertRowid,label:`Braderie — ${plan.name} (${period==='annual'?'annuel':'trimestriel'})`,amount:price.amount,method,ville:req.user.ville||null,categorie:plan.name,status:'en_attente'});
+    db.prepare("UPDATE braderie_subscriptions SET transaction_id=?,updated_at=datetime('now') WHERE id=?").run(tx,ins.lastInsertRowid);
+    braderieSpaceEvent(space.id,ins.lastInsertRowid,req.user.id,'subscription_requested',`Souscription ${period}, transaction #${tx}.`);
+    notifyAdmins('braderie','Paiement Braderie à confirmer',`${req.user.name} attend la confirmation de son paiement pour la formule « ${plan.name} ».`, '#/admin/braderie');
+    res.status(201).json({ok:true,subscription_id:ins.lastInsertRowid,transaction_id:tx,amount:price.amount,status:'pending_payment'});
+  }catch(e){res.status(400).json({error:e.message||'Souscription impossible.'});}
+});
 
 app.get('/api/braderie/config', optionalAuth, (req,res) => res.json(braderieSettings()));
 app.get('/api/braderie/categories', (req,res) => {
@@ -3046,7 +3206,7 @@ app.get('/api/braderie/items/:id', optionalAuth, (req,res) => {
   if(!braderieAccessible(row,req.user,req.query.city,req.query.commune)) return res.status(404).json({error:'Article indisponible dans cette zone ou retiré.'});
   res.json(req.user && (req.user.id===row.seller_id || req.user.role==='pdg') ? braderiePrivateItem(row) : braderiePublicItem(row,req.user));
 });
-app.post('/api/braderie/items', auth, (req,res) => {
+app.post('/api/braderie/items', auth, async (req,res) => {
   const c=braderieRequireLive(req,res); if(!c) return;
   try {
     const b=req.body||{}, title=braderieValidField(b.title,120), description=braderieValidField(b.description,2500), quartier=braderieValidField(b.quartier,120), phone=braderieValidField(b.contact_phone,40), link=braderieValidField(b.external_link,500);
@@ -3059,28 +3219,33 @@ app.post('/api/braderie/items', auth, (req,res) => {
     const geo=braderieValidateGeo(b.city,b.commune,b.visibility_mode || b.visibility,c,categoryId);
     if(link && !/^https?:\/\//i.test(link)) throw new Error('Le lien doit commencer par http:// ou https://.');
     if(c.require_conditions && b.conditions_accepted!==true) throw new Error('Vous devez accepter les conditions de publication.');
-    const count=db.prepare(`SELECT COUNT(*) n FROM braderie_items WHERE seller_id=? AND created_at>=datetime('now',?)`).get(req.user.id,braderieModifier(c.limit_period)).n;
-    if(count>=c.max_per_client) throw new Error(`Votre quota est atteint : ${c.max_per_client} publication(s) par ${c.limit_period}.`);
+    const sub=braderieRequireActiveSeller(req.user);
+    const plan=braderieSubSnapshot(sub);
     const platform=db.prepare(`SELECT COUNT(*) n FROM braderie_items WHERE created_at>=datetime('now',?)`).get(braderieModifier(c.limit_period)).n;
     if(platform>=c.max_platform) throw new Error('Le quota de publication de la plateforme est atteint pour cette période.');
-    const photos=braderieValidatePhotos(b.photos,req.user,c.max_photos);
-    const r=db.prepare(`INSERT INTO braderie_items(seller_id,title,description,price,city,commune,quartier,contact_phone,external_link,item_condition,visibility,visibility_mode,category_id,photos,conditions_accepted,expires_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now',?))`).run(req.user.id,title,description,price,geo.city,geo.commune,quartier,phone,link||null,condition,geo.mode==='national'?'national':'city',geo.mode,categoryId,JSON.stringify(photos),c.require_conditions?1:0,'+'+c.expiry_days+' days');
+    const photos=braderieValidatePhotos(b.photos,req.user,plan.photos_per_item);
+    const videos=await braderieValidateVideos(b.videos,req.user,plan);
+    braderieValidatePlanUsage(req.user,sub,photos,videos);
+    const r=db.prepare(`INSERT INTO braderie_items(seller_id,title,description,price,city,commune,quartier,contact_phone,external_link,item_condition,visibility,visibility_mode,category_id,photos,videos,subscription_id,conditions_accepted,expires_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now',?))`).run(req.user.id,title,description,price,geo.city,geo.commune,quartier,phone,link||null,condition,geo.mode==='national'?'national':'city',geo.mode,categoryId,JSON.stringify(photos),JSON.stringify(videos),sub.id,c.require_conditions?1:0,'+'+c.expiry_days+' days');
     notifyAdmins('braderie','Nouvel article à valider',`${req.user.name} a publié « ${title} ».`,`#/admin/braderie`);
-    res.status(201).json({ok:true,id:r.lastInsertRowid,status:'pending',message:'Votre article a été envoyé au PDG pour validation.'});
+    res.status(201).json({ok:true,id:r.lastInsertRowid,status:'pending',message:'Votre article a été envoyé à Klean Services pour validation.'});
   } catch(e) { res.status(400).json({error:e.message||'Publication invalide.'}); }
 });
-app.put('/api/braderie/items/:id', auth, (req,res) => {
+app.put('/api/braderie/items/:id', auth, async (req,res) => {
   const row=braderieItemRow(Number(req.params.id)); if(!row) return res.status(404).json({error:'Article introuvable.'});
   if(row.seller_id!==req.user.id) return res.status(403).json({error:'Seul le vendeur peut modifier cet article.'});
+  let activeSub; try { activeSub=braderieRequireActiveSeller(req.user); } catch(e) { return res.status(409).json({error:e.message}); }
   if(!['pending','rejected'].includes(row.status)) return res.status(409).json({error:'Seul un article en attente ou refusé peut être corrigé.'});
   try {
     const b=req.body||{}, c=braderieSettings(), title=b.title===undefined?row.title:braderieValidField(b.title,120),description=b.description===undefined?row.description:braderieValidField(b.description,2500),price=b.price===undefined?row.price:Math.round(Number(b.price)),quartier=b.quartier===undefined?row.quartier:braderieValidField(b.quartier,120),condition=b.item_condition===undefined?row.item_condition:braderieValidField(b.item_condition,30),categoryId=b.category_id===undefined?row.category_id:Number(b.category_id)||0;
     if(title.length<3||description.length<8||(c.quartier_required&&!quartier)||!Number.isFinite(price)||price<0||!['neuf','tres_bon','bon','a_reparer'].includes(condition)) throw new Error('Données de correction invalides.');
     if(!db.prepare('SELECT id FROM braderie_categories WHERE id=? AND active=1').get(categoryId)) throw new Error('Catégorie d’article inactive ou invalide.');
     const geo=braderieValidateGeo(b.city===undefined?row.city:b.city,b.commune===undefined?row.commune:b.commune,b.visibility_mode===undefined?(b.visibility===undefined?(row.visibility_mode||row.visibility):b.visibility):b.visibility_mode,c,categoryId);
-    const photos=b.photos===undefined?braderiePhotos(row.photos):braderieValidatePhotos(b.photos,req.user,c.max_photos);
-    db.prepare("UPDATE braderie_items SET title=?,description=?,price=?,city=?,commune=?,quartier=?,item_condition=?,visibility=?,visibility_mode=?,category_id=?,photos=?,status='pending',moderation_note=NULL,updated_at=datetime('now') WHERE id=?").run(title,description,price,geo.city,geo.commune,quartier,condition,geo.mode==='national'?'national':'city',geo.mode,categoryId,JSON.stringify(photos),row.id);
+    const plan=braderieSubSnapshot(activeSub);
+    const photos=b.photos===undefined?braderiePhotos(row.photos):braderieValidatePhotos(b.photos,req.user,plan.photos_per_item);
+    const videos=b.videos===undefined?braderiePhotos(row.videos):await braderieValidateVideos(b.videos,req.user,plan);
+    db.prepare("UPDATE braderie_items SET title=?,description=?,price=?,city=?,commune=?,quartier=?,item_condition=?,visibility=?,visibility_mode=?,category_id=?,photos=?,videos=?,status='pending',moderation_note=NULL,updated_at=datetime('now') WHERE id=?").run(title,description,price,geo.city,geo.commune,quartier,condition,geo.mode==='national'?'national':'city',geo.mode,categoryId,JSON.stringify(photos),JSON.stringify(videos),row.id);
     notifyAdmins('braderie','Article corrigé à valider',`${req.user.name} a corrigé « ${title} ».`,`#/admin/braderie`);res.json({ok:true,status:'pending'});
   } catch(e) { res.status(400).json({error:e.message||'Correction invalide.'}); }
 });
@@ -3102,7 +3267,7 @@ app.post('/api/braderie/items/:id/offers', auth, (req,res) => {
 // Alertes acheteurs : aucune coordonnée de vendeur n'est mise en commun ; le serveur
 // cible uniquement les comptes dont le périmètre et les références correspondent.
 function braderieAlertPayload(user, body) {
-  const cfg=braderieSettings(); if(!cfg.alerts_enabled) throw new Error('Les alertes Braderie sont temporairement désactivées par le PDG.');
+  const cfg=braderieSettings(); if(!cfg.alerts_enabled) throw new Error('Les alertes Braderie sont temporairement désactivées par Klean Services.');
   const b=body||{},scope=['city','national','abidjan','commune'].includes(String(b.scope))?String(b.scope):'';
   if(!scope) throw new Error('Choisissez une zone pour cette alerte.');
   const city=braderieValidField(b.city,100),commune=braderieValidField(b.commune,120), ids=braderieCategoryIds(b.category_ids);
@@ -3518,7 +3683,7 @@ function maintenanceStats() {
   return { blocked:maintenanceGeneral(getMaintenance())?Math.max(0,total-allowed):0, allowed, test_connections:tests, denied_attempts:denied, period:'30 jours' };
 }
 function maintenanceRoleLabel(u) {
-  if(u.role==='pdg')return 'PDG';if(u.role==='gestionnaire')return 'Gestionnaire';if(u.role==='agent')return 'Agent';if(u.role==='admin')return 'Administrateur';
+  if(u.role==='pdg')return 'Klean Services';if(u.role==='gestionnaire')return 'Gestionnaire';if(u.role==='agent')return 'Agent';if(u.role==='admin')return 'Administrateur';
   return (u.is_pro||u.pro_status==='approved'||u.pro_status==='pending')?'Professionnel':'Client';
 }
 function maintenancePublicLogo(raw) { const v=String(raw||'').trim().slice(0,600);return v==='/logo.png'||/^\/uploads\/[A-Za-z0-9._-]+$/.test(v)||/^https:\/\//i.test(v)?v:MAINT_DEFAULT.logo_url; }
@@ -3548,7 +3713,7 @@ A.get('/maintenance/accounts', pdgOnly, (req,res) => {
   else if(role==='professional')where.push("u.role='user' AND (COALESCE(u.is_pro,0)=1 OR COALESCE(u.pro_status,'') IN ('approved','pending'))");
   else if(['pdg','admin','gestionnaire','agent'].includes(role)){where.push('u.role=?');args.push(role);}
   const rows=db.prepare(`SELECT u.id,u.name,u.phone,u.email,u.kp_code,u.role,u.is_pro,u.pro_status,u.suspended,u.blocked,u.disabled_until,u.created_at,a.user_id allowed_id FROM users u LEFT JOIN maintenance_allowed_accounts a ON a.user_id=u.id ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY CASE u.role WHEN 'pdg' THEN 0 WHEN 'admin' THEN 1 WHEN 'gestionnaire' THEN 2 WHEN 'agent' THEN 3 ELSE 4 END,u.name COLLATE NOCASE,u.id LIMIT ${limit}`).all(...args);
-  res.json({accounts:rows.map(u=>({...u,maintenance_allowed:u.role==='pdg'||!!u.allowed_id,role_label:maintenanceRoleLabel(u),status:u.role==='pdg'?'Accès PDG permanent':u.blocked?'Bloqué administrativement':u.suspended?'Suspendu administrativement':u.disabled_until&&u.disabled_until>maintenanceDbNow()?'Désactivé temporairement':'Actif'})),stats:maintenanceStats()});
+  res.json({accounts:rows.map(u=>({...u,maintenance_allowed:u.role==='pdg'||!!u.allowed_id,role_label:maintenanceRoleLabel(u),status:u.role==='pdg'?'Accès Klean Services permanent':u.blocked?'Bloqué administrativement':u.suspended?'Suspendu administrativement':u.disabled_until&&u.disabled_until>maintenanceDbNow()?'Désactivé temporairement':'Actif'})),stats:maintenanceStats()});
 });
 A.put('/maintenance/allowed', pdgOnly, (req,res) => {
   const b=req.body||{},ids=[...new Set((Array.isArray(b.user_ids)?b.user_ids:[]).map(Number).filter(n=>Number.isInteger(n)&&n>0))].slice(0,500),allowed=b.allowed===true;
@@ -3721,7 +3886,7 @@ A.post('/pros/:id/approve', (req, res) => {
     while (db.prepare('SELECT 1 FROM users WHERE kp_code=?').get(kp));
     db.prepare('UPDATE users SET kp_code=? WHERE id=?').run(kp, u.id);
   }
-  notify(u.id, 'compte', '🎉 Vous êtes maintenant professionnel !', `Votre espace professionnel est actif. Votre code professionnel est ${kp}. Vous pouvez recevoir des missions. Votre compte reste aussi un compte client.`, '#/pro');
+  notify(u.id, 'compte', '🎉 Vous êtes maintenant professionnel !', `Votre espace professionnel est actif. Votre code professionnel est ${kp}. Vous pouvez recevoir des missions. Votre compte reste aussi un compte utilisateur.`, '#/pro');
   push(u.id, 'account', { pro_status: 'approved' });
   res.json({ ok: true });
 });
@@ -4180,7 +4345,7 @@ A.post('/missions/:id/reassign', reassignMissionAllowed, (req, res) => {
   const service=db.prepare('SELECT name FROM services WHERE id=?').get(result.mission.service_id);
   notify(result.mission.client_id,'mission','🔄 Professionnel réattribué',`Klean Services a réattribué votre mission « ${service.name} ». Le nouveau professionnel doit encore être confirmé.`, '#/mission/'+result.mission.id);
   notify(result.oldProId,'mission','🔄 Mission réattribuée',`La direction a confié « ${service.name} » à un autre professionnel. Motif : ${reason}`, '#/missions');
-  notify(result.newProId,'mission','🔄 Nouvelle mission réattribuée',`La direction vous a réattribué « ${service.name} ». Consultez la mission et coordonnez-vous avec le client.`, '#/mission/'+result.mission.id);
+  notify(result.newProId,'mission','🔄 Nouvelle mission réattribuée',`La direction vous a réattribué « ${service.name} ». Consultez la mission et coordonnez-vous avec l’utilisateur.`, '#/mission/'+result.mission.id);
   [result.mission.client_id,result.oldProId,result.newProId].forEach(uid=>push(uid,'mission',{id:result.mission.id,status:'reaffectee'}));
   res.json({ok:true,status:result.nextStatus,sensitive:result.sensitive});
 });
@@ -4351,6 +4516,13 @@ A.post('/transactions/:id/statut', (req, res) => {
         db.prepare(`UPDATE ad_campaigns SET status='attente_validation' WHERE id=?`).run(c.id);
         notify(c.user_id, 'information', '📣 Paiement confirmé', `Le paiement de « ${c.title} » est confirmé. Votre campagne est en cours de validation.`, '#/pub');
       }
+    } else if (t.kind === 'braderie_subscription') {
+      const sub=db.prepare('SELECT * FROM braderie_subscriptions WHERE id=?').get(t.ref_id);
+      if(sub && sub.status==='pending_payment') {
+        db.prepare("UPDATE braderie_subscriptions SET status='payment_confirmed',payment_confirmed_at=datetime('now'),updated_at=datetime('now') WHERE id=?").run(sub.id);
+        braderieSpaceEvent(sub.space_id,sub.id,req.user.id,'payment_confirmed','Paiement réel confirmé dans les transactions Klean Services.');
+        braderieActivateSubscription(sub,req.user.id);
+      }
     } else if (t.kind === 'avis_recherche') {
       db.prepare('UPDATE avis_recherche SET paid=1 WHERE id=?').run(t.ref_id);
       notify(t.user_id, 'information', '🔎 Mise en avant payée', 'Votre avis de recherche bénéficie maintenant de sa formule.', '#/avis-recherche');
@@ -4363,6 +4535,10 @@ A.post('/transactions/:id/statut', (req, res) => {
   if (st !== 'confirme' && t.kind === 'visibilite') {
     const sub = db.prepare('SELECT * FROM visibility_subs WHERE id=?').get(t.ref_id);
     if (sub && sub.status === 'attente_paiement') db.prepare(`UPDATE visibility_subs SET status='annulee' WHERE id=?`).run(sub.id);
+  }
+  if (st !== 'confirme' && t.kind === 'braderie_subscription') {
+    const sub=db.prepare('SELECT * FROM braderie_subscriptions WHERE id=?').get(t.ref_id);
+    if(sub && sub.status==='pending_payment') { db.prepare("UPDATE braderie_subscriptions SET status='cancelled',updated_at=datetime('now') WHERE id=?").run(sub.id);braderieSpaceEvent(sub.space_id,sub.id,req.user.id,'payment_'+st,'Paiement non confirmé : '+st);notify(sub.owner_id,'braderie','Paiement Braderie non confirmé','Votre demande d’abonnement a été annulée. Vous pouvez créer une nouvelle souscription.','#/braderie-space'); }
   }
   res.json({ ok: true });
 });
@@ -5293,14 +5469,48 @@ A.put('/braderie/items/:id', pdgOnly, (req,res) => {
     if(title.length<3||description.length<8)throw new Error('Titre ou description trop court.');if(!Number.isFinite(price)||price<0||price>100000000)throw new Error('Prix invalide.');if(braderieSettings().quartier_required&&!quartier)throw new Error('Quartier requis.');if(!['neuf','tres_bon','bon','a_reparer'].includes(condition))throw new Error('État d’article invalide.');if(!db.prepare('SELECT id FROM braderie_categories WHERE id=?').get(categoryId))throw new Error('Catégorie introuvable.');
     const geo=braderieValidateGeo(b.city===undefined?row.city:b.city,b.commune===undefined?row.commune:b.commune,b.visibility_mode===undefined?(b.visibility===undefined?(row.visibility_mode||row.visibility):b.visibility):b.visibility_mode,braderieSettings(),categoryId);
     const expiry=status==='available'?`datetime('now','+${braderieSettings().expiry_days} days')`:'expires_at';db.prepare(`UPDATE braderie_items SET title=?,description=?,price=?,city=?,commune=?,quartier=?,item_condition=?,visibility=?,visibility_mode=?,category_id=?,status=?,moderation_note=?,approved_at=CASE WHEN ?='available' THEN COALESCE(approved_at,datetime('now')) ELSE approved_at END,deleted_at=CASE WHEN ?='deleted' THEN datetime('now') ELSE deleted_at END,expires_at=${expiry},updated_at=datetime('now') WHERE id=?`).run(title,description,price,geo.city,geo.commune,quartier,condition,geo.mode==='national'?'national':'city',geo.mode,categoryId,status,note||null,status,status,row.id);
-    if(['suspended','expired','deleted','sold','rejected'].includes(status))db.prepare("UPDATE braderie_negotiations SET state='closed',updated_at=datetime('now') WHERE item_id=? AND state IN ('open','seller_counter','seller_last_price')").run(row.id);const msg={available:'Votre article est validé et désormais visible.',rejected:'Votre article a été refusé. Consultez la note du PDG.',suspended:'Votre article a été suspendu.',deleted:'Votre article a été retiré.',expired:'Votre article est arrivé à expiration.',sold:'Votre article a été archivé comme vendu.'}[status];if(msg)notify(row.seller_id,'braderie','Mise à jour de votre article',msg,`#/braderie-mine`);if(status==='available'&&row.status!=='available')notifyBraderieAlerts(braderieItemRow(row.id));logAction(req.user,'braderie_article_'+status,{target_type:'braderie_item',target_id:row.id,target_name:title,reason:note||null});res.json({ok:true,status});
+    if(['suspended','expired','deleted','sold','rejected'].includes(status))db.prepare("UPDATE braderie_negotiations SET state='closed',updated_at=datetime('now') WHERE item_id=? AND state IN ('open','seller_counter','seller_last_price')").run(row.id);const msg={available:'Votre article est validé et désormais visible.',rejected:'Votre article a été refusé. Consultez la note de Klean Services.',suspended:'Votre article a été suspendu.',deleted:'Votre article a été retiré.',expired:'Votre article est arrivé à expiration.',sold:'Votre article a été archivé comme vendu.'}[status];if(msg)notify(row.seller_id,'braderie','Mise à jour de votre article',msg,`#/braderie-mine`);if(status==='available'&&row.status!=='available')notifyBraderieAlerts(braderieItemRow(row.id));logAction(req.user,'braderie_article_'+status,{target_type:'braderie_item',target_id:row.id,target_name:title,reason:note||null});res.json({ok:true,status});
   }catch(e){res.status(400).json({error:e.message||'Modification invalide.'});}
 });
-A.post('/braderie/items/:id/reactivate', pdgOnly, (req,res) => { const row=braderieItemRow(Number(req.params.id));if(!row)return res.status(404).json({error:'Article introuvable.'});if(!['sold','suspended','expired'].includes(row.status))return res.status(409).json({error:'Seul un article vendu, suspendu ou expiré peut être réactivé.'});db.prepare(`UPDATE braderie_items SET status='available',sold_at=NULL,expires_at=datetime('now',?),updated_at=datetime('now') WHERE id=?`).run('+'+braderieSettings().expiry_days+' days',row.id);notify(row.seller_id,'braderie','Article réactivé',`Le PDG a réactivé « ${row.title} ».`,`#/braderie/${row.id}`);notifyBraderieAlerts(braderieItemRow(row.id));logAction(req.user,'braderie_article_reactive',{target_type:'braderie_item',target_id:row.id,target_name:row.title});res.json({ok:true,status:'available'}); });
+A.post('/braderie/items/:id/reactivate', pdgOnly, (req,res) => { const row=braderieItemRow(Number(req.params.id));if(!row)return res.status(404).json({error:'Article introuvable.'});if(!['sold','suspended','expired'].includes(row.status))return res.status(409).json({error:'Seul un article vendu, suspendu ou expiré peut être réactivé.'});db.prepare(`UPDATE braderie_items SET status='available',sold_at=NULL,expires_at=datetime('now',?),updated_at=datetime('now') WHERE id=?`).run('+'+braderieSettings().expiry_days+' days',row.id);notify(row.seller_id,'braderie','Article réactivé',`Klean Services a réactivé « ${row.title} ».`,`#/braderie/${row.id}`);notifyBraderieAlerts(braderieItemRow(row.id));logAction(req.user,'braderie_article_reactive',{target_type:'braderie_item',target_id:row.id,target_name:row.title});res.json({ok:true,status:'available'}); });
 A.get('/braderie/reports', pdgOnly, (req,res) => res.json(db.prepare(`SELECT r.*,i.title,b.name reporter_name,s.name seller_name FROM braderie_reports r JOIN braderie_items i ON i.id=r.item_id JOIN users b ON b.id=r.reporter_id JOIN users s ON s.id=i.seller_id ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.created_at DESC`).all()));
 A.put('/braderie/reports/:id', pdgOnly, (req,res) => { const b=req.body||{},status=String(b.status||''),note=braderieValidField(b.admin_note,1200);if(!['reviewed','dismissed','actioned'].includes(status))return res.status(400).json({error:'Décision de signalement invalide.'});const r=db.prepare("UPDATE braderie_reports SET status=?,admin_note=?,updated_at=datetime('now') WHERE id=?").run(status,note||null,Number(req.params.id));if(!r.changes)return res.status(404).json({error:'Signalement introuvable.'});res.json({ok:true}); });
 A.get('/braderie/contacts', pdgOnly, (req,res) => res.json(db.prepare(`SELECT c.*,i.title,b.name buyer_name,b.phone buyer_phone,s.name seller_name,s.phone seller_phone FROM braderie_contact_requests c JOIN braderie_items i ON i.id=c.item_id JOIN users b ON b.id=c.buyer_id JOIN users s ON s.id=c.seller_id ORDER BY CASE c.status WHEN 'pending' THEN 0 ELSE 1 END,c.created_at DESC`).all()));
 A.put('/braderie/contacts/:id', pdgOnly, (req,res) => { const b=req.body||{},status=String(b.status||''),note=braderieValidField(b.admin_note,1200);if(!['approved','rejected','closed'].includes(status))return res.status(400).json({error:'Décision de contact invalide.'});const row=db.prepare('SELECT * FROM braderie_contact_requests WHERE id=?').get(Number(req.params.id));if(!row)return res.status(404).json({error:'Demande introuvable.'});db.prepare("UPDATE braderie_contact_requests SET status=?,admin_note=?,updated_at=datetime('now') WHERE id=?").run(status,note||null,row.id);if(status==='approved'){notify(row.buyer_id,'braderie','Demande de contact transmise','Klean Services a transmis votre demande au vendeur. Nous vous recontacterons via la plateforme.',`#/braderie/${row.item_id}`);notify(row.seller_id,'braderie','Demande de contact transmise','Klean Services vous a transmis une demande concernant votre article. Consultez vos notifications.',`#/braderie-mine`);}else notify(row.buyer_id,'braderie','Demande de contact mise à jour',note||'Votre demande de contact a été mise à jour par Klean Services.',`#/braderie/${row.item_id}`);res.json({ok:true}); });
+
+// ----- COLIS 32 : pilotage des formules et espaces vendeurs Braderie -----
+function braderiePlanAdminPayload(body, previous) {
+  const b=body||{}, out={};
+  const text=(key,max,required=false)=>{if(b[key]===undefined)return;const v=braderieValidField(b[key],max);if(required&&v.length<3)throw new Error(`${key} est obligatoire.`);out[key]=v;};
+  text('name',100,!previous);text('description',2000);text('benefits',4000);text('restrictions',4000);
+  const integer=(key,min,max)=>{if(b[key]===undefined)return;const n=Number(b[key]);if(!Number.isInteger(n)||n<min||n>max)throw new Error(`Valeur invalide : ${key}.`);out[key]=n;};
+  integer('price_quarterly',0,100000000);integer('price_annual',0,100000000);integer('publication_quota',0,100000);integer('active_items_quota',0,100000);integer('photos_per_item',1,8);integer('videos_per_item',0,8);integer('video_max_seconds',0,7200);integer('video_max_bytes',0,15*1024*1024);integer('promo_quarterly',0,100000000);integer('promo_annual',0,100000000);
+  ['visible','active','videos_allowed'].forEach(key=>{if(b[key]!==undefined){if(![true,false,0,1,'0','1'].includes(b[key]))throw new Error(`Valeur invalide : ${key}.`);out[key]=[true,1,'1'].includes(b[key])?1:0;}});
+  if(b.video_formats!==undefined){const a=Array.isArray(b.video_formats)?b.video_formats:[];const formats=[...new Set(a.map(v=>String(v||'').trim().toLowerCase()).filter(v=>/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(v)))];if(formats.length!==a.length||formats.length>20)throw new Error('Formats vidéo invalides.');out.video_formats=JSON.stringify(formats);}
+  ['promo_start_at','promo_end_at'].forEach(key=>{if(b[key]!==undefined){const v=String(b[key]||'').trim();if(v&&!/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/.test(v))throw new Error(`Date invalide : ${key}.`);out[key]=v||null;}});
+  const merged={...(previous||{}),...out};
+  if(merged.active){
+    if(!(Number(merged.price_quarterly)>0)||!(Number(merged.price_annual)>0))throw new Error('Une formule active doit avoir ses tarifs trimestriel et annuel configurés par Klean Services.');
+    if(!(Number(merged.publication_quota)>0)||!(Number(merged.active_items_quota)>0))throw new Error('Une formule active doit définir des quotas de publication et d’articles actifs supérieurs à zéro.');
+    if(merged.videos_allowed&&(!(Number(merged.videos_per_item)>0)||!(Number(merged.video_max_seconds)>0)||!(Number(merged.video_max_bytes)>0)||!braderiePlanFormats(merged.video_formats).length))throw new Error('Renseignez nombre, durée, taille et formats avant d’autoriser les vidéos.');
+  }
+  const start=merged.promo_start_at,end=merged.promo_end_at;if(start&&end&&start>end)throw new Error('La fin de promotion doit être postérieure au début.');
+  return out;
+}
+function braderieAdminPlanRow(row){return {...row,...braderiePublicPlan(row),history_count:db.prepare('SELECT COUNT(*) n FROM braderie_plan_history WHERE plan_id=?').get(row.id).n};}
+A.get('/braderie/plans', pdgOnly, (req,res)=>res.json(db.prepare('SELECT * FROM braderie_plans ORDER BY id').all().map(braderieAdminPlanRow)));
+A.post('/braderie/plans', pdgOnly, (req,res)=>{try{const p=braderiePlanAdminPayload(req.body||{},null);if(!p.name)throw new Error('Le nom de la formule est obligatoire.');const cols=Object.keys(p),marks=cols.map(()=>'?');const r=db.prepare(`INSERT INTO braderie_plans(${cols.join(',')},created_by) VALUES(${marks.join(',')},?)`).run(...cols.map(k=>p[k]),req.user.id);const row=db.prepare('SELECT * FROM braderie_plans WHERE id=?').get(r.lastInsertRowid);db.prepare('INSERT INTO braderie_plan_history(plan_id,actor_id,action,snapshot,note) VALUES(?,?,?,?,?)').run(row.id,req.user.id,'created',JSON.stringify(row),null);logAction(req.user,'braderie_plan_created',{target_type:'braderie_plan',target_id:row.id,target_name:row.name});res.status(201).json(braderieAdminPlanRow(row));}catch(e){res.status(400).json({error:e.message||'Création de formule impossible.'});}});
+A.put('/braderie/plans/:id', pdgOnly, (req,res)=>{try{const old=db.prepare('SELECT * FROM braderie_plans WHERE id=?').get(Number(req.params.id));if(!old)return res.status(404).json({error:'Formule introuvable.'});const p=braderiePlanAdminPayload(req.body||{},old);if(!Object.keys(p).length)throw new Error('Aucune modification à enregistrer.');const cols=Object.keys(p);db.prepare(`UPDATE braderie_plans SET ${cols.map(k=>k+'=?').join(',')},updated_at=datetime('now') WHERE id=?`).run(...cols.map(k=>p[k]),old.id);const row=db.prepare('SELECT * FROM braderie_plans WHERE id=?').get(old.id);db.prepare('INSERT INTO braderie_plan_history(plan_id,actor_id,action,snapshot,note) VALUES(?,?,?,?,?)').run(row.id,req.user.id,'updated',JSON.stringify(row),braderieValidField((req.body||{}).note,600)||null);logAction(req.user,'braderie_plan_updated',{target_type:'braderie_plan',target_id:row.id,target_name:row.name});res.json(braderieAdminPlanRow(row));}catch(e){res.status(400).json({error:e.message||'Modification impossible.'});}});
+A.get('/braderie/plans/:id/history', pdgOnly, (req,res)=>res.json(db.prepare(`SELECT h.*,u.name actor_name FROM braderie_plan_history h LEFT JOIN users u ON u.id=h.actor_id WHERE h.plan_id=? ORDER BY h.id DESC`).all(Number(req.params.id))));
+A.get('/braderie/spaces', pdgOnly, (req,res)=>{braderieExpireSubscriptions();const q=braderieValidField(req.query.q,100).toLowerCase();let rows=db.prepare(`SELECT sp.*,u.name owner_name,u.phone owner_phone,u.ville, (SELECT s.plan_name FROM braderie_subscriptions s WHERE s.space_id=sp.id AND s.status='active' AND s.start_at<=datetime('now') AND s.end_at>datetime('now') ORDER BY s.end_at DESC LIMIT 1) plan_name,(SELECT s.end_at FROM braderie_subscriptions s WHERE s.space_id=sp.id AND s.status='active' AND s.start_at<=datetime('now') AND s.end_at>datetime('now') ORDER BY s.end_at DESC LIMIT 1) end_at,(SELECT COUNT(*) FROM braderie_items i WHERE i.seller_id=sp.owner_id AND i.status IN ('pending','available')) active_items FROM braderie_spaces sp JOIN users u ON u.id=sp.owner_id ORDER BY sp.updated_at DESC`).all();if(q)rows=rows.filter(r=>(r.name+' '+r.owner_name+' '+(r.owner_phone||'')).toLowerCase().includes(q));res.json(rows);});
+A.get('/braderie/subscriptions', pdgOnly, (req,res)=>{braderieExpireSubscriptions();const status=braderieValidField(req.query.status,30);const cond=status?['s.status=?']:['1=1'],args=status?[status]:[];res.json(db.prepare(`SELECT s.*,sp.name space_name,u.name owner_name,u.phone owner_phone,t.status transaction_status,t.method transaction_method FROM braderie_subscriptions s JOIN braderie_spaces sp ON sp.id=s.space_id JOIN users u ON u.id=s.owner_id LEFT JOIN transactions t ON t.id=s.transaction_id WHERE ${cond.join(' AND ')} ORDER BY s.id DESC LIMIT 500`).all(...args).map(s=>({...s,plan:braderieSubSnapshot(s)})));});
+A.put('/braderie/spaces/:id/status', pdgOnly, (req,res)=>{try{braderieExpireSubscriptions();const space=db.prepare('SELECT * FROM braderie_spaces WHERE id=?').get(Number(req.params.id)),b=req.body||{},action=String(b.action||''),note=braderieValidField(b.note,1000);if(!space)return res.status(404).json({error:'Espace introuvable.'});if(!['suspend','reactivate','cancel'].includes(action))throw new Error('Action invalide.');if(action==='suspend'){db.transaction(()=>{db.prepare("UPDATE braderie_spaces SET status='suspended',suspended_reason=?,updated_at=datetime('now') WHERE id=?").run(note||'Suspendu par Klean Services.',space.id);db.prepare("UPDATE braderie_subscriptions SET status='suspended',updated_at=datetime('now') WHERE space_id=? AND status IN ('active','payment_confirmed')").run(space.id);braderieSpaceEvent(space.id,null,req.user.id,'suspended',note||null);})();notify(space.owner_id,'braderie','Espace vendeur suspendu',note||'Votre espace vendeur a été suspendu par Klean Services.','#/braderie-space');}
+else if(action==='reactivate'){const sub=db.prepare("SELECT * FROM braderie_subscriptions WHERE space_id=? AND status='suspended' AND end_at>datetime('now') ORDER BY end_at DESC LIMIT 1").get(space.id);if(!sub)throw new Error('Aucun abonnement suspendu encore valable ne permet la réactivation.');const next=sub.start_at&&sub.start_at>new Date().toISOString().slice(0,19).replace('T',' ')?'payment_confirmed':'active';db.transaction(()=>{db.prepare("UPDATE braderie_subscriptions SET status=?,updated_at=datetime('now') WHERE id=?").run(next,sub.id);db.prepare("UPDATE braderie_spaces SET status=?,suspended_reason=NULL,updated_at=datetime('now') WHERE id=?").run(next==='active'?'active':'pending',space.id);braderieSpaceEvent(space.id,sub.id,req.user.id,'reactivated',note||null);})();notify(space.owner_id,'braderie','Espace vendeur réactivé',note||'Votre espace vendeur est de nouveau utilisable.','#/braderie-space');}
+else{db.transaction(()=>{db.prepare("UPDATE braderie_spaces SET status='cancelled',suspended_reason=?,updated_at=datetime('now') WHERE id=?").run(note||'Annulé par Klean Services.',space.id);db.prepare("UPDATE braderie_subscriptions SET status='cancelled',updated_at=datetime('now') WHERE space_id=? AND status IN ('pending_payment','payment_confirmed','active','suspended')").run(space.id);braderieSpaceEvent(space.id,null,req.user.id,'cancelled',note||null);})();notify(space.owner_id,'braderie','Espace vendeur annulé',note||'Votre espace vendeur a été annulé par Klean Services.','#/braderie-space');}logAction(req.user,'braderie_space_'+action,{target_type:'braderie_space',target_id:space.id,target_name:space.name,reason:note||null});res.json({ok:true});}catch(e){res.status(400).json({error:e.message||'Action impossible.'});}});
+A.post('/braderie/spaces/:id/grant', pdgOnly, (req,res)=>{try{const space=db.prepare('SELECT * FROM braderie_spaces WHERE id=?').get(Number(req.params.id)),b=req.body||{},period=String(b.period||''),source=String(b.source||'');if(!space)return res.status(404).json({error:'Espace introuvable.'});if(!['quarterly','annual'].includes(period)||!['admin_grant','promotion'].includes(source))throw new Error('Attribution invalide.');const plan=db.prepare('SELECT * FROM braderie_plans WHERE id=?').get(Number(b.plan_id));if(!plan)throw new Error('Formule introuvable.');const snap={...braderiePlanSnapshot(plan),price:0,base_price:braderiePlanCurrentPrice(plan,period).base_amount,granted:true,billing_period:period,granted_at:new Date().toISOString()};const r=db.prepare(`INSERT INTO braderie_subscriptions(space_id,owner_id,plan_id,plan_name,plan_snapshot,billing_period,duration_months,amount,status,source,created_by,admin_note) VALUES(?,?,?,?,?,?,?,?, 'payment_confirmed',?,?,?)`).run(space.id,space.owner_id,plan.id,plan.name,JSON.stringify(snap),period,period==='annual'?12:3,0,source,req.user.id,braderieValidField(b.note,1000)||null);braderieActivateSubscription({id:r.lastInsertRowid},req.user.id);braderieSpaceEvent(space.id,r.lastInsertRowid,req.user.id,source,braderieValidField(b.note,1000)||null);logAction(req.user,'braderie_space_'+source,{target_type:'braderie_space',target_id:space.id,target_name:space.name});res.status(201).json({ok:true,subscription_id:r.lastInsertRowid});}catch(e){res.status(400).json({error:e.message||'Attribution impossible.'});}});
+A.post('/braderie/subscriptions/:id/extend', pdgOnly, (req,res)=>{try{const s=db.prepare('SELECT * FROM braderie_subscriptions WHERE id=?').get(Number(req.params.id)),b=req.body||{},days=Number(b.days),note=braderieValidField(b.note,1000);if(!s)return res.status(404).json({error:'Abonnement introuvable.'});if(!Number.isInteger(days)||days<1||days>365)throw new Error('La prolongation doit être comprise entre 1 et 365 jours.');if(!['active','payment_confirmed','suspended'].includes(s.status))throw new Error('Seul un abonnement en cours, programmé ou suspendu peut être prolongé.');db.prepare("UPDATE braderie_subscriptions SET end_at=datetime(COALESCE(end_at,datetime('now')),?),updated_at=datetime('now') WHERE id=?").run('+'+days+' days',s.id);braderieSpaceEvent(s.space_id,s.id,req.user.id,'extended',`${days} jour(s). ${note}`);notify(s.owner_id,'braderie','Abonnement prolongé',`Klean Services a prolongé votre abonnement de ${days} jour(s).`,'#/braderie-space');logAction(req.user,'braderie_subscription_extended',{target_type:'braderie_subscription',target_id:s.id,target_name:s.plan_name,reason:note||null});res.json({ok:true});}catch(e){res.status(400).json({error:e.message||'Prolongation impossible.'});}});
+A.get('/braderie/subscription-stats', pdgOnly, (req,res)=>{braderieExpireSubscriptions();const period=['day','week','month','year'].includes(req.query.period)?req.query.period:'month',mod=braderieModifier(period);const one=(sql,args=[])=>db.prepare(sql).get(...args);const statusRows=db.prepare('SELECT status,COUNT(*) n FROM braderie_subscriptions GROUP BY status').all();const byStatus=Object.fromEntries(statusRows.map(r=>[r.status,r.n]));const byPlan=db.prepare(`SELECT plan_name,COUNT(*) subscriptions,SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) active,COALESCE(SUM(amount),0) committed FROM braderie_subscriptions GROUP BY plan_name ORDER BY subscriptions DESC`).all();const revenues=one("SELECT COALESCE(SUM(amount),0) n FROM transactions WHERE kind='braderie_subscription' AND status='confirme' AND created_at>=datetime('now',?)",[mod]);const created=one("SELECT COUNT(*) n FROM braderie_spaces WHERE created_at>=datetime('now',?)",[mod]);const renewals=one("SELECT COUNT(*) n FROM braderie_subscriptions WHERE created_at>=datetime('now',?) AND space_id IN (SELECT space_id FROM braderie_subscriptions GROUP BY space_id HAVING COUNT(*)>1)",[mod]);const articles=one("SELECT COUNT(*) n FROM braderie_items WHERE created_at>=datetime('now',?)",[mod]);const sold=one("SELECT COUNT(*) n FROM braderie_items WHERE sold_at>=datetime('now',?)",[mod]);res.json({period,spaces_total:one('SELECT COUNT(*) n FROM braderie_spaces').n,spaces_created:created.n,subscriptions:byStatus,renewals:renewals.n,revenue:revenues.n,by_plan:byPlan,articles_published:articles.n,articles_sold:sold.n});});
+
 A.get('/braderie/stats', pdgOnly, (req,res) => { const period=['day','week','month','year'].includes(req.query.period)?req.query.period:'month',mod=braderieModifier(period);const count=(where='',args=[])=>db.prepare(`SELECT COUNT(*) n FROM braderie_items ${where}`).get(...args).n;const rows=db.prepare(`SELECT status,COUNT(*) n FROM braderie_items GROUP BY status`).all();const byStatus=Object.fromEntries(rows.map(r=>[r.status,r.n]));const created=db.prepare("SELECT COUNT(*) n FROM braderie_items WHERE created_at>=datetime('now',?)").get(mod).n, sold=db.prepare("SELECT COUNT(*) n FROM braderie_items WHERE sold_at>=datetime('now',?)").get(mod).n, pendingReports=db.prepare("SELECT COUNT(*) n FROM braderie_reports WHERE status='pending'").get().n,pendingContacts=db.prepare("SELECT COUNT(*) n FROM braderie_contact_requests WHERE status='pending'").get().n,offers=db.prepare("SELECT COUNT(*) n FROM braderie_negotiation_events WHERE event_type IN ('buyer_offer','buyer_final_offer') AND created_at>=datetime('now',?)").get(mod).n;res.json({period,created,sold,offers,pending_reports:pendingReports,pending_contacts:pendingContacts,by_status:byStatus,total:count()}); });
 
 app.use('/api/admin', A);

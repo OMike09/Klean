@@ -2375,4 +2375,100 @@ CREATE INDEX IF NOT EXISTS idx_maintenance_access_events ON maintenance_access_e
 `);
 
 
+
+// ============================================================
+// COLIS 32 — Espaces vendeurs Braderie, formules et abonnements
+// Ajout strictement cumulatif : les articles et historiques COLIS 29/30 restent intacts.
+// ============================================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS braderie_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  price_quarterly INTEGER NOT NULL DEFAULT 0 CHECK(price_quarterly >= 0),
+  price_annual INTEGER NOT NULL DEFAULT 0 CHECK(price_annual >= 0),
+  publication_quota INTEGER NOT NULL DEFAULT 0 CHECK(publication_quota >= 0),
+  active_items_quota INTEGER NOT NULL DEFAULT 0 CHECK(active_items_quota >= 0),
+  photos_per_item INTEGER NOT NULL DEFAULT 1 CHECK(photos_per_item >= 1),
+  videos_allowed INTEGER NOT NULL DEFAULT 0,
+  videos_per_item INTEGER NOT NULL DEFAULT 0 CHECK(videos_per_item >= 0),
+  video_max_seconds INTEGER NOT NULL DEFAULT 0 CHECK(video_max_seconds >= 0),
+  video_max_bytes INTEGER NOT NULL DEFAULT 0 CHECK(video_max_bytes >= 0),
+  video_formats TEXT NOT NULL DEFAULT '[]',
+  benefits TEXT NOT NULL DEFAULT '',
+  restrictions TEXT NOT NULL DEFAULT '',
+  visible INTEGER NOT NULL DEFAULT 1,
+  active INTEGER NOT NULL DEFAULT 0,
+  promo_start_at TEXT,
+  promo_end_at TEXT,
+  promo_quarterly INTEGER,
+  promo_annual INTEGER,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brad_plans_public ON braderie_plans(active,visible,id);
+CREATE TABLE IF NOT EXISTS braderie_plan_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id INTEGER REFERENCES braderie_plans(id) ON DELETE SET NULL,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  snapshot TEXT NOT NULL DEFAULT '{}',
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brad_plan_history ON braderie_plan_history(plan_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS braderie_spaces (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','active','expired','suspended','cancelled')),
+  suspended_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brad_spaces_status ON braderie_spaces(status,created_at DESC);
+CREATE TABLE IF NOT EXISTS braderie_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  space_id INTEGER NOT NULL REFERENCES braderie_spaces(id) ON DELETE RESTRICT,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  plan_id INTEGER REFERENCES braderie_plans(id) ON DELETE SET NULL,
+  plan_name TEXT NOT NULL,
+  plan_snapshot TEXT NOT NULL DEFAULT '{}',
+  billing_period TEXT NOT NULL CHECK(billing_period IN ('quarterly','annual')),
+  duration_months INTEGER NOT NULL CHECK(duration_months IN (3,12)),
+  amount INTEGER NOT NULL DEFAULT 0 CHECK(amount >= 0),
+  status TEXT NOT NULL DEFAULT 'pending_payment' CHECK(status IN ('pending_payment','payment_confirmed','active','expired','suspended','cancelled')),
+  transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+  start_at TEXT,
+  end_at TEXT,
+  payment_confirmed_at TEXT,
+  source TEXT NOT NULL DEFAULT 'user' CHECK(source IN ('user','admin_grant','promotion')),
+  admin_note TEXT,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brad_sub_space ON braderie_subscriptions(space_id,status,end_at DESC);
+CREATE INDEX IF NOT EXISTS idx_brad_sub_owner ON braderie_subscriptions(owner_id,status,end_at DESC);
+CREATE TABLE IF NOT EXISTS braderie_space_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  space_id INTEGER NOT NULL REFERENCES braderie_spaces(id) ON DELETE RESTRICT,
+  subscription_id INTEGER REFERENCES braderie_subscriptions(id) ON DELETE SET NULL,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  details TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brad_space_events ON braderie_space_events(space_id,created_at DESC);
+`);
+ensureColumn('braderie_items', 'videos', "TEXT NOT NULL DEFAULT '[]'");
+ensureColumn('braderie_items', 'subscription_id', 'INTEGER REFERENCES braderie_subscriptions(id) ON DELETE SET NULL');
+// Les formules initiales ont volontairement un tarif nul et restent inactives tant que
+// Klean Services ne les a pas configurées : aucun prix commercial n'est codé en dur.
+const seedColis32Plan = db.prepare(`INSERT OR IGNORE INTO braderie_plans(name,description,active,visible) VALUES(?,?,0,1)`);
+seedColis32Plan.run('Simple', 'Formule initiale à configurer par Klean Services.');
+seedColis32Plan.run('Premium', 'Formule initiale à configurer par Klean Services.');
+seedColis32Plan.run('Professionnelle / Business', 'Formule initiale à configurer par Klean Services.');
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
