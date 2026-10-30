@@ -2471,4 +2471,173 @@ seedColis32Plan.run('Simple', 'Formule initiale à configurer par Klean Services
 seedColis32Plan.run('Premium', 'Formule initiale à configurer par Klean Services.');
 seedColis32Plan.run('Professionnelle / Business', 'Formule initiale à configurer par Klean Services.');
 
+
+// ============================================================
+// COLIS 33 — Articles seconde main & Klean Cabine (ajouts cumulatifs)
+// ============================================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS braderie_favorites (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES braderie_items(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(user_id,item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_brad_favorites_user ON braderie_favorites(user_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS braderie_item_views (
+  item_id INTEGER NOT NULL REFERENCES braderie_items(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  viewed_on TEXT NOT NULL DEFAULT (date('now')),
+  viewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(item_id,user_id,viewed_on)
+);
+CREATE INDEX IF NOT EXISTS idx_brad_views_item ON braderie_item_views(item_id,viewed_at DESC);
+CREATE TABLE IF NOT EXISTS braderie_drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  seller_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brad_drafts_seller ON braderie_drafts(seller_id,updated_at DESC);
+CREATE TABLE IF NOT EXISTS cabine_operators (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  logo_url TEXT,
+  color TEXT NOT NULL DEFAULT '#166534',
+  enabled INTEGER NOT NULL DEFAULT 0,
+  transfer_enabled INTEGER NOT NULL DEFAULT 0,
+  bundles_enabled INTEGER NOT NULL DEFAULT 0,
+  api_status TEXT NOT NULL DEFAULT 'not_configured' CHECK(api_status IN ('not_configured','connecting','connected','incident','suspended')),
+  api_message TEXT NOT NULL DEFAULT '',
+  min_amount INTEGER,
+  max_amount INTEGER,
+  conditions TEXT NOT NULL DEFAULT '',
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS cabine_services (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  icon TEXT NOT NULL DEFAULT '📱',
+  image_url TEXT,
+  color TEXT NOT NULL DEFAULT '#166534',
+  service_type TEXT NOT NULL CHECK(service_type IN ('transfer','bundle')),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS cabine_offers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  operator_id INTEGER NOT NULL REFERENCES cabine_operators(id) ON DELETE RESTRICT,
+  service_id INTEGER NOT NULL REFERENCES cabine_services(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  benefit TEXT NOT NULL DEFAULT '',
+  validity_text TEXT NOT NULL DEFAULT '',
+  provider_price INTEGER NOT NULL DEFAULT 0 CHECK(provider_price>=0),
+  customer_price INTEGER NOT NULL DEFAULT 0 CHECK(customer_price>=0),
+  fee_fixed INTEGER NOT NULL DEFAULT 0 CHECK(fee_fixed>=0),
+  fee_percent REAL NOT NULL DEFAULT 0 CHECK(fee_percent>=0),
+  available_from TEXT,
+  available_until TEXT,
+  visible INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  provider_reference TEXT,
+  conditions TEXT NOT NULL DEFAULT '',
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cabine_offers_public ON cabine_offers(operator_id,service_id,enabled,visible,sort);
+CREATE TABLE IF NOT EXISTS cabine_operations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  operation_ref TEXT NOT NULL UNIQUE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  service_id INTEGER REFERENCES cabine_services(id) ON DELETE SET NULL,
+  offer_id INTEGER REFERENCES cabine_offers(id) ON DELETE SET NULL,
+  debit_phone TEXT NOT NULL,
+  debit_operator_code TEXT,
+  beneficiary_phone TEXT NOT NULL,
+  beneficiary_operator_code TEXT,
+  operation_type TEXT NOT NULL CHECK(operation_type IN ('transfer','bundle')),
+  amount INTEGER NOT NULL DEFAULT 0,
+  fee_amount INTEGER NOT NULL DEFAULT 0,
+  commission_amount INTEGER NOT NULL DEFAULT 0,
+  total_amount INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL CHECK(status IN ('pending_payment','payment_confirmed','processing','successful','failed','paid_unexecuted','refund_pending','refunded','payment_unavailable')),
+  provider_reference TEXT,
+  failure_reason TEXT,
+  request_fingerprint TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id,request_fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_cabine_ops_user ON cabine_operations(user_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cabine_ops_status ON cabine_operations(status,created_at DESC);
+CREATE TABLE IF NOT EXISTS cabine_notification_templates (
+  code TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS cabine_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  target_type TEXT,
+  target_id INTEGER,
+  before_json TEXT,
+  after_json TEXT,
+  reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cabine_audit ON cabine_audit(created_at DESC);
+`);
+db.exec(`
+CREATE TABLE IF NOT EXISTS braderie_alert_deliveries (
+  alert_id INTEGER NOT NULL REFERENCES braderie_alerts(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES braderie_items(id) ON DELETE CASCADE,
+  delivered_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(alert_id,item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_brad_alert_deliveries ON braderie_alert_deliveries(alert_id,delivered_at DESC);
+`);
+ensureColumn('braderie_items','featured','INTEGER NOT NULL DEFAULT 0');
+ensureColumn('braderie_items','featured_until','TEXT');
+ensureColumn('braderie_items','extra_info',"TEXT NOT NULL DEFAULT ''");
+ensureColumn('braderie_alerts','query',"TEXT NOT NULL DEFAULT ''");
+ensureColumn('braderie_alerts','min_price','INTEGER');
+ensureColumn('braderie_alerts','max_price','INTEGER');
+ensureColumn('braderie_alerts','item_condition',"TEXT NOT NULL DEFAULT ''");
+ensureColumn('braderie_alerts','notify_in_app','INTEGER NOT NULL DEFAULT 1');
+ensureColumn('braderie_alerts','notify_push','INTEGER NOT NULL DEFAULT 0');
+ensureColumn('braderie_alerts','last_notified_at','TEXT');
+const COLIS33_DEFAULTS={
+  cabine_enabled:'1', cabine_title:'Klean Cabine', cabine_description:'Services mobiles : transferts de crédit et forfaits selon la disponibilité vérifiée des opérateurs.',
+  cabine_icon:'📲', cabine_color:'#166534', cabine_logo_url:'', cabine_unavailable_message:'Les opérations Klean Cabine sont momentanément indisponibles : aucun prestataire de paiement et opérateur vérifié n’est encore connecté.',
+  cabine_conditions:'Les opérations ne sont exécutées qu’après confirmation du paiement et validation par un prestataire autorisé.', cabine_payment_enabled:'0', cabine_operator_detection:'1', cabine_manual_operator:'1', cabine_custom_amount:'1', cabine_quick_amounts:'[100,200,500,1000,2000,5000]'
+};
+for(const [k,v] of Object.entries(COLIS33_DEFAULTS)) if(getSetting(k)===null)setSetting(k,v);
+const cabineSeedOperator=db.prepare("INSERT OR IGNORE INTO cabine_operators(code,name,description,color,sort) VALUES(?,?,?,?,?)");
+[['mtn','MTN','Opérateur mobile — connexion API à configurer.','#ffcc00',1],['orange','Orange','Opérateur mobile — connexion API à configurer.','#f97316',2],['moov','Moov','Opérateur mobile — connexion API à configurer.','#16a34a',3]].forEach(x=>cabineSeedOperator.run(...x));
+const cabineSeedService=db.prepare("INSERT OR IGNORE INTO cabine_services(code,name,description,icon,service_type,sort) VALUES(?,?,?,?,?,?)");
+[['transfer','Transfert de crédit','Envoyer du crédit, lorsque le prestataire autorisé est connecté.','💸','transfer',1],['internet','Forfaits Internet','Données mobiles selon les offres synchronisées.','🌐','bundle',2],['daily','Forfaits journaliers','Offres disponibles pour une journée.','☀️','bundle',3],['weekly','Forfaits hebdomadaires','Offres disponibles pour une semaine.','📅','bundle',4],['monthly','Forfaits mensuels','Offres disponibles pour un mois.','🗓️','bundle',5],['night','Forfaits nuit','Offres de nuit selon l’opérateur.','🌙','bundle',6],['social','Forfaits réseaux sociaux','Offres réseaux sociaux selon l’opérateur.','💬','bundle',7],['calls','Forfaits appels','Offres voix selon l’opérateur.','☎️','bundle',8],['mixed','Forfaits mixtes','Offres combinées selon l’opérateur.','✨','bundle',9]].forEach(x=>cabineSeedService.run(...x));
+const cabineSeedTemplate=db.prepare("INSERT OR IGNORE INTO cabine_notification_templates(code,title,body) VALUES(?,?,?)");
+[
+  ['welcome','Bienvenue dans Klean Cabine','Choisissez une opération disponible et vérifiez vos numéros avant le paiement.'],
+  ['payment_confirmed','Paiement confirmé','Votre paiement est confirmé. L’opération est en cours de traitement.'],
+  ['successful','Opération réussie','Votre opération Klean Cabine est réussie.'],
+  ['failed','Opération non exécutée','Votre opération n’a pas pu être exécutée.'],
+  ['unavailable','Service indisponible','Ce service est momentanément indisponible. Aucun paiement n’a été déclenché.'],
+  ['refund','Remboursement','Votre demande de régularisation ou remboursement est en cours.']
+].forEach(x=>cabineSeedTemplate.run(...x));
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
