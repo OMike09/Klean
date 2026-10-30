@@ -109,6 +109,7 @@ async function api(path, opts = {}) {
     let data = {};
     try { data = await res.json(); } catch { }
     if (!res.ok) {
+      if (data && data.maintenance) { MAINT = { ...MAINT, active:true, scope:'F', blocked:true, message:data.error || MAINT.message }; setTimeout(render, 0); }
       if (res.status === 401 && TOKEN) { logout(false); }
       const err = new Error(data.error || 'Une erreur est survenue. Veuillez réessayer.');
       err.status = res.status; err.data = data;
@@ -160,6 +161,11 @@ function connectSSE() {
       setTimeout(() => t.remove(), 6500);
     }
     refreshBadges();
+  });
+  sse.addEventListener('maintenance', () => {
+    // Activation, fin ou retrait d’autorisation : le serveur impose ensuite la même
+    // décision aux API. Cette notification rend la bascule immédiate à l’écran.
+    checkMaintenance().finally(() => render());
   });
   sse.addEventListener('message', e => {
     const m = JSON.parse(e.data);
@@ -3414,13 +3420,9 @@ async function checkMaintenance() {
   return MAINT;
 }
 function maintenanceScreen() {
-  $app.innerHTML = `<div class="content" style="display:flex;flex-direction:column;justify-content:center;min-height:80vh;text-align:center">
-    <div style="font-size:64px">🛠️</div>
-    <h2 style="margin:12px 0 8px">Maintenance en cours</h2>
-    <p class="muted">${esc(MAINT.message || 'Klean Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.')}</p>
-    ${MAINT.until ? `<p class="small muted">Retour prévu : ${esc(MAINT.until.replace('T', ' à '))}</p>` : ''}
-    <button class="btn mt" onclick="A.maintRetry()">Réessayer</button>
-  </div>`;
+  if (sse) { try { sse.close(); } catch {} sse=null; }
+  const title=MAINT.title || 'MAINTENANCE EN COURS', message=MAINT.message || 'Klean Services effectue actuellement une opération de maintenance afin d’améliorer la qualité de ses services.\n\nL’accès à la plateforme est temporairement suspendu.\n\nNous vous prions de bien vouloir patienter. Merci pour votre compréhension.', precision=MAINT.precision || 'Nous serons de retour très bientôt.', color=/^#[0-9a-fA-F]{6}$/.test(MAINT.background_color||'')?MAINT.background_color:'#b91c1c', logo=MAINT.logo_url||'/logo.png', icon=MAINT.icon||'⚠️';
+  $app.innerHTML=`<main role="alert" aria-live="assertive" style="position:fixed;inset:0;z-index:99999;overflow:auto;background:${esc(color)};color:#fff;display:flex;align-items:center;justify-content:center;padding:22px;box-sizing:border-box"><section style="width:min(620px,100%);text-align:center"><img src="${esc(logo)}" alt="Klean Services" style="width:94px;height:94px;object-fit:contain;background:#fff;border-radius:22px;padding:10px;box-sizing:border-box;box-shadow:0 12px 30px rgba(0,0,0,.22)" onerror="this.src='/logo.png'"><div style="font-size:64px;line-height:1;margin:22px 0 14px" aria-hidden="true">${esc(icon)}</div><h1 style="margin:0 0 18px;color:#fff;font-size:clamp(27px,7vw,44px);line-height:1.05;letter-spacing:.02em">${esc(title)}</h1><div style="white-space:pre-wrap;font-size:17px;line-height:1.65;color:#fff">${esc(message)}</div>${precision?`<p style="font-weight:800;font-size:17px;margin:24px 0 0;color:#fff">${esc(precision)}</p>`:''}${MAINT.until?`<p style="font-size:14px;margin:16px 0 0;color:#fee2e2">Retour prévu : ${esc(String(MAINT.until).replace('T',' à '))}</p>`:''}<p style="font-size:13px;margin:30px 0 0;color:#fee2e2">Cette page se met à jour automatiquement lorsque l’accès est rétabli.</p></section></main>`;
 }
 
 function render() {
@@ -3433,7 +3435,7 @@ function render() {
   const [route, ...rest] = h.split('/');
   const param = rest.join('/');
   if (route !== 'home') { const install=document.getElementById('install-cta'); if (install) install.remove(); }
-  if (MAINT.active && MAINT.scope === 'F' && (!USER || USER.role !== 'pdg')) { maintenanceScreen(); return; }
+  if (MAINT.active && MAINT.blocked) { maintenanceScreen(); return; }
   const publicRoutes = ['home','search','services','categories','request','jobs','avis-recherche','urgence','about','login','register','account','braderie'];
   if (!TOKEN && !publicRoutes.includes(route)) { publicAuthGate(); return; }
   if (USER && USER.must_change_password) { setTimeout(forcePasswordModal, 50); }
@@ -3459,7 +3461,7 @@ function render() {
   }
   applyFont(localStorage.getItem('ks_font') || 16);
   await checkMaintenance();
-  setInterval(async () => { const was = MAINT.active; await checkMaintenance(); if (was !== MAINT.active) render(); }, 60000);
+  setInterval(async () => { const before=JSON.stringify([MAINT.active,MAINT.blocked,MAINT.scheduled,MAINT.until]); await checkMaintenance(); const changed=before!==JSON.stringify([MAINT.active,MAINT.blocked,MAINT.scheduled,MAINT.until]); if (TOKEN && !MAINT.blocked && !USER) { try { USER=await api('/me'); connectSSE(); refreshBadges(); } catch {} } if (changed) render(); }, 15000);
   // Prix et disponibilité catalogue : l'accueil reste synchronisé avec le tableau de bord,
   // même s'il est déjà ouvert au moment où le PDG change un prix.
   setInterval(async () => {
@@ -3470,17 +3472,17 @@ function render() {
       if (JSON.stringify(services) !== JSON.stringify(SERVICES) || JSON.stringify(populaires) !== JSON.stringify(POPULAIRES)) { SERVICES = services; POPULAIRES = populaires; render(); }
     } catch { }
   }, 25000);
-  if (TOKEN) {
+  if (TOKEN && !MAINT.blocked) {
     try {
       USER = await api('/me');
       if (USER.font_size) applyFont(USER.font_size);
       connectSSE(); refreshBadges();
-    } catch { TOKEN = null; localStorage.removeItem('ks_token'); }
+    } catch (e) { if (!(e && e.data && e.data.maintenance)) { TOKEN = null; localStorage.removeItem('ks_token'); } }
   }
   if (!location.hash) location.hash = '#/home';
   currentHash = normalHash(location.hash); navStack = [currentHash]; navCursor = 0;
   const releasedBeforeBoot = splashReleased;
-  const splashWait = Math.max(0, 3000 - (Date.now() - splashStartedAt));
+  const splashWait = MAINT.active && MAINT.blocked ? 0 : Math.max(0, 3000 - (Date.now() - splashStartedAt));
   if (!splashReleased && splashWait) await new Promise(resolve => setTimeout(resolve, splashWait));
   clearTimeout(splashTimer);
   releaseSplash();

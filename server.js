@@ -98,7 +98,7 @@ app.get('/uploads/:name', async (req, res) => {
   const name = path.basename(String(req.params.name || ''));
   if (!name || name !== req.params.name) return res.status(404).end();
   const user = uploadRequestUser(req);
-  if (!uploadIsPublicAd(name) && !canReadUpload(user, name)) return res.status(user ? 403 : 401).end();
+  if (!uploadIsPublicAd(name) && !maintenanceLogoIsPublic(name) && !canReadUpload(user, name)) return res.status(user ? 403 : 401).end();
   const disk = path.join(UPLOAD_DIR, name);
   try {
     if (!fs.existsSync(disk) && persist.enabled()) {
@@ -178,6 +178,11 @@ function auth(req, res, next) {
     if (user.disabled_until && user.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' '))
       return res.status(403).json({ error: 'Votre compte est temporairement désactivé jusqu\u2019au ' + user.disabled_until.slice(0, 16).replace('T', ' ') + '.' });
   }
+  // Défense en profondeur : cette vérification protège aussi toute route déclarée
+  // avant le middleware global de maintenance (notamment le flux SSE).
+  const maintenance=getMaintenance();
+  if (maintenanceGeneral(maintenance) && !maintenanceUserAllowed(user)) return maintenanceDeny(req,res,user);
+  if (maintenanceGeneral(maintenance) && req.path==='/api/stream') maintenanceAccessEvent(user.id,'allowed','GET /api/stream');
   req.user = user;
   next();
 }
@@ -191,6 +196,7 @@ function optionalAuth(req, res, next) {
   if (!payload) return next();
   const user = db.prepare('SELECT * FROM users WHERE id=?').get(payload.id);
   if (!user || (user.role !== 'pdg' && (user.blocked || user.suspended || (user.disabled_until && user.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' '))))) return next();
+  if (maintenanceGeneral(getMaintenance()) && !maintenanceUserAllowed(user)) return next();
   req.user = user;
   next();
 }
@@ -313,13 +319,16 @@ function notifyAdmins(category, title, body, link) {
 // ============================================================
 // MODE MAINTENANCE / SUSPENSION DES ACTIVITÉS (réservé au PDG)
 // ============================================================
+// Les portées historiques restent disponibles. La portée F est maintenant une
+// maintenance générale réellement étanche : tout compte est bloqué, sauf le
+// PDG et les comptes explicitement autorisés pour les tests.
 const MAINT_SCOPES = {
   A: 'Suspendre toute nouvelle activité (demandes, inscriptions, activités pro, publications, jeux)',
   B: 'Suspendre uniquement les nouvelles demandes de service',
   C: 'Suspendre uniquement les inscriptions',
   D: 'Suspendre uniquement les activités des professionnels',
   E: 'Suspendre des fonctions précises (à cocher)',
-  F: 'Mettre toute la plateforme en maintenance',
+  F: 'Mettre toute la plateforme en maintenance générale',
 };
 const MAINT_FONCTIONS = {
   missions: 'Nouvelles demandes de service',
@@ -333,7 +342,7 @@ const MAINT_FONCTIONS = {
 const SCOPE_FUNCS = { A: ['missions', 'inscriptions', 'pro', 'contenu', 'jeux'], B: ['missions'], C: ['inscriptions'], D: ['pro'] };
 const MAINT_ROUTES = [
   [/^\/api\/auth\/register$/, 'inscriptions'],
-  [/^\/api\/missions$/, 'missions'], // POST = nouvelle demande
+  [/^\/api\/missions$/, 'missions'],
   [/^\/api\/missions\/\d+\/(accept|refuse|confirm|montant|start|complete|relancer|choisir)/, 'pro'],
   [/^\/api\/pro\//, 'pro'],
   [/^\/api\/missions\/\d+\/payment\//, 'paiements'],
@@ -341,46 +350,89 @@ const MAINT_ROUTES = [
   [/^\/api\/(avis-recherche|jobs|ecole-famille)$/, 'contenu'],
   [/^\/api\/games\//, 'jeux'],
 ];
+const MAINT_DEFAULT = {
+  title: 'MAINTENANCE EN COURS',
+  message: 'Klean Services effectue actuellement une opération de maintenance afin d’améliorer la qualité de ses services.\n\nL’accès à la plateforme est temporairement suspendu.\n\nNous vous prions de bien vouloir patienter. Merci pour votre compréhension.',
+  precision: 'Nous serons de retour très bientôt.', background_color: '#b91c1c', icon: '⚠️', logo_url: '/logo.png'
+};
+function maintenanceNow() { return new Date(); }
+function maintenanceDate(raw) { const n=Date.parse(String(raw||'')); return Number.isFinite(n)?n:null; }
+function maintenanceDbNow() { return new Date().toISOString().slice(0,19).replace('T',' '); }
+function maintenanceRead() { try { const m=JSON.parse(getSetting('maintenance','')||'{}');return m&&typeof m==='object'?m:{}; } catch { return {}; } }
+function maintenanceAllowedIds() { return db.prepare('SELECT user_id FROM maintenance_allowed_accounts ORDER BY user_id').all().map(r=>Number(r.user_id)); }
+function maintenanceHistory(action, actor, config, details='') {
+  try { db.prepare('INSERT INTO maintenance_history(action,actor_id,actor_name,config_json,allowed_user_ids,details) VALUES(?,?,?,?,?,?)').run(action,actor&&actor.id||null,actor&&actor.name||null,JSON.stringify(config||{}),JSON.stringify(maintenanceAllowedIds()),String(details||'').slice(0,1500)); } catch(e) { console.error('Historique maintenance non enregistré :',e.message); }
+}
+function maintenanceAccessEvent(userId,type,endpoint) {
+  try { db.prepare('INSERT INTO maintenance_access_events(user_id,event_type,endpoint) VALUES(?,?,?)').run(userId||null,type,String(endpoint||'').slice(0,300)); } catch {}
+}
+function maintenanceGeneral(m) { return !!(m&&m.active&&!m.scheduled&&!m.expired&&m.scope==='F'); }
+function maintenanceUserAllowed(user) { return !!(user && (user.role==='pdg' || db.prepare('SELECT 1 FROM maintenance_allowed_accounts WHERE user_id=?').get(user.id))); }
+function maintenanceBroadcast() {
+  // Les sessions déjà ouvertes basculent immédiatement, sans attendre le sondage client.
+  for(const [id] of sseClients) {
+    const user=db.prepare('SELECT id,role FROM users WHERE id=?').get(id); if(!user)continue;
+    const m=getMaintenance(); push(id,'maintenance',{ active:maintenanceGeneral(m), blocked:maintenanceGeneral(m)&&!maintenanceUserAllowed(user) });
+  }
+}
 function getMaintenance() {
-  try {
-    const m = JSON.parse(getSetting('maintenance', '') || '{}');
-    if (m.active && m.until && m.until.replace('T', ' ').slice(0, 19) < new Date().toISOString().slice(0, 19).replace('T', ' '))
-      return { ...m, expired: true }; // durée écoulée → la maintenance se termine automatiquement
-    return m;
-  } catch { return {}; }
-}
-function maintenanceMessage(m) {
-  return m.message || 'Klean Services est temporairement en maintenance. Nous revenons très vite. Merci de votre patience.';
-}
-// État public (l'application affiche le message aux utilisateurs)
-app.get('/api/maintenance', (req, res) => {
-  const m = getMaintenance();
-  const on = m.active && !m.expired;
-  res.json({ active: !!on, scope: on ? m.scope : null, message: on ? maintenanceMessage(m) : null, until: on && m.until ? m.until : null });
-});
-app.use((req, res, next) => {
-  if (!req.path.startsWith('/api/')) return next();
-  const m = getMaintenance();
-  if (!m.active || m.expired) return next();
-  // Le compte PDG n'est JAMAIS bloqué
-  const tok = (req.headers.authorization || '').replace('Bearer ', '') || req.query.token;
-  const payload = verifyToken(tok);
-  if (payload) {
-    const u = db.prepare('SELECT role FROM users WHERE id=?').get(payload.id);
-    if (u && u.role === 'pdg') return next();
+  let m=maintenanceRead(); if(!m.active) return { ...m, active:false };
+  const now=maintenanceNow(), start=maintenanceDate(m.start_at), end=maintenanceDate(m.until);
+  if(start && start>now.getTime()) return { ...m, active:false, scheduled:true };
+  if(end && end<=now.getTime()) {
+    if(!m.auto_ended_at) {
+      const next={...m,active:0,auto_ended_at:maintenanceDbNow()};setSetting('maintenance',JSON.stringify(next));maintenanceHistory('auto_disabled',null,next,'Fin automatique de la maintenance.');setTimeout(maintenanceBroadcast,0);m=next;
+    }
+    return { ...m, active:false, expired:true };
   }
-  // Toujours accessibles : connexion, état de maintenance, tableau de bord (les permissions du PDG s'y appliquent)
-  if (req.path === '/api/auth/login' || req.path === '/api/maintenance' || req.path.startsWith('/api/auth/reset-') || req.path.startsWith('/api/admin/')) return next();
-  if (m.scope === 'F') {
-    if (req.method === 'GET' && (req.path === '/api/me' || req.path === '/api/rules')) return next(); // l'app peut se charger et afficher le message
-    return res.status(503).json({ error: maintenanceMessage(m), maintenance: true });
+  if(m.start_at && !m.runtime_started_at) {
+    m={...m,runtime_started_at:maintenanceDbNow()};setSetting('maintenance',JSON.stringify(m));maintenanceHistory('auto_activated',null,m,'Début automatique de la maintenance programmée.');setTimeout(maintenanceBroadcast,0);
   }
-  if (req.method === 'GET') return next(); // hors plateforme entière, la consultation reste possible
-  const fns = m.scope === 'E' ? (m.functions || []) : (SCOPE_FUNCS[m.scope] || []);
-  if (MAINT_ROUTES.find(([re, k]) => re.test(req.path) && fns.includes(k)))
-    return res.status(503).json({ error: maintenanceMessage(m), maintenance: true });
+  return { ...m, active:true, scheduled:false, expired:false };
+}
+function maintenanceText(m) { return String(m.message||MAINT_DEFAULT.message).slice(0,4000); }
+function maintenancePublic(req) {
+  const m=getMaintenance(), active=!!m.active&&!m.scheduled&&!m.expired,general=active&&m.scope==='F';let user=null;
+  const token=(req.headers.authorization||'').replace('Bearer ','')||req.query.token;const payload=verifyToken(token);
+  if(payload) user=db.prepare('SELECT id,role FROM users WHERE id=?').get(payload.id)||null;
+  const allowed=!!(user&&maintenanceUserAllowed(user));
+  return { active, scheduled:!!m.scheduled, scope:active?m.scope:(m.scheduled?m.scope:null), blocked:general&&!allowed,
+    title:String(m.title||MAINT_DEFAULT.title).slice(0,180),message:active?maintenanceText(m):null,
+    precision:active?String(m.precision||MAINT_DEFAULT.precision).slice(0,700):null,
+    background_color:/^#[0-9a-fA-F]{6}$/.test(String(m.background_color||''))?m.background_color:MAINT_DEFAULT.background_color,
+    icon:String(m.icon||MAINT_DEFAULT.icon).slice(0,16),logo_url:String(m.logo_url||MAINT_DEFAULT.logo_url).slice(0,600),
+    until:(active||m.scheduled)&&m.until?m.until:null,start_at:m.scheduled?m.start_at:null };
+}
+function maintenanceDeny(req,res,user) {
+  maintenanceAccessEvent(user&&user.id,'denied',req.method+' '+req.path);
+  const m=getMaintenance();return res.status(503).json({error:maintenanceText(m),maintenance:true,blocked:true,retry_after:m.until||null});
+}
+// État public minimal, enrichi selon le jeton afin que les comptes de test restent utilisables.
+app.get('/api/maintenance', (req,res) => res.json(maintenancePublic(req)));
+// Barrière globale placée avant toutes les routes métier : une ancienne session, un lien direct
+// ou une requête API ne peuvent pas contourner une maintenance générale.
+app.use((req,res,next) => {
+  if(!req.path.startsWith('/api/')) return next();
+  const m=getMaintenance(); if(!m.active || m.scheduled || m.expired) return next();
+  const token=(req.headers.authorization||'').replace('Bearer ','')||req.query.token;const payload=verifyToken(token);
+  const user=payload&&db.prepare('SELECT id,role FROM users WHERE id=?').get(payload.id);
+  if(maintenanceGeneral(m)) {
+    if(req.path==='/api/maintenance') return next();
+    if(user && maintenanceUserAllowed(user)) { if(req.path==='/api/me') maintenanceAccessEvent(user.id,'allowed','GET /api/me'); return next(); }
+    // La route login vérifie les identifiants puis renvoie explicitement le refus de maintenance.
+    if(req.path==='/api/auth/login') return next();
+    return maintenanceDeny(req,res,user);
+  }
+  // Comportement conservé pour les maintenances partielles historiques.
+  if(user&&user.role==='pdg') return next();
+  if(req.path==='/api/auth/login'||req.path==='/api/maintenance'||req.path.startsWith('/api/auth/reset-')||req.path.startsWith('/api/admin/')) return next();
+  if(req.method==='GET') return next();
+  const fns=m.scope==='E'?(m.functions||[]):(SCOPE_FUNCS[m.scope]||[]);
+  if(MAINT_ROUTES.find(([re,k])=>re.test(req.path)&&fns.includes(k)))return res.status(503).json({error:maintenanceText(m),maintenance:true});
   next();
 });
+// Le minuteur serveur rend effectifs démarrage et fin programmés même si personne ne consulte le site.
+setInterval(()=>{ try { getMaintenance(); } catch(e) { console.error('Contrôle maintenance :',e.message); } },15000);
 
 app.post('/api/auth/register', (req, res) => {
   const { name, phone, password, address, ville, quartier, lat, lng, accept_rules, referral_token } = req.body || {};
@@ -433,6 +485,12 @@ app.post('/api/auth/login', (req, res) => {
     if (user.disabled_until && user.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' '))
       return res.status(403).json({ error: 'Votre compte est temporairement désactivé jusqu\u2019au ' + user.disabled_until.slice(0, 16) + '.' });
   }
+  const maintenance=getMaintenance();
+  if (maintenanceGeneral(maintenance) && !maintenanceUserAllowed(user)) {
+    maintenanceAccessEvent(user.id,'login_denied','POST /api/auth/login');
+    return res.status(503).json({ error: maintenanceText(maintenance), maintenance:true, blocked:true });
+  }
+  if (maintenanceGeneral(maintenance)) maintenanceAccessEvent(user.id,'login_allowed','POST /api/auth/login');
   recordRealActivity(user.id, 'active');
   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(user) });
 });
@@ -3451,26 +3509,63 @@ A.delete('/staff/:id', (req, res) => {
 });
 
 // ============== MODE MAINTENANCE (réservé au PDG) ==============
-A.get('/maintenance', (req, res) => {
-  const m = getMaintenance();
-  res.json({ config: m, scopes: MAINT_SCOPES, fonctions: MAINT_FONCTIONS, actif: !!(m.active && !m.expired) });
+function maintenanceStats() {
+  const total=db.prepare("SELECT COUNT(*) n FROM users WHERE role<>'pdg'").get().n;
+  const allowed=db.prepare("SELECT COUNT(*) n FROM maintenance_allowed_accounts a JOIN users u ON u.id=a.user_id WHERE u.role<>'pdg'").get().n;
+  const since="datetime('now','-30 days')";
+  const tests=db.prepare(`SELECT COUNT(*) n FROM maintenance_access_events WHERE event_type IN ('allowed','login_allowed') AND created_at>=${since}`).get().n;
+  const denied=db.prepare(`SELECT COUNT(*) n FROM maintenance_access_events WHERE event_type IN ('denied','login_denied') AND created_at>=${since}`).get().n;
+  return { blocked:maintenanceGeneral(getMaintenance())?Math.max(0,total-allowed):0, allowed, test_connections:tests, denied_attempts:denied, period:'30 jours' };
+}
+function maintenanceRoleLabel(u) {
+  if(u.role==='pdg')return 'PDG';if(u.role==='gestionnaire')return 'Gestionnaire';if(u.role==='agent')return 'Agent';if(u.role==='admin')return 'Administrateur';
+  return (u.is_pro||u.pro_status==='approved'||u.pro_status==='pending')?'Professionnel':'Client';
+}
+function maintenancePublicLogo(raw) { const v=String(raw||'').trim().slice(0,600);return v==='/logo.png'||/^\/uploads\/[A-Za-z0-9._-]+$/.test(v)||/^https:\/\//i.test(v)?v:MAINT_DEFAULT.logo_url; }
+function maintenanceLogoIsPublic(name) { const m=maintenanceRead();return !!(m&&m.active&&String(m.logo_url||'')==='/uploads/'+String(name||'')); }
+function maintenanceConfigBody(raw={}) {
+  const b=raw||{},scope=String(b.scope||'F'),title=String(b.title??MAINT_DEFAULT.title).trim().slice(0,180),message=String(b.message??MAINT_DEFAULT.message).trim().slice(0,4000),precision=String(b.precision??MAINT_DEFAULT.precision).trim().slice(0,700),background=String(b.background_color||MAINT_DEFAULT.background_color).trim(),icon=String(b.icon||MAINT_DEFAULT.icon).trim().slice(0,16);
+  if(!MAINT_SCOPES[scope])throw new Error('Choisissez une portée de maintenance valide.');
+  if(scope==='E'&&(!Array.isArray(b.functions)||!b.functions.filter(f=>MAINT_FONCTIONS[f]).length))throw new Error('Cochez au moins une fonction à suspendre.');
+  if(!title||!message)throw new Error('Le titre et le message de l’alerte sont obligatoires.');
+  if(!/^#[0-9a-fA-F]{6}$/.test(background))throw new Error('La couleur de fond doit être au format #RRGGBB.');
+  const start_at=b.start_at?String(b.start_at):null;let until=b.until?String(b.until):null;
+  if(start_at&&!maintenanceDate(start_at))throw new Error('Date de début programmée invalide.');
+  if(until&&!maintenanceDate(until))throw new Error('Date de fin invalide.');
+  const duration=b.duration_minutes===undefined||b.duration_minutes===''?0:parseInt(b.duration_minutes,10);
+  if(duration){if(!Number.isInteger(duration)||duration<1||duration>43200)throw new Error('La durée doit être comprise entre 1 minute et 30 jours.');const base=start_at?new Date(start_at):new Date();until=new Date(base.getTime()+duration*60000).toISOString().slice(0,16);}
+  if(start_at&&until&&maintenanceDate(until)<=maintenanceDate(start_at))throw new Error('La fin doit être postérieure au début.');
+  return { scope, functions:scope==='E'?b.functions.filter(f=>MAINT_FONCTIONS[f]):undefined,start_at,until,title,message,precision,background_color:background,icon,logo_url:maintenancePublicLogo(b.logo_url),reason:String(b.reason||'').trim().slice(0,500) };
+}
+A.get('/maintenance', pdgOnly, (req,res) => {
+  const config=getMaintenance();
+  res.json({ config, scopes:MAINT_SCOPES, fonctions:MAINT_FONCTIONS, actif:maintenanceGeneral(config), scheduled:!!config.scheduled, stats:maintenanceStats(), allowed_ids:maintenanceAllowedIds() });
 });
-A.post('/maintenance', (req, res) => {
-  const { active, scope, functions, until, message, reason } = req.body || {};
-  if (!active) {
-    setSetting('maintenance', JSON.stringify({ active: 0 }));
-    return res.json({ ok: true });
-  }
-  if (!MAINT_SCOPES[scope]) return res.status(400).json({ error: 'Choisissez la portée de la maintenance (A à F).' });
-  if (scope === 'E' && (!Array.isArray(functions) || !functions.length)) return res.status(400).json({ error: 'Cochez au moins une fonction à suspendre.' });
-  if (!reason || !reason.trim()) return res.status(400).json({ error: 'Indiquez la justification (enregistrée dans le journal).' });
-  if (until && isNaN(Date.parse(until))) return res.status(400).json({ error: 'Date de fin invalide.' });
-  setSetting('maintenance', JSON.stringify({
-    active: 1, scope, functions: scope === 'E' ? functions.filter(f => MAINT_FONCTIONS[f]) : undefined,
-    until: until || null, message: (message || '').trim() || null, reason: reason.trim(),
-    activated_at: new Date().toISOString().slice(0, 19).replace('T', ' '), activated_by: req.user.name,
-  }));
-  res.json({ ok: true });
+A.get('/maintenance/accounts', pdgOnly, (req,res) => {
+  const q=String(req.query.q||'').trim().slice(0,100), role=String(req.query.role||'all'),limit=Math.max(1,Math.min(300,parseInt(req.query.limit,10)||100));const args=[],where=[];
+  if(q){const like='%'+q+'%';where.push('(u.name LIKE ? OR u.phone LIKE ? OR COALESCE(u.email,\'\') LIKE ? OR COALESCE(u.kp_code,\'\') LIKE ? OR CAST(u.id AS TEXT)=?)');args.push(like,like,like,like,q);}
+  if(role==='client')where.push("u.role='user' AND COALESCE(u.is_pro,0)=0 AND COALESCE(u.pro_status,'') NOT IN ('approved','pending')");
+  else if(role==='professional')where.push("u.role='user' AND (COALESCE(u.is_pro,0)=1 OR COALESCE(u.pro_status,'') IN ('approved','pending'))");
+  else if(['pdg','admin','gestionnaire','agent'].includes(role)){where.push('u.role=?');args.push(role);}
+  const rows=db.prepare(`SELECT u.id,u.name,u.phone,u.email,u.kp_code,u.role,u.is_pro,u.pro_status,u.suspended,u.blocked,u.disabled_until,u.created_at,a.user_id allowed_id FROM users u LEFT JOIN maintenance_allowed_accounts a ON a.user_id=u.id ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY CASE u.role WHEN 'pdg' THEN 0 WHEN 'admin' THEN 1 WHEN 'gestionnaire' THEN 2 WHEN 'agent' THEN 3 ELSE 4 END,u.name COLLATE NOCASE,u.id LIMIT ${limit}`).all(...args);
+  res.json({accounts:rows.map(u=>({...u,maintenance_allowed:u.role==='pdg'||!!u.allowed_id,role_label:maintenanceRoleLabel(u),status:u.role==='pdg'?'Accès PDG permanent':u.blocked?'Bloqué administrativement':u.suspended?'Suspendu administrativement':u.disabled_until&&u.disabled_until>maintenanceDbNow()?'Désactivé temporairement':'Actif'})),stats:maintenanceStats()});
+});
+A.put('/maintenance/allowed', pdgOnly, (req,res) => {
+  const b=req.body||{},ids=[...new Set((Array.isArray(b.user_ids)?b.user_ids:[]).map(Number).filter(n=>Number.isInteger(n)&&n>0))].slice(0,500),allowed=b.allowed===true;
+  if(!ids.length)return res.status(400).json({error:'Sélectionnez au moins un compte.'});
+  const existing=db.prepare(`SELECT id,role FROM users WHERE id IN (${ids.map(()=>'?').join(',')})`).all(...ids);if(!existing.length)return res.status(404).json({error:'Aucun compte sélectionné n’existe.'});
+  const targets=existing.filter(u=>u.role!=='pdg').map(u=>u.id);if(!targets.length)return res.status(400).json({error:'Le PDG est toujours autorisé et ne doit pas être ajouté à cette liste.'});
+  db.transaction(()=>{if(allowed){const add=db.prepare("INSERT INTO maintenance_allowed_accounts(user_id,allowed_by,updated_at) VALUES(?,?,datetime('now')) ON CONFLICT(user_id) DO UPDATE SET allowed_by=excluded.allowed_by,updated_at=datetime('now')");targets.forEach(id=>add.run(id,req.user.id));}else{const q=targets.map(()=>'?').join(',');db.prepare(`DELETE FROM maintenance_allowed_accounts WHERE user_id IN (${q})`).run(...targets);}})();
+  const m=getMaintenance();maintenanceHistory(allowed?'accounts_authorized':'accounts_blocked',req.user,m,`${targets.length} compte(s) ${allowed?'autorisé(s)':'retiré(s)'} pendant la maintenance.`);logAction(req.user,allowed?'maintenance_comptes_autorises':'maintenance_comptes_bloques',{target_type:'maintenance',details:targets.join(',')});maintenanceBroadcast();res.json({ok:true,stats:maintenanceStats(),allowed_ids:maintenanceAllowedIds()});
+});
+A.delete('/maintenance/allowed', pdgOnly, (req,res) => { const n=db.prepare('SELECT COUNT(*) n FROM maintenance_allowed_accounts').get().n;db.prepare('DELETE FROM maintenance_allowed_accounts').run();const m=getMaintenance();maintenanceHistory('all_accounts_blocked',req.user,m,`Retrait de ${n} autorisation(s) de test.`);logAction(req.user,'maintenance_tous_comptes_bloques',{target_type:'maintenance'});maintenanceBroadcast();res.json({ok:true,removed:n,stats:maintenanceStats(),allowed_ids:[]}); });
+A.get('/maintenance/history', pdgOnly, (req,res) => {
+  const rows=db.prepare('SELECT * FROM maintenance_history ORDER BY created_at DESC,id DESC LIMIT 300').all().map(r=>{let config={},allowed=[];try{config=JSON.parse(r.config_json||'{}');}catch{}try{allowed=JSON.parse(r.allowed_user_ids||'[]');}catch{}const start=maintenanceDate(config.runtime_started_at||config.activated_at||config.start_at),end=['disabled','auto_disabled'].includes(r.action)?maintenanceDate(r.created_at):null;return {...r,config,allowed_user_ids:Array.isArray(allowed)?allowed:[],duration_seconds:start&&end&&end>=start?Math.round((end-start)/1000):null};});res.json({history:rows,stats:maintenanceStats()});
+});
+A.post('/maintenance', pdgOnly, (req,res) => {
+  const b=req.body||{};
+  if(!b.active){const before=getMaintenance(),next={...maintenanceRead(),active:0,ended_at:maintenanceDbNow(),ended_by:req.user.name};setSetting('maintenance',JSON.stringify(next));maintenanceHistory('disabled',req.user,before,'Désactivation manuelle de la maintenance.');logAction(req.user,'maintenance_desactivee',{target_type:'maintenance',reason:String(b.reason||'').slice(0,500)});maintenanceBroadcast();return res.json({ok:true,config:getMaintenance(),stats:maintenanceStats()});}
+  try {const cfg=maintenanceConfigBody(b);if(!cfg.reason)throw new Error('Indiquez la justification enregistrée dans le journal.');const start=maintenanceDate(cfg.start_at),now=Date.now(),scheduled=!!(start&&start>now);const next={...cfg,active:1,activated_at:scheduled?null:maintenanceDbNow(),activated_by:req.user.name,activated_by_id:req.user.id,runtime_started_at:scheduled?null:maintenanceDbNow(),auto_ended_at:null};setSetting('maintenance',JSON.stringify(next));maintenanceHistory(scheduled?'scheduled':'activated',req.user,next,scheduled?'Maintenance programmée.':'Maintenance activée manuellement.');logAction(req.user,scheduled?'maintenance_programmee':'maintenance_activee',{target_type:'maintenance',details:cfg.scope,reason:cfg.reason});if(!scheduled)maintenanceBroadcast();res.json({ok:true,config:getMaintenance(),stats:maintenanceStats()});}catch(e){res.status(400).json({error:e.message||'Configuration de maintenance invalide.'});}
 });
 
 // ============== GRANDE RECHERCHE ADMINISTRATEUR ==============

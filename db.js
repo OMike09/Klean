@@ -2340,4 +2340,39 @@ for(const [k,v] of Object.entries(COLIS30_DEFAULTS)) if(getSetting(k)===null)set
 })();
 
 
+// ============================================================
+// COLIS 31 — Maintenance générale avec exceptions de test et audit
+// ============================================================
+// La maintenance ne modifie jamais le statut disciplinaire d’un compte :
+// ces références ne servent qu’à autoriser temporairement l’accès pendant
+// une maintenance générale.
+db.exec(`
+CREATE TABLE IF NOT EXISTS maintenance_allowed_accounts (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  allowed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS maintenance_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  action TEXT NOT NULL,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  actor_name TEXT,
+  config_json TEXT NOT NULL DEFAULT '{}',
+  allowed_user_ids TEXT NOT NULL DEFAULT '[]',
+  details TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_maintenance_history_created ON maintenance_history(created_at DESC,id DESC);
+CREATE TABLE IF NOT EXISTS maintenance_access_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  event_type TEXT NOT NULL CHECK(event_type IN ('allowed','denied','login_allowed','login_denied')),
+  endpoint TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_maintenance_access_events ON maintenance_access_events(created_at DESC,event_type,user_id);
+`);
+
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

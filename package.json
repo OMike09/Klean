@@ -24,7 +24,9 @@
     "test:update29": "node test-colis29.js",
     "test:update29:ui": "node test-colis29-ui.js",
     "test:update30": "node test-colis30.js",
-    "test:update30:ui": "node test-colis30-ui.js"
+    "test:update30:ui": "node test-colis30-ui.js",
+    "test:update31": "node test-colis31.js",
+    "test:update31:ui": "node test-colis31-ui.js"
   },
   "keywords": [],
   "author": "",
