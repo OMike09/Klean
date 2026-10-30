@@ -2142,4 +2142,116 @@ function catalogueAudit(type, canonical, merged, row) {
   setSetting('colis27_catalogue_exact_dedup_v1','1');
 })();
 
+
+// ============================================================
+// COLIS 29 — Braderie d’articles et bandeau d’accueil paramétrable
+// ============================================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS braderie_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  seller_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  price INTEGER NOT NULL CHECK(price >= 0),
+  city TEXT NOT NULL,
+  quartier TEXT NOT NULL DEFAULT '',
+  contact_phone TEXT NOT NULL,
+  external_link TEXT,
+  item_condition TEXT NOT NULL CHECK(item_condition IN ('neuf','tres_bon','bon','a_reparer')),
+  visibility TEXT NOT NULL DEFAULT 'city' CHECK(visibility IN ('city','national')),
+  photos TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','available','sold','suspended','expired','rejected','deleted')),
+  conditions_accepted INTEGER NOT NULL DEFAULT 0,
+  moderation_note TEXT,
+  approved_at TEXT,
+  expires_at TEXT,
+  sold_at TEXT,
+  deleted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brad_items_public ON braderie_items(status,city,visibility,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_brad_items_seller ON braderie_items(seller_id,status,created_at DESC);
+CREATE TABLE IF NOT EXISTS braderie_negotiations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES braderie_items(id) ON DELETE RESTRICT,
+  buyer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  seller_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  state TEXT NOT NULL DEFAULT 'open' CHECK(state IN ('open','seller_counter','seller_last_price','accepted','rejected','closed')),
+  buyer_offer_count INTEGER NOT NULL DEFAULT 0,
+  final_offer_used INTEGER NOT NULL DEFAULT 0,
+  accepted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(item_id,buyer_id)
+);
+CREATE INDEX IF NOT EXISTS idx_brad_neg_seller ON braderie_negotiations(seller_id,state,updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_brad_neg_buyer ON braderie_negotiations(buyer_id,state,updated_at DESC);
+CREATE TABLE IF NOT EXISTS braderie_negotiation_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  negotiation_id INTEGER NOT NULL REFERENCES braderie_negotiations(id) ON DELETE RESTRICT,
+  actor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  event_type TEXT NOT NULL CHECK(event_type IN ('buyer_offer','buyer_final_offer','seller_counter','seller_last_price','accepted','rejected')),
+  amount INTEGER,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brad_neg_events ON braderie_negotiation_events(negotiation_id,created_at,id);
+CREATE TABLE IF NOT EXISTS braderie_contact_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES braderie_items(id) ON DELETE RESTRICT,
+  buyer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  seller_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  message TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','closed')),
+  admin_note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brad_contact_status ON braderie_contact_requests(status,created_at DESC);
+CREATE TABLE IF NOT EXISTS braderie_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES braderie_items(id) ON DELETE RESTRICT,
+  reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  reason TEXT NOT NULL,
+  details TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','reviewed','dismissed','actioned')),
+  admin_note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(item_id,reporter_id)
+);
+CREATE INDEX IF NOT EXISTS idx_brad_reports_status ON braderie_reports(status,created_at DESC);
+`);
+// Les colonnes de personnalisation complètent la table historique du bandeau sans
+// supprimer les messages existants.
+ensureColumn('annonces', 'image_url', 'TEXT');
+ensureColumn('annonces', 'duration_seconds', 'INTEGER NOT NULL DEFAULT 8');
+const BRADERIE_DEFAULTS = {
+  braderie_enabled: '0',
+  braderie_home_visible: '1',
+  braderie_conditions: 'La publication doit être exacte, licite et concerner un article réellement disponible. Les contenus frauduleux ou inappropriés sont interdits.',
+  braderie_require_conditions: '1',
+  braderie_max_per_client: '3',
+  braderie_max_platform: '100',
+  braderie_limit_period: 'month',
+  braderie_max_photos: '1',
+  braderie_offer_limit: '10',
+  braderie_offer_period: 'month',
+  braderie_expiry_days: '30',
+  braderie_contact_mode: 'klean',
+  braderie_hide_external_link: '1',
+  bandeau_style: 'classic',
+  bandeau_background: '#0b1320',
+  bandeau_text_color: '#ffffff',
+  bandeau_font_size: '14',
+  bandeau_font_weight: '700',
+  bandeau_height: '38',
+  bandeau_border_color: '#16a34a',
+  bandeau_animation: 'scroll',
+  bandeau_message_duration: '8'
+};
+for (const [k,v] of Object.entries(BRADERIE_DEFAULTS)) if (getSetting(k) === null) setSetting(k,v);
+
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

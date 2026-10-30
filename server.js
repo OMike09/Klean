@@ -63,12 +63,19 @@ function fileHasName(raw, name) {
   try { return JSON.parse(raw).some(v => path.basename(String(v)) === name); } catch { return false; }
 }
 function uploadIsPublicAd(name) {
-  return !!db.prepare("SELECT 1 FROM ads WHERE active=1 AND file LIKE ?").get('%/uploads/' + name);
+  // Les visuels explicitement publiés (publicité ou message du bandeau) sont les
+  // seules exceptions à la protection générale des uploads.
+  return !!db.prepare("SELECT 1 FROM ads WHERE active=1 AND file LIKE ?").get('%/uploads/' + name)
+    || !!db.prepare("SELECT 1 FROM annonces WHERE active=1 AND image_url LIKE ?").get('%/uploads/' + name);
 }
 function canReadUpload(user, name) {
   // Une image de grande catégorie active est un visuel de catalogue explicitement publié.
   // Cette exception est évaluée avant l’exigence de session ; les médias privés restent protégés.
   if (db.prepare("SELECT 1 FROM grand_categories WHERE active=1 AND image_url LIKE ?").get('%/uploads/' + name)) return true;
+  // Une photo Braderie n'est publique que pendant la diffusion validée. Les photos
+  // d'articles en attente, suspendus, vendus ou supprimés restent privées.
+  const braderie = db.prepare("SELECT photos FROM braderie_items WHERE status='available' AND photos LIKE ?").all('%/uploads/' + name + '%');
+  if (braderie.some(row => fileHasName(row.photos, name))) return true;
   if (!user) return false;
   if (isStaff(user) && (hasPerm(user, 'securite') || hasPerm(user, 'missions') || hasPerm(user, 'communication'))) return true;
   const record = db.prepare('SELECT state, uploaded_by FROM file_records WHERE name=?').get(name);
@@ -2753,14 +2760,189 @@ app.post('/api/ad-views', (req,res) => {
   res.json({ok:true,recorded});
 });
 
-// Bandeau d'annonces défilantes (bas de l'accueil) — visible aussi sans compte
+// Bandeau d'annonces défilantes (bas de l'accueil) — visible aussi sans compte.
+// Les paramètres sont retournés à chaque lecture : l'accueil actualise donc réellement
+// le ruban après toute modification PDG, sans dépendre d'un cache du navigateur.
+function bandeauConfig() {
+  const pick = (k, def) => String(getSetting(k, def) || def);
+  const n = (k, def, min, max) => Math.max(min, Math.min(max, parseInt(pick(k, String(def)), 10) || def));
+  const style = pick('bandeau_style', 'classic');
+  const animation = pick('bandeau_animation', 'scroll');
+  return {
+    enabled: pick('bandeau_enabled', '0') === '1',
+    speed: n('bandeau_speed', 60, 10, 400),
+    style: ['classic','colored','icon','image','modern'].includes(style) ? style : 'classic',
+    background: pick('bandeau_background', '#0b1320').slice(0, 20),
+    text_color: pick('bandeau_text_color', '#ffffff').slice(0, 20),
+    font_size: n('bandeau_font_size', 14, 10, 28),
+    font_weight: ['400','500','600','700','800'].includes(pick('bandeau_font_weight','700')) ? pick('bandeau_font_weight','700') : '700',
+    height: n('bandeau_height', 38, 28, 86),
+    border_color: pick('bandeau_border_color', '#16a34a').slice(0, 20),
+    animation: ['scroll','slide','fade'].includes(animation) ? animation : 'scroll',
+    message_duration: n('bandeau_message_duration', 8, 3, 60)
+  };
+}
 app.get('/api/annonces', (req, res) => {
   res.json({
-    enabled: getSetting('bandeau_enabled') === '1',
-    speed: Math.max(10, Math.min(400, parseInt(getSetting('bandeau_speed') || '60', 10) || 60)),
-    items: db.prepare('SELECT id, type, theme, title, content, icon, color, link FROM annonces WHERE active=1 ORDER BY sort, id').all()
+    ...bandeauConfig(),
+    items: db.prepare('SELECT id, type, theme, title, content, icon, color, link, image_url, duration_seconds FROM annonces WHERE active=1 ORDER BY sort, id').all()
   });
 });
+
+// ---------------- BRADERIE D’ARTICLES ----------------
+// Les sérialiseurs distincts évitent qu'un téléphone ou un lien privé ne soit
+// simplement « caché » par le navigateur : ils ne font jamais partie de la réponse publique
+// lorsque le contact est géré par Klean Services.
+function braderieNumber(key, fallback, min, max) {
+  const n = parseInt(getSetting(key, String(fallback)), 10);
+  return Math.max(min, Math.min(max, Number.isFinite(n) ? n : fallback));
+}
+function braderieSettings() {
+  const period = String(getSetting('braderie_limit_period', 'month'));
+  const offerPeriod = String(getSetting('braderie_offer_period', period));
+  return {
+    enabled: getSetting('braderie_enabled', '0') === '1',
+    home_visible: getSetting('braderie_home_visible', '1') === '1',
+    conditions: String(getSetting('braderie_conditions', '') || '').slice(0, 4000),
+    require_conditions: getSetting('braderie_require_conditions', '1') === '1',
+    max_per_client: braderieNumber('braderie_max_per_client', 3, 1, 100),
+    max_platform: braderieNumber('braderie_max_platform', 100, 1, 100000),
+    limit_period: ['day','week','month','year'].includes(period) ? period : 'month',
+    max_photos: braderieNumber('braderie_max_photos', 1, 1, 8),
+    offer_limit: braderieNumber('braderie_offer_limit', 10, 1, 1000),
+    offer_period: ['day','week','month','year'].includes(offerPeriod) ? offerPeriod : 'month',
+    expiry_days: braderieNumber('braderie_expiry_days', 30, 1, 365),
+    contact_mode: getSetting('braderie_contact_mode', 'klean') === 'direct' ? 'direct' : 'klean',
+    hide_external_link: getSetting('braderie_hide_external_link', '1') === '1'
+  };
+}
+function braderieModifier(period) { return ({ day:'-1 day', week:'-7 days', month:'-1 month', year:'-1 year' })[period] || '-1 month'; }
+function braderieExpire() {
+  const expired=db.prepare("SELECT id FROM braderie_items WHERE status='available' AND expires_at IS NOT NULL AND expires_at<=datetime('now')").all();
+  if (!expired.length) return;
+  const ids=expired.map(x=>x.id);
+  const q=ids.map(()=>'?').join(',');
+  db.prepare(`UPDATE braderie_items SET status='expired',updated_at=datetime('now') WHERE id IN (${q})`).run(...ids);
+  db.prepare(`UPDATE braderie_negotiations SET state='closed',updated_at=datetime('now') WHERE state IN ('open','seller_counter','seller_last_price') AND item_id IN (${q})`).run(...ids);
+}
+function braderiePhotos(raw) { try { const a=JSON.parse(raw || '[]'); return Array.isArray(a) ? a.filter(v=>typeof v==='string' && /^\/uploads\/[A-Za-z0-9._-]+$/.test(v)).slice(0,8) : []; } catch { return []; } }
+function braderieContactProtected() { const c=braderieSettings(); return c.contact_mode === 'klean'; }
+function braderiePublicItem(row, viewer) {
+  if (!row) return null;
+  const c=braderieSettings();
+  const out={
+    id:row.id,title:row.title,description:row.description,price:Number(row.price),city:row.city,quartier:row.quartier || '',
+    item_condition:row.item_condition,visibility:row.visibility,photos:braderiePhotos(row.photos),status:row.status,
+    created_at:row.created_at,approved_at:row.approved_at,expires_at:row.expires_at,sold_at:row.sold_at,
+    seller_name:row.seller_name || '', contact_mode:c.contact_mode,
+    is_owner:!!(viewer && viewer.id===row.seller_id), can_offer:!!(viewer && viewer.id!==row.seller_id && row.status==='available'),
+    can_request_contact:!!(viewer && viewer.id!==row.seller_id && row.status==='available' && c.contact_mode==='klean')
+  };
+  // Ces propriétés sont volontairement créées uniquement en mode direct. En mode Klean,
+  // elles ne peuvent donc pas fuiter dans une liste, une fiche, le cache ou le code client.
+  if (c.contact_mode === 'direct') {
+    out.contact_phone=row.contact_phone || '';
+    if (!c.hide_external_link && row.external_link) out.external_link=row.external_link;
+  }
+  return out;
+}
+function braderiePrivateItem(row) {
+  const pub=braderiePublicItem(row, {id:row.seller_id});
+  return {...pub, seller_id:row.seller_id, contact_phone:row.contact_phone || '', external_link:row.external_link || '', moderation_note:row.moderation_note || '', deleted_at:row.deleted_at || null};
+}
+function braderieAccessible(row, user, filterCity) {
+  if (!row || row.status !== 'available') return !!(user && (user.id===row.seller_id || user.role==='pdg'));
+  if (user && (user.id===row.seller_id || user.role==='pdg')) return true;
+  const city=String(filterCity || (user && user.ville) || '').trim();
+  return row.visibility === 'national' || (!!city && String(row.city).toLowerCase() === city.toLowerCase());
+}
+function braderieItemRow(id) { return db.prepare(`SELECT i.*,u.name seller_name FROM braderie_items i JOIN users u ON u.id=i.seller_id WHERE i.id=?`).get(id); }
+function braderieRequireLive(req,res) { const c=braderieSettings(); if (!c.enabled) { res.status(409).json({error:'La braderie d’articles n’est pas encore opérationnelle. Elle pourra être activée à tout moment. Merci de votre compréhension.'}); return null; } return c; }
+function braderieValidatePhotos(raw, user, max) {
+  const a=Array.isArray(raw)?raw:[]; const photos=[...new Set(a.map(v=>String(v||'').trim()))];
+  if (!photos.length) throw new Error('Au moins une image est obligatoire.');
+  if (photos.length>max) throw new Error(`Le maximum autorisé est de ${max} photo(s).`);
+  for(const photo of photos) { const rec=uploadRecordFor(photo); if(!rec || rec.uploaded_by!==user.id || !String(rec.mime||'').startsWith('image/')) throw new Error('Chaque photo doit être une image que vous venez d’envoyer depuis votre compte.'); }
+  return photos;
+}
+function braderieValidField(v,max) { return String(v===undefined||v===null?'':v).trim().slice(0,max); }
+function braderieOfferPeriodCount(userId, period) { return db.prepare(`SELECT COUNT(*) n FROM braderie_negotiation_events WHERE actor_id=? AND event_type IN ('buyer_offer','buyer_final_offer') AND created_at>=datetime('now',?)`).get(userId,braderieModifier(period)).n; }
+
+app.get('/api/braderie/config', optionalAuth, (req,res) => res.json(braderieSettings()));
+app.get('/api/braderie/items', optionalAuth, (req,res) => {
+  const c=braderieSettings(); braderieExpire();
+  if (!c.enabled) return res.json({enabled:false,items:[]});
+  const q=braderieValidField(req.query.q,100).toLowerCase(), city=braderieValidField(req.query.city,100), quartier=braderieValidField(req.query.quartier,100).toLowerCase();
+  const condition=braderieValidField(req.query.condition,30), min=Math.max(0,Number(req.query.min_price)||0), max=Math.max(0,Number(req.query.max_price)||0);
+  const order=req.query.order==='price_asc'?'i.price ASC,i.id DESC':req.query.order==='price_desc'?'i.price DESC,i.id DESC':'i.created_at DESC,i.id DESC';
+  let rows=db.prepare(`SELECT i.*,u.name seller_name FROM braderie_items i JOIN users u ON u.id=i.seller_id WHERE i.status='available' ORDER BY ${order} LIMIT 200`).all();
+  const baseCity=city || (req.user&&req.user.ville) || '';
+  rows=rows.filter(r=>braderieAccessible(r,req.user,baseCity));
+  if(q) rows=rows.filter(r=>(r.title+' '+r.description).toLowerCase().includes(q));
+  if(city) rows=rows.filter(r=>r.city.toLowerCase()===city.toLowerCase());
+  if(quartier) rows=rows.filter(r=>String(r.quartier||'').toLowerCase().includes(quartier));
+  if(['neuf','tres_bon','bon','a_reparer'].includes(condition)) rows=rows.filter(r=>r.item_condition===condition);
+  if(min) rows=rows.filter(r=>Number(r.price)>=min); if(max) rows=rows.filter(r=>Number(r.price)<=max);
+  res.json({enabled:true,items:rows.map(r=>braderiePublicItem(r,req.user))});
+});
+app.get('/api/braderie/items/mine', auth, (req,res) => {
+  braderieExpire();
+  const rows=db.prepare(`SELECT i.*,u.name seller_name FROM braderie_items i JOIN users u ON u.id=i.seller_id WHERE i.seller_id=? ORDER BY i.created_at DESC,i.id DESC`).all(req.user.id);
+  res.json(rows.map(braderiePrivateItem));
+});
+app.get('/api/braderie/items/:id', optionalAuth, (req,res) => {
+  const c=braderieSettings(); braderieExpire(); const row=braderieItemRow(Number(req.params.id));
+  if(!row) return res.status(404).json({error:'Article introuvable.'});
+  if(!c.enabled && !(req.user && (req.user.id===row.seller_id || req.user.role==='pdg'))) return res.status(404).json({error:'Braderie indisponible.'});
+  if(!braderieAccessible(row,req.user,req.query.city)) return res.status(404).json({error:'Article indisponible dans cette zone ou retiré.'});
+  res.json(req.user && (req.user.id===row.seller_id || req.user.role==='pdg') ? braderiePrivateItem(row) : braderiePublicItem(row,req.user));
+});
+app.post('/api/braderie/items', auth, (req,res) => {
+  const c=braderieRequireLive(req,res); if(!c) return;
+  try {
+    const b=req.body||{}, title=braderieValidField(b.title,120), description=braderieValidField(b.description,2500), city=braderieValidField(b.city,100), quartier=braderieValidField(b.quartier,120), phone=braderieValidField(b.contact_phone,40), link=braderieValidField(b.external_link,500);
+    const price=Math.round(Number(b.price)), condition=braderieValidField(b.item_condition,30), visibility=braderieValidField(b.visibility,20);
+    if(title.length<3||description.length<8||!city||!quartier||!phone) throw new Error('Titre, description, ville, quartier et téléphone sont obligatoires.');
+    if(!Number.isFinite(price)||price<0||price>100000000) throw new Error('Prix FCFA invalide.');
+    if(!['neuf','tres_bon','bon','a_reparer'].includes(condition)) throw new Error('État de l’article invalide.');
+    if(!['city','national'].includes(visibility)) throw new Error('Mode de diffusion invalide.');
+    if(!req.user.ville || city.toLocaleLowerCase()!==String(req.user.ville).trim().toLocaleLowerCase()) throw new Error('La ville de publication doit être celle enregistrée sur votre compte.');
+    if(link && !/^https?:\/\//i.test(link)) throw new Error('Le lien doit commencer par http:// ou https://.');
+    if(c.require_conditions && b.conditions_accepted!==true) throw new Error('Vous devez accepter les conditions de publication.');
+    const count=db.prepare(`SELECT COUNT(*) n FROM braderie_items WHERE seller_id=? AND created_at>=datetime('now',?)`).get(req.user.id,braderieModifier(c.limit_period)).n;
+    if(count>=c.max_per_client) throw new Error(`Votre quota est atteint : ${c.max_per_client} publication(s) par ${c.limit_period}.`);
+    const platform=db.prepare(`SELECT COUNT(*) n FROM braderie_items WHERE created_at>=datetime('now',?)`).get(braderieModifier(c.limit_period)).n;
+    if(platform>=c.max_platform) throw new Error('Le quota de publication de la plateforme est atteint pour cette période.');
+    const photos=braderieValidatePhotos(b.photos,req.user,c.max_photos);
+    const r=db.prepare(`INSERT INTO braderie_items(seller_id,title,description,price,city,quartier,contact_phone,external_link,item_condition,visibility,photos,conditions_accepted,expires_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,datetime('now',?))`).run(req.user.id,title,description,price,city,quartier,phone,link||null,condition,visibility,JSON.stringify(photos),c.require_conditions?1:0,'+'+c.expiry_days+' days');
+    notifyAdmins('braderie','Nouvel article à valider',`${req.user.name} a publié « ${title} ».`,`#/admin/braderie`);
+    res.status(201).json({ok:true,id:r.lastInsertRowid,status:'pending',message:'Votre article a été envoyé au PDG pour validation.'});
+  } catch(e) { res.status(400).json({error:e.message||'Publication invalide.'}); }
+});
+app.put('/api/braderie/items/:id', auth, (req,res) => {
+  const row=braderieItemRow(Number(req.params.id)); if(!row) return res.status(404).json({error:'Article introuvable.'});
+  if(row.seller_id!==req.user.id) return res.status(403).json({error:'Seul le vendeur peut modifier cet article.'});
+  if(!['pending','rejected'].includes(row.status)) return res.status(409).json({error:'Seul un article en attente ou refusé peut être corrigé.'});
+  try { const b=req.body||{}, c=braderieSettings(); const title=b.title===undefined?row.title:braderieValidField(b.title,120),description=b.description===undefined?row.description:braderieValidField(b.description,2500),price=b.price===undefined?row.price:Math.round(Number(b.price)),quartier=b.quartier===undefined?row.quartier:braderieValidField(b.quartier,120),condition=b.item_condition===undefined?row.item_condition:braderieValidField(b.item_condition,30), visibility=b.visibility===undefined?row.visibility:braderieValidField(b.visibility,20); if(title.length<3||description.length<8||!quartier||!Number.isFinite(price)||price<0||!['neuf','tres_bon','bon','a_reparer'].includes(condition)||!['city','national'].includes(visibility)) throw new Error('Données de correction invalides.'); const photos=b.photos===undefined?braderiePhotos(row.photos):braderieValidatePhotos(b.photos,req.user,c.max_photos); db.prepare("UPDATE braderie_items SET title=?,description=?,price=?,quartier=?,item_condition=?,visibility=?,photos=?,status='pending',moderation_note=NULL,updated_at=datetime('now') WHERE id=?").run(title,description,price,quartier,condition,visibility,JSON.stringify(photos),row.id); notifyAdmins('braderie','Article corrigé à valider',`${req.user.name} a corrigé « ${title} ».`,`#/admin/braderie`); res.json({ok:true,status:'pending'}); } catch(e) { res.status(400).json({error:e.message||'Correction invalide.'}); }
+});
+app.post('/api/braderie/items/:id/sold', auth, (req,res) => {
+  braderieExpire(); const row=braderieItemRow(Number(req.params.id)); if(!row)return res.status(404).json({error:'Article introuvable.'}); if(row.seller_id!==req.user.id)return res.status(403).json({error:'Seul le vendeur peut confirmer la vente.'}); if(row.status!=='available')return res.status(409).json({error:'Seul un article disponible peut être marqué vendu.'}); if(req.body&&req.body.confirmed!==true)return res.status(400).json({error:'Confirmation de vente requise.'});
+  db.transaction(()=>{db.prepare("UPDATE braderie_items SET status='sold',sold_at=datetime('now'),updated_at=datetime('now') WHERE id=?").run(row.id); db.prepare("UPDATE braderie_negotiations SET state='closed',updated_at=datetime('now') WHERE item_id=? AND state IN ('open','seller_counter','seller_last_price')").run(row.id);})();
+  db.prepare('SELECT DISTINCT buyer_id FROM braderie_negotiations WHERE item_id=?').all(row.id).forEach(n=>notify(n.buyer_id,'braderie','Article vendu',`L’article « ${row.title} » n’est plus disponible.`,`#/braderie/${row.id}`));
+  notifyAdmins('braderie','Article marqué vendu',`${req.user.name} a marqué « ${row.title} » comme vendu.`,`#/admin/braderie`); res.json({ok:true,status:'sold'});
+});
+app.post('/api/braderie/items/:id/report', auth, (req,res) => { const row=braderieItemRow(Number(req.params.id)),reason=braderieValidField((req.body||{}).reason,160),details=braderieValidField((req.body||{}).details,1200); if(!row||row.status!=='available')return res.status(404).json({error:'Article indisponible.'}); if(row.seller_id===req.user.id)return res.status(400).json({error:'Vous ne pouvez pas signaler votre propre article.'}); if(reason.length<3)return res.status(400).json({error:'Indiquez un motif de signalement.'}); try {db.prepare('INSERT INTO braderie_reports(item_id,reporter_id,reason,details) VALUES(?,?,?,?)').run(row.id,req.user.id,reason,details);notifyAdmins('braderie','Signalement Braderie',`Signalement sur « ${row.title} » : ${reason}.`,`#/admin/braderie`);res.json({ok:true});}catch{return res.status(409).json({error:'Vous avez déjà signalé cet article.'});} });
+app.post('/api/braderie/items/:id/contact', auth, (req,res) => { const c=braderieRequireLive(req,res);if(!c)return; if(c.contact_mode!=='klean')return res.status(409).json({error:'Le vendeur a choisi le contact direct pour cet article.'}); const row=braderieItemRow(Number(req.params.id));const message=braderieValidField((req.body||{}).message,1200); if(!row||row.status!=='available')return res.status(404).json({error:'Article indisponible.'});if(row.seller_id===req.user.id)return res.status(400).json({error:'Vous êtes le vendeur de cet article.'});if(!message)return res.status(400).json({error:'Écrivez votre demande de contact.'});const existing=db.prepare("SELECT id FROM braderie_contact_requests WHERE item_id=? AND buyer_id=? AND status='pending'").get(row.id,req.user.id);if(existing)return res.status(409).json({error:'Une demande de contact est déjà en attente.'});const r=db.prepare('INSERT INTO braderie_contact_requests(item_id,buyer_id,seller_id,message) VALUES(?,?,?,?)').run(row.id,req.user.id,row.seller_id,message);notifyAdmins('braderie','Demande de contact',`${req.user.name} souhaite contacter le vendeur de « ${row.title} ».`,`#/admin/braderie`);res.status(201).json({ok:true,id:r.lastInsertRowid}); });
+app.post('/api/braderie/items/:id/offers', auth, (req,res) => {
+  const c=braderieRequireLive(req,res); if(!c)return; braderieExpire(); const row=braderieItemRow(Number(req.params.id)); const amount=Math.round(Number((req.body||{}).amount)),note=braderieValidField((req.body||{}).note,800); if(!row||row.status!=='available')return res.status(404).json({error:'Article indisponible.'});if(row.seller_id===req.user.id)return res.status(400).json({error:'Vous ne pouvez pas faire une offre sur votre article.'});if(!Number.isFinite(amount)||amount<0||amount>100000000)return res.status(400).json({error:'Montant de proposition invalide.'});if(braderieOfferPeriodCount(req.user.id,c.offer_period)>=c.offer_limit)return res.status(429).json({error:`Votre quota de ${c.offer_limit} proposition(s) est atteint pour cette période.`});
+  let n=db.prepare('SELECT * FROM braderie_negotiations WHERE item_id=? AND buyer_id=?').get(row.id,req.user.id); let kind='buyer_offer';
+  if(n) { if(n.state==='seller_last_price'&&!n.final_offer_used){kind='buyer_final_offer';db.prepare("UPDATE braderie_negotiations SET state='open',final_offer_used=1,buyer_offer_count=buyer_offer_count+1,updated_at=datetime('now') WHERE id=?").run(n.id);} else if(n.state==='seller_counter'){db.prepare("UPDATE braderie_negotiations SET state='open',buyer_offer_count=buyer_offer_count+1,updated_at=datetime('now') WHERE id=?").run(n.id);} else return res.status(409).json({error:'Vous ne pouvez pas faire de nouvelle proposition dans cette négociation.'}); }
+  else { const r=db.prepare("INSERT INTO braderie_negotiations(item_id,buyer_id,seller_id,buyer_offer_count) VALUES(?,?,?,1)").run(row.id,req.user.id,row.seller_id); n={id:r.lastInsertRowid}; }
+  db.prepare('INSERT INTO braderie_negotiation_events(negotiation_id,actor_id,event_type,amount,note) VALUES(?,?,?,?,?)').run(n.id,req.user.id,kind,amount,note||null); notify(row.seller_id,'braderie','Nouvelle proposition',`${req.user.name} propose ${amount.toLocaleString('fr-FR')} FCFA pour « ${row.title} ».`,`#/braderie-negotiations`);res.status(201).json({ok:true,negotiation_id:n.id,event_type:kind});
+});
+app.get('/api/braderie/negotiations', auth, (req,res) => { const rows=db.prepare(`SELECT n.*,i.title,i.price,i.status item_status,i.photos,b.name buyer_name,s.name seller_name FROM braderie_negotiations n JOIN braderie_items i ON i.id=n.item_id JOIN users b ON b.id=n.buyer_id JOIN users s ON s.id=n.seller_id WHERE n.buyer_id=? OR n.seller_id=? ORDER BY n.updated_at DESC,n.id DESC`).all(req.user.id,req.user.id);const ev=db.prepare('SELECT e.*,u.name actor_name FROM braderie_negotiation_events e JOIN users u ON u.id=e.actor_id WHERE e.negotiation_id=? ORDER BY e.created_at,e.id');res.json(rows.map(r=>({...r,photos:braderiePhotos(r.photos),events:ev.all(r.id),is_buyer:r.buyer_id===req.user.id}))); });
+app.post('/api/braderie/negotiations/:id/action', auth, (req,res) => { const n=db.prepare(`SELECT n.*,i.title,i.status item_status FROM braderie_negotiations n JOIN braderie_items i ON i.id=n.item_id WHERE n.id=?`).get(Number(req.params.id));if(!n)return res.status(404).json({error:'Négociation introuvable.'});if(n.seller_id!==req.user.id)return res.status(403).json({error:'Seul le vendeur peut répondre à cette proposition.'});if(n.item_status!=='available'||!['open','seller_counter','seller_last_price'].includes(n.state))return res.status(409).json({error:'Cette négociation est fermée.'});const action=braderieValidField((req.body||{}).action,30),amount=Math.round(Number((req.body||{}).amount)),note=braderieValidField((req.body||{}).note,800);if(!['counter','last_price','accept','reject'].includes(action))return res.status(400).json({error:'Décision invalide.'});let state,event,needAmount=false;if(action==='counter'){state='seller_counter';event='seller_counter';needAmount=true;}if(action==='last_price'){state='seller_last_price';event='seller_last_price';needAmount=true;}if(action==='accept'){state='accepted';event='accepted';}if(action==='reject'){state='rejected';event='rejected';}if(needAmount&&(!Number.isFinite(amount)||amount<0||amount>100000000))return res.status(400).json({error:'Indiquez un montant valide.'});db.transaction(()=>{db.prepare("UPDATE braderie_negotiations SET state=?,accepted_at=CASE WHEN ?='accepted' THEN datetime('now') ELSE accepted_at END,updated_at=datetime('now') WHERE id=?").run(state,state,n.id);db.prepare('INSERT INTO braderie_negotiation_events(negotiation_id,actor_id,event_type,amount,note) VALUES(?,?,?,?,?)').run(n.id,req.user.id,event,needAmount?amount:null,note||null);})();const labels={counter:'a fait une contre-proposition',last_price:'a communiqué son dernier prix',accept:'a accepté votre proposition',reject:'a refusé votre proposition'};notify(n.buyer_id,'braderie','Réponse à votre proposition',`Le vendeur ${labels[action]} pour « ${n.title} ».`,`#/braderie-negotiations`);res.json({ok:true,state}); });
 
 // Comptage des vues (pub, infos, urgences, jeux) — chaque compte ne compte qu'UNE fois par élément
 const seeView = db.prepare('INSERT OR IGNORE INTO view_seen(key, user_id) VALUES(?, ?)');
@@ -2792,6 +2974,7 @@ const PERM_ROUTES = [
   [/^\/(finances|transactions|prix-modifs|visibilite|pub)/, 'paiements'],
   [/^\/commissions/, 'parametres'],
   [/^\/dispatch/, 'parametres'],
+  [/^\/braderie/, 'PDG'],
   [/^\/(ads|broadcast|general-messages|annonces|support)/, 'communication'],
   [/^\/frequentation/, 'frequentation'],
   [/^\/about/, 'PDG'],
@@ -4189,27 +4372,36 @@ A.delete('/ads/:id', (req, res) => { db.prepare('DELETE FROM ads WHERE id=?').ru
 // ----- Bandeau d'annonces défilantes -----
 A.get('/annonces', (req, res) => res.json(db.prepare('SELECT * FROM annonces ORDER BY sort, id').all()));
 const TYPES_BANDEAU = { pub: '📢', info: 'ℹ️', urgence: '🚨' }; // icône posée automatiquement selon le type
-A.post('/annonces', (req, res) => {
-  const { type, theme, title, content, color, link } = req.body || {};
-  if (!(content || '').trim() && !(title || '').trim()) return res.status(400).json({ error: 'Écrivez le message à faire défiler.' });
-  const t = TYPES_BANDEAU[type] ? type : 'info';
-  const info = db.prepare('INSERT INTO annonces(type, theme, title, content, icon, color, link) VALUES(?,?,?,?,?,?,?)')
-    .run(t, (theme || '').trim(), (title || '').trim(), (content || '').trim(), TYPES_BANDEAU[t],
-      (color || '#ffffff').trim() || '#ffffff', (link || '').trim() || null);
-  db.prepare('UPDATE annonces SET sort=? WHERE id=?').run(info.lastInsertRowid, info.lastInsertRowid); // ordre stable
-  res.json({ ok: true, id: info.lastInsertRowid });
+function bandeauImageUrl(value) {
+  const v=String(value||'').trim(); if(!v) return null;
+  const rec=uploadRecordFor(v); if(!rec || !String(rec.mime||'').startsWith('image/')) throw new Error('L’image du bandeau doit être une image envoyée sur la plateforme.');
+  return v;
+}
+function bandeauDuration(value, fallback=8) { const n=parseInt(value,10); if(!Number.isInteger(n)||n<3||n>60) return fallback; return n; }
+A.post('/annonces', pdgOnly, (req, res) => {
+  try { const { type, theme, title, content, color, link, icon, image_url, duration_seconds } = req.body || {};
+    if (!(content || '').trim() && !(title || '').trim()) return res.status(400).json({ error: 'Écrivez le message à faire défiler.' });
+    const t = TYPES_BANDEAU[type] ? type : 'info', image=bandeauImageUrl(image_url), customIcon=String(icon||'').trim().slice(0,16);
+    const info = db.prepare('INSERT INTO annonces(type, theme, title, content, icon, color, link, image_url, duration_seconds) VALUES(?,?,?,?,?,?,?,?,?)')
+      .run(t, String(theme||'').trim().slice(0,80), String(title||'').trim().slice(0,160), String(content||'').trim().slice(0,1000), customIcon||TYPES_BANDEAU[t],
+        String(color||'#ffffff').trim().slice(0,20)||'#ffffff', String(link||'').trim().slice(0,500)||null, image, bandeauDuration(duration_seconds));
+    db.prepare('UPDATE annonces SET sort=? WHERE id=?').run(info.lastInsertRowid, info.lastInsertRowid);
+    logAction(req.user,'bandeau_message_ajoute',{target_type:'annonce',target_id:info.lastInsertRowid});res.json({ ok: true, id: info.lastInsertRowid });
+  } catch(e){res.status(400).json({error:e.message||'Message invalide.'});}
 });
-A.put('/annonces/:id', (req, res) => {
-  const { type, theme, title, content, color, link, active, sort } = req.body || {};
-  const t = (type !== undefined && type !== null) ? (TYPES_BANDEAU[type] ? type : 'info') : null;
-  db.prepare(`UPDATE annonces SET type=COALESCE(?,type), theme=COALESCE(?,theme), icon=COALESCE(?,icon),
-    title=COALESCE(?,title), content=COALESCE(?,content),
-    color=COALESCE(?,color), link=COALESCE(?,link), active=COALESCE(?,active), sort=COALESCE(?,sort) WHERE id=?`)
-    .run(t, theme ?? null, t ? TYPES_BANDEAU[t] : null, title ?? null, content ?? null,
-      color ?? null, link ?? null, active ?? null, sort ?? null, req.params.id);
-  res.json({ ok: true });
+A.put('/annonces/:id', pdgOnly, (req, res) => {
+  try { const { type, theme, title, content, color, link, active, sort, icon, image_url, duration_seconds } = req.body || {};
+    const t = (type !== undefined && type !== null) ? (TYPES_BANDEAU[type] ? type : 'info') : null;
+    const image=image_url===undefined?undefined:bandeauImageUrl(image_url), customIcon=icon===undefined?undefined:String(icon||'').trim().slice(0,16);
+    db.prepare(`UPDATE annonces SET type=COALESCE(?,type), theme=COALESCE(?,theme), icon=COALESCE(?,icon),
+      title=COALESCE(?,title), content=COALESCE(?,content), color=COALESCE(?,color), link=COALESCE(?,link), active=COALESCE(?,active), sort=COALESCE(?,sort),
+      image_url=CASE WHEN ? THEN ? ELSE image_url END, duration_seconds=COALESCE(?,duration_seconds) WHERE id=?`)
+      .run(t, theme===undefined?null:String(theme||'').trim().slice(0,80), customIcon===undefined?(t?TYPES_BANDEAU[t]:null):customIcon, title===undefined?null:String(title||'').trim().slice(0,160), content===undefined?null:String(content||'').trim().slice(0,1000),
+        color===undefined?null:String(color||'').trim().slice(0,20), link===undefined?null:String(link||'').trim().slice(0,500)||null, active===undefined?null:(active?1:0), sort===undefined?null:Math.max(0,parseInt(sort,10)||0), image_url!==undefined,image, duration_seconds===undefined?null:bandeauDuration(duration_seconds), req.params.id);
+    logAction(req.user,'bandeau_message_modifie',{target_type:'annonce',target_id:Number(req.params.id)});res.json({ ok: true });
+  } catch(e){res.status(400).json({error:e.message||'Message invalide.'});}
 });
-A.delete('/annonces/:id', (req, res) => { db.prepare('DELETE FROM annonces WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+A.delete('/annonces/:id', pdgOnly, (req, res) => { db.prepare('DELETE FROM annonces WHERE id=?').run(req.params.id); logAction(req.user,'bandeau_message_supprime',{target_type:'annonce',target_id:Number(req.params.id)}); res.json({ ok: true }); });
 // L'ancien endpoint est conservé, mais passe par le système ciblé et historisé.
 A.post('/broadcast', (req, res) => {
   const title = String(req.body && req.body.title || '').trim();
@@ -4821,6 +5013,79 @@ async function purgeRecoveryFiles() {
 // Compatibilité API : l'ancien inventaire technique reste disponible, même si le dashboard utilise désormais le classement par client.
 A.get('/files', (req, res) => { const files = physicalFilesList(); res.json({ files: files.slice(0, 300), total: files.length, total_size: files.reduce((s, f) => s + f.size, 0), retention_days: parseInt(getSetting('file_retention_days', '90'), 10) }); });
 A.post('/files/cleanup', async (req, res) => res.json({ deleted: await purgeRecoveryFiles(), legacy_deleted: cleanupFiles() }));
+
+
+// ----- Bande défilante : apparence et animation réservées au PDG -----
+A.get('/bandeau/config', pdgOnly, (req,res) => res.json(bandeauConfig()));
+A.put('/bandeau/config', pdgOnly, (req,res) => {
+  try { const b=req.body||{}, current=bandeauConfig(), hex=v=>typeof v==='string'&&/^#[0-9a-fA-F]{6}$/.test(v); const int=(v,min,max,name)=>{const n=parseInt(v,10);if(!Number.isInteger(n)||n<min||n>max)throw new Error(`${name} invalide.`);return n;};
+    const next={...current};
+    if(b.enabled!==undefined){if(![true,false,0,1,'0','1'].includes(b.enabled))throw new Error('Activation invalide.');next.enabled=[true,1,'1'].includes(b.enabled);}
+    if(b.speed!==undefined)next.speed=int(b.speed,10,400,'Vitesse');
+    if(b.style!==undefined){if(!['classic','colored','icon','image','modern'].includes(b.style))throw new Error('Présentation invalide.');next.style=b.style;}
+    if(b.background!==undefined){if(!hex(b.background))throw new Error('Couleur de fond invalide.');next.background=b.background;}
+    if(b.text_color!==undefined){if(!hex(b.text_color))throw new Error('Couleur du texte invalide.');next.text_color=b.text_color;}
+    if(b.font_size!==undefined)next.font_size=int(b.font_size,10,28,'Taille de police');
+    if(b.font_weight!==undefined){if(!['400','500','600','700','800'].includes(String(b.font_weight)))throw new Error('Graisse de police invalide.');next.font_weight=String(b.font_weight);}
+    if(b.height!==undefined)next.height=int(b.height,28,86,'Hauteur');
+    if(b.border_color!==undefined){if(!hex(b.border_color))throw new Error('Couleur de bordure invalide.');next.border_color=b.border_color;}
+    if(b.animation!==undefined){if(!['scroll','slide','fade'].includes(b.animation))throw new Error('Animation invalide.');next.animation=b.animation;}
+    if(b.message_duration!==undefined)next.message_duration=int(b.message_duration,3,60,'Durée des messages');
+    const keys={enabled:'bandeau_enabled',speed:'bandeau_speed',style:'bandeau_style',background:'bandeau_background',text_color:'bandeau_text_color',font_size:'bandeau_font_size',font_weight:'bandeau_font_weight',height:'bandeau_height',border_color:'bandeau_border_color',animation:'bandeau_animation',message_duration:'bandeau_message_duration'};
+    Object.keys(keys).forEach(k=>{if(b[k]!==undefined)setSetting(keys[k],typeof next[k]==='boolean'?(next[k]?'1':'0'):next[k]);});
+    logAction(req.user,'bandeau_configuration',{target_type:'annonce',details:'Paramètres de la bande défilante mis à jour'});res.json({ok:true,config:bandeauConfig()});
+  } catch(e){res.status(400).json({error:e.message||'Configuration invalide.'});}
+});
+
+// ----- Braderie d’articles : pilotage réservé au PDG -----
+A.get('/braderie/config', pdgOnly, (req,res) => res.json(braderieSettings()));
+A.put('/braderie/config', pdgOnly, (req,res) => {
+  const b=req.body||{}, allowed=['enabled','home_visible','conditions','require_conditions','max_per_client','max_platform','limit_period','max_photos','offer_limit','offer_period','expiry_days','contact_mode','hide_external_link'];
+  const out=braderieSettings();
+  try {
+    if(b.enabled!==undefined){ if(![true,false,0,1,'0','1'].includes(b.enabled)) throw new Error('Valeur d’activation invalide.'); out.enabled=[true,1,'1'].includes(b.enabled); }
+    if(b.home_visible!==undefined){ if(![true,false,0,1,'0','1'].includes(b.home_visible)) throw new Error('Valeur de visibilité invalide.'); out.home_visible=[true,1,'1'].includes(b.home_visible); }
+    if(b.require_conditions!==undefined) out.require_conditions=[true,1,'1'].includes(b.require_conditions);
+    if(b.hide_external_link!==undefined) out.hide_external_link=[true,1,'1'].includes(b.hide_external_link);
+    if(b.conditions!==undefined){ const v=braderieValidField(b.conditions,4000); if(v.length<8) throw new Error('Les conditions doivent comporter au moins 8 caractères.'); out.conditions=v; }
+    for(const key of ['max_per_client','max_platform','max_photos','offer_limit','expiry_days']) if(b[key]!==undefined){ const ranges={max_per_client:[1,100],max_platform:[1,100000],max_photos:[1,8],offer_limit:[1,1000],expiry_days:[1,365]}; const n=parseInt(b[key],10),[min,max]=ranges[key];if(!Number.isInteger(n)||n<min||n>max)throw new Error(`Valeur invalide pour ${key}.`);out[key]=n; }
+    if(b.limit_period!==undefined){if(!['day','week','month','year'].includes(b.limit_period))throw new Error('Période de publication invalide.');out.limit_period=b.limit_period;}
+    if(b.offer_period!==undefined){if(!['day','week','month','year'].includes(b.offer_period))throw new Error('Période de propositions invalide.');out.offer_period=b.offer_period;}
+    if(b.contact_mode!==undefined){if(!['klean','direct'].includes(b.contact_mode))throw new Error('Mode de contact invalide.');out.contact_mode=b.contact_mode;}
+    const keys={enabled:'braderie_enabled',home_visible:'braderie_home_visible',conditions:'braderie_conditions',require_conditions:'braderie_require_conditions',max_per_client:'braderie_max_per_client',max_platform:'braderie_max_platform',limit_period:'braderie_limit_period',max_photos:'braderie_max_photos',offer_limit:'braderie_offer_limit',offer_period:'braderie_offer_period',expiry_days:'braderie_expiry_days',contact_mode:'braderie_contact_mode',hide_external_link:'braderie_hide_external_link'};
+    allowed.forEach(k=>{ if(b[k]!==undefined) setSetting(keys[k],typeof out[k]==='boolean'?(out[k]?'1':'0'):out[k]); });
+    logAction(req.user,'braderie_configuration',{target_type:'braderie',details:'Paramètres Braderie mis à jour'});res.json({ok:true,config:braderieSettings()});
+  } catch(e){res.status(400).json({error:e.message||'Configuration invalide.'});}
+});
+A.get('/braderie/items', pdgOnly, (req,res) => { braderieExpire(); const status=braderieValidField(req.query.status,20),q=braderieValidField(req.query.q,100).toLowerCase();let rows=db.prepare(`SELECT i.*,u.name seller_name,u.phone seller_phone FROM braderie_items i JOIN users u ON u.id=i.seller_id ORDER BY i.created_at DESC,i.id DESC LIMIT 500`).all();if(status)rows=rows.filter(r=>r.status===status);if(q)rows=rows.filter(r=>(r.title+' '+r.description+' '+r.seller_name).toLowerCase().includes(q));res.json(rows.map(r=>({...braderiePrivateItem(r),seller_name:r.seller_name,seller_phone:r.seller_phone}))); });
+A.put('/braderie/items/:id', pdgOnly, (req,res) => {
+  const row=braderieItemRow(Number(req.params.id));
+  if(!row)return res.status(404).json({error:'Article introuvable.'});
+  const b=req.body||{},status=b.status===undefined?row.status:String(b.status),note=b.moderation_note===undefined?row.moderation_note:braderieValidField(b.moderation_note,1200);
+  if(!['pending','available','sold','suspended','expired','rejected','deleted'].includes(status))return res.status(400).json({error:'Statut invalide.'});
+  if(status==='available'&&row.status==='deleted')return res.status(409).json({error:'Un article supprimé logiquement ne peut pas être republié sans restauration explicite.'});
+  // Même le PDG passe par les mêmes contrôles structurels : jamais de titre/prix/ville invalide en base.
+  const title=b.title===undefined?null:braderieValidField(b.title,120),description=b.description===undefined?null:braderieValidField(b.description,2500),price=b.price===undefined?null:Math.round(Number(b.price)),city=b.city===undefined?null:braderieValidField(b.city,100),quartier=b.quartier===undefined?null:braderieValidField(b.quartier,120),condition=b.item_condition===undefined?null:braderieValidField(b.item_condition,30),visibility=b.visibility===undefined?null:braderieValidField(b.visibility,20);
+  if(title!==null&&title.length<3)return res.status(400).json({error:'Titre trop court.'});
+  if(description!==null&&description.length<8)return res.status(400).json({error:'Description trop courte.'});
+  if(price!==null&&(!Number.isFinite(price)||price<0||price>100000000))return res.status(400).json({error:'Prix invalide.'});
+  if(city!==null&&(!city||!db.prepare('SELECT 1 FROM villes WHERE active=1 AND lower(name)=lower(?)').get(city)))return res.status(400).json({error:'Choisissez une ville active du référentiel.'});
+  if(quartier!==null&&!quartier)return res.status(400).json({error:'Quartier requis.'});
+  if(condition!==null&&!['neuf','tres_bon','bon','a_reparer'].includes(condition))return res.status(400).json({error:'État d’article invalide.'});
+  if(visibility!==null&&!['city','national'].includes(visibility))return res.status(400).json({error:'Mode de diffusion invalide.'});
+  const expiry=status==='available'?`datetime('now','+${braderieSettings().expiry_days} days')`:'expires_at';
+  db.prepare(`UPDATE braderie_items SET title=COALESCE(?,title),description=COALESCE(?,description),price=COALESCE(?,price),city=COALESCE(?,city),quartier=COALESCE(?,quartier),item_condition=COALESCE(?,item_condition),visibility=COALESCE(?,visibility),status=?,moderation_note=?,approved_at=CASE WHEN ?='available' THEN COALESCE(approved_at,datetime('now')) ELSE approved_at END,deleted_at=CASE WHEN ?='deleted' THEN datetime('now') ELSE deleted_at END,expires_at=${expiry},updated_at=datetime('now') WHERE id=?`).run(title,description,price,city,quartier,condition,visibility,status,note||null,status,status,row.id);
+  if(['suspended','expired','deleted','sold','rejected'].includes(status))db.prepare("UPDATE braderie_negotiations SET state='closed',updated_at=datetime('now') WHERE item_id=? AND state IN ('open','seller_counter','seller_last_price')").run(row.id);
+  const msg={available:'Votre article est validé et désormais visible.',rejected:'Votre article a été refusé. Consultez la note du PDG.',suspended:'Votre article a été suspendu.',deleted:'Votre article a été retiré.',expired:'Votre article est arrivé à expiration.',sold:'Votre article a été archivé comme vendu.'}[status];
+  if(msg)notify(row.seller_id,'braderie','Mise à jour de votre article',msg,`#/braderie-mine`);
+  logAction(req.user,'braderie_article_'+status,{target_type:'braderie_item',target_id:row.id,target_name:title||row.title,reason:note||null});res.json({ok:true,status});
+});
+A.post('/braderie/items/:id/reactivate', pdgOnly, (req,res) => { const row=braderieItemRow(Number(req.params.id));if(!row)return res.status(404).json({error:'Article introuvable.'});if(!['sold','suspended','expired'].includes(row.status))return res.status(409).json({error:'Seul un article vendu, suspendu ou expiré peut être réactivé.'});db.prepare(`UPDATE braderie_items SET status='available',sold_at=NULL,expires_at=datetime('now',?),updated_at=datetime('now') WHERE id=?`).run('+'+braderieSettings().expiry_days+' days',row.id);notify(row.seller_id,'braderie','Article réactivé',`Le PDG a réactivé « ${row.title} ».`,`#/braderie/${row.id}`);logAction(req.user,'braderie_article_reactive',{target_type:'braderie_item',target_id:row.id,target_name:row.title});res.json({ok:true,status:'available'}); });
+A.get('/braderie/reports', pdgOnly, (req,res) => res.json(db.prepare(`SELECT r.*,i.title,b.name reporter_name,s.name seller_name FROM braderie_reports r JOIN braderie_items i ON i.id=r.item_id JOIN users b ON b.id=r.reporter_id JOIN users s ON s.id=i.seller_id ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.created_at DESC`).all()));
+A.put('/braderie/reports/:id', pdgOnly, (req,res) => { const b=req.body||{},status=String(b.status||''),note=braderieValidField(b.admin_note,1200);if(!['reviewed','dismissed','actioned'].includes(status))return res.status(400).json({error:'Décision de signalement invalide.'});const r=db.prepare("UPDATE braderie_reports SET status=?,admin_note=?,updated_at=datetime('now') WHERE id=?").run(status,note||null,Number(req.params.id));if(!r.changes)return res.status(404).json({error:'Signalement introuvable.'});res.json({ok:true}); });
+A.get('/braderie/contacts', pdgOnly, (req,res) => res.json(db.prepare(`SELECT c.*,i.title,b.name buyer_name,b.phone buyer_phone,s.name seller_name,s.phone seller_phone FROM braderie_contact_requests c JOIN braderie_items i ON i.id=c.item_id JOIN users b ON b.id=c.buyer_id JOIN users s ON s.id=c.seller_id ORDER BY CASE c.status WHEN 'pending' THEN 0 ELSE 1 END,c.created_at DESC`).all()));
+A.put('/braderie/contacts/:id', pdgOnly, (req,res) => { const b=req.body||{},status=String(b.status||''),note=braderieValidField(b.admin_note,1200);if(!['approved','rejected','closed'].includes(status))return res.status(400).json({error:'Décision de contact invalide.'});const row=db.prepare('SELECT * FROM braderie_contact_requests WHERE id=?').get(Number(req.params.id));if(!row)return res.status(404).json({error:'Demande introuvable.'});db.prepare("UPDATE braderie_contact_requests SET status=?,admin_note=?,updated_at=datetime('now') WHERE id=?").run(status,note||null,row.id);if(status==='approved'){notify(row.buyer_id,'braderie','Demande de contact transmise','Klean Services a transmis votre demande au vendeur. Nous vous recontacterons via la plateforme.',`#/braderie/${row.item_id}`);notify(row.seller_id,'braderie','Demande de contact transmise','Klean Services vous a transmis une demande concernant votre article. Consultez vos notifications.',`#/braderie-mine`);}else notify(row.buyer_id,'braderie','Demande de contact mise à jour',note||'Votre demande de contact a été mise à jour par Klean Services.',`#/braderie/${row.item_id}`);res.json({ok:true}); });
+A.get('/braderie/stats', pdgOnly, (req,res) => { const period=['day','week','month','year'].includes(req.query.period)?req.query.period:'month',mod=braderieModifier(period);const count=(where='',args=[])=>db.prepare(`SELECT COUNT(*) n FROM braderie_items ${where}`).get(...args).n;const rows=db.prepare(`SELECT status,COUNT(*) n FROM braderie_items GROUP BY status`).all();const byStatus=Object.fromEntries(rows.map(r=>[r.status,r.n]));const created=db.prepare("SELECT COUNT(*) n FROM braderie_items WHERE created_at>=datetime('now',?)").get(mod).n, sold=db.prepare("SELECT COUNT(*) n FROM braderie_items WHERE sold_at>=datetime('now',?)").get(mod).n, pendingReports=db.prepare("SELECT COUNT(*) n FROM braderie_reports WHERE status='pending'").get().n,pendingContacts=db.prepare("SELECT COUNT(*) n FROM braderie_contact_requests WHERE status='pending'").get().n,offers=db.prepare("SELECT COUNT(*) n FROM braderie_negotiation_events WHERE event_type IN ('buyer_offer','buyer_final_offer') AND created_at>=datetime('now',?)").get(mod).n;res.json({period,created,sold,offers,pending_reports:pendingReports,pending_contacts:pendingContacts,by_status:byStatus,total:count()}); });
 
 app.use('/api/admin', A);
 

@@ -602,6 +602,8 @@ routes.home = async () => {
   catch (e) { $app.innerHTML = header('Accueil', { brand: true }) + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home'); return; }
   try { GAMES = await api('/games/config'); } catch { }
   try { ADS = await api('/ads'); } catch { }
+  let BRADERIE_HOME = { home_visible: false, enabled: false };
+  try { BRADERIE_HOME = await api('/braderie/config'); } catch { }
   const homeAds = ADS; // toutes les publicités actives sortent sur l'écran d'accueil
   const topZone = [];
   if (MAINT.active && MAINT.scope !== 'F') topZone.push(`<div style="border-left:3px solid #e67e22;background:#fff8f0">
@@ -638,6 +640,7 @@ routes.home = async () => {
     <button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>
     <div class="home-shortcuts" aria-label="Accès rapides">
       <button class="home-shortcut" onclick="nav('#/jobs')"><span>💼</span><div><b>Trouver ou proposer un job</b><small>Consulter les offres ou publier la vôtre</small></div><i>›</i></button>
+      ${BRADERIE_HOME.home_visible ? `<button class="home-shortcut" onclick="nav('#/braderie')"><span>🏷️</span><div><b>Braderie d’articles</b><small>${BRADERIE_HOME.enabled ? 'Acheter ou publier un article' : 'Prochainement disponible'}</small></div><i>›</i></button>` : ''}
       <button class="home-shortcut" onclick="nav('#/avis-recherche')"><span>📢</span><div><b>Avis de recherche</b><small>Publier ou consulter un avis</small></div><i>›</i></button>
       <button class="home-shortcut urgent" onclick="nav('#/urgence')"><span>🚨</span><div><b>Urgences</b><small>Contacts et assistance configurés</small></div><i>›</i></button>
     </div>
@@ -1638,6 +1641,66 @@ routes.pub = async () => {
   </div>${bottomNav('account')}`;
 };
 
+/* ---------- Braderie d’articles ---------- */
+const BRAD_CONDITIONS = { neuf:'Neuf', tres_bon:'Très bon état', bon:'Bon état', a_reparer:'À réparer' };
+const BRAD_STATUS = { pending:'En attente PDG', available:'Disponible', sold:'Vendu', suspended:'Suspendu', expired:'Expiré', rejected:'Refusé', deleted:'Retiré' };
+function bradPrice(n) { return Number(n || 0).toLocaleString('fr-FR') + ' FCFA'; }
+function bradCard(i) {
+  const photo=(i.photos||[])[0];
+  return `<button type="button" class="card tap" style="width:100%;text-align:left;padding:10px;margin-bottom:9px" onclick="nav('#/braderie/${i.id}')"><div class="row" style="align-items:flex-start;gap:10px">
+    ${photo?`<img src="${esc(mediaUrl(photo))}" alt="Article : ${esc(i.title)}" style="width:82px;height:82px;border-radius:10px;object-fit:cover;background:#edf4ef">`:`<div style="width:82px;height:82px;border-radius:10px;background:#edf4ef;display:grid;place-items:center;font-size:30px">🏷️</div>`}
+    <div class="grow" style="min-width:0"><div class="bold">${esc(i.title)}</div><div class="small muted">📍 ${esc(i.city)}${i.quartier?' • '+esc(i.quartier):''}</div><div class="small muted">${esc(BRAD_CONDITIONS[i.item_condition]||i.item_condition)}</div><div style="color:#dc2626;font-weight:800;margin-top:4px">${bradPrice(i.price)}</div></div>
+    ${i.status&&i.status!=='available'?`<span class="pill warn">${esc(BRAD_STATUS[i.status]||i.status)}</span>`:''}</div></button>`;
+}
+function bradItemsHtml(items, empty) { return items&&items.length ? items.map(bradCard).join('') : emptyState('🏷️', empty||'Aucun article disponible avec ces critères.'); }
+function bradFilterQuery() {
+  const val=id=>document.getElementById(id)?document.getElementById(id).value.trim():'';
+  const p=new URLSearchParams(); ['q','city','quartier','condition','min_price','max_price','order'].forEach(k=>{const v=val('brad-'+k);if(v)p.set(k,v);}); return p.toString();
+}
+routes.braderie = async param => {
+  const part=decodeURIComponent(param||'');
+  if(part==='publish') return routes['braderie-publish']();
+  if(/^\d+$/.test(part)) return routes['braderie-detail'](Number(part));
+  let cfg; try { cfg=await api('/braderie/config'); } catch(e){ toast(e.message,'err'); return; }
+  if(!cfg.enabled) { $app.innerHTML=`${header('Braderie d’articles',{bell:!!USER})}<div class="content">${emptyState('🏷️','La braderie d’articles n’est pas encore opérationnelle. Elle pourra être activée à tout moment. Merci de votre compréhension.')}</div>${bottomNav('home')}`; return; }
+  let data={items:[]}; try { data=await api('/braderie/items'+(USER&&USER.ville?'?city='+encodeURIComponent(USER.ville):'')); } catch(e){toast(e.message,'err');}
+  $app.innerHTML=`${header('Braderie d’articles',{bell:!!USER})}<div class="content">
+    <div class="card" style="background:#f0fdf4;border-color:#bbf7d0"><div class="row"><div class="grow"><b>🏷️ Acheter et vendre près de chez vous</b><div class="small muted">Les articles sont validés par Klean Services avant publication.</div></div>${USER?'<button class="btn sm" onclick="nav(\'#/braderie/publish\')">＋ Publier</button>':'<button class="btn sm" onclick="authRequired(\'#/braderie/publish\')">Se connecter</button>'}</div></div>
+    <div class="card compact-card"><div class="bold small mb">🔎 Rechercher un article</div><div class="field"><input id="brad-q" type="search" placeholder="Titre ou description"></div>
+      <div class="frow" style="gap:7px"><input id="brad-city" type="text" placeholder="Ville" value="${esc(USER&&USER.ville||'')}" style="min-width:110px;flex:1"><input id="brad-quartier" type="text" placeholder="Quartier" style="min-width:100px;flex:1"></div>
+      <div class="frow" style="gap:7px"><input id="brad-min_price" type="number" min="0" placeholder="Prix min." style="min-width:100px;flex:1"><input id="brad-max_price" type="number" min="0" placeholder="Prix max." style="min-width:100px;flex:1"></div>
+      <div class="frow" style="gap:7px"><select id="brad-condition" style="flex:1"><option value="">Tous les états</option>${Object.entries(BRAD_CONDITIONS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select><select id="brad-order" style="flex:1"><option value="recent">Plus récents</option><option value="price_asc">Prix croissant</option><option value="price_desc">Prix décroissant</option></select></div>
+      <div class="small muted mt">Uniquement les articles disponibles sont affichés.</div><button class="btn sec sm mt" onclick="A.bradFilter()">Appliquer les filtres</button></div>
+    <div id="brad-results">${bradItemsHtml(data.items)}</div>
+    ${USER?`<div class="menu-item" onclick="nav('#/braderie-mine')"><span class="mi-ic">📦</span>Mes articles publiés<span class="mi-arr">›</span></div><div class="menu-item" onclick="nav('#/braderie-negotiations')"><span class="mi-ic">🤝</span>Mes propositions et négociations<span class="mi-arr">›</span></div>`:''}
+  </div>${bottomNav('home')}`;
+  document.getElementById('brad-q').addEventListener('keydown',e=>{if(e.key==='Enter')A.bradFilter();});
+};
+routes['braderie-publish'] = async () => {
+  if(!USER){authRequired('#/braderie/publish');return;} let cfg;try{cfg=await api('/braderie/config');}catch(e){toast(e.message,'err');return;}if(!cfg.enabled){nav('#/braderie');return;}
+  $app.innerHTML=`${header('Publier un article',{bell:true})}<div class="content"><div class="card"><div class="small muted mb">Votre ville d’inscription est appliquée pour protéger la diffusion locale. Toute publication est validée par le PDG.</div>
+    <div class="field"><label>Image(s) <span class="req">*</span> <span class="muted small">(${cfg.max_photos} max.)</span></label><input type="file" id="brad-photos" accept="image/*" ${cfg.max_photos>1?'multiple':''}><div id="brad-photo-note" class="small muted mt"></div></div>
+    <div class="field"><label>Titre <span class="req">*</span></label><input id="brad-title" maxlength="120" placeholder="Ex : Téléviseur LED 32 pouces"></div><div class="field"><label>Description <span class="req">*</span></label><textarea id="brad-description" maxlength="2500" placeholder="Décrivez l’article, son fonctionnement et ses défauts éventuels."></textarea></div>
+    <div class="field"><label>Prix (FCFA) <span class="req">*</span></label><input id="brad-price" type="number" min="0" inputmode="numeric" placeholder="Ex : 45000"></div><div class="field"><label>Ville <span class="req">*</span></label><input id="brad-city-publish" readonly value="${esc(USER.ville||'')}" style="background:#f4f7f6"></div><div class="field"><label>Quartier <span class="req">*</span></label><input id="brad-quartier-publish" maxlength="120" placeholder="Ex : Angré 8e tranche"></div>
+    <div class="field"><label>Téléphone <span class="req">*</span></label><input id="brad-phone" type="tel" maxlength="40" value="${esc(USER.phone||'')}" placeholder="Votre numéro de contact"></div><div class="field"><label>Lien (facultatif)</label><input id="brad-link" type="url" maxlength="500" placeholder="https://…"></div>
+    <div class="field"><label>État <span class="req">*</span></label><select id="brad-condition-publish">${Object.entries(BRAD_CONDITIONS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select></div><div class="field"><label>Diffusion <span class="req">*</span></label><select id="brad-visibility"><option value="city">Ma ville uniquement</option><option value="national">Toute la Côte d’Ivoire</option></select></div>
+    ${cfg.require_conditions?`<div class="rules-box small" style="max-height:145px;overflow:auto">${esc(cfg.conditions)}</div><label class="check-line"><input type="checkbox" id="brad-conditions"> J’ai lu et j’accepte les conditions de publication.</label>`:''}
+    <button class="btn" id="brad-submit" onclick="A.bradPublish(this)">Envoyer au PDG pour validation</button></div></div>${bottomNav('home')}`;
+};
+routes['braderie-detail'] = async id => {
+  let item; try { item=await api('/braderie/items/'+id+(USER&&USER.ville?'?city='+encodeURIComponent(USER.ville):'')); }catch(e){$app.innerHTML=`${header('Braderie d’articles')}<div class="content">${emptyState('🏷️',e.message)}</div>${bottomNav('home')}`;return;}
+  const photo=(item.photos||[])[0], direct=Object.prototype.hasOwnProperty.call(item,'contact_phone');
+  $app.innerHTML=`${header('Détail de l’article',{bell:!!USER})}<div class="content"><div class="card">
+    ${photo?`<img src="${esc(mediaUrl(photo))}" alt="${esc(item.title)}" style="width:100%;max-height:285px;object-fit:cover;border-radius:12px;background:#edf4ef">`:''}
+    <div class="row mt"><div class="grow"><h2 style="margin:0">${esc(item.title)}</h2><div class="small muted">📍 ${esc(item.city)}${item.quartier?' • '+esc(item.quartier):''} • ${esc(BRAD_CONDITIONS[item.item_condition]||item.item_condition)}</div></div>${item.status!=='available'?`<span class="pill warn">${esc(BRAD_STATUS[item.status]||item.status)}</span>`:''}</div>
+    <div style="font-size:21px;color:#dc2626;font-weight:800;margin:10px 0">${bradPrice(item.price)}</div><div style="white-space:pre-wrap">${esc(item.description)}</div>
+    ${direct?`<div class="mt small"><b>📞 Contact :</b> <a href="tel:${esc(item.contact_phone)}">${esc(item.contact_phone)}</a>${item.external_link?`<br><a href="${esc(item.external_link)}" target="_blank" rel="noopener">🔗 Voir le lien fourni</a>`:''}</div>`:`<div class="hint mt">🔒 Contact sécurisé via Klean Services : le téléphone et le lien du vendeur ne sont pas publiés.</div>`}
+    ${item.is_owner?`<div class="btn-row mt">${item.status==='available'?'<button class="btn warn" onclick="A.bradSold('+item.id+')">Marquer comme vendu</button>':''}<button class="btn sec" onclick="nav('#/braderie-mine')">Mes articles</button><button class="btn sec" onclick="nav('#/braderie-negotiations')">Mes négociations</button></div>`:item.can_offer?`<div class="btn-row mt"><button class="btn" onclick="A.bradOffer(${item.id})">🤝 Faire une proposition</button>${item.can_request_contact?`<button class="btn sec" onclick="A.bradContact(${item.id})">💬 Demander le contact</button>`:''}<button class="btn ghost" onclick="A.bradReport(${item.id})">⚠️ Signaler</button></div>`:''}
+  </div></div>${bottomNav('home')}`;
+};
+routes['braderie-mine'] = async () => { if(!USER){nav('#/login');return;} let items=[];try{items=await api('/braderie/items/mine');}catch(e){toast(e.message,'err');}$app.innerHTML=`${header('Mes articles',{bell:true})}<div class="content"><button class="btn mb" onclick="nav('#/braderie/publish')">＋ Publier un article</button>${bradItemsHtml(items,'Vous n’avez encore publié aucun article.')}</div>${bottomNav('account')}`; };
+routes['braderie-negotiations'] = async () => { if(!USER){nav('#/login');return;}let rows=[];try{rows=await api('/braderie/negotiations');}catch(e){toast(e.message,'err');}$app.innerHTML=`${header('Mes négociations',{bell:true})}<div class="content">${rows.length?rows.map(n=>`<div class="card"><div class="row"><div class="grow"><b>${esc(n.title)}</b><div class="small muted">${n.is_buyer?'Vous achetez à '+esc(n.seller_name):'Acheteur : '+esc(n.buyer_name)}</div></div><span class="pill ${n.state==='accepted'?'ok':n.state==='rejected'||n.state==='closed'?'off':'warn'}">${esc({open:'En discussion',seller_counter:'Contre-proposition',seller_last_price:'Dernier prix',accepted:'Acceptée',rejected:'Refusée',closed:'Clôturée'}[n.state]||n.state)}</span></div><div class="small mt">${(n.events||[]).map(e=>`<div>• ${esc(e.actor_name)} — ${esc({buyer_offer:'proposition',buyer_final_offer:'dernière proposition',seller_counter:'contre-proposition',seller_last_price:'dernier prix',accepted:'acceptation',rejected:'refus'}[e.event_type]||e.event_type)}${e.amount!==null&&e.amount!==undefined?' : <b>'+bradPrice(e.amount)+'</b>':''}${e.note?' — '+esc(e.note):''}</div>`).join('')}</div>${!n.is_buyer&&['open','seller_counter','seller_last_price'].includes(n.state)?`<button class="btn sm mt" onclick="A.bradSellerAction(${n.id})">Répondre</button>`:''}${n.is_buyer&&n.state==='seller_last_price'?`<button class="btn sm mt" onclick="A.bradOffer(${n.item_id},true)">Faire ma dernière proposition</button>`:''}</div>`).join(''):emptyState('🤝','Aucune proposition ni négociation pour le moment.')}</div>${bottomNav('account')}`; };
+
 /* ---------- Avis de recherche ---------- */
 routes['avis-recherche'] = async () => {
   const saved = JSON.parse(sessionStorage.getItem('ks_avis_filters') || '{}');
@@ -1899,50 +1962,68 @@ routes.payments = async () => {
   </div>${bottomNav('account')}`;
 };
 
-/* ---------- Bandeau fixe en bas de l'accueil : publicités, informations, urgences ---------- */
-let BD_TIMER = null, BD_JSON = '';
+/* ---------- Bandeau fixe en bas de l'accueil : ruban continu, paramétré par le PDG ---------- */
+let BD_TIMER = null, BD_FADE_TIMER = null, BD_JSON = '';
 const BD_TYPES = { pub: { ic: '📢', lb: 'Pub' }, info: { ic: 'ℹ️', lb: 'Info' }, urgence: { ic: '🚨', lb: 'Urgence' } };
+function bandeauStopFade() { if (BD_FADE_TIMER) { clearInterval(BD_FADE_TIMER); BD_FADE_TIMER = null; } }
+function bandeauColor(v, fallback) { return /^#[0-9a-f]{6}$/i.test(String(v || '')) ? v : fallback; }
 async function bandeauMount() {
   if (BD_TIMER) { clearInterval(BD_TIMER); BD_TIMER = null; }
-  BD_JSON = '';
+  bandeauStopFade(); BD_JSON = '';
   await bandeauRender();
-  // Synchronisation : tout changement fait dans le tableau de bord (type, thème, message,
-  // activation, ordre, vitesse) est répercuté sur l'accueil sans recharger la page.
+  // Une comparaison du JSON évite de réinjecter le DOM toutes les quelques secondes :
+  // le ruban ne repart donc jamais au début tant que le PDG ne l'a pas réellement modifié.
   BD_TIMER = setInterval(() => {
-    if (!document.getElementById('bandeau-host')) { clearInterval(BD_TIMER); BD_TIMER = null; return; }
+    if (!document.getElementById('bandeau-host')) { clearInterval(BD_TIMER); BD_TIMER = null; bandeauStopFade(); return; }
     bandeauRender();
-  }, 12000);
+  }, 5000);
 }
 async function bandeauRender() {
   const host = document.getElementById('bandeau-host');
   if (!host) return;
-  let b;
-  try { b = await api('/annonces'); } catch { return; }
+  let b; try { b = await api('/annonces'); } catch { return; }
   const j = JSON.stringify(b);
-  if (j === BD_JSON && host.innerHTML) return; // rien n'a changé : on ne casse pas l'animation en cours
-  BD_JSON = j;
+  if (j === BD_JSON && host.innerHTML) return;
+  BD_JSON = j; bandeauStopFade();
   const espace = document.getElementById('bandeau-espace');
-  if (!b.enabled || !b.items.length) { host.innerHTML = ''; if (espace) espace.style.height = '0'; return; }
-  // Préfixe généré automatiquement selon le type : 📢 Pub (Thème) : … | ℹ️ Info (Thème) : … | 🚨 Urgence (Thème) : …
-  const item = a => { const t = BD_TYPES[a.type] || BD_TYPES.info;
-    return `<span ${a.link ? `data-link="${esc(a.link)}" onclick="A.bandeauGo(this.dataset.link)"` : ''}
-    style="display:inline-flex;align-items:center;gap:7px;padding:0 20px;cursor:${a.link ? 'pointer' : 'default'};color:${esc(a.color || '#ffffff')}">
-    <b style="${(a.type || 'info') === 'urgence' ? 'color:#ff6b6b' : ''}">${t.ic} ${t.lb}${(a.theme || '').trim() ? ' (' + esc(a.theme.trim()) + ')' : ''} :</b>
-    <span style="opacity:.92">${esc(a.content || a.title || '')}</span>
-    <span style="opacity:.35;padding-left:20px">◆</span></span>`; };
-  const bloc = b.items.map(item).join('');
-  host.innerHTML = `
-  <style>@keyframes ksdefile{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-  #bandeau-int:hover,#bandeau-int:active{animation-play-state:paused}</style>
-  <div style="position:fixed;bottom:calc(57px + var(--safe-b, 0px));left:50%;transform:translateX(-50%);width:100%;max-width:560px;z-index:49;background:#0b1320;border-top:2px solid #16a34a;overflow:hidden;height:34px;display:flex;align-items:center">
-    <div id="bandeau-int" style="display:inline-flex;white-space:nowrap;will-change:transform;font-size:13.5px;color:#fff">${bloc}${bloc}${bloc}${bloc}</div>
-  </div>`;
-  if (espace) espace.style.height = '42px'; // le bandeau ne masque jamais le contenu
-  requestAnimationFrame(() => {
-    const int = document.getElementById('bandeau-int');
-    if (!int) return;
-    const demiLargeur = int.scrollWidth / 2;
-    int.style.animation = `ksdefile ${Math.max(6, demiLargeur / b.speed)}s linear infinite`; // vitesse en pixels/seconde, fluide
+  if (!b.enabled || !Array.isArray(b.items) || !b.items.length) { host.innerHTML = ''; if (espace) espace.style.height = '0'; return; }
+  const bg=bandeauColor(b.background,'#0b1320'), text=bandeauColor(b.text_color,'#ffffff'), border=bandeauColor(b.border_color,'#16a34a');
+  const height=Math.max(28,Math.min(86,Number(b.height)||38)), fs=Math.max(10,Math.min(28,Number(b.font_size)||14)), weight=['400','500','600','700','800'].includes(String(b.font_weight))?b.font_weight:'700';
+  const item = a => { const t=BD_TYPES[a.type]||BD_TYPES.info, useImage=b.style==='image'&&a.image_url, useIcon=b.style!=='classic'&&!useImage;
+    return `<span class="ks-band-item" ${a.link ? `data-link="${esc(a.link)}" onclick="A.bandeauGo(this.dataset.link)" role="link" tabindex="0"` : ''} style="color:${bandeauColor(a.color,text)};cursor:${a.link?'pointer':'default'}">
+      ${useImage ? `<img src="${esc(mediaUrl(a.image_url))}" alt="" class="ks-band-img">` : useIcon ? `<span class="ks-band-icon">${esc(a.icon||t.ic)}</span>` : ''}
+      <b style="font-weight:${weight};${(a.type||'info')==='urgence'?'color:#ff8a8a':''}">${esc(t.lb)}${(a.theme||'').trim()?' ('+esc(a.theme.trim())+')':''} :</b>
+      <span class="ks-band-copy">${esc(a.content||a.title||'')}</span><span class="ks-band-dot">◆</span></span>`; };
+  const messages=b.items.map(item), bloc=messages.join('');
+  const shell=`<style>
+    @keyframes ksBandeauScroll { from { transform:translate3d(0,0,0) } to { transform:translate3d(-50%,0,0) } }
+    @keyframes ksBandeauFade { 0%,100%{opacity:.05;transform:translateY(3px)} 16%,82%{opacity:1;transform:translateY(0)} }
+    .ks-band{position:fixed;bottom:calc(57px + var(--safe-b,0px));left:50%;transform:translateX(-50%);width:100%;max-width:560px;z-index:49;overflow:hidden;display:flex;align-items:center;box-sizing:border-box}
+    .ks-band-track,.ks-band-segment{display:flex;align-items:center;flex:0 0 auto;white-space:nowrap;will-change:transform}
+    .ks-band-item{display:inline-flex;align-items:center;gap:7px;padding:0 20px;min-height:100%;white-space:nowrap}
+    .ks-band-img{width:26px;height:26px;border-radius:5px;object-fit:cover;flex:0 0 auto}.ks-band-icon{font-size:18px;line-height:1}.ks-band-copy{opacity:.94}.ks-band-dot{opacity:.35;padding-left:18px}
+    .ks-band-track:hover,.ks-band-track:active{animation-play-state:paused}.ks-band-fade{width:100%;text-align:center;white-space:nowrap;overflow:hidden;animation:ksBandeauFade var(--ks-fade-duration,8s) ease-in-out infinite}
+  </style>`;
+  if (b.animation === 'fade') {
+    host.innerHTML=`${shell}<div class="ks-band" style="height:${height}px;background:${bg};border-top:2px solid ${border};font-size:${fs}px;font-weight:${weight};color:${text}"><div id="ks-band-fade" class="ks-band-fade" style="--ks-fade-duration:${Math.max(3,Math.min(60,Number(b.items[0] && b.items[0].duration_seconds)||Number(b.message_duration)||8))}s">${messages[0]}</div></div>`;
+    if(espace)espace.style.height=(height+8)+'px'; let i=0;
+    // Chaque message peut définir sa durée (3 à 60 s). Le réglage général sert de
+    // valeur de repli : ce n’est donc pas un champ décoratif dans le tableau PDG.
+    const fadeDelay=index=>Math.max(3,Math.min(60,Number(b.items[index] && b.items[index].duration_seconds)||Number(b.message_duration)||8))*1000;
+    const nextFade=()=>{const el=document.getElementById('ks-band-fade');if(!el){bandeauStopFade();return;}i=(i+1)%messages.length;el.innerHTML=messages[i];el.style.setProperty('--ks-fade-duration',(fadeDelay(i)/1000)+'s');el.style.animation='none';void el.offsetWidth;el.style.animation='';BD_FADE_TIMER=setTimeout(nextFade,fadeDelay(i));};
+    BD_FADE_TIMER=setTimeout(nextFade,fadeDelay(0));
+    return;
+  }
+  host.innerHTML=`${shell}<div id="ks-band" class="ks-band" style="height:${height}px;background:${bg};border-top:2px solid ${border};font-size:${fs}px;font-weight:${weight};color:${text}"><div id="ks-band-track" class="ks-band-track"><div id="ks-band-segment" class="ks-band-segment">${bloc}</div></div></div>`;
+  if(espace)espace.style.height=(height+8)+'px';
+  requestAnimationFrame(()=>{
+    const band=document.getElementById('ks-band'),track=document.getElementById('ks-band-track'),segment=document.getElementById('ks-band-segment');if(!band||!track||!segment)return;
+    // On allonge le premier segment jusqu'à dépasser l'écran, puis on le duplique une seule fois.
+    // Le déplacement exact de 50 % retombe donc sur un segment identique, sans saut ni blanc.
+    let loops=0;while(segment.scrollWidth<band.clientWidth*1.25&&loops++<12)segment.insertAdjacentHTML('beforeend',bloc);
+    const clone=segment.cloneNode(true);clone.removeAttribute('id');clone.setAttribute('aria-hidden','true');track.appendChild(clone);
+    const duration=Math.max(6,segment.scrollWidth/Math.max(10,Number(b.speed)||60));
+    track.style.animation=`ksBandeauScroll ${duration}s ${b.animation==='slide'?'linear':'linear'} infinite`;
   });
 }
 
@@ -3208,6 +3289,32 @@ const A = {
     if (link.startsWith('#')) nav(link);
     else window.open(link, '_blank', 'noopener');
   },
+  async bradFilter() {
+    const zone=document.getElementById('brad-results'); if(!zone)return;
+    try { const d=await api('/braderie/items?'+bradFilterQuery()); zone.innerHTML=bradItemsHtml(d.items); }
+    catch(e){toast(e.message,'err');}
+  },
+  async bradPublish(btn) {
+    const files=[...(document.getElementById('brad-photos')?.files||[])]; if(!files.length){toast('Ajoutez au moins une image de l’article.','err');return;}
+    busy(btn,true);
+    try {
+      const fd=new FormData(); files.forEach(f=>fd.append('files',f)); const upload=await api('/upload',{method:'POST',body:fd});
+      const body={title:document.getElementById('brad-title').value,description:document.getElementById('brad-description').value,price:document.getElementById('brad-price').value,city:document.getElementById('brad-city-publish').value,quartier:document.getElementById('brad-quartier-publish').value,contact_phone:document.getElementById('brad-phone').value,external_link:document.getElementById('brad-link').value,item_condition:document.getElementById('brad-condition-publish').value,visibility:document.getElementById('brad-visibility').value,photos:upload.files||[],conditions_accepted:!!(document.getElementById('brad-conditions')||{}).checked};
+      await api('/braderie/items',{method:'POST',body});toast('Article envoyé au PDG pour validation.','ok');nav('#/braderie-mine');
+    } catch(e){toast(e.message,'err');busy(btn,false);}
+  },
+  bradOffer(id, final) {
+    if(!USER){authRequired('#/braderie/'+id);return;}
+    openModal(`<h3>🤝 ${final?'Dernière proposition':'Faire une proposition'}</h3><p class="small muted">Saisissez votre montant en FCFA. Votre proposition est transmise au vendeur dans Klean Services.</p><div class="field"><label>Montant (FCFA)</label><input id="brad-offer-amount" type="number" min="0" inputmode="numeric"></div><div class="field"><label>Message (facultatif)</label><textarea id="brad-offer-note" maxlength="800" placeholder="Ex : Je peux venir le récupérer demain."></textarea></div><div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button><button class="btn" onclick="A.bradOfferSend(${Number(id)},this)">Envoyer</button></div>`);
+  },
+  async bradOfferSend(id,btn) { busy(btn,true);try{await api('/braderie/items/'+id+'/offers',{method:'POST',body:{amount:document.getElementById('brad-offer-amount').value,note:document.getElementById('brad-offer-note').value}});closeModal();toast('Votre proposition a été envoyée au vendeur.','ok');nav('#/braderie-negotiations');}catch(e){toast(e.message,'err');busy(btn,false);} },
+  bradContact(id) { if(!USER){authRequired('#/braderie/'+id);return;}openModal(`<h3>💬 Demander le contact</h3><p class="small muted">Votre demande sera examinée et transmise par Klean Services. Le téléphone du vendeur n’est pas affiché publiquement.</p><div class="field"><label>Votre message</label><textarea id="brad-contact-message" maxlength="1200" placeholder="Bonjour, je suis intéressé(e) par cet article…"></textarea></div><div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button><button class="btn" onclick="A.bradContactSend(${Number(id)},this)">Envoyer la demande</button></div>`); },
+  async bradContactSend(id,btn){busy(btn,true);try{await api('/braderie/items/'+id+'/contact',{method:'POST',body:{message:document.getElementById('brad-contact-message').value}});closeModal();toast('Demande de contact transmise à Klean Services.','ok');}catch(e){toast(e.message,'err');busy(btn,false);}},
+  bradReport(id){if(!USER){authRequired('#/braderie/'+id);return;}openModal(`<h3>⚠️ Signaler cet article</h3><div class="field"><label>Motif</label><input id="brad-report-reason" maxlength="160" placeholder="Ex : article suspect ou description trompeuse"></div><div class="field"><label>Détails (facultatif)</label><textarea id="brad-report-details" maxlength="1200"></textarea></div><div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button><button class="btn warn" onclick="A.bradReportSend(${Number(id)},this)">Signaler</button></div>`);},
+  async bradReportSend(id,btn){busy(btn,true);try{await api('/braderie/items/'+id+'/report',{method:'POST',body:{reason:document.getElementById('brad-report-reason').value,details:document.getElementById('brad-report-details').value}});closeModal();toast('Signalement envoyé à Klean Services.','ok');}catch(e){toast(e.message,'err');busy(btn,false);}},
+  async bradSold(id){if(!confirm('Confirmez-vous que cet article est vendu ? Les offres en cours seront clôturées.'))return;try{await api('/braderie/items/'+id+'/sold',{method:'POST',body:{confirmed:true}});toast('Article marqué comme vendu.','ok');nav('#/braderie-mine');}catch(e){toast(e.message,'err');}},
+  bradSellerAction(id){openModal(`<h3>Répondre à la proposition</h3><div class="field"><label>Décision</label><select id="brad-seller-action"><option value="counter">Faire une contre-proposition</option><option value="last_price">Communiquer mon dernier prix</option><option value="accept">Accepter la proposition</option><option value="reject">Refuser la proposition</option></select></div><div class="field"><label>Montant (pour une contre-proposition / dernier prix)</label><input id="brad-seller-amount" type="number" min="0" inputmode="numeric"></div><div class="field"><label>Message (facultatif)</label><textarea id="brad-seller-note" maxlength="800"></textarea></div><div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button><button class="btn" onclick="A.bradSellerSend(${Number(id)},this)">Envoyer</button></div>`);},
+  async bradSellerSend(id,btn){busy(btn,true);try{await api('/braderie/negotiations/'+id+'/action',{method:'POST',body:{action:document.getElementById('brad-seller-action').value,amount:document.getElementById('brad-seller-amount').value,note:document.getElementById('brad-seller-note').value}});closeModal();toast('Réponse envoyée.','ok');routes['braderie-negotiations']();}catch(e){toast(e.message,'err');busy(btn,false);}},
   async qlRepondre(sid, index, j) {
     if (window._qlLock) return; // une seule sélection
     window._qlLock = true;
@@ -3304,7 +3411,7 @@ function render() {
   const param = rest.join('/');
   if (route !== 'home') { const install=document.getElementById('install-cta'); if (install) install.remove(); }
   if (MAINT.active && MAINT.scope === 'F' && (!USER || USER.role !== 'pdg')) { maintenanceScreen(); return; }
-  const publicRoutes = ['home','search','services','categories','request','jobs','avis-recherche','urgence','about','login','register','account'];
+  const publicRoutes = ['home','search','services','categories','request','jobs','avis-recherche','urgence','about','login','register','account','braderie'];
   if (!TOKEN && !publicRoutes.includes(route)) { publicAuthGate(); return; }
   if (USER && USER.must_change_password) { setTimeout(forcePasswordModal, 50); }
   const fn = routes[route] || routes.home;
