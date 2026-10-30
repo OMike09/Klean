@@ -22,12 +22,14 @@
     "test:update27": "node test-update-27.js",
     "test:update28": "node test-category-images.js",
     "test:update29": "node test-colis29.js",
-    "test:update29:ui": "npx -y -p playwright@1.57.0 node test-colis29-ui.js"
+    "test:update29:ui": "node test-colis29-ui.js",
+    "test:update30": "node test-colis30.js",
+    "test:update30:ui": "node test-colis30-ui.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "Klean Services \u2014 plateforme de mise en relation de services",
+  "description": "Klean Services — plateforme de mise en relation de services",
   "dependencies": {
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
@@ -38,5 +40,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright": "^1.57.0"
   }
 }

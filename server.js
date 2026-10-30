@@ -986,6 +986,28 @@ app.get('/api/search', (req, res) => {
   res.json({ results: found.results, categories, query: q, clarification: clarificationForSearch(found.results, categories) });
 });
 
+
+// Recherche vocale : le navigateur transcrit localement lorsqu'il le permet, puis cette
+// API ne traite que du texte. Aucun enregistrement audio n'est reçu ni conservé.
+function voiceConfig() { return { enabled:getSetting('voice_search_enabled','1')==='1', home_visible:getSetting('voice_search_home_visible','1')==='1', max_seconds:Math.max(1,Math.min(25,parseInt(getSetting('voice_search_max_seconds','25'),10)||25)), store_text:getSetting('voice_search_store_text','0')==='1' && getSetting('voice_search_store_text_authorized','0')==='1' }; }
+function voiceFindLocation(text) {
+  const q=normalize(text); let city='';
+  const cities=db.prepare("SELECT name FROM villes WHERE active=1 AND name NOT LIKE 'Abidjan / %' ORDER BY length(name) DESC").all().map(r=>r.name);
+  for(const name of cities) if(q.includes(normalize(name))) { city=name;break; }
+  let commune=''; const communes=db.prepare("SELECT name FROM communes WHERE active=1 AND lower(city_name)=lower('Abidjan') ORDER BY length(name) DESC").all().map(r=>r.name);
+  for(const name of communes) if(q.includes(normalize(name))) { commune=name; city='Abidjan';break; }
+  return {city,commune};
+}
+function recordVoiceEvent(req, payload) { const cfg=voiceConfig();db.prepare('INSERT INTO voice_search_events(user_id,transcript,recognized_city,recognized_commune,grand_category_id,service_id,task_id,result_state) VALUES(?,?,?,?,?,?,?,?)').run(req.user&&req.user.id||null,cfg.store_text?String(payload.text||'').slice(0,500):null,payload.city||null,payload.commune||null,payload.grand_category_id||null,payload.service_id||null,payload.task_id||null,payload.state); }
+app.get('/api/voice-search/config', (req,res) => res.json(voiceConfig()));
+app.post('/api/voice-search/analyze', optionalAuth, (req,res) => {
+  const cfg=voiceConfig(); if(!cfg.enabled) { recordVoiceEvent(req,{state:'disabled'}); return res.status(409).json({error:'La recherche vocale est temporairement désactivée par Klean Services.'}); }
+  const text=String((req.body||{}).text||'').trim().slice(0,500); if(text.length<2){recordVoiceEvent(req,{state:'error'});return res.status(400).json({error:'Aucun texte exploitable n’a été reconnu. Vous pouvez écrire votre recherche.'});}
+  const loc=voiceFindLocation(text), found=intelligentSearch(text,loc.city); const first=found.results[0]||null; const state=first?(first.confidence==='faible'?'uncertain':'matched'):'no_match';
+  recordVoiceEvent(req,{text,city:loc.city,commune:loc.commune,grand_category_id:first&&first.grand_category_id,service_id:first&&first.id,task_id:first&&first.task_id,state});
+  res.json({text,city:loc.city,commune:loc.commune,city_confirm:!!loc.city,commune_confirm:!!loc.commune,result_state:state,service:first&&{id:first.id,name:first.name,grand_category_id:first.grand_category_id,grand_category:first.grand_category,task_id:first.task_id,tache:first.tache_suggeree,confidence:first.confidence},results:found.results.slice(0,5),clarification:clarificationForSearch(found.results,[])});
+});
+
 function parsedRuleFactors(raw) {
   const f = jsonObject(raw);
   const fixed = Math.max(-1000000, Math.min(1000000, Number(f.fixed_adjustment || f.frais_deplacement || 0) || 0));
@@ -2813,10 +2835,62 @@ function braderieSettings() {
     offer_period: ['day','week','month','year'].includes(offerPeriod) ? offerPeriod : 'month',
     expiry_days: braderieNumber('braderie_expiry_days', 30, 1, 365),
     contact_mode: getSetting('braderie_contact_mode', 'klean') === 'direct' ? 'direct' : 'klean',
-    hide_external_link: getSetting('braderie_hide_external_link', '1') === '1'
+    hide_external_link: getSetting('braderie_hide_external_link', '1') === '1',
+    geo_modes: {
+      city: getSetting('braderie_geo_city','1') === '1',
+      national: getSetting('braderie_geo_national','1') === '1',
+      abidjan: getSetting('braderie_geo_abidjan','1') === '1',
+      commune: getSetting('braderie_geo_commune','1') === '1'
+    },
+    quartier_required: getSetting('braderie_quartier_required','1') === '1',
+    alerts_enabled: getSetting('braderie_alerts_enabled','1') === '1',
+    purchase_conditions: String(getSetting('braderie_purchase_conditions','') || '').slice(0,4000),
+    purchase_conditions_enabled: getSetting('braderie_purchase_conditions_enabled','1') === '1',
+    purchase_confirmation_required: getSetting('braderie_purchase_confirmation_required','1') === '1'
   };
 }
 function braderieModifier(period) { return ({ day:'-1 day', week:'-7 days', month:'-1 month', year:'-1 year' })[period] || '-1 month'; }
+function braderieCategoryIds(raw) { try { const a=Array.isArray(raw)?raw:JSON.parse(raw||'[]'); return [...new Set((Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger))].slice(0,50); } catch { return []; } }
+function braderieVisibilityMode(raw) { return ['city','national','abidjan','commune'].includes(String(raw||'')) ? String(raw) : 'city'; }
+function braderieGeoModeAllowed(mode, cfg=braderieSettings()) { return !!cfg.geo_modes[braderieVisibilityMode(mode)]; }
+function braderieModeList(raw) { try { const a=Array.isArray(raw)?raw:JSON.parse(raw||'[]'); return [...new Set((Array.isArray(a)?a:[]).map(String).filter(m=>['city','national','abidjan','commune'].includes(m)))]; } catch { return []; } }
+function braderieCategoryModes(categoryId) { const row=categoryId&&db.prepare('SELECT visibility_modes FROM braderie_categories WHERE id=?').get(Number(categoryId));const modes=braderieModeList(row&&row.visibility_modes);return modes.length?modes:null; }
+function braderieCurrentConditionsHash() { return crypto.createHash('sha256').update(String(getSetting('braderie_purchase_conditions','')||'')).digest('hex'); }
+function braderiePurchaseAcceptance(req, body) {
+  const cfg=braderieSettings();
+  if(!cfg.purchase_conditions_enabled || !cfg.purchase_confirmation_required) return true;
+  const hash=braderieCurrentConditionsHash();
+  const old=db.prepare('SELECT 1 FROM braderie_purchase_acknowledgements WHERE user_id=? AND conditions_hash=?').get(req.user.id,hash);
+  if(old) return true;
+  if(!body || body.accept_purchase_conditions!==true) throw new Error('Vous devez confirmer avoir lu les conditions d’achat avant cette action.');
+  db.prepare('INSERT OR IGNORE INTO braderie_purchase_acknowledgements(user_id,conditions_hash) VALUES(?,?)').run(req.user.id,hash);
+  return true;
+}
+function braderieValidateGeo(cityRaw, communeRaw, modeRaw, cfg=braderieSettings(), categoryId=null) {
+  const city=activeCity(cityRaw); if(!city) throw new Error('Choisissez une ville active de Klean Services.');
+  const commune=braderieValidField(communeRaw,120), mode=braderieVisibilityMode(modeRaw), categoryModes=braderieCategoryModes(categoryId);
+  if(!braderieGeoModeAllowed(mode,cfg)) throw new Error('Ce mode de diffusion est désactivé par le PDG.');
+  if(categoryModes && !categoryModes.includes(mode)) throw new Error('Ce mode de diffusion est désactivé pour cette catégorie par le PDG.');
+  if(normalize(city.name)!=='abidjan' && (mode==='abidjan'||mode==='commune')) throw new Error('La diffusion Abidjan ou commune nécessite la ville Abidjan.');
+  if(normalize(city.name)!=='abidjan' && commune) throw new Error('Une commune ne peut être indiquée que pour Abidjan.');
+  if(normalize(city.name)==='abidjan' && commune && !activeCommune('Abidjan',commune)) throw new Error('Choisissez une commune active d’Abidjan.');
+  if(mode==='commune' && (!commune || !activeCommune('Abidjan',commune))) throw new Error('Choisissez la commune concernée par cette diffusion.');
+  return {city:city.name,commune,mode};
+}
+function braderieAlertMatchesItem(alert,item) {
+  const cats=braderieCategoryIds(alert.category_ids); if(cats.length && !cats.includes(Number(item.category_id))) return false;
+  if(alert.scope==='national') return true;
+  if(alert.scope==='abidjan') return normalize(item.city)==='abidjan';
+  if(alert.scope==='city') return normalize(alert.city)===normalize(item.city);
+  return alert.scope==='commune' && normalize(item.city)==='abidjan' && normalize(alert.commune)===normalize(item.commune);
+}
+function notifyBraderieAlerts(item) {
+  const cfg=braderieSettings(); if(!cfg.alerts_enabled) return 0;
+  const alerts=db.prepare("SELECT * FROM braderie_alerts WHERE active=1").all(); let sent=0;
+  alerts.forEach(a=>{ if(a.user_id===item.seller_id || !braderieAlertMatchesItem(a,item)) return; notify(a.user_id,'braderie','Article correspondant disponible',`Un nouvel article « ${item.title} » correspond à votre alerte ${item.city}${item.commune?' · '+item.commune:''}.`,`#/braderie/${item.id}`);sent++; });
+  return sent;
+}
+
 function braderieExpire() {
   const expired=db.prepare("SELECT id FROM braderie_items WHERE status='available' AND expires_at IS NOT NULL AND expires_at<=datetime('now')").all();
   if (!expired.length) return;
@@ -2831,8 +2905,9 @@ function braderiePublicItem(row, viewer) {
   if (!row) return null;
   const c=braderieSettings();
   const out={
-    id:row.id,title:row.title,description:row.description,price:Number(row.price),city:row.city,quartier:row.quartier || '',
-    item_condition:row.item_condition,visibility:row.visibility,photos:braderiePhotos(row.photos),status:row.status,
+    id:row.id,title:row.title,description:row.description,price:Number(row.price),city:row.city,commune:row.commune || '',quartier:row.quartier || '',
+    category_id:row.category_id || null, category_name:row.category_name || '', category_icon:row.category_icon || '🏷️',
+    item_condition:row.item_condition,visibility:row.visibility_mode || row.visibility,visibility_mode:row.visibility_mode || row.visibility,photos:braderiePhotos(row.photos),status:row.status,
     created_at:row.created_at,approved_at:row.approved_at,expires_at:row.expires_at,sold_at:row.sold_at,
     seller_name:row.seller_name || '', contact_mode:c.contact_mode,
     is_owner:!!(viewer && viewer.id===row.seller_id), can_offer:!!(viewer && viewer.id!==row.seller_id && row.status==='available'),
@@ -2850,13 +2925,17 @@ function braderiePrivateItem(row) {
   const pub=braderiePublicItem(row, {id:row.seller_id});
   return {...pub, seller_id:row.seller_id, contact_phone:row.contact_phone || '', external_link:row.external_link || '', moderation_note:row.moderation_note || '', deleted_at:row.deleted_at || null};
 }
-function braderieAccessible(row, user, filterCity) {
+function braderieAccessible(row, user, filterCity, filterCommune) {
   if (!row || row.status !== 'available') return !!(user && (user.id===row.seller_id || user.role==='pdg'));
   if (user && (user.id===row.seller_id || user.role==='pdg')) return true;
-  const city=String(filterCity || (user && user.ville) || '').trim();
-  return row.visibility === 'national' || (!!city && String(row.city).toLowerCase() === city.toLowerCase());
+  const city=String(filterCity || (user && user.ville) || '').trim(), commune=String(filterCommune || '').trim();
+  const mode=braderieVisibilityMode(row.visibility_mode || row.visibility);
+  if(mode==='national') return true;
+  if(mode==='abidjan') return normalize(city)==='abidjan';
+  if(mode==='commune') return normalize(city)==='abidjan' && !!commune && normalize(row.commune)===normalize(commune);
+  return !!city && normalize(row.city)===normalize(city);
 }
-function braderieItemRow(id) { return db.prepare(`SELECT i.*,u.name seller_name FROM braderie_items i JOIN users u ON u.id=i.seller_id WHERE i.id=?`).get(id); }
+function braderieItemRow(id) { return db.prepare(`SELECT i.*,u.name seller_name,bc.name category_name,bc.icon category_icon FROM braderie_items i JOIN users u ON u.id=i.seller_id LEFT JOIN braderie_categories bc ON bc.id=i.category_id WHERE i.id=?`).get(id); }
 function braderieRequireLive(req,res) { const c=braderieSettings(); if (!c.enabled) { res.status(409).json({error:'La braderie d’articles n’est pas encore opérationnelle. Elle pourra être activée à tout moment. Merci de votre compréhension.'}); return null; } return c; }
 function braderieValidatePhotos(raw, user, max) {
   const a=Array.isArray(raw)?raw:[]; const photos=[...new Set(a.map(v=>String(v||'').trim()))];
@@ -2869,44 +2948,57 @@ function braderieValidField(v,max) { return String(v===undefined||v===null?'':v)
 function braderieOfferPeriodCount(userId, period) { return db.prepare(`SELECT COUNT(*) n FROM braderie_negotiation_events WHERE actor_id=? AND event_type IN ('buyer_offer','buyer_final_offer') AND created_at>=datetime('now',?)`).get(userId,braderieModifier(period)).n; }
 
 app.get('/api/braderie/config', optionalAuth, (req,res) => res.json(braderieSettings()));
+app.get('/api/braderie/categories', (req,res) => {
+  const active=req.query.all!=='1';
+  const rows=db.prepare(`SELECT c.*,p.name parent_name FROM braderie_categories c LEFT JOIN braderie_categories p ON p.id=c.parent_id ${active?'WHERE c.active=1':''} ORDER BY COALESCE(c.parent_id,0),c.sort,c.id`).all();
+  res.json(rows.map(r=>({...r,visibility_modes:braderieModeList(r.visibility_modes)})));
+});
+app.get('/api/braderie/purchase-conditions', optionalAuth, (req,res) => {
+  const cfg=braderieSettings(), hash=braderieCurrentConditionsHash();
+  const accepted=!!(req.user && db.prepare('SELECT 1 FROM braderie_purchase_acknowledgements WHERE user_id=? AND conditions_hash=?').get(req.user.id,hash));
+  res.json({enabled:cfg.purchase_conditions_enabled,required:cfg.purchase_confirmation_required,conditions:cfg.purchase_conditions,accepted});
+});
 app.get('/api/braderie/items', optionalAuth, (req,res) => {
   const c=braderieSettings(); braderieExpire();
   if (!c.enabled) return res.json({enabled:false,items:[]});
-  const q=braderieValidField(req.query.q,100).toLowerCase(), city=braderieValidField(req.query.city,100), quartier=braderieValidField(req.query.quartier,100).toLowerCase();
-  const condition=braderieValidField(req.query.condition,30), min=Math.max(0,Number(req.query.min_price)||0), max=Math.max(0,Number(req.query.max_price)||0);
+  const q=braderieValidField(req.query.q,100).toLowerCase(), city=braderieValidField(req.query.city,100), commune=braderieValidField(req.query.commune,120), quartier=braderieValidField(req.query.quartier,100).toLowerCase();
+  const condition=braderieValidField(req.query.condition,30), categoryId=Number(req.query.category_id)||0,min=Math.max(0,Number(req.query.min_price)||0), max=Math.max(0,Number(req.query.max_price)||0);
   const order=req.query.order==='price_asc'?'i.price ASC,i.id DESC':req.query.order==='price_desc'?'i.price DESC,i.id DESC':'i.created_at DESC,i.id DESC';
-  let rows=db.prepare(`SELECT i.*,u.name seller_name FROM braderie_items i JOIN users u ON u.id=i.seller_id WHERE i.status='available' ORDER BY ${order} LIMIT 200`).all();
+  let rows=db.prepare(`SELECT i.*,u.name seller_name,bc.name category_name,bc.icon category_icon FROM braderie_items i JOIN users u ON u.id=i.seller_id LEFT JOIN braderie_categories bc ON bc.id=i.category_id WHERE i.status='available' ORDER BY ${order} LIMIT 200`).all();
   const baseCity=city || (req.user&&req.user.ville) || '';
-  rows=rows.filter(r=>braderieAccessible(r,req.user,baseCity));
-  if(q) rows=rows.filter(r=>(r.title+' '+r.description).toLowerCase().includes(q));
-  if(city) rows=rows.filter(r=>r.city.toLowerCase()===city.toLowerCase());
+  rows=rows.filter(r=>braderieAccessible(r,req.user,baseCity,commune));
+  if(q) rows=rows.filter(r=>(r.title+' '+r.description+' '+(r.category_name||'')).toLowerCase().includes(q));
+  if(city) rows=rows.filter(r=>normalize(r.city)===normalize(city));
+  if(commune) rows=rows.filter(r=>normalize(r.commune)===normalize(commune));
   if(quartier) rows=rows.filter(r=>String(r.quartier||'').toLowerCase().includes(quartier));
+  if(categoryId) rows=rows.filter(r=>Number(r.category_id)===categoryId);
   if(['neuf','tres_bon','bon','a_reparer'].includes(condition)) rows=rows.filter(r=>r.item_condition===condition);
   if(min) rows=rows.filter(r=>Number(r.price)>=min); if(max) rows=rows.filter(r=>Number(r.price)<=max);
   res.json({enabled:true,items:rows.map(r=>braderiePublicItem(r,req.user))});
 });
 app.get('/api/braderie/items/mine', auth, (req,res) => {
   braderieExpire();
-  const rows=db.prepare(`SELECT i.*,u.name seller_name FROM braderie_items i JOIN users u ON u.id=i.seller_id WHERE i.seller_id=? ORDER BY i.created_at DESC,i.id DESC`).all(req.user.id);
+  const rows=db.prepare(`SELECT i.*,u.name seller_name,bc.name category_name,bc.icon category_icon FROM braderie_items i JOIN users u ON u.id=i.seller_id LEFT JOIN braderie_categories bc ON bc.id=i.category_id WHERE i.seller_id=? ORDER BY i.created_at DESC,i.id DESC`).all(req.user.id);
   res.json(rows.map(braderiePrivateItem));
 });
 app.get('/api/braderie/items/:id', optionalAuth, (req,res) => {
   const c=braderieSettings(); braderieExpire(); const row=braderieItemRow(Number(req.params.id));
   if(!row) return res.status(404).json({error:'Article introuvable.'});
   if(!c.enabled && !(req.user && (req.user.id===row.seller_id || req.user.role==='pdg'))) return res.status(404).json({error:'Braderie indisponible.'});
-  if(!braderieAccessible(row,req.user,req.query.city)) return res.status(404).json({error:'Article indisponible dans cette zone ou retiré.'});
+  if(!braderieAccessible(row,req.user,req.query.city,req.query.commune)) return res.status(404).json({error:'Article indisponible dans cette zone ou retiré.'});
   res.json(req.user && (req.user.id===row.seller_id || req.user.role==='pdg') ? braderiePrivateItem(row) : braderiePublicItem(row,req.user));
 });
 app.post('/api/braderie/items', auth, (req,res) => {
   const c=braderieRequireLive(req,res); if(!c) return;
   try {
-    const b=req.body||{}, title=braderieValidField(b.title,120), description=braderieValidField(b.description,2500), city=braderieValidField(b.city,100), quartier=braderieValidField(b.quartier,120), phone=braderieValidField(b.contact_phone,40), link=braderieValidField(b.external_link,500);
-    const price=Math.round(Number(b.price)), condition=braderieValidField(b.item_condition,30), visibility=braderieValidField(b.visibility,20);
-    if(title.length<3||description.length<8||!city||!quartier||!phone) throw new Error('Titre, description, ville, quartier et téléphone sont obligatoires.');
+    const b=req.body||{}, title=braderieValidField(b.title,120), description=braderieValidField(b.description,2500), quartier=braderieValidField(b.quartier,120), phone=braderieValidField(b.contact_phone,40), link=braderieValidField(b.external_link,500);
+    const price=Math.round(Number(b.price)), condition=braderieValidField(b.item_condition,30), categoryId=Number(b.category_id)||0;
+    if(title.length<3||description.length<8||!phone) throw new Error('Titre, description et téléphone sont obligatoires.');
+    if(c.quartier_required&&!quartier) throw new Error('Le quartier ou repère est obligatoire selon les règles de la Braderie.');
     if(!Number.isFinite(price)||price<0||price>100000000) throw new Error('Prix FCFA invalide.');
     if(!['neuf','tres_bon','bon','a_reparer'].includes(condition)) throw new Error('État de l’article invalide.');
-    if(!['city','national'].includes(visibility)) throw new Error('Mode de diffusion invalide.');
-    if(!req.user.ville || city.toLocaleLowerCase()!==String(req.user.ville).trim().toLocaleLowerCase()) throw new Error('La ville de publication doit être celle enregistrée sur votre compte.');
+    const category=db.prepare('SELECT id FROM braderie_categories WHERE id=? AND active=1').get(categoryId); if(!category) throw new Error('Choisissez une catégorie active pour votre article.');
+    const geo=braderieValidateGeo(b.city,b.commune,b.visibility_mode || b.visibility,c,categoryId);
     if(link && !/^https?:\/\//i.test(link)) throw new Error('Le lien doit commencer par http:// ou https://.');
     if(c.require_conditions && b.conditions_accepted!==true) throw new Error('Vous devez accepter les conditions de publication.');
     const count=db.prepare(`SELECT COUNT(*) n FROM braderie_items WHERE seller_id=? AND created_at>=datetime('now',?)`).get(req.user.id,braderieModifier(c.limit_period)).n;
@@ -2914,8 +3006,8 @@ app.post('/api/braderie/items', auth, (req,res) => {
     const platform=db.prepare(`SELECT COUNT(*) n FROM braderie_items WHERE created_at>=datetime('now',?)`).get(braderieModifier(c.limit_period)).n;
     if(platform>=c.max_platform) throw new Error('Le quota de publication de la plateforme est atteint pour cette période.');
     const photos=braderieValidatePhotos(b.photos,req.user,c.max_photos);
-    const r=db.prepare(`INSERT INTO braderie_items(seller_id,title,description,price,city,quartier,contact_phone,external_link,item_condition,visibility,photos,conditions_accepted,expires_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,datetime('now',?))`).run(req.user.id,title,description,price,city,quartier,phone,link||null,condition,visibility,JSON.stringify(photos),c.require_conditions?1:0,'+'+c.expiry_days+' days');
+    const r=db.prepare(`INSERT INTO braderie_items(seller_id,title,description,price,city,commune,quartier,contact_phone,external_link,item_condition,visibility,visibility_mode,category_id,photos,conditions_accepted,expires_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now',?))`).run(req.user.id,title,description,price,geo.city,geo.commune,quartier,phone,link||null,condition,geo.mode==='national'?'national':'city',geo.mode,categoryId,JSON.stringify(photos),c.require_conditions?1:0,'+'+c.expiry_days+' days');
     notifyAdmins('braderie','Nouvel article à valider',`${req.user.name} a publié « ${title} ».`,`#/admin/braderie`);
     res.status(201).json({ok:true,id:r.lastInsertRowid,status:'pending',message:'Votre article a été envoyé au PDG pour validation.'});
   } catch(e) { res.status(400).json({error:e.message||'Publication invalide.'}); }
@@ -2924,7 +3016,15 @@ app.put('/api/braderie/items/:id', auth, (req,res) => {
   const row=braderieItemRow(Number(req.params.id)); if(!row) return res.status(404).json({error:'Article introuvable.'});
   if(row.seller_id!==req.user.id) return res.status(403).json({error:'Seul le vendeur peut modifier cet article.'});
   if(!['pending','rejected'].includes(row.status)) return res.status(409).json({error:'Seul un article en attente ou refusé peut être corrigé.'});
-  try { const b=req.body||{}, c=braderieSettings(); const title=b.title===undefined?row.title:braderieValidField(b.title,120),description=b.description===undefined?row.description:braderieValidField(b.description,2500),price=b.price===undefined?row.price:Math.round(Number(b.price)),quartier=b.quartier===undefined?row.quartier:braderieValidField(b.quartier,120),condition=b.item_condition===undefined?row.item_condition:braderieValidField(b.item_condition,30), visibility=b.visibility===undefined?row.visibility:braderieValidField(b.visibility,20); if(title.length<3||description.length<8||!quartier||!Number.isFinite(price)||price<0||!['neuf','tres_bon','bon','a_reparer'].includes(condition)||!['city','national'].includes(visibility)) throw new Error('Données de correction invalides.'); const photos=b.photos===undefined?braderiePhotos(row.photos):braderieValidatePhotos(b.photos,req.user,c.max_photos); db.prepare("UPDATE braderie_items SET title=?,description=?,price=?,quartier=?,item_condition=?,visibility=?,photos=?,status='pending',moderation_note=NULL,updated_at=datetime('now') WHERE id=?").run(title,description,price,quartier,condition,visibility,JSON.stringify(photos),row.id); notifyAdmins('braderie','Article corrigé à valider',`${req.user.name} a corrigé « ${title} ».`,`#/admin/braderie`); res.json({ok:true,status:'pending'}); } catch(e) { res.status(400).json({error:e.message||'Correction invalide.'}); }
+  try {
+    const b=req.body||{}, c=braderieSettings(), title=b.title===undefined?row.title:braderieValidField(b.title,120),description=b.description===undefined?row.description:braderieValidField(b.description,2500),price=b.price===undefined?row.price:Math.round(Number(b.price)),quartier=b.quartier===undefined?row.quartier:braderieValidField(b.quartier,120),condition=b.item_condition===undefined?row.item_condition:braderieValidField(b.item_condition,30),categoryId=b.category_id===undefined?row.category_id:Number(b.category_id)||0;
+    if(title.length<3||description.length<8||(c.quartier_required&&!quartier)||!Number.isFinite(price)||price<0||!['neuf','tres_bon','bon','a_reparer'].includes(condition)) throw new Error('Données de correction invalides.');
+    if(!db.prepare('SELECT id FROM braderie_categories WHERE id=? AND active=1').get(categoryId)) throw new Error('Catégorie d’article inactive ou invalide.');
+    const geo=braderieValidateGeo(b.city===undefined?row.city:b.city,b.commune===undefined?row.commune:b.commune,b.visibility_mode===undefined?(b.visibility===undefined?(row.visibility_mode||row.visibility):b.visibility):b.visibility_mode,c,categoryId);
+    const photos=b.photos===undefined?braderiePhotos(row.photos):braderieValidatePhotos(b.photos,req.user,c.max_photos);
+    db.prepare("UPDATE braderie_items SET title=?,description=?,price=?,city=?,commune=?,quartier=?,item_condition=?,visibility=?,visibility_mode=?,category_id=?,photos=?,status='pending',moderation_note=NULL,updated_at=datetime('now') WHERE id=?").run(title,description,price,geo.city,geo.commune,quartier,condition,geo.mode==='national'?'national':'city',geo.mode,categoryId,JSON.stringify(photos),row.id);
+    notifyAdmins('braderie','Article corrigé à valider',`${req.user.name} a corrigé « ${title} ».`,`#/admin/braderie`);res.json({ok:true,status:'pending'});
+  } catch(e) { res.status(400).json({error:e.message||'Correction invalide.'}); }
 });
 app.post('/api/braderie/items/:id/sold', auth, (req,res) => {
   braderieExpire(); const row=braderieItemRow(Number(req.params.id)); if(!row)return res.status(404).json({error:'Article introuvable.'}); if(row.seller_id!==req.user.id)return res.status(403).json({error:'Seul le vendeur peut confirmer la vente.'}); if(row.status!=='available')return res.status(409).json({error:'Seul un article disponible peut être marqué vendu.'}); if(req.body&&req.body.confirmed!==true)return res.status(400).json({error:'Confirmation de vente requise.'});
@@ -2933,14 +3033,35 @@ app.post('/api/braderie/items/:id/sold', auth, (req,res) => {
   notifyAdmins('braderie','Article marqué vendu',`${req.user.name} a marqué « ${row.title} » comme vendu.`,`#/admin/braderie`); res.json({ok:true,status:'sold'});
 });
 app.post('/api/braderie/items/:id/report', auth, (req,res) => { const row=braderieItemRow(Number(req.params.id)),reason=braderieValidField((req.body||{}).reason,160),details=braderieValidField((req.body||{}).details,1200); if(!row||row.status!=='available')return res.status(404).json({error:'Article indisponible.'}); if(row.seller_id===req.user.id)return res.status(400).json({error:'Vous ne pouvez pas signaler votre propre article.'}); if(reason.length<3)return res.status(400).json({error:'Indiquez un motif de signalement.'}); try {db.prepare('INSERT INTO braderie_reports(item_id,reporter_id,reason,details) VALUES(?,?,?,?)').run(row.id,req.user.id,reason,details);notifyAdmins('braderie','Signalement Braderie',`Signalement sur « ${row.title} » : ${reason}.`,`#/admin/braderie`);res.json({ok:true});}catch{return res.status(409).json({error:'Vous avez déjà signalé cet article.'});} });
-app.post('/api/braderie/items/:id/contact', auth, (req,res) => { const c=braderieRequireLive(req,res);if(!c)return; if(c.contact_mode!=='klean')return res.status(409).json({error:'Le vendeur a choisi le contact direct pour cet article.'}); const row=braderieItemRow(Number(req.params.id));const message=braderieValidField((req.body||{}).message,1200); if(!row||row.status!=='available')return res.status(404).json({error:'Article indisponible.'});if(row.seller_id===req.user.id)return res.status(400).json({error:'Vous êtes le vendeur de cet article.'});if(!message)return res.status(400).json({error:'Écrivez votre demande de contact.'});const existing=db.prepare("SELECT id FROM braderie_contact_requests WHERE item_id=? AND buyer_id=? AND status='pending'").get(row.id,req.user.id);if(existing)return res.status(409).json({error:'Une demande de contact est déjà en attente.'});const r=db.prepare('INSERT INTO braderie_contact_requests(item_id,buyer_id,seller_id,message) VALUES(?,?,?,?)').run(row.id,req.user.id,row.seller_id,message);notifyAdmins('braderie','Demande de contact',`${req.user.name} souhaite contacter le vendeur de « ${row.title} ».`,`#/admin/braderie`);res.status(201).json({ok:true,id:r.lastInsertRowid}); });
+app.post('/api/braderie/items/:id/contact', auth, (req,res) => { const c=braderieRequireLive(req,res);if(!c)return; try { braderiePurchaseAcceptance(req,req.body||{}); } catch(e) { return res.status(400).json({error:e.message}); } if(c.contact_mode!=='klean')return res.status(409).json({error:'Le vendeur a choisi le contact direct pour cet article.'}); const row=braderieItemRow(Number(req.params.id));const message=braderieValidField((req.body||{}).message,1200); if(!row||row.status!=='available')return res.status(404).json({error:'Article indisponible.'});if(row.seller_id===req.user.id)return res.status(400).json({error:'Vous êtes le vendeur de cet article.'});if(!message)return res.status(400).json({error:'Écrivez votre demande de contact.'});const existing=db.prepare("SELECT id FROM braderie_contact_requests WHERE item_id=? AND buyer_id=? AND status='pending'").get(row.id,req.user.id);if(existing)return res.status(409).json({error:'Une demande de contact est déjà en attente.'});const r=db.prepare('INSERT INTO braderie_contact_requests(item_id,buyer_id,seller_id,message) VALUES(?,?,?,?)').run(row.id,req.user.id,row.seller_id,message);notifyAdmins('braderie','Demande de contact',`${req.user.name} souhaite contacter le vendeur de « ${row.title} ».`,`#/admin/braderie`);res.status(201).json({ok:true,id:r.lastInsertRowid}); });
 app.post('/api/braderie/items/:id/offers', auth, (req,res) => {
-  const c=braderieRequireLive(req,res); if(!c)return; braderieExpire(); const row=braderieItemRow(Number(req.params.id)); const amount=Math.round(Number((req.body||{}).amount)),note=braderieValidField((req.body||{}).note,800); if(!row||row.status!=='available')return res.status(404).json({error:'Article indisponible.'});if(row.seller_id===req.user.id)return res.status(400).json({error:'Vous ne pouvez pas faire une offre sur votre article.'});if(!Number.isFinite(amount)||amount<0||amount>100000000)return res.status(400).json({error:'Montant de proposition invalide.'});if(braderieOfferPeriodCount(req.user.id,c.offer_period)>=c.offer_limit)return res.status(429).json({error:`Votre quota de ${c.offer_limit} proposition(s) est atteint pour cette période.`});
+  const c=braderieRequireLive(req,res); if(!c)return; try { braderiePurchaseAcceptance(req,req.body||{}); } catch(e) { return res.status(400).json({error:e.message}); } braderieExpire(); const row=braderieItemRow(Number(req.params.id)); const amount=Math.round(Number((req.body||{}).amount)),note=braderieValidField((req.body||{}).note,800); if(!row||row.status!=='available')return res.status(404).json({error:'Article indisponible.'});if(row.seller_id===req.user.id)return res.status(400).json({error:'Vous ne pouvez pas faire une offre sur votre article.'});if(!Number.isFinite(amount)||amount<0||amount>100000000)return res.status(400).json({error:'Montant de proposition invalide.'});if(braderieOfferPeriodCount(req.user.id,c.offer_period)>=c.offer_limit)return res.status(429).json({error:`Votre quota de ${c.offer_limit} proposition(s) est atteint pour cette période.`});
   let n=db.prepare('SELECT * FROM braderie_negotiations WHERE item_id=? AND buyer_id=?').get(row.id,req.user.id); let kind='buyer_offer';
   if(n) { if(n.state==='seller_last_price'&&!n.final_offer_used){kind='buyer_final_offer';db.prepare("UPDATE braderie_negotiations SET state='open',final_offer_used=1,buyer_offer_count=buyer_offer_count+1,updated_at=datetime('now') WHERE id=?").run(n.id);} else if(n.state==='seller_counter'){db.prepare("UPDATE braderie_negotiations SET state='open',buyer_offer_count=buyer_offer_count+1,updated_at=datetime('now') WHERE id=?").run(n.id);} else return res.status(409).json({error:'Vous ne pouvez pas faire de nouvelle proposition dans cette négociation.'}); }
   else { const r=db.prepare("INSERT INTO braderie_negotiations(item_id,buyer_id,seller_id,buyer_offer_count) VALUES(?,?,?,1)").run(row.id,req.user.id,row.seller_id); n={id:r.lastInsertRowid}; }
   db.prepare('INSERT INTO braderie_negotiation_events(negotiation_id,actor_id,event_type,amount,note) VALUES(?,?,?,?,?)').run(n.id,req.user.id,kind,amount,note||null); notify(row.seller_id,'braderie','Nouvelle proposition',`${req.user.name} propose ${amount.toLocaleString('fr-FR')} FCFA pour « ${row.title} ».`,`#/braderie-negotiations`);res.status(201).json({ok:true,negotiation_id:n.id,event_type:kind});
 });
+// Alertes acheteurs : aucune coordonnée de vendeur n'est mise en commun ; le serveur
+// cible uniquement les comptes dont le périmètre et les références correspondent.
+function braderieAlertPayload(user, body) {
+  const cfg=braderieSettings(); if(!cfg.alerts_enabled) throw new Error('Les alertes Braderie sont temporairement désactivées par le PDG.');
+  const b=body||{},scope=['city','national','abidjan','commune'].includes(String(b.scope))?String(b.scope):'';
+  if(!scope) throw new Error('Choisissez une zone pour cette alerte.');
+  const city=braderieValidField(b.city,100),commune=braderieValidField(b.commune,120), ids=braderieCategoryIds(b.category_ids);
+  if(scope==='city' && !activeCity(city)) throw new Error('Choisissez une ville active.');
+  if(scope==='abidjan' && !activeCity('Abidjan')) throw new Error('Abidjan est indisponible.');
+  if(scope==='commune' && (!activeCity('Abidjan') || !activeCommune('Abidjan',commune))) throw new Error('Choisissez une commune active d’Abidjan.');
+  if(ids.length) { const active=db.prepare(`SELECT id FROM braderie_categories WHERE active=1 AND id IN (${ids.map(()=>'?').join(',')})`).all(...ids).map(r=>Number(r.id)); if(active.length!==ids.length) throw new Error('Une référence sélectionnée n’est plus active.'); }
+  return {scope,city:scope==='city'?(activeCity(city).name):scope==='abidjan'||scope==='commune'?'Abidjan':'',commune:scope==='commune'?commune:'',category_ids:JSON.stringify(ids),active:b.active===undefined?1:(b.active?1:0)};
+}
+app.get('/api/braderie/alerts', auth, (req,res) => {
+  const rows=db.prepare('SELECT * FROM braderie_alerts WHERE user_id=? ORDER BY updated_at DESC,id DESC').all(req.user.id);
+  res.json(rows.map(r=>({...r,category_ids:braderieCategoryIds(r.category_ids)})));
+});
+app.post('/api/braderie/alerts', auth, (req,res) => { try { const a=braderieAlertPayload(req.user,req.body);const r=db.prepare('INSERT INTO braderie_alerts(user_id,scope,city,commune,category_ids,active) VALUES(?,?,?,?,?,?)').run(req.user.id,a.scope,a.city||null,a.commune||null,a.category_ids,a.active);res.status(201).json({ok:true,id:r.lastInsertRowid}); }catch(e){res.status(400).json({error:e.message||'Alerte invalide.'});} });
+app.put('/api/braderie/alerts/:id', auth, (req,res) => { const old=db.prepare('SELECT * FROM braderie_alerts WHERE id=? AND user_id=?').get(Number(req.params.id),req.user.id);if(!old)return res.status(404).json({error:'Alerte introuvable.'});try{const a=braderieAlertPayload(req.user,{...old,...(req.body||{})});db.prepare("UPDATE braderie_alerts SET scope=?,city=?,commune=?,category_ids=?,active=?,updated_at=datetime('now') WHERE id=?").run(a.scope,a.city||null,a.commune||null,a.category_ids,a.active,old.id);res.json({ok:true});}catch(e){res.status(400).json({error:e.message||'Alerte invalide.'});} });
+app.delete('/api/braderie/alerts/:id', auth, (req,res) => { const r=db.prepare('DELETE FROM braderie_alerts WHERE id=? AND user_id=?').run(Number(req.params.id),req.user.id);if(!r.changes)return res.status(404).json({error:'Alerte introuvable.'});res.json({ok:true}); });
+
 app.get('/api/braderie/negotiations', auth, (req,res) => { const rows=db.prepare(`SELECT n.*,i.title,i.price,i.status item_status,i.photos,b.name buyer_name,s.name seller_name FROM braderie_negotiations n JOIN braderie_items i ON i.id=n.item_id JOIN users b ON b.id=n.buyer_id JOIN users s ON s.id=n.seller_id WHERE n.buyer_id=? OR n.seller_id=? ORDER BY n.updated_at DESC,n.id DESC`).all(req.user.id,req.user.id);const ev=db.prepare('SELECT e.*,u.name actor_name FROM braderie_negotiation_events e JOIN users u ON u.id=e.actor_id WHERE e.negotiation_id=? ORDER BY e.created_at,e.id');res.json(rows.map(r=>({...r,photos:braderiePhotos(r.photos),events:ev.all(r.id),is_buyer:r.buyer_id===req.user.id}))); });
 app.post('/api/braderie/negotiations/:id/action', auth, (req,res) => { const n=db.prepare(`SELECT n.*,i.title,i.status item_status FROM braderie_negotiations n JOIN braderie_items i ON i.id=n.item_id WHERE n.id=?`).get(Number(req.params.id));if(!n)return res.status(404).json({error:'Négociation introuvable.'});if(n.seller_id!==req.user.id)return res.status(403).json({error:'Seul le vendeur peut répondre à cette proposition.'});if(n.item_status!=='available'||!['open','seller_counter','seller_last_price'].includes(n.state))return res.status(409).json({error:'Cette négociation est fermée.'});const action=braderieValidField((req.body||{}).action,30),amount=Math.round(Number((req.body||{}).amount)),note=braderieValidField((req.body||{}).note,800);if(!['counter','last_price','accept','reject'].includes(action))return res.status(400).json({error:'Décision invalide.'});let state,event,needAmount=false;if(action==='counter'){state='seller_counter';event='seller_counter';needAmount=true;}if(action==='last_price'){state='seller_last_price';event='seller_last_price';needAmount=true;}if(action==='accept'){state='accepted';event='accepted';}if(action==='reject'){state='rejected';event='rejected';}if(needAmount&&(!Number.isFinite(amount)||amount<0||amount>100000000))return res.status(400).json({error:'Indiquez un montant valide.'});db.transaction(()=>{db.prepare("UPDATE braderie_negotiations SET state=?,accepted_at=CASE WHEN ?='accepted' THEN datetime('now') ELSE accepted_at END,updated_at=datetime('now') WHERE id=?").run(state,state,n.id);db.prepare('INSERT INTO braderie_negotiation_events(negotiation_id,actor_id,event_type,amount,note) VALUES(?,?,?,?,?)').run(n.id,req.user.id,event,needAmount?amount:null,note||null);})();const labels={counter:'a fait une contre-proposition',last_price:'a communiqué son dernier prix',accept:'a accepté votre proposition',reject:'a refusé votre proposition'};notify(n.buyer_id,'braderie','Réponse à votre proposition',`Le vendeur ${labels[action]} pour « ${n.title} ».`,`#/braderie-negotiations`);res.json({ok:true,state}); });
 
@@ -2974,7 +3095,7 @@ const PERM_ROUTES = [
   [/^\/(finances|transactions|prix-modifs|visibilite|pub)/, 'paiements'],
   [/^\/commissions/, 'parametres'],
   [/^\/dispatch/, 'parametres'],
-  [/^\/braderie/, 'PDG'],
+  [/^\/(braderie|voice-search)/, 'PDG'],
   [/^\/(ads|broadcast|general-messages|annonces|support)/, 'communication'],
   [/^\/frequentation/, 'frequentation'],
   [/^\/about/, 'PDG'],
@@ -3723,11 +3844,12 @@ A.put('/villes/:id', (req, res) => {
     .run(req.body.name || null, req.body.active ?? null, req.params.id);
   res.json({ ok: true });
 });
-A.delete('/villes/:id', (req, res) => { db.prepare('DELETE FROM villes WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+A.delete('/villes/:id', (req, res) => { const city=db.prepare('SELECT * FROM villes WHERE id=?').get(req.params.id);if(!city)return res.status(404).json({error:'Ville introuvable.'});const n=db.prepare('SELECT COUNT(*) n FROM braderie_items WHERE lower(city)=lower(?)').get(city.name).n, alerts=db.prepare('SELECT COUNT(*) n FROM braderie_alerts WHERE lower(city)=lower(?)').get(city.name).n;if(n||alerts)return res.status(409).json({error:`Cette ville est liée à ${n} annonce(s) Braderie et ${alerts} alerte(s). Désactivez-la plutôt pour préserver l’historique.`});db.prepare('DELETE FROM villes WHERE id=?').run(city.id);res.json({ ok: true }); });
 // Communes : la même source centrale que les villes, sans liste parallèle client.
 A.get('/communes', (req,res) => res.json(frenchSort(db.prepare('SELECT * FROM communes ORDER BY city_name,sort,id').all())));
 A.post('/communes', (req,res) => { const city=activeCity((req.body||{}).city_name), name=String((req.body||{}).name||'').trim().slice(0,120); if(!city||!name)return res.status(400).json({error:'Ville centrale et nom de commune requis.'}); try { const id=db.prepare('INSERT INTO communes(city_name,name,sort) VALUES(?,?,?)').run(city.name,name,Number(req.body.sort)||99).lastInsertRowid;res.status(201).json({id}); }catch{return res.status(409).json({error:'Cette commune existe déjà pour cette ville.'});} });
 A.put('/communes/:id', (req,res) => { const old=db.prepare('SELECT * FROM communes WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Commune introuvable.'});const b=req.body||{}, city=b.city_name===undefined?old.city_name:activeCity(b.city_name)?.name,name=b.name===undefined?old.name:String(b.name).trim().slice(0,120);if(!city||!name)return res.status(400).json({error:'Ville ou commune invalide.'});try{db.prepare("UPDATE communes SET city_name=?,name=?,active=COALESCE(?,active),sort=COALESCE(?,sort),updated_at=datetime('now') WHERE id=?").run(city,name,b.active??null,b.sort??null,old.id);res.json({ok:true});}catch{return res.status(409).json({error:'Cette commune existe déjà pour cette ville.'});} });
+A.delete('/communes/:id', (req,res) => { const old=db.prepare('SELECT * FROM communes WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Commune introuvable.'});const n=db.prepare('SELECT COUNT(*) n FROM braderie_items WHERE lower(city)=lower(?) AND lower(commune)=lower(?)').get(old.city_name,old.name).n,alerts=db.prepare('SELECT COUNT(*) n FROM braderie_alerts WHERE lower(city)=lower(?) AND lower(commune)=lower(?)').get(old.city_name,old.name).n;if(n||alerts)return res.status(409).json({error:`Cette commune est liée à ${n} annonce(s) et ${alerts} alerte(s). Désactivez-la plutôt.`});db.prepare('DELETE FROM communes WHERE id=?').run(old.id);res.json({ok:true}); });
 A.post('/categories', pdgOnly, (req, res) => {
   const domainId = req.body.grand_category_id ? Number(req.body.grand_category_id) : null;
   if (domainId && !db.prepare('SELECT 1 FROM grand_categories WHERE id=?').get(domainId)) return res.status(400).json({ error: 'Grande catégorie invalide.' });
@@ -5015,6 +5137,11 @@ A.get('/files', (req, res) => { const files = physicalFilesList(); res.json({ fi
 A.post('/files/cleanup', async (req, res) => res.json({ deleted: await purgeRecoveryFiles(), legacy_deleted: cleanupFiles() }));
 
 
+// ----- Recherche vocale : gouvernance PDG, texte facultativement conservé -----
+A.get('/voice-search/config', pdgOnly, (req,res) => res.json(voiceConfig()));
+A.put('/voice-search/config', pdgOnly, (req,res) => { try {const b=req.body||{},cur=voiceConfig();if(b.enabled!==undefined){if(![true,false,0,1,'0','1'].includes(b.enabled))throw new Error('Activation invalide.');cur.enabled=[true,1,'1'].includes(b.enabled);}if(b.home_visible!==undefined){if(![true,false,0,1,'0','1'].includes(b.home_visible))throw new Error('Visibilité invalide.');cur.home_visible=[true,1,'1'].includes(b.home_visible);}if(b.store_text!==undefined){if(![true,false,0,1,'0','1'].includes(b.store_text))throw new Error('Confidentialité invalide.');cur.store_text=[true,1,'1'].includes(b.store_text);}if(b.max_seconds!==undefined){const n=parseInt(b.max_seconds,10);if(!Number.isInteger(n)||n<1||n>25)throw new Error('La durée maximale doit être comprise entre 1 et 25 secondes.');cur.max_seconds=n;}setSetting('voice_search_enabled',cur.enabled?'1':'0');setSetting('voice_search_home_visible',cur.home_visible?'1':'0');setSetting('voice_search_store_text',cur.store_text?'1':'0');if(b.store_text!==undefined)setSetting('voice_search_store_text_authorized',cur.store_text?'1':'0');setSetting('voice_search_max_seconds',cur.max_seconds);logAction(req.user,'recherche_vocale_configuration',{target_type:'voice_search',details:'Paramètres de recherche vocale mis à jour'});res.json({ok:true,config:voiceConfig()});}catch(e){res.status(400).json({error:e.message||'Configuration invalide.'});} });
+A.get('/voice-search/stats', pdgOnly, (req,res) => { const period=['day','week','month','year'].includes(req.query.period)?req.query.period:'month',mod=braderieModifier(period);const total=db.prepare("SELECT COUNT(*) n FROM voice_search_events WHERE created_at>=datetime('now',?)").get(mod).n,rows=db.prepare("SELECT result_state,COUNT(*) n FROM voice_search_events WHERE created_at>=datetime('now',?) GROUP BY result_state").all(mod),errors=db.prepare("SELECT id,transcript,recognized_city,recognized_commune,result_state,created_at FROM voice_search_events WHERE result_state IN ('no_match','uncertain','error') AND created_at>=datetime('now',?) ORDER BY created_at DESC,id DESC LIMIT 100").all(mod);res.json({period,total,by_state:Object.fromEntries(rows.map(r=>[r.result_state,r.n])),errors}); });
+
 // ----- Bande défilante : apparence et animation réservées au PDG -----
 A.get('/bandeau/config', pdgOnly, (req,res) => res.json(bandeauConfig()));
 A.put('/bandeau/config', pdgOnly, (req,res) => {
@@ -5040,47 +5167,41 @@ A.put('/bandeau/config', pdgOnly, (req,res) => {
 // ----- Braderie d’articles : pilotage réservé au PDG -----
 A.get('/braderie/config', pdgOnly, (req,res) => res.json(braderieSettings()));
 A.put('/braderie/config', pdgOnly, (req,res) => {
-  const b=req.body||{}, allowed=['enabled','home_visible','conditions','require_conditions','max_per_client','max_platform','limit_period','max_photos','offer_limit','offer_period','expiry_days','contact_mode','hide_external_link'];
-  const out=braderieSettings();
+  const b=req.body||{}, out=braderieSettings();
   try {
-    if(b.enabled!==undefined){ if(![true,false,0,1,'0','1'].includes(b.enabled)) throw new Error('Valeur d’activation invalide.'); out.enabled=[true,1,'1'].includes(b.enabled); }
-    if(b.home_visible!==undefined){ if(![true,false,0,1,'0','1'].includes(b.home_visible)) throw new Error('Valeur de visibilité invalide.'); out.home_visible=[true,1,'1'].includes(b.home_visible); }
-    if(b.require_conditions!==undefined) out.require_conditions=[true,1,'1'].includes(b.require_conditions);
-    if(b.hide_external_link!==undefined) out.hide_external_link=[true,1,'1'].includes(b.hide_external_link);
-    if(b.conditions!==undefined){ const v=braderieValidField(b.conditions,4000); if(v.length<8) throw new Error('Les conditions doivent comporter au moins 8 caractères.'); out.conditions=v; }
-    for(const key of ['max_per_client','max_platform','max_photos','offer_limit','expiry_days']) if(b[key]!==undefined){ const ranges={max_per_client:[1,100],max_platform:[1,100000],max_photos:[1,8],offer_limit:[1,1000],expiry_days:[1,365]}; const n=parseInt(b[key],10),[min,max]=ranges[key];if(!Number.isInteger(n)||n<min||n>max)throw new Error(`Valeur invalide pour ${key}.`);out[key]=n; }
+    const bools=['enabled','home_visible','require_conditions','hide_external_link','quartier_required','alerts_enabled','purchase_conditions_enabled','purchase_confirmation_required'];
+    bools.forEach(k=>{if(b[k]!==undefined){if(![true,false,0,1,'0','1'].includes(b[k]))throw new Error(`Valeur invalide pour ${k}.`);out[k]=[true,1,'1'].includes(b[k]);}});
+    if(b.conditions!==undefined){const v=braderieValidField(b.conditions,4000);if(v.length<8)throw new Error('Les conditions de publication doivent comporter au moins 8 caractères.');out.conditions=v;}
+    if(b.purchase_conditions!==undefined){const v=braderieValidField(b.purchase_conditions,4000);if(out.purchase_conditions_enabled&&v.length<8)throw new Error('Les conditions d’achat doivent comporter au moins 8 caractères.');out.purchase_conditions=v;}
+    for(const key of ['max_per_client','max_platform','max_photos','offer_limit','expiry_days']) if(b[key]!==undefined){const ranges={max_per_client:[1,100],max_platform:[1,100000],max_photos:[1,8],offer_limit:[1,1000],expiry_days:[1,365]};const n=parseInt(b[key],10),[min,max]=ranges[key];if(!Number.isInteger(n)||n<min||n>max)throw new Error(`Valeur invalide pour ${key}.`);out[key]=n;}
     if(b.limit_period!==undefined){if(!['day','week','month','year'].includes(b.limit_period))throw new Error('Période de publication invalide.');out.limit_period=b.limit_period;}
     if(b.offer_period!==undefined){if(!['day','week','month','year'].includes(b.offer_period))throw new Error('Période de propositions invalide.');out.offer_period=b.offer_period;}
     if(b.contact_mode!==undefined){if(!['klean','direct'].includes(b.contact_mode))throw new Error('Mode de contact invalide.');out.contact_mode=b.contact_mode;}
-    const keys={enabled:'braderie_enabled',home_visible:'braderie_home_visible',conditions:'braderie_conditions',require_conditions:'braderie_require_conditions',max_per_client:'braderie_max_per_client',max_platform:'braderie_max_platform',limit_period:'braderie_limit_period',max_photos:'braderie_max_photos',offer_limit:'braderie_offer_limit',offer_period:'braderie_offer_period',expiry_days:'braderie_expiry_days',contact_mode:'braderie_contact_mode',hide_external_link:'braderie_hide_external_link'};
-    allowed.forEach(k=>{ if(b[k]!==undefined) setSetting(keys[k],typeof out[k]==='boolean'?(out[k]?'1':'0'):out[k]); });
+    if(b.geo_modes!==undefined){if(!b.geo_modes||typeof b.geo_modes!=='object')throw new Error('Modes de diffusion invalides.');['city','national','abidjan','commune'].forEach(k=>{if(b.geo_modes[k]!==undefined){if(![true,false,0,1,'0','1'].includes(b.geo_modes[k]))throw new Error('Mode géographique invalide.');out.geo_modes[k]=[true,1,'1'].includes(b.geo_modes[k]);}});if(!Object.values(out.geo_modes).some(Boolean))throw new Error('Activez au moins un mode de diffusion géographique.');}
+    const keys={enabled:'braderie_enabled',home_visible:'braderie_home_visible',conditions:'braderie_conditions',require_conditions:'braderie_require_conditions',max_per_client:'braderie_max_per_client',max_platform:'braderie_max_platform',limit_period:'braderie_limit_period',max_photos:'braderie_max_photos',offer_limit:'braderie_offer_limit',offer_period:'braderie_offer_period',expiry_days:'braderie_expiry_days',contact_mode:'braderie_contact_mode',hide_external_link:'braderie_hide_external_link',quartier_required:'braderie_quartier_required',alerts_enabled:'braderie_alerts_enabled',purchase_conditions:'braderie_purchase_conditions',purchase_conditions_enabled:'braderie_purchase_conditions_enabled',purchase_confirmation_required:'braderie_purchase_confirmation_required'};
+    Object.keys(keys).forEach(k=>{if(b[k]!==undefined)setSetting(keys[k],typeof out[k]==='boolean'?(out[k]?'1':'0'):out[k]);});
+    if(b.geo_modes!==undefined){setSetting('braderie_geo_city',out.geo_modes.city?'1':'0');setSetting('braderie_geo_national',out.geo_modes.national?'1':'0');setSetting('braderie_geo_abidjan',out.geo_modes.abidjan?'1':'0');setSetting('braderie_geo_commune',out.geo_modes.commune?'1':'0');}
     logAction(req.user,'braderie_configuration',{target_type:'braderie',details:'Paramètres Braderie mis à jour'});res.json({ok:true,config:braderieSettings()});
   } catch(e){res.status(400).json({error:e.message||'Configuration invalide.'});}
 });
-A.get('/braderie/items', pdgOnly, (req,res) => { braderieExpire(); const status=braderieValidField(req.query.status,20),q=braderieValidField(req.query.q,100).toLowerCase();let rows=db.prepare(`SELECT i.*,u.name seller_name,u.phone seller_phone FROM braderie_items i JOIN users u ON u.id=i.seller_id ORDER BY i.created_at DESC,i.id DESC LIMIT 500`).all();if(status)rows=rows.filter(r=>r.status===status);if(q)rows=rows.filter(r=>(r.title+' '+r.description+' '+r.seller_name).toLowerCase().includes(q));res.json(rows.map(r=>({...braderiePrivateItem(r),seller_name:r.seller_name,seller_phone:r.seller_phone}))); });
+A.get('/braderie/categories', pdgOnly, (req,res) => res.json(db.prepare('SELECT c.*,p.name parent_name FROM braderie_categories c LEFT JOIN braderie_categories p ON p.id=c.parent_id ORDER BY COALESCE(c.parent_id,0),c.sort,c.id').all().map(r=>({...r,visibility_modes:braderieModeList(r.visibility_modes)}))));
+A.post('/braderie/categories', pdgOnly, (req,res) => { const b=req.body||{},name=braderieValidField(b.name,120),description=braderieValidField(b.description,800),icon=braderieValidField(b.icon,16)||'🏷️',parent=b.parent_id?Number(b.parent_id):null,modes=braderieModeList(b.visibility_modes);if(name.length<2)return res.status(400).json({error:'Nom de référence requis.'});if(parent&&!db.prepare('SELECT id FROM braderie_categories WHERE id=?').get(parent))return res.status(400).json({error:'Référence parente introuvable.'});try{const r=db.prepare('INSERT INTO braderie_categories(parent_id,name,description,icon,image_url,visibility_modes,active,sort) VALUES(?,?,?,?,?,?,?,?)').run(parent,name,description,icon,b.image_url||null,JSON.stringify(modes),b.active===false?0:1,Math.max(0,Number(b.sort)||0));res.status(201).json({id:r.lastInsertRowid});}catch{return res.status(409).json({error:'Cette référence existe déjà à ce niveau.'});} });
+A.put('/braderie/categories/:id', pdgOnly, (req,res) => { const old=db.prepare('SELECT * FROM braderie_categories WHERE id=?').get(Number(req.params.id));if(!old)return res.status(404).json({error:'Référence introuvable.'});const b=req.body||{},name=b.name===undefined?old.name:braderieValidField(b.name,120),parent=b.parent_id===undefined?old.parent_id:(b.parent_id?Number(b.parent_id):null),modes=b.visibility_modes===undefined?braderieModeList(old.visibility_modes):braderieModeList(b.visibility_modes);if(name.length<2||parent===old.id)return res.status(400).json({error:'Référence invalide.'});if(parent&&!db.prepare('SELECT id FROM braderie_categories WHERE id=?').get(parent))return res.status(400).json({error:'Référence parente introuvable.'});try{db.prepare("UPDATE braderie_categories SET parent_id=?,name=?,description=COALESCE(?,description),icon=COALESCE(?,icon),image_url=COALESCE(?,image_url),visibility_modes=?,active=COALESCE(?,active),sort=COALESCE(?,sort),updated_at=datetime('now') WHERE id=?").run(parent,name,b.description===undefined?null:braderieValidField(b.description,800),b.icon===undefined?null:braderieValidField(b.icon,16),b.image_url===undefined?null:b.image_url,JSON.stringify(modes),b.active===undefined?null:(b.active?1:0),b.sort===undefined?null:Math.max(0,Number(b.sort)||0),old.id);res.json({ok:true});}catch{return res.status(409).json({error:'Cette référence existe déjà à ce niveau.'});} });
+A.delete('/braderie/categories/:id', pdgOnly, (req,res) => { const id=Number(req.params.id),items=db.prepare('SELECT COUNT(*) n FROM braderie_items WHERE category_id=?').get(id).n,children=db.prepare('SELECT COUNT(*) n FROM braderie_categories WHERE parent_id=?').get(id).n;if(items||children)return res.status(409).json({error:`Cette référence est liée à ${items} annonce(s) ou ${children} sous-référence(s). Désactivez-la pour préserver l’historique.`});const r=db.prepare('DELETE FROM braderie_categories WHERE id=?').run(id);if(!r.changes)return res.status(404).json({error:'Référence introuvable.'});res.json({ok:true}); });
+A.get('/braderie/alerts', pdgOnly, (req,res) => res.json(db.prepare(`SELECT a.*,u.name user_name,u.ville user_city FROM braderie_alerts a JOIN users u ON u.id=a.user_id ORDER BY a.updated_at DESC LIMIT 500`).all().map(a=>({...a,category_ids:braderieCategoryIds(a.category_ids)}))));
+
+A.get('/braderie/items', pdgOnly, (req,res) => { braderieExpire(); const status=braderieValidField(req.query.status,20),q=braderieValidField(req.query.q,100).toLowerCase();let rows=db.prepare(`SELECT i.*,u.name seller_name,u.phone seller_phone,bc.name category_name,bc.icon category_icon FROM braderie_items i JOIN users u ON u.id=i.seller_id LEFT JOIN braderie_categories bc ON bc.id=i.category_id ORDER BY i.created_at DESC,i.id DESC LIMIT 500`).all();if(status)rows=rows.filter(r=>r.status===status);if(q)rows=rows.filter(r=>(r.title+' '+r.description+' '+r.seller_name+' '+(r.category_name||'')).toLowerCase().includes(q));res.json(rows.map(r=>({...braderiePrivateItem(r),seller_name:r.seller_name,seller_phone:r.seller_phone}))); });
 A.put('/braderie/items/:id', pdgOnly, (req,res) => {
-  const row=braderieItemRow(Number(req.params.id));
-  if(!row)return res.status(404).json({error:'Article introuvable.'});
-  const b=req.body||{},status=b.status===undefined?row.status:String(b.status),note=b.moderation_note===undefined?row.moderation_note:braderieValidField(b.moderation_note,1200);
-  if(!['pending','available','sold','suspended','expired','rejected','deleted'].includes(status))return res.status(400).json({error:'Statut invalide.'});
-  if(status==='available'&&row.status==='deleted')return res.status(409).json({error:'Un article supprimé logiquement ne peut pas être republié sans restauration explicite.'});
-  // Même le PDG passe par les mêmes contrôles structurels : jamais de titre/prix/ville invalide en base.
-  const title=b.title===undefined?null:braderieValidField(b.title,120),description=b.description===undefined?null:braderieValidField(b.description,2500),price=b.price===undefined?null:Math.round(Number(b.price)),city=b.city===undefined?null:braderieValidField(b.city,100),quartier=b.quartier===undefined?null:braderieValidField(b.quartier,120),condition=b.item_condition===undefined?null:braderieValidField(b.item_condition,30),visibility=b.visibility===undefined?null:braderieValidField(b.visibility,20);
-  if(title!==null&&title.length<3)return res.status(400).json({error:'Titre trop court.'});
-  if(description!==null&&description.length<8)return res.status(400).json({error:'Description trop courte.'});
-  if(price!==null&&(!Number.isFinite(price)||price<0||price>100000000))return res.status(400).json({error:'Prix invalide.'});
-  if(city!==null&&(!city||!db.prepare('SELECT 1 FROM villes WHERE active=1 AND lower(name)=lower(?)').get(city)))return res.status(400).json({error:'Choisissez une ville active du référentiel.'});
-  if(quartier!==null&&!quartier)return res.status(400).json({error:'Quartier requis.'});
-  if(condition!==null&&!['neuf','tres_bon','bon','a_reparer'].includes(condition))return res.status(400).json({error:'État d’article invalide.'});
-  if(visibility!==null&&!['city','national'].includes(visibility))return res.status(400).json({error:'Mode de diffusion invalide.'});
-  const expiry=status==='available'?`datetime('now','+${braderieSettings().expiry_days} days')`:'expires_at';
-  db.prepare(`UPDATE braderie_items SET title=COALESCE(?,title),description=COALESCE(?,description),price=COALESCE(?,price),city=COALESCE(?,city),quartier=COALESCE(?,quartier),item_condition=COALESCE(?,item_condition),visibility=COALESCE(?,visibility),status=?,moderation_note=?,approved_at=CASE WHEN ?='available' THEN COALESCE(approved_at,datetime('now')) ELSE approved_at END,deleted_at=CASE WHEN ?='deleted' THEN datetime('now') ELSE deleted_at END,expires_at=${expiry},updated_at=datetime('now') WHERE id=?`).run(title,description,price,city,quartier,condition,visibility,status,note||null,status,status,row.id);
-  if(['suspended','expired','deleted','sold','rejected'].includes(status))db.prepare("UPDATE braderie_negotiations SET state='closed',updated_at=datetime('now') WHERE item_id=? AND state IN ('open','seller_counter','seller_last_price')").run(row.id);
-  const msg={available:'Votre article est validé et désormais visible.',rejected:'Votre article a été refusé. Consultez la note du PDG.',suspended:'Votre article a été suspendu.',deleted:'Votre article a été retiré.',expired:'Votre article est arrivé à expiration.',sold:'Votre article a été archivé comme vendu.'}[status];
-  if(msg)notify(row.seller_id,'braderie','Mise à jour de votre article',msg,`#/braderie-mine`);
-  logAction(req.user,'braderie_article_'+status,{target_type:'braderie_item',target_id:row.id,target_name:title||row.title,reason:note||null});res.json({ok:true,status});
+  const row=braderieItemRow(Number(req.params.id));if(!row)return res.status(404).json({error:'Article introuvable.'});
+  try {const b=req.body||{},status=b.status===undefined?row.status:String(b.status),note=b.moderation_note===undefined?row.moderation_note:braderieValidField(b.moderation_note,1200);if(!['pending','available','sold','suspended','expired','rejected','deleted'].includes(status))throw new Error('Statut invalide.');if(status==='available'&&row.status==='deleted')return res.status(409).json({error:'Un article supprimé logiquement ne peut pas être republié sans restauration explicite.'});
+    const title=b.title===undefined?row.title:braderieValidField(b.title,120),description=b.description===undefined?row.description:braderieValidField(b.description,2500),price=b.price===undefined?row.price:Math.round(Number(b.price)),quartier=b.quartier===undefined?row.quartier:braderieValidField(b.quartier,120),condition=b.item_condition===undefined?row.item_condition:braderieValidField(b.item_condition,30),categoryId=b.category_id===undefined?row.category_id:Number(b.category_id)||0;
+    if(title.length<3||description.length<8)throw new Error('Titre ou description trop court.');if(!Number.isFinite(price)||price<0||price>100000000)throw new Error('Prix invalide.');if(braderieSettings().quartier_required&&!quartier)throw new Error('Quartier requis.');if(!['neuf','tres_bon','bon','a_reparer'].includes(condition))throw new Error('État d’article invalide.');if(!db.prepare('SELECT id FROM braderie_categories WHERE id=?').get(categoryId))throw new Error('Catégorie introuvable.');
+    const geo=braderieValidateGeo(b.city===undefined?row.city:b.city,b.commune===undefined?row.commune:b.commune,b.visibility_mode===undefined?(b.visibility===undefined?(row.visibility_mode||row.visibility):b.visibility):b.visibility_mode,braderieSettings(),categoryId);
+    const expiry=status==='available'?`datetime('now','+${braderieSettings().expiry_days} days')`:'expires_at';db.prepare(`UPDATE braderie_items SET title=?,description=?,price=?,city=?,commune=?,quartier=?,item_condition=?,visibility=?,visibility_mode=?,category_id=?,status=?,moderation_note=?,approved_at=CASE WHEN ?='available' THEN COALESCE(approved_at,datetime('now')) ELSE approved_at END,deleted_at=CASE WHEN ?='deleted' THEN datetime('now') ELSE deleted_at END,expires_at=${expiry},updated_at=datetime('now') WHERE id=?`).run(title,description,price,geo.city,geo.commune,quartier,condition,geo.mode==='national'?'national':'city',geo.mode,categoryId,status,note||null,status,status,row.id);
+    if(['suspended','expired','deleted','sold','rejected'].includes(status))db.prepare("UPDATE braderie_negotiations SET state='closed',updated_at=datetime('now') WHERE item_id=? AND state IN ('open','seller_counter','seller_last_price')").run(row.id);const msg={available:'Votre article est validé et désormais visible.',rejected:'Votre article a été refusé. Consultez la note du PDG.',suspended:'Votre article a été suspendu.',deleted:'Votre article a été retiré.',expired:'Votre article est arrivé à expiration.',sold:'Votre article a été archivé comme vendu.'}[status];if(msg)notify(row.seller_id,'braderie','Mise à jour de votre article',msg,`#/braderie-mine`);if(status==='available'&&row.status!=='available')notifyBraderieAlerts(braderieItemRow(row.id));logAction(req.user,'braderie_article_'+status,{target_type:'braderie_item',target_id:row.id,target_name:title,reason:note||null});res.json({ok:true,status});
+  }catch(e){res.status(400).json({error:e.message||'Modification invalide.'});}
 });
-A.post('/braderie/items/:id/reactivate', pdgOnly, (req,res) => { const row=braderieItemRow(Number(req.params.id));if(!row)return res.status(404).json({error:'Article introuvable.'});if(!['sold','suspended','expired'].includes(row.status))return res.status(409).json({error:'Seul un article vendu, suspendu ou expiré peut être réactivé.'});db.prepare(`UPDATE braderie_items SET status='available',sold_at=NULL,expires_at=datetime('now',?),updated_at=datetime('now') WHERE id=?`).run('+'+braderieSettings().expiry_days+' days',row.id);notify(row.seller_id,'braderie','Article réactivé',`Le PDG a réactivé « ${row.title} ».`,`#/braderie/${row.id}`);logAction(req.user,'braderie_article_reactive',{target_type:'braderie_item',target_id:row.id,target_name:row.title});res.json({ok:true,status:'available'}); });
+A.post('/braderie/items/:id/reactivate', pdgOnly, (req,res) => { const row=braderieItemRow(Number(req.params.id));if(!row)return res.status(404).json({error:'Article introuvable.'});if(!['sold','suspended','expired'].includes(row.status))return res.status(409).json({error:'Seul un article vendu, suspendu ou expiré peut être réactivé.'});db.prepare(`UPDATE braderie_items SET status='available',sold_at=NULL,expires_at=datetime('now',?),updated_at=datetime('now') WHERE id=?`).run('+'+braderieSettings().expiry_days+' days',row.id);notify(row.seller_id,'braderie','Article réactivé',`Le PDG a réactivé « ${row.title} ».`,`#/braderie/${row.id}`);notifyBraderieAlerts(braderieItemRow(row.id));logAction(req.user,'braderie_article_reactive',{target_type:'braderie_item',target_id:row.id,target_name:row.title});res.json({ok:true,status:'available'}); });
 A.get('/braderie/reports', pdgOnly, (req,res) => res.json(db.prepare(`SELECT r.*,i.title,b.name reporter_name,s.name seller_name FROM braderie_reports r JOIN braderie_items i ON i.id=r.item_id JOIN users b ON b.id=r.reporter_id JOIN users s ON s.id=i.seller_id ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.created_at DESC`).all()));
 A.put('/braderie/reports/:id', pdgOnly, (req,res) => { const b=req.body||{},status=String(b.status||''),note=braderieValidField(b.admin_note,1200);if(!['reviewed','dismissed','actioned'].includes(status))return res.status(400).json({error:'Décision de signalement invalide.'});const r=db.prepare("UPDATE braderie_reports SET status=?,admin_note=?,updated_at=datetime('now') WHERE id=?").run(status,note||null,Number(req.params.id));if(!r.changes)return res.status(404).json({error:'Signalement introuvable.'});res.json({ok:true}); });
 A.get('/braderie/contacts', pdgOnly, (req,res) => res.json(db.prepare(`SELECT c.*,i.title,b.name buyer_name,b.phone buyer_phone,s.name seller_name,s.phone seller_phone FROM braderie_contact_requests c JOIN braderie_items i ON i.id=c.item_id JOIN users b ON b.id=c.buyer_id JOIN users s ON s.id=c.seller_id ORDER BY CASE c.status WHEN 'pending' THEN 0 ELSE 1 END,c.created_at DESC`).all()));

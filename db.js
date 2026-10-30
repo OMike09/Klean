@@ -2254,4 +2254,90 @@ const BRADERIE_DEFAULTS = {
 for (const [k,v] of Object.entries(BRADERIE_DEFAULTS)) if (getSetting(k) === null) setSetting(k,v);
 
 
+
+// ============================================================
+// COLIS 30 — Braderie géolocalisée, alertes et recherche vocale
+// ============================================================
+// Les ajouts sont compatibles avec les annonces Braderie déjà historisées : aucune
+// migration ne remplace la ville, le statut, les offres ou les contacts existants.
+db.exec(`
+CREATE TABLE IF NOT EXISTS braderie_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_id INTEGER REFERENCES braderie_categories(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  icon TEXT NOT NULL DEFAULT '🏷️',
+  image_url TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(parent_id,name)
+);
+CREATE INDEX IF NOT EXISTS idx_brad_categories_public ON braderie_categories(parent_id,active,sort,id);
+CREATE TABLE IF NOT EXISTS braderie_alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  scope TEXT NOT NULL CHECK(scope IN ('city','national','abidjan','commune')),
+  city TEXT,
+  commune TEXT,
+  category_ids TEXT NOT NULL DEFAULT '[]',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_brad_alerts_user ON braderie_alerts(user_id,active,updated_at DESC);
+CREATE TABLE IF NOT EXISTS braderie_purchase_acknowledgements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  conditions_hash TEXT NOT NULL,
+  accepted_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id,conditions_hash)
+);
+CREATE TABLE IF NOT EXISTS voice_search_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  transcript TEXT,
+  recognized_city TEXT,
+  recognized_commune TEXT,
+  grand_category_id INTEGER REFERENCES grand_categories(id) ON DELETE SET NULL,
+  service_id INTEGER REFERENCES services(id) ON DELETE SET NULL,
+  task_id INTEGER REFERENCES taches(id) ON DELETE SET NULL,
+  result_state TEXT NOT NULL CHECK(result_state IN ('matched','uncertain','no_match','disabled','error')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_voice_events_state ON voice_search_events(result_state,created_at DESC);
+`);
+ensureColumn('braderie_items', 'commune', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('braderie_items', 'category_id', 'INTEGER REFERENCES braderie_categories(id) ON DELETE SET NULL');
+ensureColumn('braderie_items', 'visibility_mode', "TEXT NOT NULL DEFAULT 'city'");
+ensureColumn('braderie_categories', 'visibility_modes', "TEXT NOT NULL DEFAULT ''");
+db.prepare("UPDATE braderie_items SET visibility_mode=visibility WHERE visibility_mode IS NULL OR visibility_mode='' ").run();
+const COLIS30_DEFAULTS={
+  braderie_geo_city:'1', braderie_geo_national:'1', braderie_geo_abidjan:'1', braderie_geo_commune:'1',
+  braderie_quartier_required:'1', braderie_alerts_enabled:'1',
+  braderie_purchase_conditions:'Les échanges et les achats restent sous la responsabilité des parties. Vérifiez l’article, le prix et le lieu avant toute décision.',
+  braderie_purchase_conditions_enabled:'1', braderie_purchase_confirmation_required:'1',
+  voice_search_enabled:'1', voice_search_home_visible:'1', voice_search_max_seconds:'25', voice_search_store_text:'0', voice_search_store_text_authorized:'0'
+};
+for(const [k,v] of Object.entries(COLIS30_DEFAULTS)) if(getSetting(k)===null)setSetting(k,v);
+(function seedColis30BraderieCategories(){
+  const rows=[
+    ['Électroménager','Appareils de cuisine, lavage, froid et maison.','🧺'],
+    ['Téléphones et accessoires','Téléphones, tablettes, coques et accessoires.','📱'],
+    ['Ordinateurs et informatique','Ordinateurs, périphériques et matériel numérique.','💻'],
+    ['Télévisions et équipements électroniques','TV, audio, consoles et électronique.','📺'],
+    ['Meubles et décoration','Mobilier, ameublement et décoration.','🛋️'],
+    ['Vêtements et chaussures','Vêtements, sacs et chaussures.','👕'],
+    ['Motos et accessoires','Motos, pièces et équipements.','🏍️'],
+    ['Matériel professionnel','Équipements de travail et commerce.','🧰'],
+    ['Matériel de construction','Matériaux, outils et équipements de chantier.','🧱'],
+    ['Articles pour bébé','Articles et équipements pour bébé.','🍼'],
+    ['Divers','Articles ne relevant pas des références précédentes.','🧩']
+  ];
+  const add=db.prepare('INSERT OR IGNORE INTO braderie_categories(name,description,icon,sort) VALUES(?,?,?,?)');
+  rows.forEach((r,i)=>add.run(r[0],r[1],r[2],i+1));
+})();
+
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
