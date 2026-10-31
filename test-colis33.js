@@ -1,4 +1,4 @@
-/* COLIS 33 — Articles seconde main et Klean Cabine : tests API réels.
+/* COLIS 33 — Articles seconde main et Klean Kbine à distance : tests API réels.
    Lancer : KLEAN_TEST_BASE=http://127.0.0.1:3000 node test-colis33.js */
 'use strict';
 const BASE=(process.env.KLEAN_TEST_BASE||'http://127.0.0.1:3000').replace(/\/$/,'');const API=BASE+'/api';
@@ -26,8 +26,8 @@ try{
  x=await call(buyer,'/braderie/buyer-dashboard');ok(x.r.status===200&&x.d.counts.favorites===1&&x.d.recent.some(i=>Number(i.id)===itemId),'espace acheteur : favoris et vues récentes');
  x=await call(seller,'/braderie/drafts','POST',{title:'Brouillon COLIS 33',description:'Publication à préparer.',price:1000});draftId=x.d.id;ok(x.r.status===201&&!!draftId,'brouillon vendeur persistant');
  x=await call(seller,'/braderie/drafts');ok(x.r.status===200&&x.d.some(d=>Number(d.id)===Number(draftId)&&d.payload.title==='Brouillon COLIS 33'),'lecture brouillon vendeur');
- x=await call(null,'/cabine/config');ok(x.r.status===200&&x.d.checkout_available===false&&x.d.provider_connected===false&&x.d.operators.length>=3,'catalogue Klean Cabine exposé avec exécution indisponible');
- x=await call(buyer,'/cabine/quote','POST',{operation_type:'transfer',debit_phone:'0700000001',debit_operator_code:'mtn',beneficiary_phone:'0700000002',beneficiary_operator_code:'orange',amount:500});ok(x.r.status===200&&x.d.no_charge&&x.d.checkout_available===false&&x.d.total===500,'récapitulatif sans paiement Klean Cabine');
+ x=await call(null,'/cabine/config');ok(x.r.status===200&&x.d.checkout_available===false&&x.d.provider_connected===false&&x.d.operators.length>=3,'catalogue Klean Kbine à distance exposé avec exécution indisponible');
+ x=await call(buyer,'/cabine/quote','POST',{operation_type:'transfer',debit_phone:'0700000001',debit_operator_code:'mtn',beneficiary_phone:'0700000002',beneficiary_confirmation:'0700000002',beneficiary_operator_code:'orange',amount:500});ok(x.r.status===200&&x.d.no_charge&&x.d.checkout_available===false&&x.d.fee===10&&x.d.total===510,'récapitulatif sans paiement Klean Kbine à distance');
  const beforeOps=db.prepare('SELECT COUNT(*) n FROM cabine_operations').get().n;x=await call(buyer,'/cabine/operations','POST',{operation_type:'transfer'});const afterOps=db.prepare('SELECT COUNT(*) n FROM cabine_operations').get().n;ok(x.r.status===503&&x.d.code==='PROVIDER_NOT_CONNECTED'&&x.d.no_charge&&beforeOps===afterOps,'checkout bloqué : aucune opération ni débit artificiel');
  x=await call(admin,'/admin/cabine/operators','POST',{code:'test'+stamp,name:'Test Opérateur',enabled:true,transfer_enabled:true,bundles_enabled:true});operatorId=x.d.id;ok(x.r.status===201&&x.d.api_status==='not_configured','opérateur administrable sans déclarer une connexion API');
  x=await call(admin,'/admin/cabine/services','POST',{code:'test'+stamp,name:'Test Service',service_type:'bundle',enabled:true});serviceId=x.d.id;ok(x.r.status===201,'catégorie Cabine administrable');

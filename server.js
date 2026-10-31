@@ -434,6 +434,34 @@ app.use((req,res,next) => {
 // Le minuteur serveur rend effectifs démarrage et fin programmés même si personne ne consulte le site.
 setInterval(()=>{ try { getMaintenance(); } catch(e) { console.error('Contrôle maintenance :',e.message); } },15000);
 
+
+// ================== COLIS 34 — codes provisoires des comptes rapides ==================
+function quickAccessNumber(key,fallback,min,max){const n=Math.round(Number(getSetting(key,String(fallback))));return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;}
+function quickAccessPolicy(){return {hours:quickAccessNumber('quick_access_code_hours',72,1,24*30),max_attempts:quickAccessNumber('quick_access_code_max_attempts',5,3,12)};}
+function quickAccessCode(){
+  // 60 bits aléatoires, alphabet sans caractères ambigus ; la valeur brute n’est jamais stockée ni journalisée.
+  const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let out='';const bytes=crypto.randomBytes(12);for(let i=0;i<12;i++)out+=alphabet[bytes[i]%alphabet.length];return out.slice(0,10);
+}
+function issueQuickAccessCode(userId,actorId){
+  const policy=quickAccessPolicy(),code=quickAccessCode(),salt=crypto.randomBytes(16).toString('hex');
+  db.transaction(()=>{db.prepare("UPDATE quick_access_codes SET status='replaced',updated_at=datetime('now') WHERE user_id=? AND status='active'").run(userId);db.prepare("INSERT INTO quick_access_codes(user_id,code_hash,salt,expires_at,max_attempts,created_by) VALUES(?,?,?,?,?,?)").run(userId,hashPassword(code,salt),salt,new Date(Date.now()+policy.hours*3600000).toISOString().slice(0,19).replace('T',' '),policy.max_attempts,actorId||null);db.prepare('UPDATE users SET must_change_password=0 WHERE id=?').run(userId);})();
+  return {code,expires_at:new Date(Date.now()+policy.hours*3600000).toISOString().slice(0,19).replace('T',' '),hours:policy.hours};
+}
+function quickAccessStatus(userId){
+  db.prepare("UPDATE quick_access_codes SET status='expired',updated_at=datetime('now') WHERE user_id=? AND status='active' AND expires_at<=datetime('now')").run(userId);
+  const row=db.prepare("SELECT id,status,expires_at,attempts,max_attempts,created_at FROM quick_access_codes WHERE user_id=? ORDER BY id DESC LIMIT 1").get(userId);
+  return row?{active:row.status==='active'&&row.expires_at>maintenanceDbNow(),status:row.status,expires_at:row.expires_at,attempts:row.attempts,max_attempts:row.max_attempts,created_at:row.created_at}:null;
+}
+function verifyQuickAccessCode(user,code){
+  const row=db.prepare("SELECT * FROM quick_access_codes WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 1").get(user.id);if(!row)return false;
+  if(row.expires_at<=maintenanceDbNow()){db.prepare("UPDATE quick_access_codes SET status='expired',updated_at=datetime('now') WHERE id=?").run(row.id);return false;}
+  if(row.attempts>=row.max_attempts){db.prepare("UPDATE quick_access_codes SET status='locked',updated_at=datetime('now') WHERE id=?").run(row.id);return false;}
+  if(hashPassword(String(code||''),row.salt)!==row.code_hash){const attempts=row.attempts+1;db.prepare("UPDATE quick_access_codes SET attempts=?,status=CASE WHEN ?>=max_attempts THEN 'locked' ELSE status END,updated_at=datetime('now') WHERE id=?").run(attempts,attempts,row.id);return false;}
+  return true;
+}
+function setUnusablePassword(userId){const salt=crypto.randomBytes(16).toString('hex'),secret=crypto.randomBytes(32).toString('hex');db.prepare('UPDATE users SET password_hash=?,salt=?,must_change_password=0 WHERE id=?').run(hashPassword(secret,salt),salt,userId);}
+function quickAccessAdminAllowed(req){return hasPerm(req.user,'comptes');}
+
 app.post('/api/auth/register', (req, res) => {
   const { name, phone, password, address, ville, quartier, lat, lng, accept_rules, referral_token } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Veuillez indiquer votre nom.' });
@@ -467,6 +495,10 @@ app.post('/api/auth/login', (req, res) => {
   const p = (phone || '').trim().replace(/\s+/g, '');
   const user = db.prepare('SELECT * FROM users WHERE phone=?').get(p);
   let ok = !!user && user.password_hash === hashPassword(password || '', user.salt);
+  let loginWithQuickCode=false;
+  // Un code provisoire créé par l’administration est vérifié séparément, avec durée et anti-bruteforce.
+  // Il ne modifie ni le rôle ni les permissions du compte.
+  if(!ok && user){loginWithQuickCode=verifyQuickAccessCode(user,password||'');ok=loginWithQuickCode;}
   // Compte importé de l'ancienne application : on accepte aussi l'ANCIEN mot de passe
   if (!ok && user) {
     const legacy = db.prepare('SELECT sha256 FROM legacy_passwords WHERE user_id=?').get(user.id);
@@ -600,18 +632,17 @@ app.post('/api/auth/reset-confirm', (req, res) => {
     return res.status(400).json({ error: 'Code incorrect (' + (4 - rc.attempts) + ' essai(s) restant(s)).' });
   }
   const salt = crypto.randomBytes(16).toString('hex');
-  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, user.id);
-  db.prepare('UPDATE reset_codes SET used=1 WHERE id=?').run(rc.id);
+  db.transaction(()=>{db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, user.id);db.prepare("UPDATE quick_access_codes SET status='replaced',updated_at=datetime('now') WHERE user_id=? AND status='active'").run(user.id);db.prepare('UPDATE reset_codes SET used=1 WHERE id=?').run(rc.id);})();
   notify(user.id, 'compte', '🔑 Mot de passe modifié', 'Votre mot de passe a été modifié grâce au code de vérification. Si ce n\u2019était pas vous, contactez immédiatement Klean Services.', '#/account');
   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
 });
 
 app.put('/api/me/password', auth, (req, res) => {
   const { current, password } = req.body || {};
-  if (req.user.password_hash !== hashPassword(current || '', req.user.salt)) return res.status(400).json({ error: 'Mot de passe actuel incorrect.' });
+  if (req.user.password_hash !== hashPassword(current || '', req.user.salt) && !verifyQuickAccessCode(req.user,current||'')) return res.status(400).json({ error: 'Code ou mot de passe actuel incorrect.' });
   if (!password || password.length < 6) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 6 caractères.' });
   const salt = crypto.randomBytes(16).toString('hex');
-  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, req.user.id);
+  db.transaction(()=>{db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, req.user.id);db.prepare("UPDATE quick_access_codes SET status='replaced',updated_at=datetime('now') WHERE user_id=? AND status='active'").run(req.user.id);})();
   res.json({ ok: true });
 });
 
@@ -3350,7 +3381,9 @@ app.post('/api/vues', auth, (req, res) => {
 
 
 // ================== COLIS 33 — Klean Cabine (fondations sûres, sans exécution) ==================
-function cabineSettings(){const g=(k,d='')=>getSetting(k,d);return {enabled:g('cabine_enabled','1')==='1',title:g('cabine_title','Klean Cabine'),description:g('cabine_description',''),icon:g('cabine_icon','📲'),color:g('cabine_color','#166534'),logo_url:g('cabine_logo_url',''),unavailable_message:g('cabine_unavailable_message','Les opérations sont indisponibles.'),conditions:g('cabine_conditions',''),payment_enabled:false,operator_detection:g('cabine_operator_detection','1')==='1',manual_operator:g('cabine_manual_operator','1')==='1',custom_amount:g('cabine_custom_amount','1')==='1',quick_amounts:jsonArray(g('cabine_quick_amounts','[]')).filter(n=>Number.isInteger(Number(n))&&Number(n)>0)};}
+function cabineSettings(){const g=(k,d='')=>getSetting(k,d),rate=Math.max(0,Math.min(100,Number(g('cabine_fee_percent','2'))||0));return {enabled:g('cabine_enabled','1')==='1',title:g('cabine_title','Klean Kbine à distance'),description:g('cabine_description',''),icon:g('cabine_icon','📲'),color:g('cabine_color','#166534'),logo_url:g('cabine_logo_url',''),unavailable_message:g('cabine_unavailable_message','Les opérations sont indisponibles.'),conditions:g('cabine_conditions',''),payment_enabled:false,operator_detection:g('cabine_operator_detection','1')==='1',manual_operator:g('cabine_manual_operator','1')==='1',custom_amount:g('cabine_custom_amount','1')==='1',quick_amounts:jsonArray(g('cabine_quick_amounts','[]')).filter(n=>Number.isInteger(Number(n))&&Number(n)>0),fee_enabled:g('cabine_fee_enabled','1')==='1',fee_percent:rate,fee_rounding:g('cabine_fee_rounding','nearest')==='ceil'?'ceil':'nearest',free_request_label:g('cabine_free_request_label','Décrivez le forfait que vous souhaitez'),free_request_hint:g('cabine_free_request_hint','Exemple : Je veux 1,5 Go pour 500 FCFA.'),transfer_label:g('cabine_transfer_label','Transfert de crédit'),subscription_label:g('cabine_subscription_label','Souscription Appel/Internet')};}
+function cabineFee(amount,cfg=cabineSettings()){if(!cfg.fee_enabled)return 0;const value=Number(amount||0)*Number(cfg.fee_percent||0)/100;return cfg.fee_rounding==='ceil'?Math.ceil(value):Math.round(value);}
+
 function cabineOperatorPublic(r){return {id:r.id,code:r.code,name:r.name,description:r.description,logo_url:r.logo_url,color:r.color,configured:!!r.enabled,transfer_configured:!!r.transfer_enabled,bundles_configured:!!r.bundles_enabled,api_status:r.api_status,api_message:r.api_message,conditions:r.conditions,available:false,unavailable_reason:'Aucun connecteur officiel de paiement et d’opérateur n’est vérifié pour le moment.'};}
 function cabineServicePublic(r){return {id:r.id,code:r.code,name:r.name,description:r.description,icon:r.icon,image_url:r.image_url,color:r.color,service_type:r.service_type,configured:!!r.enabled,available:false};}
 function cabineOfferPublic(r){return {id:r.id,operator_id:r.operator_id,operator_code:r.operator_code,operator_name:r.operator_name,service_id:r.service_id,service_code:r.service_code,service_name:r.service_name,name:r.name,description:r.description,benefit:r.benefit,validity_text:r.validity_text,provider_price:r.provider_price,customer_price:r.customer_price,fee_fixed:r.fee_fixed,fee_percent:r.fee_percent,conditions:r.conditions,configured:!!r.enabled,available:false,unavailable_reason:'Aucun paiement ni achat de forfait ne peut être lancé avant connexion officielle vérifiée.'};}
@@ -3360,7 +3393,8 @@ function cabineAudit(actor,action,targetType,targetId,before,after,reason=''){db
 function cabineOperationPublic(r){return {...r,service_name:r.service_name||null,offer_name:r.offer_name||null,debit_phone:'••••'+String(r.debit_phone||'').slice(-4),beneficiary_phone:'••••'+String(r.beneficiary_phone||'').slice(-4),receipt_available:['successful','refunded'].includes(r.status),execution_available:false};}
 app.get('/api/cabine/config', optionalAuth, (req,res)=>{const cfg=cabineSettings(),ops=db.prepare('SELECT * FROM cabine_operators ORDER BY sort,id').all(),services=db.prepare('SELECT * FROM cabine_services WHERE enabled=1 ORDER BY sort,id').all(),offers=db.prepare(`SELECT o.*,op.code operator_code,op.name operator_name,s.code service_code,s.name service_name FROM cabine_offers o JOIN cabine_operators op ON op.id=o.operator_id JOIN cabine_services s ON s.id=o.service_id WHERE o.visible=1 ORDER BY s.sort,op.sort,o.sort,o.id`).all();res.json({...cfg,operators:ops.map(cabineOperatorPublic),services:services.map(cabineServicePublic),offers:offers.map(cabineOfferPublic),checkout_available:false,provider_connected:false});});
 app.get('/api/cabine/offers', optionalAuth, (req,res)=>{const service=braderieValidField(req.query.service,40),operator=braderieValidField(req.query.operator,40);let rows=db.prepare(`SELECT o.*,op.code operator_code,op.name operator_name,s.code service_code,s.name service_name FROM cabine_offers o JOIN cabine_operators op ON op.id=o.operator_id JOIN cabine_services s ON s.id=o.service_id WHERE o.visible=1 ORDER BY s.sort,op.sort,o.sort,o.id`).all();if(service)rows=rows.filter(x=>x.service_code===service);if(operator)rows=rows.filter(x=>x.operator_code===operator);res.json(rows.map(cabineOfferPublic));});
-app.post('/api/cabine/quote', auth, (req,res)=>{const b=req.body||{},type=String(b.operation_type||''),debit=cabineCleanPhone(b.debit_phone),beneficiary=cabineCleanPhone(b.beneficiary_phone),debitOperator=braderieValidField(b.debit_operator_code,30).toLowerCase(),beneficiaryOperator=braderieValidField(b.beneficiary_operator_code,30).toLowerCase(),offer=Number(b.offer_id)||0;if(!['transfer','bundle'].includes(type))return res.status(400).json({error:'Type d’opération invalide.'});if(!/^\+?[0-9]{8,18}$/.test(debit)||!/^\+?[0-9]{8,18}$/.test(beneficiary))return res.status(400).json({error:'Vérifiez les numéros débiteur et bénéficiaire.'});if(!debitOperator||!beneficiaryOperator||!db.prepare('SELECT 1 FROM cabine_operators WHERE code=?').get(debitOperator)||!db.prepare('SELECT 1 FROM cabine_operators WHERE code=?').get(beneficiaryOperator))return res.status(400).json({error:'Choisissez les opérateurs débiteur et bénéficiaire configurés.'});let row=null;if(type==='bundle'){row=cabineOfferRow(offer);if(!row)return res.status(404).json({error:'Offre introuvable.'});}const amount=type==='bundle'?Number(row.customer_price):Math.round(Number(b.amount)),fee=type==='bundle'?Number(row.fee_fixed)+Math.round(Number(row.customer_price)*Number(row.fee_percent)/100):0;if(type==='transfer'&&(!Number.isFinite(amount)||amount<=0))return res.status(400).json({error:'Le montant est obligatoire pour un transfert.'});res.json({recap:true,operation_type:type,debit_phone:'••••'+debit.slice(-4),debit_operator_code:debitOperator,beneficiary_phone:'••••'+beneficiary.slice(-4),beneficiary_operator_code:beneficiaryOperator,offer:row?cabineOfferPublic(row):null,amount,fee,total:amount+fee,checkout_available:false,provider_connected:false,message:cabineSettings().unavailable_message,no_charge:true});});
+app.post('/api/cabine/quote', auth, (req,res)=>{const b=req.body||{},type=String(b.operation_type||''),debit=cabineCleanPhone(b.debit_phone),beneficiary=cabineCleanPhone(b.beneficiary_phone),beneficiaryConfirmation=cabineCleanPhone(b.beneficiary_confirmation),debitOperator=braderieValidField(b.debit_operator_code,30).toLowerCase(),beneficiaryOperator=braderieValidField(b.beneficiary_operator_code,30).toLowerCase(),offer=Number(b.offer_id)||0,freeRequest=braderieValidField(b.free_request,500);if(!['transfer','bundle'].includes(type))return res.status(400).json({error:'Type d’opération invalide.'});if(!/^\+?[0-9]{8,18}$/.test(debit)||!/^\+?[0-9]{8,18}$/.test(beneficiary))return res.status(400).json({error:'Vérifiez les numéros à débiter et bénéficiaire.'});if(!beneficiaryConfirmation||beneficiary!==beneficiaryConfirmation)return res.status(400).json({error:'Les deux numéros ne correspondent pas. Veuillez vérifier le numéro bénéficiaire.'});if(!debitOperator||!beneficiaryOperator||!db.prepare('SELECT 1 FROM cabine_operators WHERE code=?').get(debitOperator)||!db.prepare('SELECT 1 FROM cabine_operators WHERE code=?').get(beneficiaryOperator))return res.status(400).json({error:'Choisissez les opérateurs débiteur et bénéficiaire configurés.'});let row=null;if(type==='bundle'){row=cabineOfferRow(offer);if(!row&&!freeRequest)return res.status(400).json({error:'Choisissez une offre disponible ou décrivez le forfait recherché.'});if(row&&row.operator_code!==beneficiaryOperator)return res.status(400).json({error:'L’offre choisie ne correspond pas à l’opérateur bénéficiaire.'});}const amount=type==='bundle'&&row?Number(row.customer_price):Math.round(Number(b.amount)),cfg=cabineSettings(),fee=cabineFee(amount,cfg);if((type==='transfer'||!row)&&(!Number.isFinite(amount)||amount<=0))return res.status(400).json({error:'Un montant ou une offre administrée est obligatoire.'});res.json({recap:true,operation_type:type,debit_phone:'••••'+debit.slice(-4),debit_operator_code:debitOperator,beneficiary_phone:'••••'+beneficiary.slice(-4),beneficiary_confirmation:'••••'+beneficiaryConfirmation.slice(-4),beneficiary_operator_code:beneficiaryOperator,offer:row?cabineOfferPublic(row):null,free_request:freeRequest||null,amount,fee,fee_percent:cfg.fee_enabled?cfg.fee_percent:0,total:amount+fee,checkout_available:false,provider_connected:false,message:cfg.unavailable_message,no_charge:true});});
+app.post('/api/cabine/offers/match',auth,(req,res)=>{const q=normalize(braderieValidField((req.body||{}).query,500)),operator=braderieValidField((req.body||{}).operator,30).toLowerCase(),kind=['calls','internet'].includes(String((req.body||{}).kind||''))?String((req.body||{}).kind):'';if(!q)return res.status(400).json({error:'Décrivez le forfait recherché.'});let rows=db.prepare(`SELECT o.*,op.code operator_code,op.name operator_name,s.code service_code,s.name service_name FROM cabine_offers o JOIN cabine_operators op ON op.id=o.operator_id JOIN cabine_services s ON s.id=o.service_id WHERE o.visible=1 ORDER BY o.sort,o.id`).all();if(operator)rows=rows.filter(r=>r.operator_code===operator);if(kind)rows=rows.filter(r=>r.service_code===kind);const tokens=q.split(/[^a-z0-9]+/).filter(x=>x.length>=2);const found=rows.filter(r=>{const hay=normalize([r.name,r.description,r.benefit,r.validity_text,r.service_name,r.operator_name,r.customer_price].join(' '));return tokens.every(t=>hay.includes(t));}).slice(0,8);res.json({matches:found.map(cabineOfferPublic),matched:found.length>0,notice:found.length?'Offre(s) administrée(s) correspondante(s) trouvée(s).':'Aucune offre administrée ne correspond exactement. Klean Services devra la vérifier.'});});
 app.post('/api/cabine/operations', auth, (req,res)=>{cabineAudit(req.user,'checkout_blocked','cabine_operation',null,null,{operation_type:(req.body||{}).operation_type||null},'Prestataire officiel non connecté : aucune opération ni débit créé.');res.status(503).json({error:cabineSettings().unavailable_message,code:'PROVIDER_NOT_CONNECTED',no_charge:true,operation_created:false});});
 app.get('/api/cabine/operations', auth, (req,res)=>{const rows=db.prepare(`SELECT o.*,s.name service_name,f.name offer_name FROM cabine_operations o LEFT JOIN cabine_services s ON s.id=o.service_id LEFT JOIN cabine_offers f ON f.id=o.offer_id WHERE o.user_id=? ORDER BY o.created_at DESC LIMIT 200`).all(req.user.id);res.json({items:rows.map(cabineOperationPublic),checkout_available:false});});
 app.get('/api/cabine/operations/:id/receipt', auth, (req,res)=>{const row=db.prepare(`SELECT o.*,s.name service_name,f.name offer_name FROM cabine_operations o LEFT JOIN cabine_services s ON s.id=o.service_id LEFT JOIN cabine_offers f ON f.id=o.offer_id WHERE o.id=? AND o.user_id=?`).get(Number(req.params.id),req.user.id);if(!row)return res.status(404).json({error:'Opération introuvable.'});if(!['successful','refunded'].includes(row.status))return res.status(409).json({error:'Aucun reçu n’est disponible pour une opération non exécutée.'});res.json(cabineOperationPublic(row));});
@@ -3540,6 +3574,8 @@ A.get('/users', (req, res) => {
   if (f === 'incomplete') where += ' AND u.profile_incomplete=1';
   const sort = req.query.sort === 'nom' ? 'u.name COLLATE NOCASE ASC' : 'u.id DESC'; // alphabétique ou date d'inscription (récents d'abord)
   const rows = db.prepare(`SELECT u.id, u.name, u.phone, u.email, u.address, u.ville, u.quartier, u.is_pro, u.pro_status, u.kp_code, u.suspended, u.blocked, u.disabled_until, u.must_change_password, u.profile_incomplete, u.verified, u.created_at,
+    (SELECT q.status FROM quick_access_codes q WHERE q.user_id=u.id ORDER BY q.id DESC LIMIT 1) quick_access_status,
+    (SELECT q.expires_at FROM quick_access_codes q WHERE q.user_id=u.id ORDER BY q.id DESC LIMIT 1) quick_access_expires_at,
     p.profession AS pro_profession, p.services AS pro_services, p.service_city AS service_city
     FROM users u LEFT JOIN pro_profiles p ON p.user_id=u.id WHERE ${where} ORDER BY ${sort} LIMIT 500`).all();
   // Les identifiants enregistrés dans le profil sont résolus à chaque lecture : aucune copie
@@ -3559,8 +3595,9 @@ A.get('/users/:id', (req, res) => {
   const pro = db.prepare('SELECT * FROM pro_profiles WHERE user_id=?').get(u.id);
   const missions = db.prepare('SELECT COUNT(*) n FROM missions WHERE client_id=? OR pro_id=?').get(u.id, u.id).n;
   const history = db.prepare("SELECT admin_name, admin_role, action, details, reason, created_at FROM admin_log WHERE target_type='users' AND target_id=? ORDER BY id DESC LIMIT 50").all(u.id);
+  const quick_access=quickAccessStatus(u.id);
   delete u.password_hash; delete u.salt; delete u.perms;
-  res.json({ ...u, pro: pro ? { ...pro, services: JSON.parse(pro.services), authorized_services: jsonNumberIds(pro.authorized_services || pro.services),
+  res.json({ ...u, quick_access, pro: pro ? { ...pro, services: JSON.parse(pro.services), authorized_services: jsonNumberIds(pro.authorized_services || pro.services),
     domain_categories: (() => { try { const v=JSON.parse(pro.domain_categories || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })(),
     authorized_domain_categories: pro.authorized_domain_categories === null || pro.authorized_domain_categories === undefined ? null : (() => { try { const v=JSON.parse(pro.authorized_domain_categories || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })(),
     selected_subcategories:numberIds(pro.selected_subcategories),authorized_subcategories:pro.authorized_subcategories===null?null:numberIds(pro.authorized_subcategories),
@@ -3581,22 +3618,27 @@ function motDePasseTemporaire() {
   return 'KS' + String(Math.floor(100000 + Math.random() * 900000));
 }
 
-// ＋ Créer rapidement un compte (infos minimales — l'utilisateur complètera son profil)
+// ＋ Créer rapidement un compte : code provisoire distinct, expirant et révocable.
 A.post('/users', (req, res) => {
+  if(!quickAccessAdminAllowed(req))return res.status(403).json({error:'La permission de gestion des comptes est requise.'});
   const { name, phone, email, type } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: 'Veuillez indiquer le nom.' });
   if (!phone || !/^[+0-9 ]{8,20}$/.test(phone.trim())) return res.status(400).json({ error: 'Numéro de téléphone invalide.' });
   const p = phone.trim().replace(/\s+/g, '');
-  if (db.prepare('SELECT id FROM users WHERE phone=?').get(p)) return res.status(409).json({ error: 'Ce numéro est déjà associé à un compte.' });
-  const temp = motDePasseTemporaire();
-  const salt = crypto.randomBytes(16).toString('hex');
+  const existing=db.prepare('SELECT id FROM users WHERE phone=?').get(p);
+  if(existing)return res.status(409).json({ error: 'Ce numéro est déjà associé à un compte. Utilisez la récupération ou régénérez un code provisoire depuis sa fiche.', duplicate:true, user_id:existing.id });
+  const salt = crypto.randomBytes(16).toString('hex'),placeholder=crypto.randomBytes(32).toString('hex');
   const info = db.prepare(`INSERT INTO users(name, phone, email, password_hash, salt, must_change_password, profile_incomplete, created_by)
-    VALUES(?,?,?,?,?,1,1,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(temp, salt), salt, req.user.id);
-  notify(info.lastInsertRowid, 'compte', 'Bienvenue sur Klean Services 👋',
-    'Votre compte a été créé par notre équipe. Connectez-vous, choisissez votre mot de passe et complétez votre profil.' +
-    (type === 'pro' ? ' Pour devenir professionnel, faites votre demande depuis Mon compte (validation normale).' : ''), '#/account');
-  res.json({ id: info.lastInsertRowid, temp_password: temp });
+    VALUES(?,?,?,?,?,0,1,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(placeholder,salt), salt, req.user.id);
+  const access=issueQuickAccessCode(info.lastInsertRowid,req.user.id);
+  notify(info.lastInsertRowid, 'compte', 'Bienvenue sur Klean Services 👋','Votre compte a été créé par notre équipe. Utilisez le code provisoire communiqué par l’administration pour vous connecter ; vous pourrez le remplacer plus tard dans Compte → Paramètres. '+(type === 'pro' ? ' Pour devenir professionnel, faites votre demande depuis Mon compte.' : ''),'#/account');
+  logAction(req.user,'quick_account_created',{target_type:'users',target_id:info.lastInsertRowid,target_name:name.trim(),details:'Code provisoire généré sans conservation en clair.'});
+  res.status(201).json({id:info.lastInsertRowid,phone:p,temporary_code:access.code,expires_at:access.expires_at,code_status:'active'});
 });
+A.get('/access-codes/config',pdgOnly,(req,res)=>res.json(quickAccessPolicy()));
+A.put('/access-codes/config',pdgOnly,(req,res)=>{const b=req.body||{},hours=Math.round(Number(b.hours)),max=Math.round(Number(b.max_attempts));if(!Number.isInteger(hours)||hours<1||hours>720||!Number.isInteger(max)||max<3||max>12)return res.status(400).json({error:'Durée ou nombre maximal d’essais invalide.'});setSetting('quick_access_code_hours',hours);setSetting('quick_access_code_max_attempts',max);logAction(req.user,'quick_access_policy_updated',{target_type:'settings',target_name:'quick_access_codes',details:`durée=${hours}h; essais=${max}`});res.json(quickAccessPolicy());});
+A.get('/users/:id/quick-access', (req,res)=>{if(!quickAccessAdminAllowed(req))return res.status(403).json({error:'Permission requise.'});const u=cibleUtilisateur(req,res);if(!u)return;res.json(quickAccessStatus(u.id)||{active:false,status:'none'});});
+A.post('/users/:id/quick-access', (req,res)=>{if(!quickAccessAdminAllowed(req))return res.status(403).json({error:'Permission requise.'});const u=cibleUtilisateur(req,res);if(!u)return;setUnusablePassword(u.id);const access=issueQuickAccessCode(u.id,req.user.id);notify(u.id,'compte','🔑 Nouveau code provisoire','Un nouveau code provisoire vous a été attribué par Klean Services. Il vous est communiqué séparément et peut être remplacé ultérieurement dans Compte → Paramètres.','#/settings');logAction(req.user,'quick_access_regenerated',{target_type:'users',target_id:u.id,target_name:u.name,details:'Code provisoire régénéré sans conservation en clair.'});res.json({ok:true,phone:u.phone,temporary_code:access.code,expires_at:access.expires_at,code_status:'active'});});
 
 // Conversion contrôlée d’un client : identité minimale conservée, aucune donnée inventée.
 A.post('/users/:id/convert-pro', (req, res) => {
@@ -3658,14 +3700,14 @@ A.post('/users/:id/disable-temp', (req, res) => {
   if (until) revokeProfessionalOffers(u.id);
   res.json({ ok: true });
 });
-// Réinitialiser l'accès : nouveau mot de passe temporaire (l'admin ne voit JAMAIS l'ancien mot de passe)
+// Réinitialiser l’accès : nouveau code provisoire expirant, sans obligation de modifier le mot de passe à la première connexion.
 A.post('/users/:id/reset-access', (req, res) => {
+  if(!quickAccessAdminAllowed(req))return res.status(403).json({error:'La permission de gestion des comptes est requise.'});
   const u = cibleUtilisateur(req, res); if (!u) return;
-  const temp = motDePasseTemporaire();
-  const salt = crypto.randomBytes(16).toString('hex');
-  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=1 WHERE id=?').run(hashPassword(temp, salt), salt, u.id);
-  notify(u.id, 'compte', '🔑 Accès réinitialisé', 'Votre accès a été réinitialisé par l\u2019administration. Connectez-vous avec le mot de passe temporaire qui vous a été communiqué, puis choisissez-en un nouveau.', '#/account');
-  res.json({ ok: true, temp_password: temp });
+  setUnusablePassword(u.id);const access=issueQuickAccessCode(u.id,req.user.id);
+  notify(u.id, 'compte', '🔑 Accès réinitialisé','Votre accès a été réinitialisé. Connectez-vous avec le code provisoire communiqué par Klean Services ; vous pourrez ensuite le conserver jusqu’à son expiration ou le remplacer dans Paramètres.','#/settings');
+  logAction(req.user,'quick_access_reset',{target_type:'users',target_id:u.id,target_name:u.name,details:'Code provisoire régénéré sans conservation en clair.'});
+  res.json({ ok: true, phone:u.phone, temporary_code:access.code, expires_at:access.expires_at, code_status:'active' });
 });
 A.post('/users/:id/force-password', (req, res) => {
   const u = cibleUtilisateur(req, res); if (!u) return;
@@ -3703,11 +3745,11 @@ A.post('/staff', (req, res) => {
   if (!phone || !/^[+0-9 ]{3,20}$/.test(phone.trim())) return res.status(400).json({ error: 'Identifiant / téléphone invalide.' });
   const p = phone.trim().replace(/\s+/g, '');
   if (db.prepare('SELECT id FROM users WHERE phone=?').get(p)) return res.status(409).json({ error: 'Ce numéro est déjà associé à un compte.' });
-  const temp = motDePasseTemporaire();
-  const salt = crypto.randomBytes(16).toString('hex');
+  const salt = crypto.randomBytes(16).toString('hex'),placeholder=crypto.randomBytes(32).toString('hex');
   const info = db.prepare(`INSERT INTO users(name, phone, email, password_hash, salt, role, must_change_password, created_by)
-    VALUES(?,?,?,?,?,?,1,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(temp, salt), salt, role, req.user.id);
-  res.json({ id: info.lastInsertRowid, temp_password: temp });
+    VALUES(?,?,?,?,?,?,0,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(placeholder, salt), salt, role, req.user.id);
+  const access=issueQuickAccessCode(info.lastInsertRowid,req.user.id);
+  res.status(201).json({ id: info.lastInsertRowid, phone:p, temporary_code:access.code, expires_at:access.expires_at });
 });
 A.put('/staff/:id', (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
@@ -3728,10 +3770,8 @@ A.post('/staff/:id/reset-access', (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
   if (!u || !STAFF_ROLES.includes(u.role)) return res.status(404).json({ error: 'Membre introuvable.' });
   if (u.role === 'pdg' && u.id !== req.user.id) return res.status(403).json({ error: 'Impossible.' });
-  const temp = motDePasseTemporaire();
-  const salt = crypto.randomBytes(16).toString('hex');
-  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=1 WHERE id=?').run(hashPassword(temp, salt), salt, u.id);
-  res.json({ ok: true, temp_password: temp });
+  setUnusablePassword(u.id);const access=issueQuickAccessCode(u.id,req.user.id);
+  res.json({ ok: true, phone:u.phone, temporary_code:access.code, expires_at:access.expires_at });
 });
 A.delete('/staff/:id', (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
@@ -5594,7 +5634,7 @@ function cabineAdminOffers(){return db.prepare(`SELECT o.*,op.code operator_code
 function cabineAdminOperations(){return db.prepare(`SELECT o.*,u.name user_name,u.phone user_phone,s.name service_name,f.name offer_name FROM cabine_operations o JOIN users u ON u.id=o.user_id LEFT JOIN cabine_services s ON s.id=o.service_id LEFT JOIN cabine_offers f ON f.id=o.offer_id ORDER BY o.created_at DESC LIMIT 500`).all();}
 A.get('/cabine/overview', pdgOnly,(req,res)=>{const settings=cabineSettings(),operators=db.prepare('SELECT * FROM cabine_operators ORDER BY sort,id').all(),services=db.prepare('SELECT * FROM cabine_services ORDER BY sort,id').all(),offers=cabineAdminOffers(),operations=cabineAdminOperations(),templates=db.prepare('SELECT * FROM cabine_notification_templates ORDER BY code').all(),audit=db.prepare(`SELECT a.*,u.name actor_name FROM cabine_audit a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.created_at DESC,a.id DESC LIMIT 200`).all();res.json({settings,operators,services,offers,operations,templates,audit,provider_connected:false,checkout_available:false});});
 A.get('/cabine/stats',pdgOnly,(req,res)=>{const total=db.prepare('SELECT COUNT(*) n FROM cabine_operations').get().n,states=Object.fromEntries(db.prepare('SELECT status,COUNT(*) n FROM cabine_operations GROUP BY status').all().map(r=>[r.status,r.n])),attempts=db.prepare("SELECT COUNT(*) n FROM cabine_audit WHERE action='checkout_blocked' AND created_at>=datetime('now','-30 days')").get().n;res.json({operations_total:total,by_status:states,blocked_checkout_attempts_30d:attempts,successful:0,revenue:0,provider_connected:false,checkout_available:false});});
-A.put('/cabine/settings',pdgOnly,(req,res)=>{const b=req.body||{},allowed=['cabine_enabled','cabine_title','cabine_description','cabine_icon','cabine_color','cabine_logo_url','cabine_unavailable_message','cabine_conditions','cabine_operator_detection','cabine_manual_operator','cabine_custom_amount','cabine_quick_amounts'];const before=cabineSettings();for(const k of allowed)if(k in b){let v=b[k];if(['cabine_enabled','cabine_operator_detection','cabine_manual_operator','cabine_custom_amount'].includes(k))v=v?1:0;if(k==='cabine_quick_amounts'){const ar=Array.isArray(v)?v:[];v=JSON.stringify(ar.map(Number).filter(n=>Number.isInteger(n)&&n>0&&n<=100000000).slice(0,12));}setSetting(k,String(v).slice(0,6000));}setSetting('cabine_payment_enabled','0');const after=cabineSettings();cabineAudit(req.user,'settings_updated','cabine_settings',null,before,after,'Paiement conservé désactivé jusqu’à intégration officielle.');res.json({...after,checkout_available:false});});
+A.put('/cabine/settings',pdgOnly,(req,res)=>{const b=req.body||{},allowed=['cabine_enabled','cabine_title','cabine_description','cabine_icon','cabine_color','cabine_logo_url','cabine_unavailable_message','cabine_conditions','cabine_operator_detection','cabine_manual_operator','cabine_custom_amount','cabine_quick_amounts','cabine_fee_enabled','cabine_fee_percent','cabine_fee_rounding','cabine_free_request_label','cabine_free_request_hint','cabine_transfer_label','cabine_subscription_label'];const before=cabineSettings();for(const k of allowed)if(k in b){let v=b[k];if(['cabine_enabled','cabine_operator_detection','cabine_manual_operator','cabine_custom_amount','cabine_fee_enabled'].includes(k))v=v?1:0;if(k==='cabine_quick_amounts'){const ar=Array.isArray(v)?v:[];v=JSON.stringify(ar.map(Number).filter(n=>Number.isInteger(n)&&n>0&&n<=100000000).slice(0,12));}if(k==='cabine_fee_percent'){v=Math.max(0,Math.min(100,Number(v)||0));}if(k==='cabine_fee_rounding')v=v==='ceil'?'ceil':'nearest';setSetting(k,String(v).slice(0,6000));}setSetting('cabine_payment_enabled','0');const after=cabineSettings();cabineAudit(req.user,'settings_updated','cabine_settings',null,before,after,'Paiement conservé désactivé jusqu’à intégration officielle.');res.json({...after,checkout_available:false});});
 A.post('/cabine/operators',pdgOnly,(req,res)=>{try{const p=cabineOperatorPayload(req.body,null),cols=Object.keys(p),r=db.prepare(`INSERT INTO cabine_operators(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`).run(...cols.map(k=>p[k]));const row=db.prepare('SELECT * FROM cabine_operators WHERE id=?').get(r.lastInsertRowid);cabineAudit(req.user,'operator_created','cabine_operator',row.id,null,row);res.status(201).json(row);}catch(e){res.status(400).json({error:e.message||'Création impossible.'});}});
 A.put('/cabine/operators/:id',pdgOnly,(req,res)=>{try{const old=db.prepare('SELECT * FROM cabine_operators WHERE id=?').get(Number(req.params.id));if(!old)return res.status(404).json({error:'Opérateur introuvable.'});const p=cabineOperatorPayload(req.body,old),cols=Object.keys(p);db.prepare(`UPDATE cabine_operators SET ${cols.map(k=>k+'=?').join(',')},updated_at=datetime('now') WHERE id=?`).run(...cols.map(k=>p[k]),old.id);const row=db.prepare('SELECT * FROM cabine_operators WHERE id=?').get(old.id);cabineAudit(req.user,'operator_updated','cabine_operator',old.id,old,row);res.json(row);}catch(e){res.status(400).json({error:e.message||'Mise à jour impossible.'});}});
 A.delete('/cabine/operators/:id',pdgOnly,(req,res)=>{try{const old=db.prepare('SELECT * FROM cabine_operators WHERE id=?').get(Number(req.params.id));if(!old)return res.status(404).json({error:'Opérateur introuvable.'});db.prepare('DELETE FROM cabine_operators WHERE id=?').run(old.id);cabineAudit(req.user,'operator_deleted','cabine_operator',old.id,old,null);res.json({ok:true});}catch(e){res.status(409).json({error:'Cet opérateur est utilisé par une offre ou un historique et ne peut pas être supprimé.'});}});

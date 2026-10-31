@@ -2640,4 +2640,38 @@ const cabineSeedTemplate=db.prepare("INSERT OR IGNORE INTO cabine_notification_t
   ['refund','Remboursement','Votre demande de régularisation ou remboursement est en cours.']
 ].forEach(x=>cabineSeedTemplate.run(...x));
 
+
+// ============================================================
+// COLIS 34 — comptes rapides et Klean Kbine à distance (additif)
+// ============================================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS quick_access_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash TEXT NOT NULL,
+  salt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','replaced','expired','locked','revoked')),
+  expires_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 5,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_quick_access_active ON quick_access_codes(user_id,status,expires_at DESC);
+`);
+const COLIS34_DEFAULTS={
+  quick_access_code_hours:'72', quick_access_code_max_attempts:'5',
+  cabine_title:'Klean Kbine à distance', cabine_fee_enabled:'1', cabine_fee_percent:'2', cabine_fee_rounding:'nearest',
+  cabine_free_request_label:'Décrivez le forfait que vous souhaitez', cabine_free_request_hint:'Exemple : Je veux 1,5 Go pour 500 FCFA.',
+  cabine_transfer_label:'Transfert de crédit', cabine_subscription_label:'Souscription Appel/Internet'
+};
+for(const [k,v] of Object.entries(COLIS34_DEFAULTS)) if(getSetting(k)===null)setSetting(k,v);
+// Renommage non destructif : une personnalisation explicite reste prioritaire.
+if(getSetting('cabine_title')==='Klean Cabine')setSetting('cabine_title','Klean Kbine à distance');
+// Les modèles par défaut suivent le nouveau nom, sans écraser un texte personnalisé.
+db.prepare("UPDATE cabine_notification_templates SET title=?,body=? WHERE code='welcome' AND title=? AND body=?").run('Bienvenue dans Klean Kbine à distance','Choisissez un service, vérifiez vos numéros puis consultez le récapitulatif sans paiement.','Bienvenue dans Klean Cabine','Choisissez une opération disponible et vérifiez vos numéros avant le paiement.');
+
+if(getSetting('cabine_unavailable_message')==='Les opérations Klean Cabine sont momentanément indisponibles : aucun prestataire de paiement et opérateur vérifié n’est encore connecté.')setSetting('cabine_unavailable_message','Les opérations Klean Kbine à distance sont momentanément indisponibles : aucun prestataire de paiement et opérateur vérifié n’est encore connecté.');
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

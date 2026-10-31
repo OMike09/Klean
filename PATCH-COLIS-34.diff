@@ -1,0 +1,722 @@
+--- COLIS-33/db.js
++++ COLIS-34/db.js
+@@ -2640,4 +2640,38 @@
+   ['refund','Remboursement','Votre demande de régularisation ou remboursement est en cours.']
+ ].forEach(x=>cabineSeedTemplate.run(...x));
+ 
++
++// ============================================================
++// COLIS 34 — comptes rapides et Klean Kbine à distance (additif)
++// ============================================================
++db.exec(`
++CREATE TABLE IF NOT EXISTS quick_access_codes (
++  id INTEGER PRIMARY KEY AUTOINCREMENT,
++  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
++  code_hash TEXT NOT NULL,
++  salt TEXT NOT NULL,
++  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','replaced','expired','locked','revoked')),
++  expires_at TEXT NOT NULL,
++  attempts INTEGER NOT NULL DEFAULT 0,
++  max_attempts INTEGER NOT NULL DEFAULT 5,
++  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
++  created_at TEXT NOT NULL DEFAULT (datetime('now')),
++  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
++);
++CREATE INDEX IF NOT EXISTS idx_quick_access_active ON quick_access_codes(user_id,status,expires_at DESC);
++`);
++const COLIS34_DEFAULTS={
++  quick_access_code_hours:'72', quick_access_code_max_attempts:'5',
++  cabine_title:'Klean Kbine à distance', cabine_fee_enabled:'1', cabine_fee_percent:'2', cabine_fee_rounding:'nearest',
++  cabine_free_request_label:'Décrivez le forfait que vous souhaitez', cabine_free_request_hint:'Exemple : Je veux 1,5 Go pour 500 FCFA.',
++  cabine_transfer_label:'Transfert de crédit', cabine_subscription_label:'Souscription Appel/Internet'
++};
++for(const [k,v] of Object.entries(COLIS34_DEFAULTS)) if(getSetting(k)===null)setSetting(k,v);
++// Renommage non destructif : une personnalisation explicite reste prioritaire.
++if(getSetting('cabine_title')==='Klean Cabine')setSetting('cabine_title','Klean Kbine à distance');
++// Les modèles par défaut suivent le nouveau nom, sans écraser un texte personnalisé.
++db.prepare("UPDATE cabine_notification_templates SET title=?,body=? WHERE code='welcome' AND title=? AND body=?").run('Bienvenue dans Klean Kbine à distance','Choisissez un service, vérifiez vos numéros puis consultez le récapitulatif sans paiement.','Bienvenue dans Klean Cabine','Choisissez une opération disponible et vérifiez vos numéros avant le paiement.');
++
++if(getSetting('cabine_unavailable_message')==='Les opérations Klean Cabine sont momentanément indisponibles : aucun prestataire de paiement et opérateur vérifié n’est encore connecté.')setSetting('cabine_unavailable_message','Les opérations Klean Kbine à distance sont momentanément indisponibles : aucun prestataire de paiement et opérateur vérifié n’est encore connecté.');
++
+ module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
+--- COLIS-33/server.js
++++ COLIS-34/server.js
+@@ -434,6 +434,34 @@
+ // Le minuteur serveur rend effectifs démarrage et fin programmés même si personne ne consulte le site.
+ setInterval(()=>{ try { getMaintenance(); } catch(e) { console.error('Contrôle maintenance :',e.message); } },15000);
+ 
++
++// ================== COLIS 34 — codes provisoires des comptes rapides ==================
++function quickAccessNumber(key,fallback,min,max){const n=Math.round(Number(getSetting(key,String(fallback))));return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;}
++function quickAccessPolicy(){return {hours:quickAccessNumber('quick_access_code_hours',72,1,24*30),max_attempts:quickAccessNumber('quick_access_code_max_attempts',5,3,12)};}
++function quickAccessCode(){
++  // 60 bits aléatoires, alphabet sans caractères ambigus ; la valeur brute n’est jamais stockée ni journalisée.
++  const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let out='';const bytes=crypto.randomBytes(12);for(let i=0;i<12;i++)out+=alphabet[bytes[i]%alphabet.length];return out.slice(0,10);
++}
++function issueQuickAccessCode(userId,actorId){
++  const policy=quickAccessPolicy(),code=quickAccessCode(),salt=crypto.randomBytes(16).toString('hex');
++  db.transaction(()=>{db.prepare("UPDATE quick_access_codes SET status='replaced',updated_at=datetime('now') WHERE user_id=? AND status='active'").run(userId);db.prepare("INSERT INTO quick_access_codes(user_id,code_hash,salt,expires_at,max_attempts,created_by) VALUES(?,?,?,?,?,?)").run(userId,hashPassword(code,salt),salt,new Date(Date.now()+policy.hours*3600000).toISOString().slice(0,19).replace('T',' '),policy.max_attempts,actorId||null);db.prepare('UPDATE users SET must_change_password=0 WHERE id=?').run(userId);})();
++  return {code,expires_at:new Date(Date.now()+policy.hours*3600000).toISOString().slice(0,19).replace('T',' '),hours:policy.hours};
++}
++function quickAccessStatus(userId){
++  db.prepare("UPDATE quick_access_codes SET status='expired',updated_at=datetime('now') WHERE user_id=? AND status='active' AND expires_at<=datetime('now')").run(userId);
++  const row=db.prepare("SELECT id,status,expires_at,attempts,max_attempts,created_at FROM quick_access_codes WHERE user_id=? ORDER BY id DESC LIMIT 1").get(userId);
++  return row?{active:row.status==='active'&&row.expires_at>maintenanceDbNow(),status:row.status,expires_at:row.expires_at,attempts:row.attempts,max_attempts:row.max_attempts,created_at:row.created_at}:null;
++}
++function verifyQuickAccessCode(user,code){
++  const row=db.prepare("SELECT * FROM quick_access_codes WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 1").get(user.id);if(!row)return false;
++  if(row.expires_at<=maintenanceDbNow()){db.prepare("UPDATE quick_access_codes SET status='expired',updated_at=datetime('now') WHERE id=?").run(row.id);return false;}
++  if(row.attempts>=row.max_attempts){db.prepare("UPDATE quick_access_codes SET status='locked',updated_at=datetime('now') WHERE id=?").run(row.id);return false;}
++  if(hashPassword(String(code||''),row.salt)!==row.code_hash){const attempts=row.attempts+1;db.prepare("UPDATE quick_access_codes SET attempts=?,status=CASE WHEN ?>=max_attempts THEN 'locked' ELSE status END,updated_at=datetime('now') WHERE id=?").run(attempts,attempts,row.id);return false;}
++  return true;
++}
++function setUnusablePassword(userId){const salt=crypto.randomBytes(16).toString('hex'),secret=crypto.randomBytes(32).toString('hex');db.prepare('UPDATE users SET password_hash=?,salt=?,must_change_password=0 WHERE id=?').run(hashPassword(secret,salt),salt,userId);}
++function quickAccessAdminAllowed(req){return hasPerm(req.user,'comptes');}
++
+ app.post('/api/auth/register', (req, res) => {
+   const { name, phone, password, address, ville, quartier, lat, lng, accept_rules, referral_token } = req.body || {};
+   if (!name || !name.trim()) return res.status(400).json({ error: 'Veuillez indiquer votre nom.' });
+@@ -467,6 +495,10 @@
+   const p = (phone || '').trim().replace(/\s+/g, '');
+   const user = db.prepare('SELECT * FROM users WHERE phone=?').get(p);
+   let ok = !!user && user.password_hash === hashPassword(password || '', user.salt);
++  let loginWithQuickCode=false;
++  // Un code provisoire créé par l’administration est vérifié séparément, avec durée et anti-bruteforce.
++  // Il ne modifie ni le rôle ni les permissions du compte.
++  if(!ok && user){loginWithQuickCode=verifyQuickAccessCode(user,password||'');ok=loginWithQuickCode;}
+   // Compte importé de l'ancienne application : on accepte aussi l'ANCIEN mot de passe
+   if (!ok && user) {
+     const legacy = db.prepare('SELECT sha256 FROM legacy_passwords WHERE user_id=?').get(user.id);
+@@ -600,18 +632,17 @@
+     return res.status(400).json({ error: 'Code incorrect (' + (4 - rc.attempts) + ' essai(s) restant(s)).' });
+   }
+   const salt = crypto.randomBytes(16).toString('hex');
+-  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, user.id);
+-  db.prepare('UPDATE reset_codes SET used=1 WHERE id=?').run(rc.id);
++  db.transaction(()=>{db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, user.id);db.prepare("UPDATE quick_access_codes SET status='replaced',updated_at=datetime('now') WHERE user_id=? AND status='active'").run(user.id);db.prepare('UPDATE reset_codes SET used=1 WHERE id=?').run(rc.id);})();
+   notify(user.id, 'compte', '🔑 Mot de passe modifié', 'Votre mot de passe a été modifié grâce au code de vérification. Si ce n\u2019était pas vous, contactez immédiatement Klean Services.', '#/account');
+   res.json({ token: sign({ id: user.id, exp: Date.now() + 90 * 86400000 }), user: me(db.prepare('SELECT * FROM users WHERE id=?').get(user.id)) });
+ });
+ 
+ app.put('/api/me/password', auth, (req, res) => {
+   const { current, password } = req.body || {};
+-  if (req.user.password_hash !== hashPassword(current || '', req.user.salt)) return res.status(400).json({ error: 'Mot de passe actuel incorrect.' });
++  if (req.user.password_hash !== hashPassword(current || '', req.user.salt) && !verifyQuickAccessCode(req.user,current||'')) return res.status(400).json({ error: 'Code ou mot de passe actuel incorrect.' });
+   if (!password || password.length < 6) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 6 caractères.' });
+   const salt = crypto.randomBytes(16).toString('hex');
+-  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, req.user.id);
++  db.transaction(()=>{db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=0 WHERE id=?').run(hashPassword(password, salt), salt, req.user.id);db.prepare("UPDATE quick_access_codes SET status='replaced',updated_at=datetime('now') WHERE user_id=? AND status='active'").run(req.user.id);})();
+   res.json({ ok: true });
+ });
+ 
+@@ -3350,7 +3381,9 @@
+ 
+ 
+ // ================== COLIS 33 — Klean Cabine (fondations sûres, sans exécution) ==================
+-function cabineSettings(){const g=(k,d='')=>getSetting(k,d);return {enabled:g('cabine_enabled','1')==='1',title:g('cabine_title','Klean Cabine'),description:g('cabine_description',''),icon:g('cabine_icon','📲'),color:g('cabine_color','#166534'),logo_url:g('cabine_logo_url',''),unavailable_message:g('cabine_unavailable_message','Les opérations sont indisponibles.'),conditions:g('cabine_conditions',''),payment_enabled:false,operator_detection:g('cabine_operator_detection','1')==='1',manual_operator:g('cabine_manual_operator','1')==='1',custom_amount:g('cabine_custom_amount','1')==='1',quick_amounts:jsonArray(g('cabine_quick_amounts','[]')).filter(n=>Number.isInteger(Number(n))&&Number(n)>0)};}
++function cabineSettings(){const g=(k,d='')=>getSetting(k,d),rate=Math.max(0,Math.min(100,Number(g('cabine_fee_percent','2'))||0));return {enabled:g('cabine_enabled','1')==='1',title:g('cabine_title','Klean Kbine à distance'),description:g('cabine_description',''),icon:g('cabine_icon','📲'),color:g('cabine_color','#166534'),logo_url:g('cabine_logo_url',''),unavailable_message:g('cabine_unavailable_message','Les opérations sont indisponibles.'),conditions:g('cabine_conditions',''),payment_enabled:false,operator_detection:g('cabine_operator_detection','1')==='1',manual_operator:g('cabine_manual_operator','1')==='1',custom_amount:g('cabine_custom_amount','1')==='1',quick_amounts:jsonArray(g('cabine_quick_amounts','[]')).filter(n=>Number.isInteger(Number(n))&&Number(n)>0),fee_enabled:g('cabine_fee_enabled','1')==='1',fee_percent:rate,fee_rounding:g('cabine_fee_rounding','nearest')==='ceil'?'ceil':'nearest',free_request_label:g('cabine_free_request_label','Décrivez le forfait que vous souhaitez'),free_request_hint:g('cabine_free_request_hint','Exemple : Je veux 1,5 Go pour 500 FCFA.'),transfer_label:g('cabine_transfer_label','Transfert de crédit'),subscription_label:g('cabine_subscription_label','Souscription Appel/Internet')};}
++function cabineFee(amount,cfg=cabineSettings()){if(!cfg.fee_enabled)return 0;const value=Number(amount||0)*Number(cfg.fee_percent||0)/100;return cfg.fee_rounding==='ceil'?Math.ceil(value):Math.round(value);}
++
+ function cabineOperatorPublic(r){return {id:r.id,code:r.code,name:r.name,description:r.description,logo_url:r.logo_url,color:r.color,configured:!!r.enabled,transfer_configured:!!r.transfer_enabled,bundles_configured:!!r.bundles_enabled,api_status:r.api_status,api_message:r.api_message,conditions:r.conditions,available:false,unavailable_reason:'Aucun connecteur officiel de paiement et d’opérateur n’est vérifié pour le moment.'};}
+ function cabineServicePublic(r){return {id:r.id,code:r.code,name:r.name,description:r.description,icon:r.icon,image_url:r.image_url,color:r.color,service_type:r.service_type,configured:!!r.enabled,available:false};}
+ function cabineOfferPublic(r){return {id:r.id,operator_id:r.operator_id,operator_code:r.operator_code,operator_name:r.operator_name,service_id:r.service_id,service_code:r.service_code,service_name:r.service_name,name:r.name,description:r.description,benefit:r.benefit,validity_text:r.validity_text,provider_price:r.provider_price,customer_price:r.customer_price,fee_fixed:r.fee_fixed,fee_percent:r.fee_percent,conditions:r.conditions,configured:!!r.enabled,available:false,unavailable_reason:'Aucun paiement ni achat de forfait ne peut être lancé avant connexion officielle vérifiée.'};}
+@@ -3360,7 +3393,8 @@
+ function cabineOperationPublic(r){return {...r,service_name:r.service_name||null,offer_name:r.offer_name||null,debit_phone:'••••'+String(r.debit_phone||'').slice(-4),beneficiary_phone:'••••'+String(r.beneficiary_phone||'').slice(-4),receipt_available:['successful','refunded'].includes(r.status),execution_available:false};}
+ app.get('/api/cabine/config', optionalAuth, (req,res)=>{const cfg=cabineSettings(),ops=db.prepare('SELECT * FROM cabine_operators ORDER BY sort,id').all(),services=db.prepare('SELECT * FROM cabine_services WHERE enabled=1 ORDER BY sort,id').all(),offers=db.prepare(`SELECT o.*,op.code operator_code,op.name operator_name,s.code service_code,s.name service_name FROM cabine_offers o JOIN cabine_operators op ON op.id=o.operator_id JOIN cabine_services s ON s.id=o.service_id WHERE o.visible=1 ORDER BY s.sort,op.sort,o.sort,o.id`).all();res.json({...cfg,operators:ops.map(cabineOperatorPublic),services:services.map(cabineServicePublic),offers:offers.map(cabineOfferPublic),checkout_available:false,provider_connected:false});});
+ app.get('/api/cabine/offers', optionalAuth, (req,res)=>{const service=braderieValidField(req.query.service,40),operator=braderieValidField(req.query.operator,40);let rows=db.prepare(`SELECT o.*,op.code operator_code,op.name operator_name,s.code service_code,s.name service_name FROM cabine_offers o JOIN cabine_operators op ON op.id=o.operator_id JOIN cabine_services s ON s.id=o.service_id WHERE o.visible=1 ORDER BY s.sort,op.sort,o.sort,o.id`).all();if(service)rows=rows.filter(x=>x.service_code===service);if(operator)rows=rows.filter(x=>x.operator_code===operator);res.json(rows.map(cabineOfferPublic));});
+-app.post('/api/cabine/quote', auth, (req,res)=>{const b=req.body||{},type=String(b.operation_type||''),debit=cabineCleanPhone(b.debit_phone),beneficiary=cabineCleanPhone(b.beneficiary_phone),debitOperator=braderieValidField(b.debit_operator_code,30).toLowerCase(),beneficiaryOperator=braderieValidField(b.beneficiary_operator_code,30).toLowerCase(),offer=Number(b.offer_id)||0;if(!['transfer','bundle'].includes(type))return res.status(400).json({error:'Type d’opération invalide.'});if(!/^\+?[0-9]{8,18}$/.test(debit)||!/^\+?[0-9]{8,18}$/.test(beneficiary))return res.status(400).json({error:'Vérifiez les numéros débiteur et bénéficiaire.'});if(!debitOperator||!beneficiaryOperator||!db.prepare('SELECT 1 FROM cabine_operators WHERE code=?').get(debitOperator)||!db.prepare('SELECT 1 FROM cabine_operators WHERE code=?').get(beneficiaryOperator))return res.status(400).json({error:'Choisissez les opérateurs débiteur et bénéficiaire configurés.'});let row=null;if(type==='bundle'){row=cabineOfferRow(offer);if(!row)return res.status(404).json({error:'Offre introuvable.'});}const amount=type==='bundle'?Number(row.customer_price):Math.round(Number(b.amount)),fee=type==='bundle'?Number(row.fee_fixed)+Math.round(Number(row.customer_price)*Number(row.fee_percent)/100):0;if(type==='transfer'&&(!Number.isFinite(amount)||amount<=0))return res.status(400).json({error:'Le montant est obligatoire pour un transfert.'});res.json({recap:true,operation_type:type,debit_phone:'••••'+debit.slice(-4),debit_operator_code:debitOperator,beneficiary_phone:'••••'+beneficiary.slice(-4),beneficiary_operator_code:beneficiaryOperator,offer:row?cabineOfferPublic(row):null,amount,fee,total:amount+fee,checkout_available:false,provider_connected:false,message:cabineSettings().unavailable_message,no_charge:true});});
++app.post('/api/cabine/quote', auth, (req,res)=>{const b=req.body||{},type=String(b.operation_type||''),debit=cabineCleanPhone(b.debit_phone),beneficiary=cabineCleanPhone(b.beneficiary_phone),beneficiaryConfirmation=cabineCleanPhone(b.beneficiary_confirmation),debitOperator=braderieValidField(b.debit_operator_code,30).toLowerCase(),beneficiaryOperator=braderieValidField(b.beneficiary_operator_code,30).toLowerCase(),offer=Number(b.offer_id)||0,freeRequest=braderieValidField(b.free_request,500);if(!['transfer','bundle'].includes(type))return res.status(400).json({error:'Type d’opération invalide.'});if(!/^\+?[0-9]{8,18}$/.test(debit)||!/^\+?[0-9]{8,18}$/.test(beneficiary))return res.status(400).json({error:'Vérifiez les numéros à débiter et bénéficiaire.'});if(!beneficiaryConfirmation||beneficiary!==beneficiaryConfirmation)return res.status(400).json({error:'Les deux numéros ne correspondent pas. Veuillez vérifier le numéro bénéficiaire.'});if(!debitOperator||!beneficiaryOperator||!db.prepare('SELECT 1 FROM cabine_operators WHERE code=?').get(debitOperator)||!db.prepare('SELECT 1 FROM cabine_operators WHERE code=?').get(beneficiaryOperator))return res.status(400).json({error:'Choisissez les opérateurs débiteur et bénéficiaire configurés.'});let row=null;if(type==='bundle'){row=cabineOfferRow(offer);if(!row&&!freeRequest)return res.status(400).json({error:'Choisissez une offre disponible ou décrivez le forfait recherché.'});if(row&&row.operator_code!==beneficiaryOperator)return res.status(400).json({error:'L’offre choisie ne correspond pas à l’opérateur bénéficiaire.'});}const amount=type==='bundle'&&row?Number(row.customer_price):Math.round(Number(b.amount)),cfg=cabineSettings(),fee=cabineFee(amount,cfg);if((type==='transfer'||!row)&&(!Number.isFinite(amount)||amount<=0))return res.status(400).json({error:'Un montant ou une offre administrée est obligatoire.'});res.json({recap:true,operation_type:type,debit_phone:'••••'+debit.slice(-4),debit_operator_code:debitOperator,beneficiary_phone:'••••'+beneficiary.slice(-4),beneficiary_confirmation:'••••'+beneficiaryConfirmation.slice(-4),beneficiary_operator_code:beneficiaryOperator,offer:row?cabineOfferPublic(row):null,free_request:freeRequest||null,amount,fee,fee_percent:cfg.fee_enabled?cfg.fee_percent:0,total:amount+fee,checkout_available:false,provider_connected:false,message:cfg.unavailable_message,no_charge:true});});
++app.post('/api/cabine/offers/match',auth,(req,res)=>{const q=normalize(braderieValidField((req.body||{}).query,500)),operator=braderieValidField((req.body||{}).operator,30).toLowerCase(),kind=['calls','internet'].includes(String((req.body||{}).kind||''))?String((req.body||{}).kind):'';if(!q)return res.status(400).json({error:'Décrivez le forfait recherché.'});let rows=db.prepare(`SELECT o.*,op.code operator_code,op.name operator_name,s.code service_code,s.name service_name FROM cabine_offers o JOIN cabine_operators op ON op.id=o.operator_id JOIN cabine_services s ON s.id=o.service_id WHERE o.visible=1 ORDER BY o.sort,o.id`).all();if(operator)rows=rows.filter(r=>r.operator_code===operator);if(kind)rows=rows.filter(r=>r.service_code===kind);const tokens=q.split(/[^a-z0-9]+/).filter(x=>x.length>=2);const found=rows.filter(r=>{const hay=normalize([r.name,r.description,r.benefit,r.validity_text,r.service_name,r.operator_name,r.customer_price].join(' '));return tokens.every(t=>hay.includes(t));}).slice(0,8);res.json({matches:found.map(cabineOfferPublic),matched:found.length>0,notice:found.length?'Offre(s) administrée(s) correspondante(s) trouvée(s).':'Aucune offre administrée ne correspond exactement. Klean Services devra la vérifier.'});});
+ app.post('/api/cabine/operations', auth, (req,res)=>{cabineAudit(req.user,'checkout_blocked','cabine_operation',null,null,{operation_type:(req.body||{}).operation_type||null},'Prestataire officiel non connecté : aucune opération ni débit créé.');res.status(503).json({error:cabineSettings().unavailable_message,code:'PROVIDER_NOT_CONNECTED',no_charge:true,operation_created:false});});
+ app.get('/api/cabine/operations', auth, (req,res)=>{const rows=db.prepare(`SELECT o.*,s.name service_name,f.name offer_name FROM cabine_operations o LEFT JOIN cabine_services s ON s.id=o.service_id LEFT JOIN cabine_offers f ON f.id=o.offer_id WHERE o.user_id=? ORDER BY o.created_at DESC LIMIT 200`).all(req.user.id);res.json({items:rows.map(cabineOperationPublic),checkout_available:false});});
+ app.get('/api/cabine/operations/:id/receipt', auth, (req,res)=>{const row=db.prepare(`SELECT o.*,s.name service_name,f.name offer_name FROM cabine_operations o LEFT JOIN cabine_services s ON s.id=o.service_id LEFT JOIN cabine_offers f ON f.id=o.offer_id WHERE o.id=? AND o.user_id=?`).get(Number(req.params.id),req.user.id);if(!row)return res.status(404).json({error:'Opération introuvable.'});if(!['successful','refunded'].includes(row.status))return res.status(409).json({error:'Aucun reçu n’est disponible pour une opération non exécutée.'});res.json(cabineOperationPublic(row));});
+@@ -3540,6 +3574,8 @@
+   if (f === 'incomplete') where += ' AND u.profile_incomplete=1';
+   const sort = req.query.sort === 'nom' ? 'u.name COLLATE NOCASE ASC' : 'u.id DESC'; // alphabétique ou date d'inscription (récents d'abord)
+   const rows = db.prepare(`SELECT u.id, u.name, u.phone, u.email, u.address, u.ville, u.quartier, u.is_pro, u.pro_status, u.kp_code, u.suspended, u.blocked, u.disabled_until, u.must_change_password, u.profile_incomplete, u.verified, u.created_at,
++    (SELECT q.status FROM quick_access_codes q WHERE q.user_id=u.id ORDER BY q.id DESC LIMIT 1) quick_access_status,
++    (SELECT q.expires_at FROM quick_access_codes q WHERE q.user_id=u.id ORDER BY q.id DESC LIMIT 1) quick_access_expires_at,
+     p.profession AS pro_profession, p.services AS pro_services, p.service_city AS service_city
+     FROM users u LEFT JOIN pro_profiles p ON p.user_id=u.id WHERE ${where} ORDER BY ${sort} LIMIT 500`).all();
+   // Les identifiants enregistrés dans le profil sont résolus à chaque lecture : aucune copie
+@@ -3559,8 +3595,9 @@
+   const pro = db.prepare('SELECT * FROM pro_profiles WHERE user_id=?').get(u.id);
+   const missions = db.prepare('SELECT COUNT(*) n FROM missions WHERE client_id=? OR pro_id=?').get(u.id, u.id).n;
+   const history = db.prepare("SELECT admin_name, admin_role, action, details, reason, created_at FROM admin_log WHERE target_type='users' AND target_id=? ORDER BY id DESC LIMIT 50").all(u.id);
++  const quick_access=quickAccessStatus(u.id);
+   delete u.password_hash; delete u.salt; delete u.perms;
+-  res.json({ ...u, pro: pro ? { ...pro, services: JSON.parse(pro.services), authorized_services: jsonNumberIds(pro.authorized_services || pro.services),
++  res.json({ ...u, quick_access, pro: pro ? { ...pro, services: JSON.parse(pro.services), authorized_services: jsonNumberIds(pro.authorized_services || pro.services),
+     domain_categories: (() => { try { const v=JSON.parse(pro.domain_categories || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })(),
+     authorized_domain_categories: pro.authorized_domain_categories === null || pro.authorized_domain_categories === undefined ? null : (() => { try { const v=JSON.parse(pro.authorized_domain_categories || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })(),
+     selected_subcategories:numberIds(pro.selected_subcategories),authorized_subcategories:pro.authorized_subcategories===null?null:numberIds(pro.authorized_subcategories),
+@@ -3581,22 +3618,27 @@
+   return 'KS' + String(Math.floor(100000 + Math.random() * 900000));
+ }
+ 
+-// ＋ Créer rapidement un compte (infos minimales — l'utilisateur complètera son profil)
++// ＋ Créer rapidement un compte : code provisoire distinct, expirant et révocable.
+ A.post('/users', (req, res) => {
++  if(!quickAccessAdminAllowed(req))return res.status(403).json({error:'La permission de gestion des comptes est requise.'});
+   const { name, phone, email, type } = req.body || {};
+   if (!name || !name.trim()) return res.status(400).json({ error: 'Veuillez indiquer le nom.' });
+   if (!phone || !/^[+0-9 ]{8,20}$/.test(phone.trim())) return res.status(400).json({ error: 'Numéro de téléphone invalide.' });
+   const p = phone.trim().replace(/\s+/g, '');
+-  if (db.prepare('SELECT id FROM users WHERE phone=?').get(p)) return res.status(409).json({ error: 'Ce numéro est déjà associé à un compte.' });
+-  const temp = motDePasseTemporaire();
+-  const salt = crypto.randomBytes(16).toString('hex');
++  const existing=db.prepare('SELECT id FROM users WHERE phone=?').get(p);
++  if(existing)return res.status(409).json({ error: 'Ce numéro est déjà associé à un compte. Utilisez la récupération ou régénérez un code provisoire depuis sa fiche.', duplicate:true, user_id:existing.id });
++  const salt = crypto.randomBytes(16).toString('hex'),placeholder=crypto.randomBytes(32).toString('hex');
+   const info = db.prepare(`INSERT INTO users(name, phone, email, password_hash, salt, must_change_password, profile_incomplete, created_by)
+-    VALUES(?,?,?,?,?,1,1,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(temp, salt), salt, req.user.id);
+-  notify(info.lastInsertRowid, 'compte', 'Bienvenue sur Klean Services 👋',
+-    'Votre compte a été créé par notre équipe. Connectez-vous, choisissez votre mot de passe et complétez votre profil.' +
+-    (type === 'pro' ? ' Pour devenir professionnel, faites votre demande depuis Mon compte (validation normale).' : ''), '#/account');
+-  res.json({ id: info.lastInsertRowid, temp_password: temp });
+-});
++    VALUES(?,?,?,?,?,0,1,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(placeholder,salt), salt, req.user.id);
++  const access=issueQuickAccessCode(info.lastInsertRowid,req.user.id);
++  notify(info.lastInsertRowid, 'compte', 'Bienvenue sur Klean Services 👋','Votre compte a été créé par notre équipe. Utilisez le code provisoire communiqué par l’administration pour vous connecter ; vous pourrez le remplacer plus tard dans Compte → Paramètres. '+(type === 'pro' ? ' Pour devenir professionnel, faites votre demande depuis Mon compte.' : ''),'#/account');
++  logAction(req.user,'quick_account_created',{target_type:'users',target_id:info.lastInsertRowid,target_name:name.trim(),details:'Code provisoire généré sans conservation en clair.'});
++  res.status(201).json({id:info.lastInsertRowid,phone:p,temporary_code:access.code,expires_at:access.expires_at,code_status:'active'});
++});
++A.get('/access-codes/config',pdgOnly,(req,res)=>res.json(quickAccessPolicy()));
++A.put('/access-codes/config',pdgOnly,(req,res)=>{const b=req.body||{},hours=Math.round(Number(b.hours)),max=Math.round(Number(b.max_attempts));if(!Number.isInteger(hours)||hours<1||hours>720||!Number.isInteger(max)||max<3||max>12)return res.status(400).json({error:'Durée ou nombre maximal d’essais invalide.'});setSetting('quick_access_code_hours',hours);setSetting('quick_access_code_max_attempts',max);logAction(req.user,'quick_access_policy_updated',{target_type:'settings',target_name:'quick_access_codes',details:`durée=${hours}h; essais=${max}`});res.json(quickAccessPolicy());});
++A.get('/users/:id/quick-access', (req,res)=>{if(!quickAccessAdminAllowed(req))return res.status(403).json({error:'Permission requise.'});const u=cibleUtilisateur(req,res);if(!u)return;res.json(quickAccessStatus(u.id)||{active:false,status:'none'});});
++A.post('/users/:id/quick-access', (req,res)=>{if(!quickAccessAdminAllowed(req))return res.status(403).json({error:'Permission requise.'});const u=cibleUtilisateur(req,res);if(!u)return;setUnusablePassword(u.id);const access=issueQuickAccessCode(u.id,req.user.id);notify(u.id,'compte','🔑 Nouveau code provisoire','Un nouveau code provisoire vous a été attribué par Klean Services. Il vous est communiqué séparément et peut être remplacé ultérieurement dans Compte → Paramètres.','#/settings');logAction(req.user,'quick_access_regenerated',{target_type:'users',target_id:u.id,target_name:u.name,details:'Code provisoire régénéré sans conservation en clair.'});res.json({ok:true,phone:u.phone,temporary_code:access.code,expires_at:access.expires_at,code_status:'active'});});
+ 
+ // Conversion contrôlée d’un client : identité minimale conservée, aucune donnée inventée.
+ A.post('/users/:id/convert-pro', (req, res) => {
+@@ -3658,14 +3700,14 @@
+   if (until) revokeProfessionalOffers(u.id);
+   res.json({ ok: true });
+ });
+-// Réinitialiser l'accès : nouveau mot de passe temporaire (l'admin ne voit JAMAIS l'ancien mot de passe)
++// Réinitialiser l’accès : nouveau code provisoire expirant, sans obligation de modifier le mot de passe à la première connexion.
+ A.post('/users/:id/reset-access', (req, res) => {
++  if(!quickAccessAdminAllowed(req))return res.status(403).json({error:'La permission de gestion des comptes est requise.'});
+   const u = cibleUtilisateur(req, res); if (!u) return;
+-  const temp = motDePasseTemporaire();
+-  const salt = crypto.randomBytes(16).toString('hex');
+-  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=1 WHERE id=?').run(hashPassword(temp, salt), salt, u.id);
+-  notify(u.id, 'compte', '🔑 Accès réinitialisé', 'Votre accès a été réinitialisé par l\u2019administration. Connectez-vous avec le mot de passe temporaire qui vous a été communiqué, puis choisissez-en un nouveau.', '#/account');
+-  res.json({ ok: true, temp_password: temp });
++  setUnusablePassword(u.id);const access=issueQuickAccessCode(u.id,req.user.id);
++  notify(u.id, 'compte', '🔑 Accès réinitialisé','Votre accès a été réinitialisé. Connectez-vous avec le code provisoire communiqué par Klean Services ; vous pourrez ensuite le conserver jusqu’à son expiration ou le remplacer dans Paramètres.','#/settings');
++  logAction(req.user,'quick_access_reset',{target_type:'users',target_id:u.id,target_name:u.name,details:'Code provisoire régénéré sans conservation en clair.'});
++  res.json({ ok: true, phone:u.phone, temporary_code:access.code, expires_at:access.expires_at, code_status:'active' });
+ });
+ A.post('/users/:id/force-password', (req, res) => {
+   const u = cibleUtilisateur(req, res); if (!u) return;
+@@ -3703,11 +3745,11 @@
+   if (!phone || !/^[+0-9 ]{3,20}$/.test(phone.trim())) return res.status(400).json({ error: 'Identifiant / téléphone invalide.' });
+   const p = phone.trim().replace(/\s+/g, '');
+   if (db.prepare('SELECT id FROM users WHERE phone=?').get(p)) return res.status(409).json({ error: 'Ce numéro est déjà associé à un compte.' });
+-  const temp = motDePasseTemporaire();
+-  const salt = crypto.randomBytes(16).toString('hex');
++  const salt = crypto.randomBytes(16).toString('hex'),placeholder=crypto.randomBytes(32).toString('hex');
+   const info = db.prepare(`INSERT INTO users(name, phone, email, password_hash, salt, role, must_change_password, created_by)
+-    VALUES(?,?,?,?,?,?,1,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(temp, salt), salt, role, req.user.id);
+-  res.json({ id: info.lastInsertRowid, temp_password: temp });
++    VALUES(?,?,?,?,?,?,0,?)`).run(name.trim(), p, (email || '').trim() || null, hashPassword(placeholder, salt), salt, role, req.user.id);
++  const access=issueQuickAccessCode(info.lastInsertRowid,req.user.id);
++  res.status(201).json({ id: info.lastInsertRowid, phone:p, temporary_code:access.code, expires_at:access.expires_at });
+ });
+ A.put('/staff/:id', (req, res) => {
+   const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+@@ -3728,10 +3770,8 @@
+   const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+   if (!u || !STAFF_ROLES.includes(u.role)) return res.status(404).json({ error: 'Membre introuvable.' });
+   if (u.role === 'pdg' && u.id !== req.user.id) return res.status(403).json({ error: 'Impossible.' });
+-  const temp = motDePasseTemporaire();
+-  const salt = crypto.randomBytes(16).toString('hex');
+-  db.prepare('UPDATE users SET password_hash=?, salt=?, must_change_password=1 WHERE id=?').run(hashPassword(temp, salt), salt, u.id);
+-  res.json({ ok: true, temp_password: temp });
++  setUnusablePassword(u.id);const access=issueQuickAccessCode(u.id,req.user.id);
++  res.json({ ok: true, phone:u.phone, temporary_code:access.code, expires_at:access.expires_at });
+ });
+ A.delete('/staff/:id', (req, res) => {
+   const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+@@ -5594,7 +5634,7 @@
+ function cabineAdminOperations(){return db.prepare(`SELECT o.*,u.name user_name,u.phone user_phone,s.name service_name,f.name offer_name FROM cabine_operations o JOIN users u ON u.id=o.user_id LEFT JOIN cabine_services s ON s.id=o.service_id LEFT JOIN cabine_offers f ON f.id=o.offer_id ORDER BY o.created_at DESC LIMIT 500`).all();}
+ A.get('/cabine/overview', pdgOnly,(req,res)=>{const settings=cabineSettings(),operators=db.prepare('SELECT * FROM cabine_operators ORDER BY sort,id').all(),services=db.prepare('SELECT * FROM cabine_services ORDER BY sort,id').all(),offers=cabineAdminOffers(),operations=cabineAdminOperations(),templates=db.prepare('SELECT * FROM cabine_notification_templates ORDER BY code').all(),audit=db.prepare(`SELECT a.*,u.name actor_name FROM cabine_audit a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.created_at DESC,a.id DESC LIMIT 200`).all();res.json({settings,operators,services,offers,operations,templates,audit,provider_connected:false,checkout_available:false});});
+ A.get('/cabine/stats',pdgOnly,(req,res)=>{const total=db.prepare('SELECT COUNT(*) n FROM cabine_operations').get().n,states=Object.fromEntries(db.prepare('SELECT status,COUNT(*) n FROM cabine_operations GROUP BY status').all().map(r=>[r.status,r.n])),attempts=db.prepare("SELECT COUNT(*) n FROM cabine_audit WHERE action='checkout_blocked' AND created_at>=datetime('now','-30 days')").get().n;res.json({operations_total:total,by_status:states,blocked_checkout_attempts_30d:attempts,successful:0,revenue:0,provider_connected:false,checkout_available:false});});
+-A.put('/cabine/settings',pdgOnly,(req,res)=>{const b=req.body||{},allowed=['cabine_enabled','cabine_title','cabine_description','cabine_icon','cabine_color','cabine_logo_url','cabine_unavailable_message','cabine_conditions','cabine_operator_detection','cabine_manual_operator','cabine_custom_amount','cabine_quick_amounts'];const before=cabineSettings();for(const k of allowed)if(k in b){let v=b[k];if(['cabine_enabled','cabine_operator_detection','cabine_manual_operator','cabine_custom_amount'].includes(k))v=v?1:0;if(k==='cabine_quick_amounts'){const ar=Array.isArray(v)?v:[];v=JSON.stringify(ar.map(Number).filter(n=>Number.isInteger(n)&&n>0&&n<=100000000).slice(0,12));}setSetting(k,String(v).slice(0,6000));}setSetting('cabine_payment_enabled','0');const after=cabineSettings();cabineAudit(req.user,'settings_updated','cabine_settings',null,before,after,'Paiement conservé désactivé jusqu’à intégration officielle.');res.json({...after,checkout_available:false});});
++A.put('/cabine/settings',pdgOnly,(req,res)=>{const b=req.body||{},allowed=['cabine_enabled','cabine_title','cabine_description','cabine_icon','cabine_color','cabine_logo_url','cabine_unavailable_message','cabine_conditions','cabine_operator_detection','cabine_manual_operator','cabine_custom_amount','cabine_quick_amounts','cabine_fee_enabled','cabine_fee_percent','cabine_fee_rounding','cabine_free_request_label','cabine_free_request_hint','cabine_transfer_label','cabine_subscription_label'];const before=cabineSettings();for(const k of allowed)if(k in b){let v=b[k];if(['cabine_enabled','cabine_operator_detection','cabine_manual_operator','cabine_custom_amount','cabine_fee_enabled'].includes(k))v=v?1:0;if(k==='cabine_quick_amounts'){const ar=Array.isArray(v)?v:[];v=JSON.stringify(ar.map(Number).filter(n=>Number.isInteger(n)&&n>0&&n<=100000000).slice(0,12));}if(k==='cabine_fee_percent'){v=Math.max(0,Math.min(100,Number(v)||0));}if(k==='cabine_fee_rounding')v=v==='ceil'?'ceil':'nearest';setSetting(k,String(v).slice(0,6000));}setSetting('cabine_payment_enabled','0');const after=cabineSettings();cabineAudit(req.user,'settings_updated','cabine_settings',null,before,after,'Paiement conservé désactivé jusqu’à intégration officielle.');res.json({...after,checkout_available:false});});
+ A.post('/cabine/operators',pdgOnly,(req,res)=>{try{const p=cabineOperatorPayload(req.body,null),cols=Object.keys(p),r=db.prepare(`INSERT INTO cabine_operators(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`).run(...cols.map(k=>p[k]));const row=db.prepare('SELECT * FROM cabine_operators WHERE id=?').get(r.lastInsertRowid);cabineAudit(req.user,'operator_created','cabine_operator',row.id,null,row);res.status(201).json(row);}catch(e){res.status(400).json({error:e.message||'Création impossible.'});}});
+ A.put('/cabine/operators/:id',pdgOnly,(req,res)=>{try{const old=db.prepare('SELECT * FROM cabine_operators WHERE id=?').get(Number(req.params.id));if(!old)return res.status(404).json({error:'Opérateur introuvable.'});const p=cabineOperatorPayload(req.body,old),cols=Object.keys(p);db.prepare(`UPDATE cabine_operators SET ${cols.map(k=>k+'=?').join(',')},updated_at=datetime('now') WHERE id=?`).run(...cols.map(k=>p[k]),old.id);const row=db.prepare('SELECT * FROM cabine_operators WHERE id=?').get(old.id);cabineAudit(req.user,'operator_updated','cabine_operator',old.id,old,row);res.json(row);}catch(e){res.status(400).json({error:e.message||'Mise à jour impossible.'});}});
+ A.delete('/cabine/operators/:id',pdgOnly,(req,res)=>{try{const old=db.prepare('SELECT * FROM cabine_operators WHERE id=?').get(Number(req.params.id));if(!old)return res.status(404).json({error:'Opérateur introuvable.'});db.prepare('DELETE FROM cabine_operators WHERE id=?').run(old.id);cabineAudit(req.user,'operator_deleted','cabine_operator',old.id,old,null);res.json({ok:true});}catch(e){res.status(409).json({error:'Cet opérateur est utilisé par une offre ou un historique et ne peut pas être supprimé.'});}});
+--- COLIS-33/public/app.js
++++ COLIS-34/public/app.js
+@@ -460,6 +460,7 @@
+ /* ============================================================
+    ÉCRANS
+    ============================================================ */
++let lastRenderedHash='';
+ const routes = {};
+ 
+ /* ---------- Connexion / Inscription ---------- */
+@@ -471,7 +472,7 @@
+       <div class="muted">Tous vos services à portée de main</div></div>
+     <div class="card">
+       <div class="field"><label>Numéro de téléphone</label><input type="tel" id="f-phone" placeholder="Ex : 07 00 00 00 00" autocomplete="tel"></div>
+-      ${pwField('f-pass', 'Mot de passe', 'Votre mot de passe')}
++      ${pwField('f-pass', 'Mot de passe ou code provisoire', 'Votre mot de passe ou code provisoire')}
+       <button class="btn" id="b-login">Se connecter</button>
+       <button class="btn ghost" onclick="A.forgot(document.getElementById('f-phone').value)">Mot de passe oublié ?</button>
+       <button class="btn ghost mt" onclick="nav('#/register')">Pas encore de compte ? <b>Créer un compte</b></button>
+@@ -650,7 +651,7 @@
+     <div class="home-shortcuts" aria-label="Accès rapides">
+       <button class="home-shortcut" onclick="nav('#/jobs')"><span>💼</span><div><b>Trouver ou proposer un job</b><small>Consulter les offres ou publier la vôtre</small></div><i>›</i></button>
+       ${BRADERIE_HOME.home_visible ? `<button class="home-shortcut" onclick="nav('#/articles-seconde-main')"><span>🏷️</span><div><b>Articles seconde main</b><small>${BRADERIE_HOME.enabled ? 'Découvrir, rechercher et acheter' : 'Prochainement disponible'}</small></div><i>›</i></button>` : ''}
+-      ${CABINE_HOME.enabled ? `<button class="home-shortcut" onclick="nav('#/klean-cabine')"><span>${esc(CABINE_HOME.icon||'📲')}</span><div><b>Klean Cabine</b><small>Crédit et forfaits — disponibilité vérifiée</small></div><i>›</i></button>` : ''}
++      ${CABINE_HOME.enabled ? `<button class="home-shortcut" onclick="nav('#/klean-cabine')"><span>${esc(CABINE_HOME.icon||'📲')}</span><div><b>Klean Kbine à distance</b><small>Crédit et forfaits — disponibilité vérifiée</small></div><i>›</i></button>` : ''}
+       <button class="home-shortcut" onclick="nav('#/avis-recherche')"><span>📢</span><div><b>Avis de recherche</b><small>Publier ou consulter un avis</small></div><i>›</i></button>
+       <button class="home-shortcut urgent" onclick="nav('#/urgence')"><span>🚨</span><div><b>Urgences</b><small>Contacts et assistance configurés</small></div><i>›</i></button>
+     </div>
+@@ -1312,7 +1313,7 @@
+     <div class="menu-item" onclick="nav('#/pro')"><span class="mi-ic">💼</span>Mon espace professionnel
+       ${USER.pro_status === 'pending' ? '<span class="pill warn">En validation</span>' : USER.pro_status === 'approved' ? '' : '<span class="pill ok">Devenir pro</span>'}<span class="mi-arr">›</span></div>
+     <div class="menu-item" onclick="nav('#/braderie-space')"><span class="mi-ic">🏷️</span>Mon espace braderie<span class="mi-arr">›</span></div>
+-    <div class="menu-item" onclick="nav('#/cabine-operations')"><span class="mi-ic">📲</span>Mes opérations Klean Cabine<span class="mi-arr">›</span></div>
++    <div class="menu-item" onclick="nav('#/cabine-operations')"><span class="mi-ic">📲</span>Mes opérations Klean Kbine<span class="mi-arr">›</span></div>
+     <div class="menu-item" onclick="nav('#/messages')"><span class="mi-ic">💬</span>Mes messages<span class="mi-arr">›</span></div>
+     <div class="menu-item" onclick="nav('#/contact')"><span class="mi-ic">📩</span>Contacter Klean Services<span class="mi-arr">›</span></div>
+     <div class="menu-item" onclick="nav('#/my-reviews')"><span class="mi-ic">⭐</span>Mes avis<span class="mi-arr">›</span></div>
+@@ -1757,25 +1758,25 @@
+ routes['braderie-drafts'] = async () => {if(!USER){authRequired('#/braderie-drafts');return;}let rows=[];try{rows=await api('/braderie/drafts');}catch(e){toast(e.message,'err');return;}$app.innerHTML=`${header('Mes brouillons',{bell:true})}<div class="content"><div class="card"><b>✏️ Préparer une annonce</b><div class="small muted mt">Un brouillon n’est jamais publié et ne consomme aucun quota. La publication finale reste soumise à votre formule active et à validation.</div><button class="btn mt" onclick="A.bradDraftEdit()">Créer un brouillon</button></div>${rows.length?rows.map(d=>`<div class="card"><b>${esc(d.payload&&d.payload.title||'Brouillon sans titre')}</b><div class="small muted">Modifié le ${fmtDate(d.updated_at)}</div>${d.payload&&d.payload.description?`<div class="small mt">${esc(d.payload.description)}</div>`:''}<div class="btn-row mt"><button class="btn sm sec" onclick="A.bradDraftEdit(${d.id})">Modifier</button><button class="btn sm warn" onclick="A.bradDraftDelete(${d.id})">Supprimer</button></div></div>`).join(''):emptyState('✏️','Aucun brouillon enregistré.')}</div>${bottomNav('account')}`;};
+ routes['braderie-negotiations'] = async () => { if(!USER){nav('#/login');return;}let rows=[];try{rows=await api('/braderie/negotiations');}catch(e){toast(e.message,'err');}$app.innerHTML=`${header('Mes négociations',{bell:true})}<div class="content">${rows.length?rows.map(n=>`<div class="card"><div class="row"><div class="grow"><b>${esc(n.title)}</b><div class="small muted">${n.is_buyer?'Vous achetez à '+esc(n.seller_name):'Acheteur : '+esc(n.buyer_name)}</div></div><span class="pill ${n.state==='accepted'?'ok':n.state==='rejected'||n.state==='closed'?'off':'warn'}">${esc({open:'En discussion',seller_counter:'Contre-proposition',seller_last_price:'Dernier prix',accepted:'Acceptée',rejected:'Refusée',closed:'Clôturée'}[n.state]||n.state)}</span></div><div class="small mt">${(n.events||[]).map(e=>`<div>• ${esc(e.actor_name)} — ${esc({buyer_offer:'proposition',buyer_final_offer:'dernière proposition',seller_counter:'contre-proposition',seller_last_price:'dernier prix',accepted:'acceptation',rejected:'refus'}[e.event_type]||e.event_type)}${e.amount!==null&&e.amount!==undefined?' : <b>'+bradPrice(e.amount)+'</b>':''}${e.note?' — '+esc(e.note):''}</div>`).join('')}</div>${!n.is_buyer&&['open','seller_counter','seller_last_price'].includes(n.state)?`<button class="btn sm mt" onclick="A.bradSellerAction(${n.id})">Répondre</button>`:''}${n.is_buyer&&n.state==='seller_last_price'?`<button class="btn sm mt" onclick="A.bradOffer(${n.item_id},true)">Faire ma dernière proposition</button>`:''}</div>`).join(''):emptyState('🤝','Aucune proposition ni négociation pour le moment.')}</div>${bottomNav('account')}`; };
+ 
+-/* ---------- Klean Cabine : catalogue administré, paiement/exécution volontairement indisponibles ---------- */
+-function cabineStatusBox(cfg){return `<div class="card" style="background:#fff8ed;border-color:#fed7aa"><div class="bold">⚠️ Opérations non disponibles</div><div class="small mt">${esc(cfg.unavailable_message||'Aucun prestataire officiel n’est connecté.')}</div><div class="small muted mt">Aucun paiement, débit, transfert ou achat de forfait ne sera déclenché depuis cette interface.</div></div>`;}
++/* ---------- Klean Kbine à distance : parcours réduit, contrôle sans paiement/exécution ---------- */
++function cabineStatusBox(cfg){return `<div class="card" style="background:#fff8ed;border-color:#fed7aa"><div class="bold">⚠️ Paiement et exécution indisponibles</div><div class="small mt">${esc(cfg.unavailable_message||'Aucun prestataire officiel n’est connecté.')}</div><div class="small muted mt">Aucun paiement, débit, transfert ou achat de forfait ne sera déclenché depuis cette interface.</div></div>`;}
++function cabineOperatorChoices(ops){return `<option value="">Choisir…</option>${ops.map(o=>`<option value="${esc(o.code)}">${esc(o.name)}</option>`).join('')}`;}
++function cabineOfferOptions(cfg,kind,operator){return (cfg.offers||[]).filter(o=>(!kind||o.service_code===kind)&&(!operator||o.operator_code===operator)).map(o=>`<option value="${o.id}">${esc(o.operator_name)} · ${esc(o.name)}${o.benefit?' — '+esc(o.benefit):''}${o.validity_text?' · '+esc(o.validity_text):''} · ${bradPrice(o.customer_price)}</option>`).join('');}
+ routes['klean-cabine'] = async param => {
+   let cfg;try{cfg=await api('/cabine/config');}catch(e){toast(e.message,'err');return;}
+   const part=decodeURIComponent(param||'');if(part)return routes['cabine-operation'](part,cfg);
+-  if(!cfg.enabled){$app.innerHTML=`${header('Klean Cabine',{bell:!!USER})}<div class="content">${emptyState('📲','Klean Cabine n’est pas disponible pour le moment.')}</div>${bottomNav('home')}`;return;}
+-  const services=cfg.services||[],ops=cfg.operators||[],offers=cfg.offers||[];
+-  $app.innerHTML=`${header(cfg.title||'Klean Cabine',{bell:!!USER})}<div class="content"><div class="card" style="background:linear-gradient(135deg,${esc(cfg.color||'#166534')} 0%,#0f5132 100%);color:#fff"><div style="font-size:35px">${esc(cfg.icon||'📲')}</div><h2 style="margin:4px 0">${esc(cfg.title||'Klean Cabine')}</h2><div class="small">${esc(cfg.description||'')}</div></div>${cabineStatusBox(cfg)}
+-  <div class="sec-title">Services</div>${services.length?services.map(s=>`<button type="button" class="card tap" style="width:100%;text-align:left;margin-bottom:8px" onclick="nav('#/klean-cabine/${esc(s.code)}')"><div class="row"><span style="font-size:29px">${esc(s.icon||'📱')}</span><div class="grow"><b>${esc(s.name)}</b><div class="small muted">${esc(s.description||'Catalogue en configuration.')}</div></div><span class="pill off">Indisponible</span></div></button>`).join(''):emptyState('📲','Les catégories Klean Cabine sont en cours de configuration par Klean Services.')}
+-  <div class="sec-title">Opérateurs</div>${ops.length?ops.map(o=>`<div class="card compact-card"><div class="row"><div class="grow"><b>${esc(o.name)}</b><div class="small muted">${esc(o.description||'')}</div></div><span class="pill off">Non connecté</span></div></div>`).join(''):''}
+-  ${offers.length?`<div class="sec-title">Offres configurées</div>${offers.map(o=>`<div class="card"><b>${esc(o.name)}</b><div class="small muted">${esc(o.operator_name)} · ${esc(o.service_name)}${o.benefit?' · '+esc(o.benefit):''}${o.validity_text?' · '+esc(o.validity_text):''}</div><div class="hint mt">Cette offre est affichée à titre de catalogue mais ne peut pas être achetée tant qu’elle n’est pas synchronisée avec un prestataire officiel.</div></div>`).join('')}`:''}
+-  ${USER?`<button class="btn sec mt" onclick="nav('#/cabine-operations')">Mes opérations Klean Cabine</button>`:`<button class="btn sec mt" onclick="authRequired('#/cabine-operations','Connectez-vous pour consulter vos opérations Klean Cabine.')">Mes opérations</button>`}</div>${bottomNav('home')}`;
+-};
+-routes['cabine-operation'] = async (serviceCode,initialCfg) => {
+-  if(!USER){authRequired('#/klean-cabine/'+encodeURIComponent(serviceCode),'Connectez-vous avant de préparer une opération Klean Cabine.');return;}
+-  let cfg=initialCfg;try{if(!cfg)cfg=await api('/cabine/config');}catch(e){toast(e.message,'err');return;}const service=(cfg.services||[]).find(s=>s.code===serviceCode);if(!service){nav('#/klean-cabine');return;}const isTransfer=service.service_type==='transfer',offers=(cfg.offers||[]).filter(o=>o.service_code===service.code),ops=cfg.operators||[];
+-  $app.innerHTML=`${header(service.name,{bell:true})}<div class="content">${cabineStatusBox(cfg)}<div class="card"><h2 style="margin-top:0">${esc(service.icon||'📱')} ${esc(service.name)}</h2><div class="small muted">Préparez les informations. Le récapitulatif est possible ; le paiement et l’exécution restent bloqués sans prestataire autorisé.</div><div class="field"><label>Numéro à débiter</label><input id="cabine-debit" inputmode="tel" placeholder="Ex : 07 XX XX XX XX"></div><div class="field"><label>Opérateur du numéro à débiter</label><select id="cabine-debit-operator"><option value="">Choisir…</option>${ops.map(o=>`<option value="${esc(o.code)}">${esc(o.name)}</option>`).join('')}</select></div><div class="field"><label>Numéro bénéficiaire</label><input id="cabine-beneficiary" inputmode="tel" placeholder="Ex : 07 XX XX XX XX"></div><div class="field"><label>Opérateur du bénéficiaire</label><select id="cabine-beneficiary-operator"><option value="">Choisir…</option>${ops.map(o=>`<option value="${esc(o.code)}">${esc(o.name)}</option>`).join('')}</select></div>${isTransfer?`<div class="field"><label>Montant de crédit (FCFA)</label><input id="cabine-amount" type="number" min="1" inputmode="numeric" placeholder="Montant à vérifier"></div>`:`<div class="field"><label>Offre</label><select id="cabine-offer"><option value="">Choisir une offre administrée…</option>${offers.map(o=>`<option value="${o.id}">${esc(o.operator_name)} · ${esc(o.name)}${o.customer_price?' · '+bradPrice(o.customer_price):''}</option>`).join('')}</select></div>${!offers.length?'<div class="hint">Aucune offre validée n’est encore disponible dans ce catalogue.</div>':''}`}<button class="btn mt" onclick="A.cabineQuote('${esc(service.code)}',this)">Vérifier le récapitulatif</button></div></div>${bottomNav('home')}`;
++  if(!cfg.enabled){$app.innerHTML=`${header('Klean Kbine à distance',{bell:!!USER})}<div class="content">${emptyState('📲','Klean Kbine à distance n’est pas disponible pour le moment.')}</div>${bottomNav('home')}`;return;}
++  $app.innerHTML=`${header(cfg.title||'Klean Kbine à distance',{bell:!!USER})}<div class="content"><div class="card" style="background:linear-gradient(135deg,${esc(cfg.color||'#166534')} 0%,#0f5132 100%);color:#fff"><div style="font-size:35px">${esc(cfg.icon||'📲')}</div><h2 style="margin:4px 0">${esc(cfg.title||'Klean Kbine à distance')}</h2><div class="small">${esc(cfg.description||'')}</div></div>${cabineStatusBox(cfg)}
++  <div class="sec-title">Choisissez un service</div><button type="button" class="card tap" style="width:100%;text-align:left;margin-bottom:10px;padding:18px" onclick="nav('#/klean-cabine/transfer')"><div class="row"><span style="font-size:34px">💸</span><div class="grow"><b style="font-size:18px">${esc(cfg.transfer_label||'Transfert de crédit')}</b><div class="small muted">Préparer un transfert de crédit vers un bénéficiaire.</div></div><i class="mi-arr">›</i></div></button><button type="button" class="card tap" style="width:100%;text-align:left;padding:18px" onclick="nav('#/klean-cabine/subscription')"><div class="row"><span style="font-size:34px">📶</span><div class="grow"><b style="font-size:18px">${esc(cfg.subscription_label||'Souscription Appel/Internet')}</b><div class="small muted">Choisir une offre Appel ou Internet administrée.</div></div><i class="mi-arr">›</i></div></button>
++  ${USER?`<button class="btn sec mt" onclick="nav('#/cabine-operations')">Mes opérations Klean Kbine</button>`:`<button class="btn sec mt" onclick="authRequired('#/cabine-operations','Connectez-vous pour consulter vos opérations Klean Kbine.')">Mes opérations</button>`}</div>${bottomNav('home')}`;
++};
++routes['cabine-operation'] = async (mode,initialCfg) => {
++  if(!USER){authRequired('#/klean-cabine/'+encodeURIComponent(mode),'Connectez-vous avant de préparer une demande Klean Kbine.');return;}
++  let cfg=initialCfg;try{if(!cfg)cfg=await api('/cabine/config');}catch(e){toast(e.message,'err');return;}const isTransfer=mode==='transfer',isSubscription=mode==='subscription';if(!isTransfer&&!isSubscription){nav('#/klean-cabine');return;}const ops=cfg.operators||[];window._cabineCfg=cfg;
++  $app.innerHTML=`${header(isTransfer?(cfg.transfer_label||'Transfert de crédit'):(cfg.subscription_label||'Souscription Appel/Internet'),{bell:true})}<div class="content">${cabineStatusBox(cfg)}<div class="card"><h2 style="margin-top:0">${isTransfer?'💸':'📶'} ${esc(isTransfer?(cfg.transfer_label||'Transfert de crédit'):(cfg.subscription_label||'Souscription Appel/Internet'))}</h2><div class="small muted">Vérifiez chaque numéro avant le récapitulatif. Les frais supplémentaires configurés (${cfg.fee_enabled?Number(cfg.fee_percent)+' %':'désactivés'}) sont calculés côté serveur.</div><div class="field"><label>Numéro à débiter (Numéro qui paye)</label><input id="cabine-debit" inputmode="tel" value="${esc(USER.phone||'')}" placeholder="Ex : 07 XX XX XX XX"></div><div class="field"><label>Opérateur du numéro qui paye</label><select id="cabine-debit-operator">${cabineOperatorChoices(ops)}</select></div><div class="field"><label>Numéro bénéficiaire</label><input id="cabine-beneficiary" inputmode="tel" placeholder="Ex : 07 XX XX XX XX"></div><div class="field"><label>Confirmer le numéro bénéficiaire</label><input id="cabine-beneficiary-confirm" inputmode="tel" placeholder="Saisissez à nouveau le numéro bénéficiaire"></div><div class="field"><label>Opérateur du bénéficiaire</label><select id="cabine-beneficiary-operator" ${isSubscription?'onchange="A.cabineBundleKindChanged()"':''}>${cabineOperatorChoices(ops)}</select></div>${isTransfer?`<div class="field"><label>Montant de crédit (FCFA)</label><input id="cabine-amount" type="number" min="1" inputmode="numeric" placeholder="Montant à vérifier"></div>`:`<div class="field"><label>Type de souscription</label><div class="choices" id="cabine-kind"><button class="chip" type="button" onclick="A.cabinePickKind(this,'calls')">☎️ Appel</button><button class="chip" type="button" onclick="A.cabinePickKind(this,'internet')">🌐 Internet</button></div></div><div class="field"><label>Offre disponible</label><select id="cabine-offer"><option value="">Choisissez d’abord Appel ou Internet</option></select></div><div class="field"><label>${esc(cfg.free_request_label||'Décrivez le forfait que vous souhaitez')}</label><textarea id="cabine-free-request" maxlength="500" placeholder="${esc(cfg.free_request_hint||'Exemple : Je veux 1,5 Go pour 500 FCFA.')}"></textarea><button class="btn ghost sm mt" onclick="A.cabineMatchOffers(this)">Chercher une offre correspondante</button><div id="cabine-match-result" class="small muted mt"></div></div>`}<button class="btn mt" onclick="A.cabineQuote('${isTransfer?'transfer':'subscription'}',this)">Vérifier le récapitulatif</button></div></div>${bottomNav('home')}`;
+ };
+-routes['cabine-operations'] = async () => {if(!USER){authRequired('#/cabine-operations');return;}let d,cfg;try{[d,cfg]=await Promise.all([api('/cabine/operations'),api('/cabine/config')]);}catch(e){toast(e.message,'err');return;}$app.innerHTML=`${header('Mes opérations Klean Cabine',{bell:true})}<div class="content">${cabineStatusBox(cfg)}<div class="card"><h2 style="margin:0">Historique</h2><div class="small muted mt">Seules les opérations réellement initiées et confirmées par un prestataire autorisé apparaîtront ici.</div></div>${d.items&&d.items.length?d.items.map(o=>`<div class="card"><div class="row"><div class="grow"><b>${esc(o.offer_name||o.service_name||o.operation_type)}</b><div class="small muted">Réf. ${esc(o.operation_ref)} · ${fmtDate(o.created_at)}</div></div><span class="pill off">${esc(o.status)}</span></div><div class="small mt">Bénéficiaire ${esc(o.beneficiary_phone)} · ${bradPrice(o.total_amount)}</div></div>`).join(''):emptyState('📲','Aucune opération enregistrée. Aucun paiement ni débit n’a été effectué.')}</div>${bottomNav('account')}`;};
++routes['cabine-operations'] = async () => {if(!USER){authRequired('#/cabine-operations');return;}let d,cfg;try{[d,cfg]=await Promise.all([api('/cabine/operations'),api('/cabine/config')]);}catch(e){toast(e.message,'err');return;}$app.innerHTML=`${header('Mes opérations Klean Kbine',{bell:true})}<div class="content">${cabineStatusBox(cfg)}<div class="card"><h2 style="margin:0">Historique de mes demandes</h2><div class="small muted mt">Seules les opérations réellement initiées et confirmées par un prestataire autorisé apparaîtront ici. Aucune demande fictive n’est affichée.</div></div>${d.items&&d.items.length?d.items.map(o=>`<div class="card"><div class="row"><div class="grow"><b>${esc(o.offer_name||o.service_name||o.operation_type)}</b><div class="small muted">Réf. ${esc(o.operation_ref)} · ${fmtDate(o.created_at)}</div></div><span class="pill off">${esc(o.status)}</span></div><div class="small mt">Bénéficiaire ${esc(o.beneficiary_phone)} · ${bradPrice(o.total_amount)}</div></div>`).join(''):emptyState('📲','Aucune opération enregistrée. Aucun paiement ni débit n’a été effectué.')}</div>${bottomNav('account')}`;};
++
+ 
+ /* ---------- Avis de recherche ---------- */
+ routes['avis-recherche'] = async () => {
+@@ -1955,6 +1956,7 @@
+       <div class="bold mb">Changer mon mot de passe</div>
+       ${pwField('s-cur', 'Mot de passe actuel')}
+       ${pwField('s-new', 'Nouveau mot de passe')}
++      ${pwField('s-new-confirm', 'Confirmez le nouveau mot de passe')}
+       <button class="btn" id="b-pass">Mettre à jour</button>
+     </div>
+     <div class="card">
+@@ -1964,9 +1966,12 @@
+     </div>
+   </div>${bottomNav('account')}`;
+   document.getElementById('b-pass').onclick = async e => {
++    const next=document.getElementById('s-new').value,confirmNext=document.getElementById('s-new-confirm').value;
++    if(next.length<6)return toast('Le nouveau mot de passe doit contenir au moins 6 caractères.','err');
++    if(next!==confirmNext)return toast('Les deux nouveaux mots de passe ne correspondent pas.','err');
+     busy(e.target, true);
+     try {
+-      await api('/me/password', { method: 'PUT', body: { current: document.getElementById('s-cur').value, password: document.getElementById('s-new').value } });
++      await api('/me/password', { method: 'PUT', body: { current: document.getElementById('s-cur').value, password: next } });
+       toast('Mot de passe mis à jour ✓', 'ok'); back();
+     } catch (err) { toast(err.message, 'err'); busy(e.target, false); }
+   };
+@@ -3438,8 +3443,10 @@
+   async bradDraftEdit(id){try{const rows=await api('/braderie/drafts'),d=id?rows.find(x=>Number(x.id)===Number(id)):null,p=d&&d.payload||{};openModal(`<h3>${d?'Modifier':'Créer'} un brouillon</h3><div class="field"><label>Titre</label><input id="bd-title" maxlength="120" value="${esc(p.title||'')}"></div><div class="field"><label>Description</label><textarea id="bd-description" maxlength="2500">${esc(p.description||'')}</textarea></div><div class="field"><label>Prix envisagé (FCFA)</label><input id="bd-price" type="number" min="0" value="${esc(String(p.price||''))}"></div><div class="btn-row"><button class="btn sec" onclick="closeModal()">Annuler</button><button class="btn" onclick="A.bradDraftSave(${d?d.id:'null'},this)">Enregistrer</button></div>`);}catch(e){toast(e.message,'err');}},
+   async bradDraftSave(id,btn){busy(btn,true);try{const payload={title:document.getElementById('bd-title').value,description:document.getElementById('bd-description').value,price:document.getElementById('bd-price').value};await api('/braderie/drafts'+(id?'/'+id:''),{method:id?'PUT':'POST',body:payload});closeModal();toast('Brouillon enregistré.','ok');routes['braderie-drafts']();}catch(e){toast(e.message,'err');busy(btn,false);}},
+   async bradDraftDelete(id){if(!confirm('Supprimer ce brouillon ?'))return;try{await api('/braderie/drafts/'+id,{method:'DELETE'});toast('Brouillon supprimé.','ok');routes['braderie-drafts']();}catch(e){toast(e.message,'err');}},
+-  async cabineQuote(serviceCode,btn){
+-    busy(btn,true);try{const body={operation_type:serviceCode==='transfer'?'transfer':'bundle',debit_phone:(document.getElementById('cabine-debit')||{}).value||'',debit_operator_code:(document.getElementById('cabine-debit-operator')||{}).value||'',beneficiary_phone:(document.getElementById('cabine-beneficiary')||{}).value||'',beneficiary_operator_code:(document.getElementById('cabine-beneficiary-operator')||{}).value||'',amount:(document.getElementById('cabine-amount')||{}).value||'',offer_id:(document.getElementById('cabine-offer')||{}).value||''};const q=await api('/cabine/quote',{method:'POST',body});openModal(`<h3>Récapitulatif Klean Cabine</h3><div class="card compact-card"><div class="small">Service : <b>${esc(q.operation_type==='transfer'?'Transfert de crédit':q.offer&&q.offer.name||'Forfait')}</b><br>Débiteur : ${esc(q.debit_phone)}<br>Bénéficiaire : ${esc(q.beneficiary_phone)}<br>Montant : ${bradPrice(q.amount)}${q.fee?`<br>Frais administrés : ${bradPrice(q.fee)}`:''}<br><b>Total théorique : ${bradPrice(q.total)}</b></div></div><div class="hint"><b>⚠️ Aucune opération ne sera lancée.</b><br>${esc(q.message)} Aucun paiement, débit ou transfert n’a été créé.</div><div class="btn-row"><button class="btn sec" onclick="closeModal()">Fermer</button><button class="btn" disabled title="Prestataire non connecté">Paiement indisponible</button></div>`);}catch(e){toast(e.message,'err');}finally{busy(btn,false);}},
++  cabinePickKind(btn,kind){document.querySelectorAll('#cabine-kind .chip').forEach(x=>x.classList.remove('on'));btn.classList.add('on');const box=document.getElementById('cabine-kind');box.dataset.value=kind;A.cabineBundleKindChanged();},
++  cabineBundleKindChanged(){const cfg=window._cabineCfg||{},kind=(document.getElementById('cabine-kind')||{}).dataset.value||'',operator=(document.getElementById('cabine-beneficiary-operator')||{}).value||'',select=document.getElementById('cabine-offer');if(!select)return;select.innerHTML='<option value="">Choisir une offre administrée…</option>'+cabineOfferOptions(cfg,kind,operator);},
++  async cabineMatchOffers(btn){const q=(document.getElementById('cabine-free-request')||{}).value||'',kind=(document.getElementById('cabine-kind')||{}).dataset.value||'',operator=(document.getElementById('cabine-beneficiary-operator')||{}).value||'',zone=document.getElementById('cabine-match-result');if(!q)return toast('Décrivez le forfait recherché.','err');busy(btn,true);try{const r=await api('/cabine/offers/match',{method:'POST',body:{query:q,kind,operator}});if(zone)zone.innerHTML=r.matches.length?`<b>Offres correspondantes :</b> ${r.matches.map(o=>`<button class="btn ghost sm" style="margin:4px 2px" onclick="document.getElementById('cabine-offer').value='${o.id}'">${esc(o.name)} · ${bradPrice(o.customer_price)}</button>`).join('')}`:esc(r.notice);}catch(e){toast(e.message,'err');}finally{busy(btn,false);}},
++  async cabineQuote(serviceCode,btn){busy(btn,true);try{const beneficiary=(document.getElementById('cabine-beneficiary')||{}).value||'',confirmation=(document.getElementById('cabine-beneficiary-confirm')||{}).value||'';if(beneficiary.replace(/[\s.()-]/g,'')!==confirmation.replace(/[\s.()-]/g,''))return toast('Les deux numéros ne correspondent pas. Veuillez vérifier le numéro bénéficiaire.','err');const body={operation_type:serviceCode==='transfer'?'transfer':'bundle',debit_phone:(document.getElementById('cabine-debit')||{}).value||'',debit_operator_code:(document.getElementById('cabine-debit-operator')||{}).value||'',beneficiary_phone:beneficiary,beneficiary_confirmation:confirmation,beneficiary_operator_code:(document.getElementById('cabine-beneficiary-operator')||{}).value||'',amount:(document.getElementById('cabine-amount')||{}).value||'',offer_id:(document.getElementById('cabine-offer')||{}).value||'',free_request:(document.getElementById('cabine-free-request')||{}).value||''};const q=await api('/cabine/quote',{method:'POST',body});openModal(`<h3>Récapitulatif Klean Kbine</h3><div class="card compact-card"><div class="small">Service : <b>${esc(q.operation_type==='transfer'?'Transfert de crédit':q.offer&&q.offer.name||'Souscription Appel/Internet')}</b><br>Numéro qui paye : ${esc(q.debit_phone)} · ${esc(q.debit_operator_code)}<br>Bénéficiaire : ${esc(q.beneficiary_phone)} · ${esc(q.beneficiary_operator_code)}<br>Confirmation bénéficiaire : ${esc(q.beneficiary_confirmation)}${q.free_request?`<br>Demande libre : ${esc(q.free_request)}`:''}<br>Montant : ${bradPrice(q.amount)}<br>Frais supplémentaires (${Number(q.fee_percent||0)} %) : ${bradPrice(q.fee)}<br><b>Total estimé : ${bradPrice(q.total)}</b></div></div><div class="hint"><b>⚠️ Aucune demande payante ni opération ne sera lancée.</b><br>${esc(q.message)} Aucun paiement, débit ou transfert n’a été créé.</div><div class="btn-row"><button class="btn sec" onclick="closeModal()">Revenir corriger</button><button class="btn" disabled title="Prestataire non connecté">Valider ma demande indisponible</button></div>`);}catch(e){toast(e.message,'err');}finally{busy(btn,false);}},
+   async qlRepondre(sid, index, j) {
+     if (window._qlLock) return; // une seule sélection
+     window._qlLock = true;
+@@ -3521,7 +3528,7 @@
+   $app.innerHTML=`<main role="alert" aria-live="assertive" style="position:fixed;inset:0;z-index:99999;overflow:auto;background:${esc(color)};color:#fff;display:flex;align-items:center;justify-content:center;padding:22px;box-sizing:border-box"><section style="width:min(620px,100%);text-align:center"><img src="${esc(logo)}" alt="Klean Services" style="width:94px;height:94px;object-fit:contain;background:#fff;border-radius:22px;padding:10px;box-sizing:border-box;box-shadow:0 12px 30px rgba(0,0,0,.22)" onerror="this.src='/logo.png'"><div style="font-size:64px;line-height:1;margin:22px 0 14px" aria-hidden="true">${esc(icon)}</div><h1 style="margin:0 0 18px;color:#fff;font-size:clamp(27px,7vw,44px);line-height:1.05;letter-spacing:.02em">${esc(title)}</h1><div style="white-space:pre-wrap;font-size:17px;line-height:1.65;color:#fff">${esc(message)}</div>${precision?`<p style="font-weight:800;font-size:17px;margin:24px 0 0;color:#fff">${esc(precision)}</p>`:''}${MAINT.until?`<p style="font-size:14px;margin:16px 0 0;color:#fee2e2">Retour prévu : ${esc(String(MAINT.until).replace('T',' à '))}</p>`:''}<p style="font-size:13px;margin:30px 0 0;color:#fee2e2">Cette page se met à jour automatiquement lorsque l’accès est rétabli.</p></section></main>`;
+ }
+ 
+-function render() {
++function render(options = {}) {
+   // Un rendu complet remplace l’écran : aucun brouillon n’y survit implicitement.
+   // Les écrans de formulaire réarment leur protection une fois leurs champs affichés.
+   resetDraftGuard();
+@@ -3530,6 +3537,10 @@
+   const h = (location.hash || '#/home').slice(2);
+   const [route, ...rest] = h.split('/');
+   const param = rest.join('/');
++  const renderHash=normalHash(location.hash||'#/home');
++  // Un rafraîchissement automatique de l’accueil ne doit jamais arracher la lecture en cours.
++  const preserveScroll=!!options.preserveScroll || (route==='home' && renderHash===lastRenderedHash);
++  const previousScroll=preserveScroll?window.scrollY:0;
+   if (route !== 'home') { const install=document.getElementById('install-cta'); if (install) install.remove(); }
+   if (MAINT.active && MAINT.blocked) { maintenanceScreen(); return; }
+   const publicRoutes = ['home','search','services','categories','request','jobs','avis-recherche','urgence','about','login','register','account','braderie','articles-seconde-main','klean-cabine'];
+@@ -3538,10 +3549,12 @@
+   const fn = routes[route] || routes.home;
+   Promise.resolve(fn(param)).then(() => {
+     if (normalHash(location.hash) === currentHash && pageNeedsDraftProtection(route)) armDraftProtection(document.getElementById('app'), route, true);
++    if(preserveScroll) requestAnimationFrame(()=>window.scrollTo({top:previousScroll,left:0,behavior:'auto'}));
+   }).catch(e => {
+     $app.innerHTML = header('Erreur') + `<div class="content">${emptyState('⚠️', e.message || 'Une erreur est survenue.')}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home');
+   });
+-  window.scrollTo(0, 0);
++  if(!preserveScroll) window.scrollTo({top:0,left:0,behavior:'auto'});
++  lastRenderedHash=renderHash;
+ }
+ 
+ /* ---------- Démarrage ---------- */
+@@ -3565,7 +3578,7 @@
+     try {
+       const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
+       const [services, populaires] = await Promise.all([api('/services' + cityQuery), api('/services/populaires' + cityQuery)]);
+-      if (JSON.stringify(services) !== JSON.stringify(SERVICES) || JSON.stringify(populaires) !== JSON.stringify(POPULAIRES)) { SERVICES = services; POPULAIRES = populaires; render(); }
++      if (JSON.stringify(services) !== JSON.stringify(SERVICES) || JSON.stringify(populaires) !== JSON.stringify(POPULAIRES)) { SERVICES = services; POPULAIRES = populaires; if(window.scrollY<8) render({preserveScroll:true}); }
+     } catch { }
+   }, 25000);
+   if (TOKEN && !MAINT.blocked) {
+--- COLIS-33/public/admin/admin.js
++++ COLIS-34/public/admin/admin.js
+@@ -85,7 +85,7 @@
+       if (!['pdg', 'admin', 'gestionnaire', 'agent'].includes(r.user.role)) { toast('Ce compte ne fait pas partie de l\u2019équipe d\u2019administration.', 'err'); e.target.disabled = false; return; }
+       TOKEN = r.token; localStorage.setItem('ks_admin_token', TOKEN);
+       ME = r.user;
+-      if (r.user.must_change_password) toast('⚠️ Pensez à changer votre mot de passe temporaire (menu « Mon compte » de l\u2019application).', 'warn');
++      if (r.user.must_change_password) toast('⚠️ Pensez à changer votre code provisoire (menu « Mon compte » de l\u2019application).', 'warn');
+       render();
+     } catch (err) { toast(err.message, 'err'); e.target.disabled = false; }
+   };
+@@ -101,7 +101,7 @@
+   ['MISSIONS', [['missions', '🧰 Demandes & missions', null, 'missions'], ['payments', '💰 Paiements & commissions', null, 'paiements'], ['finances', '📈 Finances & revenus', null, 'paiements']]],
+   ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['bandeau', '📺 Gestion bande défilante', null, 'PDG'], ['support', '📩 Messages Klean Services', null, 'communication'], ['broadcast', '📨 Messages généraux', null, 'communication']]],
+   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
+-  ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Trouver ou proposer un job', null, 'contenu'], ['braderie', '🏷️ Articles seconde main', null, 'PDG'], ['cabine', '📲 Gestion de Klean Cabine', null, 'PDG'], ['ecole', '🏫 École & famille', null, 'contenu'], ['voice-search', '🎤 Recherche vocale', null, 'PDG'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
++  ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Trouver ou proposer un job', null, 'contenu'], ['braderie', '🏷️ Articles seconde main', null, 'PDG'], ['cabine', '📲 Gestion de Klean Kbine à distance', null, 'PDG'], ['ecole', '🏫 École & famille', null, 'contenu'], ['voice-search', '🎤 Recherche vocale', null, 'PDG'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
+   ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
+   ['CONFIGURATION', [['estimates', '🧠 Tarifs & estimations intelligentes', null, 'PDG'], ['commerce', '💰 Paramètres commerciaux', null, 'parametres'], ['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
+ ];
+@@ -202,7 +202,8 @@
+   const f = sessionStorage.getItem('adm_uf') || 'all';
+   const tri = sessionStorage.getItem('adm_us') || 'date';
+   const list = await api('/admin/users?filter=' + f + '&sort=' + tri);
+-  shell(`<h1>👥 Utilisateurs</h1>
++  let quickPolicy=null; if(ME&&ME.role==='pdg'){try{quickPolicy=await api('/admin/access-codes/config');}catch{}}
++  shell(`<h1>👥 Utilisateurs</h1>${quickPolicy?`<div class="panel small"><b>Codes provisoires des comptes rapides</b><div class="frow mt"><div><label>Validité (heures)</label><input id="qa-hours" type="number" min="1" max="720" value="${Number(quickPolicy.hours)}"></div><div><label>Essais maximum</label><input id="qa-attempts" type="number" min="3" max="12" value="${Number(quickPolicy.max_attempts)}"></div><button class="btn sm" onclick="A.quickAccessPolicySave()">Enregistrer</button></div><div class="muted mt">Les codes sont aléatoires, protégés, limités dans le temps et ne sont jamais conservés en clair.</div></div>`:''}
+   <div class="tabs">${[['all', 'Tous'], ['clients', 'Clients'], ['pros', 'Professionnels'], ['pending', 'Pro en attente'], ['suspended', 'Suspendus / bloqués'], ['verified', 'Vérifiés'], ['incomplete', 'Profils à compléter']]
+     .map(([id, lb]) => `<button class="${f === id ? 'on' : ''}" onclick="sessionStorage.setItem('adm_uf','${id}');render()">${lb}</button>`).join('')}
+     <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+@@ -1225,12 +1226,12 @@
+ };
+ 
+ /* ---------- Actions ---------- */
+-/* ---------- Gestion de Klean Cabine : pilotage central, sans faux paiement ---------- */
++/* ---------- Gestion de Klean Kbine à distance : pilotage central, sans faux paiement ---------- */
+ views.cabine = async () => {
+   const cabEmpty=message=>`<div class="hint small">${esc(message)}</div>`;
+   const [d,stats]=await Promise.all([api('/admin/cabine/overview'),api('/admin/cabine/stats')]);const cfg=d.settings||{};
+-  shell(`<h1>📲 Gestion de Klean Cabine <span class="pill info">PDG</span></h1><div class="panel" style="border-left:4px solid #f59e0b"><h2 style="margin-top:0">⚠️ Exécution verrouillée</h2><p class="small">Aucun connecteur de paiement ou opérateur officiel n’est configuré. Les actions utilisateur sont bloquées côté serveur : aucun débit, achat de forfait ou transfert ne peut être créé ou présenté comme réussi.</p><div class="cards"><div class="kpi"><div class="v">${stats.operations_total||0}</div><div class="l">Opérations réelles historisées</div></div><div class="kpi"><div class="v">${stats.blocked_checkout_attempts_30d||0}</div><div class="l">Tentatives bloquées · 30 j</div></div><div class="kpi"><div class="v">0 FCFA</div><div class="l">Encaissement Cabine</div></div></div></div>
+-  <div class="panel"><h2 style="margin-top:0">Paramètres et communication</h2><div class="frow"><div><label>Titre</label><input id="cab-title" maxlength="100" value="${esc(cfg.title||'Klean Cabine')}"></div><div><label>Icône</label><input id="cab-icon" maxlength="20" value="${esc(cfg.icon||'📲')}"></div><div><label>Couleur</label><input id="cab-color" maxlength="20" value="${esc(cfg.color||'#166534')}"></div></div><label>Description publique</label><textarea id="cab-description" maxlength="1000">${esc(cfg.description||'')}</textarea><label>Message d’indisponibilité</label><textarea id="cab-unavailable" maxlength="2000">${esc(cfg.unavailable_message||'')}</textarea><label>Conditions</label><textarea id="cab-conditions" maxlength="4000">${esc(cfg.conditions||'')}</textarea><div class="frow"><label class="check-line"><input id="cab-enabled" type="checkbox" ${cfg.enabled?'checked':''}> Afficher Klean Cabine</label><label class="check-line"><input id="cab-detect" type="checkbox" ${cfg.operator_detection?'checked':''}> Prévoir détection opérateur</label><label class="check-line"><input id="cab-manual" type="checkbox" ${cfg.manual_operator?'checked':''}> Sélection manuelle opérateur</label><label class="check-line"><input id="cab-custom" type="checkbox" ${cfg.custom_amount?'checked':''}> Montant libre à préparer</label></div><button class="btn" onclick="A.cabineSettings()">Enregistrer les paramètres</button></div>
++  shell(`<h1>📲 Gestion de Klean Kbine à distance <span class="pill info">PDG</span></h1><div class="panel" style="border-left:4px solid #f59e0b"><h2 style="margin-top:0">⚠️ Exécution verrouillée</h2><p class="small">Aucun connecteur de paiement ou opérateur officiel n’est configuré. Les actions utilisateur sont bloquées côté serveur : aucun débit, achat de forfait ou transfert ne peut être créé ou présenté comme réussi.</p><div class="cards"><div class="kpi"><div class="v">${stats.operations_total||0}</div><div class="l">Opérations réelles historisées</div></div><div class="kpi"><div class="v">${stats.blocked_checkout_attempts_30d||0}</div><div class="l">Tentatives bloquées · 30 j</div></div><div class="kpi"><div class="v">0 FCFA</div><div class="l">Encaissement Cabine</div></div></div></div>
++  <div class="panel"><h2 style="margin-top:0">Paramètres et communication</h2><div class="frow"><div><label>Titre</label><input id="cab-title" maxlength="100" value="${esc(cfg.title||'Klean Kbine à distance')}"></div><div><label>Icône</label><input id="cab-icon" maxlength="20" value="${esc(cfg.icon||'📲')}"></div><div><label>Couleur</label><input id="cab-color" maxlength="20" value="${esc(cfg.color||'#166534')}"></div></div><label>Description publique</label><textarea id="cab-description" maxlength="1000">${esc(cfg.description||'')}</textarea><label>Message d’indisponibilité</label><textarea id="cab-unavailable" maxlength="2000">${esc(cfg.unavailable_message||'')}</textarea><label>Conditions</label><textarea id="cab-conditions" maxlength="4000">${esc(cfg.conditions||'')}</textarea><div class="frow"><label class="check-line"><input id="cab-enabled" type="checkbox" ${cfg.enabled?'checked':''}> Afficher Klean Kbine à distance</label><label class="check-line"><input id="cab-detect" type="checkbox" ${cfg.operator_detection?'checked':''}> Prévoir détection opérateur</label><label class="check-line"><input id="cab-manual" type="checkbox" ${cfg.manual_operator?'checked':''}> Sélection manuelle opérateur</label><label class="check-line"><input id="cab-custom" type="checkbox" ${cfg.custom_amount?'checked':''}> Montant libre à préparer</label></div><div class="frow"><label class="check-line"><input id="cab-fee-enabled" type="checkbox" ${cfg.fee_enabled?'checked':''}> Appliquer des frais supplémentaires</label><div><label>Taux de frais (%)</label><input id="cab-fee-percent" type="number" min="0" max="100" step="0.01" value="${Number(cfg.fee_percent??2)}"></div><div><label>Arrondi</label><select id="cab-fee-rounding"><option value="nearest" ${cfg.fee_rounding==='nearest'?'selected':''}>Au FCFA le plus proche</option><option value="ceil" ${cfg.fee_rounding==='ceil'?'selected':''}>Au FCFA supérieur</option></select></div></div><label>Libellé demande libre</label><input id="cab-free-label" maxlength="160" value="${esc(cfg.free_request_label||'Décrivez le forfait que vous souhaitez')}"><label>Texte indicatif</label><input id="cab-free-hint" maxlength="500" value="${esc(cfg.free_request_hint||'')}"><button class="btn" onclick="A.cabineSettings()">Enregistrer les paramètres</button></div>
+   <div class="grid2"><div class="panel"><div class="row"><h2 class="grow" style="margin:0">Opérateurs</h2><button class="btn sec sm" onclick="A.cabineOperatorEdit()">＋ Ajouter</button></div>${d.operators.length?`<table><thead><tr><th>Opérateur</th><th>État API</th><th>Catalogue</th><th></th></tr></thead><tbody>${d.operators.map(o=>`<tr><td><b>${esc(o.name)}</b><br><span class="small muted">${esc(o.code)}</span></td><td><span class="pill ${o.api_status==='connected'?'ok':'off'}">${esc(o.api_status)}</span><br><span class="small muted">${esc(o.api_message||'Non configuré')}</span></td><td>${o.enabled?'Visible':'Masqué'} · crédit ${o.transfer_enabled?'préparé':'non'} · forfaits ${o.bundles_enabled?'préparés':'non'}</td><td><button class="btn sm sec" onclick="A.cabineOperatorEdit(${o.id})">Modifier</button> <button class="btn sm warn" onclick="A.cabineDelete('operators',${o.id})">Suppr.</button></td></tr>`).join('')}</tbody></table>`:cabEmpty('Aucun opérateur.')}</div>
+   <div class="panel"><div class="row"><h2 class="grow" style="margin:0">Catégories / services</h2><button class="btn sec sm" onclick="A.cabineServiceEdit()">＋ Ajouter</button></div>${d.services.length?`<table><thead><tr><th>Service</th><th>Type</th><th>Visibilité</th><th></th></tr></thead><tbody>${d.services.map(s=>`<tr><td>${esc(s.icon||'📱')} <b>${esc(s.name)}</b><br><span class="small muted">${esc(s.code)}</span></td><td>${esc(s.service_type)}</td><td>${s.enabled?'Active':'Masquée'}</td><td><button class="btn sm sec" onclick="A.cabineServiceEdit(${s.id})">Modifier</button> <button class="btn sm warn" onclick="A.cabineDelete('services',${s.id})">Suppr.</button></td></tr>`).join('')}</tbody></table>`:cabEmpty('Aucune catégorie.')}</div></div>
+   <div class="panel"><div class="row"><h2 class="grow" style="margin:0">Catalogue d’offres et frais</h2><button class="btn sec sm" onclick="A.cabineOfferEdit()">＋ Ajouter</button></div><div class="hint small">Les prix affichés ici sont administrés ; cocher une offre ne l’exécute jamais. Elle demeure indisponible tant qu’un connecteur officiel réellement vérifié n’est pas intégré.</div>${d.offers.length?`<table><thead><tr><th>Offre</th><th>Opérateur / catégorie</th><th>Prix / frais</th><th>État</th><th></th></tr></thead><tbody>${d.offers.map(o=>`<tr><td><b>${esc(o.name)}</b><br><span class="small muted">${esc(o.benefit||'')}</span></td><td>${esc(o.operator_name)}<br>${esc(o.service_name)}</td><td>${Number(o.customer_price).toLocaleString('fr-FR')} FCFA<br><span class="small">${Number(o.fee_fixed||0)} FCFA + ${Number(o.fee_percent||0)}%</span></td><td>${o.visible?'Visible':'Masquée'} · ${o.enabled?'Préparée':'Non préparée'}<br><span class="pill off">Exécution bloquée</span></td><td><button class="btn sm sec" onclick="A.cabineOfferEdit(${o.id})">Modifier</button> <button class="btn sm warn" onclick="A.cabineDelete('offers',${o.id})">Suppr.</button></td></tr>`).join('')}</tbody></table>`:cabEmpty('Aucune offre administrée.')}</div>
+@@ -1244,7 +1245,7 @@
+       const u = await api('/admin/users/' + id);
+       const tempDis = u.disabled_until && u.disabled_until > new Date().toISOString().slice(0, 19).replace('T', ' ');
+       openModal(`<h3>${esc(u.name)} ${u.verified ? '✅' : ''}</h3>
+-        <div style="margin-bottom:8px">${userStatusPill(u)} ${u.must_change_password ? '<span class="pill warn">doit changer son mot de passe</span>' : ''} ${u.profile_incomplete ? '<span class="pill warn">profil à compléter</span>' : ''}</div>
++        <div style="margin-bottom:8px">${userStatusPill(u)} ${u.quick_access&&u.quick_access.active?`<span class="pill ok">Code provisoire actif jusqu’au ${esc(String(u.quick_access.expires_at).slice(0,16))}</span>`:u.quick_access?`<span class="pill off">Code provisoire ${esc(u.quick_access.status)}</span>`:''} ${u.must_change_password ? '<span class="pill warn">changement de mot de passe requis</span>' : ''} ${u.profile_incomplete ? '<span class="pill warn">profil à compléter</span>' : ''}</div>
+         <p class="small">📞 ${esc(u.phone)} ${u.email ? '• ✉️ ' + esc(u.email) : ''}<br>
+         ${u.kp_code ? `🪪 Code professionnel : <b>${esc(u.kp_code)}</b><br>` : ''}
+         📍 ${esc(u.ville ? u.ville + (u.quartier ? ' / ' + u.quartier : '') : '')} ${esc(u.address || '')}<br>
+@@ -1261,7 +1262,7 @@
+           <button class="btn sm ${u.blocked ? '' : 'warn'}" onclick="A.userBlock(${u.id},${u.blocked ? 0 : 1})">${u.blocked ? '🔓 Débloquer' : '🚫 Bloquer'}</button>
+           ${tempDis ? `<button class="btn sm" onclick="A.userDisableTemp(${u.id},true)">▶️ Fin de désactivation</button>` : `<button class="btn sm sec" onclick="A.userDisableTemp(${u.id})">⏱ Désactiver temporairement</button>`}
+           <button class="btn sm sec" onclick="A.verify(${u.id},${u.verified ? 0 : 1})">${u.verified ? 'Retirer ✓' : '✅ Vérifier'}</button>
+-          <button class="btn sm sec" onclick="A.userResetAccess(${u.id})">🔑 Réinitialiser l\u2019accès</button>
++          <button class="btn sm sec" onclick="A.userResetAccess(${u.id})">🔑 Régénérer le code provisoire</button>
+           <button class="btn sm sec" onclick="A.userForcePwd(${u.id})">🔒 Forcer un nouveau mot de passe</button>
+           <button class="btn sm warn" onclick="A.userDelete(${u.id})">🗑️ Supprimer</button>
+         </div>
+@@ -1277,9 +1278,10 @@
+     try { const u=await api('/admin/users/'+id); openModal(`<h3>💼 Conversion professionnelle</h3><p class="small muted">Identité conservée : <b>${esc(u.name)}</b> • ${esc(u.phone)}. Aucune information professionnelle fictive n’est créée. Le profil sera marqué incomplet et restera indisponible tant que ses services ne sont pas autorisés.</p><label>Type</label><select id="cp-type" style="width:100%"><option value="particulier">Particulier</option><option value="entreprise">Entreprise</option></select><label class="check-line mt"><input id="cp-exception" type="checkbox"> Valider exceptionnellement tout de suite (réservé à une situation justifiée)</label><label>Motif <span class="small muted">(obligatoire pour validation exceptionnelle)</span></label><textarea id="cp-reason" maxlength="500" placeholder="Motif administratif…"></textarea><div class="btn-row mt"><button class="btn" onclick="A.saveConvertUserPro(${id})">Confirmer</button><button class="btn sec" onclick="closeModal()">Annuler</button></div>`); }catch(e){toast(e.message,'err');}
+   },
+   async saveConvertUserPro(id) { try { const exceptional=document.getElementById('cp-exception').checked; await api('/admin/users/'+id+'/convert-pro',{method:'POST',body:{pro_type:document.getElementById('cp-type').value,exceptional,reason:document.getElementById('cp-reason').value}});closeModal();toast(exceptional?'Professionnel exceptionnellement validé (profil incomplet).':'Conversion envoyée vers le parcours professionnel.','ok');A.userDetail(id);}catch(e){toast(e.message,'err');} },
++  async quickAccessPolicySave(){try{await api('/admin/access-codes/config',{method:'PUT',body:{hours:document.getElementById('qa-hours').value,max_attempts:document.getElementById('qa-attempts').value}});toast('Politique des codes provisoires enregistrée.','ok');render();}catch(e){toast(e.message,'err');}},
+   userQuickCreate() {
+     openModal(`<h3>＋ Créer rapidement un compte</h3>
+-      <p class="small muted">Informations minimales. L\u2019utilisateur se connectera avec le mot de passe temporaire, devra en choisir un nouveau et compléter lui-même son profil. Aucune fausse information.</p>
++      <p class="small muted">Informations minimales. L\u2019utilisateur se connectera immédiatement avec le code provisoire communiqué, sans étape obligatoire de création de mot de passe, et pourra le remplacer plus tard. Aucune fausse information.</p>
+       <label class="small muted">Nom complet</label><input id="qc-name" style="width:100%;margin-bottom:10px" placeholder="Ex : John Sery Michael">
+       <label class="small muted">Téléphone</label><input id="qc-phone" style="width:100%;margin-bottom:10px" placeholder="Ex : 0700000000">
+       <label class="small muted">E-mail (si disponible)</label><input id="qc-email" style="width:100%;margin-bottom:10px" placeholder="facultatif">
+@@ -1291,9 +1293,9 @@
+     try {
+       const r = await api('/admin/users', { method: 'POST', body: { name: document.getElementById('qc-name').value, phone: document.getElementById('qc-phone').value, email: document.getElementById('qc-email').value, type: document.getElementById('qc-type').value } });
+       openModal(`<h3>✅ Compte créé</h3>
+-        <p>Communiquez ce mot de passe temporaire à l\u2019utilisateur (il devra en choisir un nouveau à sa première connexion) :</p>
+-        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temp_password)}</div>
+-        <p class="small muted">Ce mot de passe ne sera plus jamais affiché.</p>
++        <p>Communiquez ce code provisoire à l\u2019utilisateur :</p>
++        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temporary_code)}</div>
++        <p class="small muted">Valable jusqu’au ${esc(String(r.expires_at||'').slice(0,16))}. Ce code ne sera plus jamais affiché.</p>
+         <button class="btn" onclick="closeModal();render()">Terminé</button>`);
+     } catch (e) { toast(e.message, 'err'); }
+   },
+@@ -1369,13 +1371,13 @@
+     try { await api(`/admin/users/${id}/disable-temp`, { method: 'POST', body: { until, reason: document.getElementById('dt-reason').value } }); toast('Compte désactivé temporairement.', 'ok'); A.userDetail(id); render(); } catch (e) { toast(e.message, 'err'); }
+   },
+   async userResetAccess(id) {
+-    if (!confirm('Réinitialiser l\u2019accès de ce compte ?\nUn mot de passe temporaire sera généré (l\u2019ancien mot de passe n\u2019est jamais visible).')) return;
++    if (!confirm('Régénérer le code provisoire de ce compte ? L’ancien code sera immédiatement invalidé.')) return;
+     try {
+       const r = await api(`/admin/users/${id}/reset-access`, { method: 'POST', body: {} });
+       openModal(`<h3>🔑 Accès réinitialisé</h3>
+-        <p>Communiquez ce mot de passe temporaire à l\u2019utilisateur :</p>
+-        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temp_password)}</div>
+-        <p class="small muted">Il devra choisir un nouveau mot de passe à sa prochaine connexion. Ce mot de passe ne sera plus jamais affiché.</p>
++        <p>Communiquez à l’utilisateur son numéro et ce code provisoire :</p>
++        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temporary_code)}</div>
++        <p class="small muted">Valable jusqu’au ${esc(String(r.expires_at||'').slice(0,16))}. Il peut le remplacer ultérieurement depuis ses paramètres. Ce code ne sera plus jamais affiché.</p>
+         <button class="btn" onclick="closeModal()">Terminé</button>`);
+     } catch (e) { toast(e.message, 'err'); }
+   },
+@@ -1725,9 +1727,9 @@
+     try {
+       const r = await api('/admin/staff', { method: 'POST', body: { name: document.getElementById('st-name').value, phone: document.getElementById('st-phone').value, email: document.getElementById('st-email').value, role: document.getElementById('st-role').value } });
+       openModal(`<h3>✅ Membre ajouté</h3>
+-        <p>Communiquez-lui ce mot de passe temporaire (il devra en choisir un nouveau) :</p>
+-        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temp_password)}</div>
+-        <p class="small muted">Connexion sur la page /admin avec son identifiant. Ce mot de passe ne sera plus jamais affiché.</p>
++        <p>Communiquez-lui ce code provisoire :</p>
++        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temporary_code)}</div>
++        <p class="small muted">Connexion sur la page /admin avec son identifiant. Valable jusqu’au ${esc(String(r.expires_at||'').slice(0,16))}. Ce code ne sera plus jamais affiché.</p>
+         <button class="btn" onclick="closeModal();render()">Terminé</button>`);
+     } catch (e) { toast(e.message, 'err'); }
+   },
+@@ -1764,12 +1766,12 @@
+     try { await api('/admin/staff/' + id, { method: 'PUT', body: { [field]: v, reason } }); toast('Mis à jour ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+   },
+   async staffReset(id) {
+-    if (!confirm('Réinitialiser l\u2019accès de ce membre ? Un mot de passe temporaire sera généré.')) return;
++    if (!confirm('Réinitialiser l\u2019accès de ce membre ? Un code provisoire sera généré.')) return;
+     try {
+       const r = await api('/admin/staff/' + id + '/reset-access', { method: 'POST', body: {} });
+       openModal(`<h3>🔑 Accès réinitialisé</h3>
+-        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temp_password)}</div>
+-        <p class="small muted">Il devra choisir un nouveau mot de passe à sa prochaine connexion.</p>
++        <div style="font-size:24px;font-weight:800;text-align:center;background:#eef7f5;border-radius:10px;padding:14px;letter-spacing:2px">${esc(r.temporary_code)}</div>
++        <p class="small muted">Valable jusqu’au ${esc(String(r.expires_at||'').slice(0,16))}. Il peut le remplacer ultérieurement depuis ses paramètres.</p>
+         <button class="btn" onclick="closeModal()">Terminé</button>`);
+     } catch (e) { toast(e.message, 'err'); }
+   },
+@@ -2364,7 +2366,7 @@
+     const categories = document.getElementById('st-urgcats').value.split('\n').map(l => { const [name,description] = l.split('|').map(s=>(s||'').trim()); return name ? {name,description,active:true} : null; }).filter(Boolean);
+     try { await api('/admin/settings',{method:'PUT',body:{urgence_info:document.getElementById('st-urginfo').value,urgence_contacts:JSON.stringify(contacts),urgence_categories:JSON.stringify(categories),urgence_assistance_enabled:document.getElementById('st-urgavailable').checked?'1':'0'}});toast('Configuration d’urgence enregistrée ✓','ok');render(); } catch(e){toast(e.message,'err');}
+   },
+-  async cabineSettings(){try{await api('/admin/cabine/settings',{method:'PUT',body:{cabine_enabled:document.getElementById('cab-enabled').checked,cabine_title:document.getElementById('cab-title').value,cabine_icon:document.getElementById('cab-icon').value,cabine_color:document.getElementById('cab-color').value,cabine_description:document.getElementById('cab-description').value,cabine_unavailable_message:document.getElementById('cab-unavailable').value,cabine_conditions:document.getElementById('cab-conditions').value,cabine_operator_detection:document.getElementById('cab-detect').checked,cabine_manual_operator:document.getElementById('cab-manual').checked,cabine_custom_amount:document.getElementById('cab-custom').checked}});toast('Paramètres Klean Cabine enregistrés. Le paiement reste verrouillé.','ok');render();}catch(e){toast(e.message,'err');}},
++  async cabineSettings(){try{await api('/admin/cabine/settings',{method:'PUT',body:{cabine_enabled:document.getElementById('cab-enabled').checked,cabine_title:document.getElementById('cab-title').value,cabine_icon:document.getElementById('cab-icon').value,cabine_color:document.getElementById('cab-color').value,cabine_description:document.getElementById('cab-description').value,cabine_unavailable_message:document.getElementById('cab-unavailable').value,cabine_conditions:document.getElementById('cab-conditions').value,cabine_operator_detection:document.getElementById('cab-detect').checked,cabine_manual_operator:document.getElementById('cab-manual').checked,cabine_custom_amount:document.getElementById('cab-custom').checked,cabine_fee_enabled:document.getElementById('cab-fee-enabled').checked,cabine_fee_percent:document.getElementById('cab-fee-percent').value,cabine_fee_rounding:document.getElementById('cab-fee-rounding').value,cabine_free_request_label:document.getElementById('cab-free-label').value,cabine_free_request_hint:document.getElementById('cab-free-hint').value}});toast('Paramètres Klean Kbine à distance enregistrés. Le paiement reste verrouillé.','ok');render();}catch(e){toast(e.message,'err');}},
+   async cabineOperatorEdit(id){try{const d=await api('/admin/cabine/overview'),o=id?d.operators.find(x=>Number(x.id)===Number(id)):null,x=o||{code:'',name:'',description:'',color:'#166534',enabled:false,transfer_enabled:false,bundles_enabled:false,min_amount:'',max_amount:'',conditions:'',sort:0};openModal(`<h3>${o?'Modifier':'Ajouter'} un opérateur</h3><div class="hint">La configuration du catalogue ne connecte pas l’opérateur. L’état API reste contrôlé par une intégration officielle vérifiée.</div><div class="frow"><div><label>Code</label><input id="co-code" maxlength="30" value="${esc(x.code)}"></div><div><label>Nom</label><input id="co-name" maxlength="100" value="${esc(x.name)}"></div><div><label>Couleur</label><input id="co-color" maxlength="20" value="${esc(x.color||'#166534')}"></div></div><label>Description</label><textarea id="co-desc" maxlength="500">${esc(x.description||'')}</textarea><div class="frow"><div><label>Minimum FCFA</label><input id="co-min" type="number" min="0" value="${x.min_amount??''}"></div><div><label>Maximum FCFA</label><input id="co-max" type="number" min="0" value="${x.max_amount??''}"></div><div><label>Ordre</label><input id="co-sort" type="number" min="0" value="${Number(x.sort||0)}"></div></div><label>Conditions</label><textarea id="co-conditions" maxlength="3000">${esc(x.conditions||'')}</textarea><label class="check-line"><input id="co-enabled" type="checkbox" ${x.enabled?'checked':''}> Afficher au catalogue</label><label class="check-line"><input id="co-transfer" type="checkbox" ${x.transfer_enabled?'checked':''}> Préparer la catégorie transfert</label><label class="check-line"><input id="co-bundles" type="checkbox" ${x.bundles_enabled?'checked':''}> Préparer les catégories forfait</label><div class="btn-row"><button class="btn" onclick="A.cabineOperatorSave(${o?o.id:'null'},this)">Enregistrer</button><button class="btn sec" onclick="closeModal()">Annuler</button></div>`);}catch(e){toast(e.message,'err');}},
+   async cabineOperatorSave(id,btn){busy(btn,true);try{const body={code:document.getElementById('co-code').value,name:document.getElementById('co-name').value,color:document.getElementById('co-color').value,description:document.getElementById('co-desc').value,min_amount:document.getElementById('co-min').value,max_amount:document.getElementById('co-max').value,sort:document.getElementById('co-sort').value,conditions:document.getElementById('co-conditions').value,enabled:document.getElementById('co-enabled').checked,transfer_enabled:document.getElementById('co-transfer').checked,bundles_enabled:document.getElementById('co-bundles').checked};await api('/admin/cabine/operators'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Opérateur administré. API non connectée.','ok');render();}catch(e){toast(e.message,'err');busy(btn,false);}},
+   async cabineServiceEdit(id){try{const d=await api('/admin/cabine/overview'),x=id?d.services.find(s=>Number(s.id)===Number(id)):null,o=x||{code:'',name:'',description:'',icon:'📱',color:'#166534',service_type:'bundle',enabled:true,sort:0};openModal(`<h3>${x?'Modifier':'Ajouter'} un service</h3><div class="frow"><div><label>Code</label><input id="cs-code" maxlength="30" value="${esc(o.code)}"></div><div><label>Nom</label><input id="cs-name" maxlength="100" value="${esc(o.name)}"></div><div><label>Icône</label><input id="cs-icon" maxlength="20" value="${esc(o.icon||'📱')}"></div></div><label>Description</label><textarea id="cs-desc" maxlength="500">${esc(o.description||'')}</textarea><div class="frow"><div><label>Type</label><select id="cs-type"><option value="bundle" ${o.service_type==='bundle'?'selected':''}>Forfait</option><option value="transfer" ${o.service_type==='transfer'?'selected':''}>Transfert</option></select></div><div><label>Couleur</label><input id="cs-color" maxlength="20" value="${esc(o.color||'#166534')}"></div><div><label>Ordre</label><input id="cs-sort" type="number" min="0" value="${Number(o.sort||0)}"></div></div><label class="check-line"><input id="cs-enabled" type="checkbox" ${o.enabled?'checked':''}> Visible</label><div class="btn-row"><button class="btn" onclick="A.cabineServiceSave(${x?x.id:'null'},this)">Enregistrer</button><button class="btn sec" onclick="closeModal()">Annuler</button></div>`);}catch(e){toast(e.message,'err');}},
+--- COLIS-33/package.json
++++ COLIS-34/package.json
+@@ -30,7 +30,9 @@
+     "test:colis32": "node test-colis32.js",
+     "test:colis32:ui": "node test-colis32-ui.js",
+     "test:colis33": "node test-colis33.js",
+-    "test:colis33:ui": "node test-colis33-ui.js"
++    "test:colis33:ui": "node test-colis33-ui.js",
++    "test:colis34": "node test-colis34.js",
++    "test:colis34:ui": "node test-colis34-ui.js"
+   },
+   "keywords": [],
+   "author": "",
+--- COLIS-33/test-colis29-ui.js
++++ COLIS-34/test-colis29-ui.js
+@@ -15,7 +15,7 @@
+  for(const [name,viewport] of [['Desktop',{width:1440,height:900}],['Pixel 7',{width:412,height:915}],['iPhone 13',{width:390,height:844}]]){
+    const ctx=await browser.newContext({viewport,isMobile:name!=='Desktop',deviceScaleFactor:name==='Desktop'?1:2});const page=await ctx.newPage();let jsErrors=[];page.on('pageerror',e=>jsErrors.push(e.message));
+    await page.goto(BASE+'/#/home',{waitUntil:'networkidle'});await page.waitForSelector('.home-shortcuts');
+-   const shortcuts=await page.locator('.home-shortcut').allTextContents();const jobs=shortcuts.findIndex(t=>t.includes('Trouver ou proposer un job')),brad=shortcuts.findIndex(t=>t.includes('Articles seconde main')),cabine=shortcuts.findIndex(t=>t.includes('Klean Cabine')),avis=shortcuts.findIndex(t=>t.includes('Avis de recherche'));yes(jobs>=0&&brad===jobs+1&&cabine===brad+1&&avis===cabine+1,`${name} : Articles seconde main puis Klean Cabine entre Jobs et Avis`);
++   const shortcuts=await page.locator('.home-shortcut').allTextContents();const jobs=shortcuts.findIndex(t=>t.includes('Trouver ou proposer un job')),brad=shortcuts.findIndex(t=>t.includes('Articles seconde main')),cabine=shortcuts.findIndex(t=>t.includes('Klean Kbine à distance')),avis=shortcuts.findIndex(t=>t.includes('Avis de recherche'));yes(jobs>=0&&brad===jobs+1&&cabine===brad+1&&avis===cabine+1,`${name} : Articles seconde main puis Klean Kbine à distance entre Jobs et Avis`);
+    await page.waitForSelector('#ks-band-track',{timeout:8000});const marquee=await page.evaluate(async()=>{const e=document.getElementById('ks-band-track');const before=getComputedStyle(e).transform;await new Promise(r=>setTimeout(r,350));return {name:getComputedStyle(e).animationName,before,after:getComputedStyle(e).transform,width:document.documentElement.scrollWidth,inner:innerWidth};});yes(marquee.name.includes('ksBandeauScroll')&&marquee.before!==marquee.after&&marquee.width<=marquee.inner+1,`${name} : bandeau animé sans blocage ni débordement`);
+    await page.getByRole('button',{name:/Articles seconde main/}).click();await page.waitForSelector('text=Article UI COLIS 29',{timeout:8000});const text=await page.locator('body').innerText();yes(text.includes('Article UI COLIS 29')&&!text.includes('0101010101')&&!text.includes('secret-ui'),`${name} : fiche/listing Articles seconde main responsive et coordonnées Klean absentes`);
+    const box=await page.locator('.card').filter({hasText:'Article UI COLIS 29'}).first().boundingBox();yes(!!box&&box.x>=0&&box.x+box.width<=viewport.width+1,`${name} : carte Articles seconde main ne déborde pas`);yes(!jsErrors.length,`${name} : aucune erreur JavaScript pendant le parcours`);await ctx.close();
+--- COLIS-33/test-colis33.js
++++ COLIS-34/test-colis33.js
+@@ -1,4 +1,4 @@
+-/* COLIS 33 — Articles seconde main et Klean Cabine : tests API réels.
++/* COLIS 33 — Articles seconde main et Klean Kbine à distance : tests API réels.
+    Lancer : KLEAN_TEST_BASE=http://127.0.0.1:3000 node test-colis33.js */
+ 'use strict';
+ const BASE=(process.env.KLEAN_TEST_BASE||'http://127.0.0.1:3000').replace(/\/$/,'');const API=BASE+'/api';
+@@ -26,8 +26,8 @@
+  x=await call(buyer,'/braderie/buyer-dashboard');ok(x.r.status===200&&x.d.counts.favorites===1&&x.d.recent.some(i=>Number(i.id)===itemId),'espace acheteur : favoris et vues récentes');
+  x=await call(seller,'/braderie/drafts','POST',{title:'Brouillon COLIS 33',description:'Publication à préparer.',price:1000});draftId=x.d.id;ok(x.r.status===201&&!!draftId,'brouillon vendeur persistant');
+  x=await call(seller,'/braderie/drafts');ok(x.r.status===200&&x.d.some(d=>Number(d.id)===Number(draftId)&&d.payload.title==='Brouillon COLIS 33'),'lecture brouillon vendeur');
+- x=await call(null,'/cabine/config');ok(x.r.status===200&&x.d.checkout_available===false&&x.d.provider_connected===false&&x.d.operators.length>=3,'catalogue Klean Cabine exposé avec exécution indisponible');
+- x=await call(buyer,'/cabine/quote','POST',{operation_type:'transfer',debit_phone:'0700000001',debit_operator_code:'mtn',beneficiary_phone:'0700000002',beneficiary_operator_code:'orange',amount:500});ok(x.r.status===200&&x.d.no_charge&&x.d.checkout_available===false&&x.d.total===500,'récapitulatif sans paiement Klean Cabine');
++ x=await call(null,'/cabine/config');ok(x.r.status===200&&x.d.checkout_available===false&&x.d.provider_connected===false&&x.d.operators.length>=3,'catalogue Klean Kbine à distance exposé avec exécution indisponible');
++ x=await call(buyer,'/cabine/quote','POST',{operation_type:'transfer',debit_phone:'0700000001',debit_operator_code:'mtn',beneficiary_phone:'0700000002',beneficiary_confirmation:'0700000002',beneficiary_operator_code:'orange',amount:500});ok(x.r.status===200&&x.d.no_charge&&x.d.checkout_available===false&&x.d.fee===10&&x.d.total===510,'récapitulatif sans paiement Klean Kbine à distance');
+  const beforeOps=db.prepare('SELECT COUNT(*) n FROM cabine_operations').get().n;x=await call(buyer,'/cabine/operations','POST',{operation_type:'transfer'});const afterOps=db.prepare('SELECT COUNT(*) n FROM cabine_operations').get().n;ok(x.r.status===503&&x.d.code==='PROVIDER_NOT_CONNECTED'&&x.d.no_charge&&beforeOps===afterOps,'checkout bloqué : aucune opération ni débit artificiel');
+  x=await call(admin,'/admin/cabine/operators','POST',{code:'test'+stamp,name:'Test Opérateur',enabled:true,transfer_enabled:true,bundles_enabled:true});operatorId=x.d.id;ok(x.r.status===201&&x.d.api_status==='not_configured','opérateur administrable sans déclarer une connexion API');
+  x=await call(admin,'/admin/cabine/services','POST',{code:'test'+stamp,name:'Test Service',service_type:'bundle',enabled:true});serviceId=x.d.id;ok(x.r.status===201,'catégorie Cabine administrable');
+--- COLIS-33/test-colis33-ui.js
++++ COLIS-34/test-colis33-ui.js
+@@ -1,9 +1,9 @@
+-/* COLIS 33 — UI Playwright : Articles seconde main et Klean Cabine sûrs.
++/* COLIS 33 — UI Playwright : Articles seconde main et Klean Kbine à distance sûrs.
+    Lancer : KLEAN_TEST_BASE=http://127.0.0.1:3000 node test-colis33-ui.js */
+ 'use strict'; const {chromium}=require('playwright');const BASE=(process.env.KLEAN_TEST_BASE||'http://127.0.0.1:3000').replace(/\/$/,'');const API=BASE+'/api';let total=0,failed=0;const ok=(v,l)=>{total++;console.log(v?'OK ':'BAD',l);if(!v)failed++;};async function call(token,url,method='GET',body){const r=await fetch(API+url,{method,headers:{...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return {r,d:await r.json().catch(()=>({}))};}
+ (async()=>{let admin,buyer,buyerId,sellerId,itemId,browser,oldEnabled;const stamp=String(Date.now()).slice(-8);try{const {db,getSetting,setSetting}=require('./db');oldEnabled=getSetting('braderie_enabled','0');admin=(await call(null,'/auth/login','POST',{phone:'admin',password:'Klean@2026'})).d.token;let r=await call(null,'/auth/register','POST',{name:'Acheteur UI 33',phone:'073'+stamp.slice(-7),password:'Colis33Ui!Pass',ville:'Abidjan',quartier:'Cocody',accept_rules:true});buyer=r.d.token;buyerId=r.d.user.id;r=await call(null,'/auth/register','POST',{name:'Vendeur UI 33',phone:'074'+stamp.slice(-7),password:'Colis33Ui!Pass',ville:'Abidjan',quartier:'Cocody',accept_rules:true});sellerId=r.d.user.id;await call(admin,'/admin/braderie/config','PUT',{enabled:true,home_visible:true});const cat=db.prepare('SELECT id FROM braderie_categories WHERE active=1 LIMIT 1').get();itemId=Number(db.prepare("INSERT INTO braderie_items(seller_id,title,description,price,city,commune,quartier,contact_phone,item_condition,visibility,visibility_mode,category_id,status,conditions_accepted,expires_at) VALUES(?,?,?,?,?,?,?,?,?,'city','city',?,'available',1,datetime('now','+30 days'))").run(sellerId,'Article UI COLIS 33','Article visible sur la vitrine publique de test.',7000,'Abidjan','Cocody','Cocody','0740000000','bon',cat.id).lastInsertRowid);browser=await chromium.launch({headless:true});
+- const guest=await browser.newContext({viewport:{width:390,height:844},isMobile:true});const gp=await guest.newPage();let errors=[];gp.on('pageerror',e=>errors.push(e.message));await gp.goto(BASE+'/#/articles-seconde-main',{waitUntil:'domcontentloaded'});await gp.waitForSelector('text=Articles seconde main',{timeout:10000});ok(await gp.locator('text=Article UI COLIS 33').count()===1,'vitrine publique Articles seconde main');ok(await gp.locator('text=Publier').count()===0&&await gp.locator('text=Mes articles publiés').count()===0,'aucune action vendeur sur la vitrine publique');await gp.goto(BASE+'/#/klean-cabine',{waitUntil:'domcontentloaded'});await gp.waitForSelector('text=Opérations non disponibles',{timeout:10000});ok(await gp.locator('text=Aucun paiement, débit, transfert ou achat de forfait').count()===1,'Klean Cabine avertit clairement et ne simule pas une exécution');ok(!errors.length,'vitrines sans erreur JavaScript');await guest.close();
+- const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true});await ctx.addInitScript(t=>localStorage.setItem('ks_token',t),buyer);const p=await ctx.newPage();await p.goto(BASE+'/#/account',{waitUntil:'domcontentloaded'});await p.waitForSelector('text=Mes opérations Klean Cabine');ok(await p.locator('text=Mon espace braderie').count()===1&&await p.locator('text=Mes opérations Klean Cabine').count()===1,'Compte : espaces Articles et Klean Cabine accessibles');await p.goto(BASE+'/#/articles-seconde-main/'+itemId,{waitUntil:'domcontentloaded'});await p.waitForSelector('text=Faire une proposition');await p.locator('text=♡ Favori').click();await p.waitForSelector('text=♥ Retirer');ok(await p.locator('text=♥ Retirer').count()===1,'détail acheteur : favori réellement synchronisé');await p.goto(BASE+'/#/klean-cabine/transfer',{waitUntil:'domcontentloaded'});await p.waitForSelector('#cabine-debit');await p.locator('#cabine-debit').fill('0700000001');await p.selectOption('#cabine-debit-operator','mtn');await p.locator('#cabine-beneficiary').fill('0700000002');await p.selectOption('#cabine-beneficiary-operator','orange');await p.locator('#cabine-amount').fill('500');await p.locator('text=Vérifier le récapitulatif').click();await p.waitForSelector('text=Paiement indisponible');ok(await p.locator('button[disabled]').filter({hasText:'Paiement indisponible'}).count()===1,'récapitulatif Cabine : paiement visiblement non opérable');await ctx.close();
+- const ac=await browser.newContext({viewport:{width:1366,height:900}});await ac.addInitScript(t=>localStorage.setItem('ks_admin_token',t),admin);const ap=await ac.newPage();let aerr=[];ap.on('pageerror',e=>aerr.push(e.message));await ap.goto(BASE+'/admin/#cabine',{waitUntil:'domcontentloaded'});await ap.waitForSelector('text=Gestion de Klean Cabine',{timeout:10000});ok(await ap.locator('text=Exécution verrouillée').count()===1&&await ap.locator('text=Opérateurs').count()>=1&&await ap.locator('text=Catalogue d’offres et frais').count()===1,'administration Cabine centralisée');ok(!aerr.length,'dashboard Cabine sans erreur JavaScript');await ac.close();
++ const guest=await browser.newContext({viewport:{width:390,height:844},isMobile:true});const gp=await guest.newPage();let errors=[];gp.on('pageerror',e=>errors.push(e.message));await gp.goto(BASE+'/#/articles-seconde-main',{waitUntil:'domcontentloaded'});await gp.waitForSelector('text=Articles seconde main',{timeout:10000});ok(await gp.locator('text=Article UI COLIS 33').count()===1,'vitrine publique Articles seconde main');ok(await gp.locator('text=Publier').count()===0&&await gp.locator('text=Mes articles publiés').count()===0,'aucune action vendeur sur la vitrine publique');await gp.goto(BASE+'/#/klean-cabine',{waitUntil:'domcontentloaded'});await gp.waitForSelector('text=Paiement et exécution indisponibles',{timeout:10000});ok(await gp.locator('text=Aucun paiement, débit, transfert ou achat de forfait').count()===1,'Klean Kbine à distance avertit clairement et ne simule pas une exécution');ok(!errors.length,'vitrines sans erreur JavaScript');await guest.close();
++ const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true});await ctx.addInitScript(t=>localStorage.setItem('ks_token',t),buyer);const p=await ctx.newPage();await p.goto(BASE+'/#/account',{waitUntil:'domcontentloaded'});await p.waitForSelector('text=Mes opérations Klean Kbine');ok(await p.locator('text=Mon espace braderie').count()===1&&await p.locator('text=Mes opérations Klean Kbine').count()===1,'Compte : espaces Articles et Klean Kbine à distance accessibles');await p.goto(BASE+'/#/articles-seconde-main/'+itemId,{waitUntil:'domcontentloaded'});await p.waitForSelector('text=Faire une proposition');await p.locator('text=♡ Favori').click();await p.waitForSelector('text=♥ Retirer');ok(await p.locator('text=♥ Retirer').count()===1,'détail acheteur : favori réellement synchronisé');await p.goto(BASE+'/#/klean-cabine/transfer',{waitUntil:'domcontentloaded'});await p.waitForSelector('#cabine-debit');await p.locator('#cabine-debit').fill('0700000001');await p.selectOption('#cabine-debit-operator','mtn');await p.locator('#cabine-beneficiary').fill('0700000002');await p.locator('#cabine-beneficiary-confirm').fill('0700000002');await p.selectOption('#cabine-beneficiary-operator','orange');await p.locator('#cabine-amount').fill('500');await p.locator('text=Vérifier le récapitulatif').click();await p.waitForSelector('text=Valider ma demande indisponible');ok(await p.locator('button[disabled]').filter({hasText:'Valider ma demande indisponible'}).count()===1,'récapitulatif Cabine : paiement visiblement non opérable');await ctx.close();
++ const ac=await browser.newContext({viewport:{width:1366,height:900}});await ac.addInitScript(t=>localStorage.setItem('ks_admin_token',t),admin);const ap=await ac.newPage();let aerr=[];ap.on('pageerror',e=>aerr.push(e.message));await ap.goto(BASE+'/admin/#cabine',{waitUntil:'domcontentloaded'});await ap.waitForSelector('text=Gestion de Klean Kbine à distance',{timeout:10000});ok(await ap.locator('text=Exécution verrouillée').count()===1&&await ap.locator('text=Opérateurs').count()>=1&&await ap.locator('text=Catalogue d’offres et frais').count()===1,'administration Cabine centralisée');ok(!aerr.length,'dashboard Cabine sans erreur JavaScript');await ac.close();
+ }catch(e){failed++;console.error(e.stack||e);}finally{if(browser)await browser.close();try{const {db,setSetting}=require('./db');if(itemId)db.prepare('DELETE FROM braderie_items WHERE id=?').run(itemId);for(const id of [buyerId,sellerId])if(id){db.prepare('DELETE FROM braderie_favorites WHERE user_id=?').run(id);db.prepare('DELETE FROM braderie_item_views WHERE user_id=?').run(id);db.prepare('DELETE FROM notifications WHERE user_id=?').run(id);db.prepare('DELETE FROM view_seen WHERE user_id=?').run(id);db.prepare('DELETE FROM ad_view_events WHERE user_id=?').run(id);db.prepare('DELETE FROM user_activity_events WHERE user_id=?').run(id);db.prepare('DELETE FROM users WHERE id=?').run(id);}if(oldEnabled!==undefined)setSetting('braderie_enabled',oldEnabled);}catch(e){console.error('Nettoyage',e.message);}}
+ console.log(`RESULT ${total-failed}/${total}, failed=${failed}`);process.exitCode=failed?1:0;})();
+--- COLIS-33/test-colis34.js
++++ COLIS-34/test-colis34.js
+@@ -0,0 +1,23 @@
++/* COLIS 34 — comptes rapides et Klean Kbine à distance : API intégrée, avec nettoyage. */
++const {db,getSetting,setSetting}=require('./db');
++const BASE='http://127.0.0.1:3000/api';let pass=0,fail=0,uid=null;const old={hours:getSetting('quick_access_code_hours'),attempts:getSetting('quick_access_code_max_attempts'),fee:getSetting('cabine_fee_percent'),feeEnabled:getSetting('cabine_fee_enabled')};
++function ok(condition,label){if(condition){pass++;console.log('✓',label)}else{fail++;console.error('✗',label)}}
++async function api(token,url,method='GET',body){const r=await fetch(BASE+url,{method,headers:{...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const d=await r.json().catch(()=>({}));return {r,d};}
++(async()=>{try{
++ let x=await api(null,'/auth/login','POST',{phone:'admin',password:'Klean@2026'});const admin=x.d.token;ok(x.r.status===200&&admin,'connexion administrateur de test');
++ x=await api(admin,'/admin/access-codes/config');ok(x.r.status===200&&x.d.hours>=1&&x.d.max_attempts>=1,'politique de codes provisoires PDG exposée');
++ x=await api(admin,'/admin/access-codes/config','PUT',{hours:24,max_attempts:3});ok(x.r.status===200&&x.d.hours===24&&x.d.max_attempts===3,'politique de durée et tentatives modifiable');
++ const phone='0799'+String(Date.now()).slice(-6);x=await api(admin,'/admin/users','POST',{name:'Test rapide COLIS 34',phone,type:'client'});uid=x.d.id;const first=x.d.temporary_code;ok(x.r.status===201&&/^[A-Z2-9]{10}$/.test(first||'')&&x.d.expires_at,'création rapide retourne uniquement un code sécurisé et son échéance');
++ x=await api(null,'/auth/login','POST',{phone,password:first});let user=x.d.token;ok(x.r.status===200&&x.d.user.must_change_password===false,'connexion immédiate par téléphone + code sans forcer un mot de passe');
++ x=await api(user,'/me/password','PUT',{current:first,password:'NouveauPass7'});ok(x.r.status===200,'le code provisoire peut servir de credential courant pour définir un mot de passe');
++ x=await api(null,'/auth/login','POST',{phone,password:first});ok(x.r.status===401,'le code est invalidé après changement de mot de passe');
++ x=await api(null,'/auth/login','POST',{phone,password:'NouveauPass7'});ok(x.r.status===200,'connexion avec le nouveau mot de passe');
++ x=await api(admin,'/admin/users/'+uid+'/quick-access','POST',{});const renewed=x.d.temporary_code;ok(x.r.status===200&&renewed&&renewed!==first,'régénération remplace le code actif');
++ x=await api(null,'/auth/login','POST',{phone,password:renewed});user=x.d.token;ok(x.r.status===200,'connexion avec le code régénéré');
++ x=await api(admin,'/admin/users?limit=300');const safe=(x.d||[]).find(u=>u.id===uid);ok(safe&&safe.quick_access_status==='active'&&!JSON.stringify(safe).includes(renewed),'liste admin expose l’état sans divulguer le code');
++ x=await api(null,'/cabine/config');ok(x.r.status===200&&x.d.title==='Klean Kbine à distance'&&x.d.fee_percent===2&&x.d.payment_enabled===false&&x.d.checkout_available===false,'configuration Kbine affiche le nouveau titre, frais et verrou de paiement');
++ x=await api(user,'/cabine/quote','POST',{operation_type:'transfer',debit_phone:'0700000001',debit_operator_code:'mtn',beneficiary_phone:'0700000002',beneficiary_confirmation:'0700000002',beneficiary_operator_code:'orange',amount:500});ok(x.r.status===200&&x.d.fee===10&&x.d.total===510&&x.d.no_charge&&x.d.checkout_available===false,'récapitulatif transfert applique 2 % côté serveur sans débit');
++ x=await api(user,'/cabine/quote','POST',{operation_type:'transfer',debit_phone:'0700000001',debit_operator_code:'mtn',beneficiary_phone:'0700000002',beneficiary_confirmation:'0700000003',beneficiary_operator_code:'orange',amount:500});ok(x.r.status===400&&/correspondent/.test(x.d.error||''),'confirmation obligatoire du numéro bénéficiaire');
++ x=await api(user,'/cabine/offers/match','POST',{query:'internet 1 go',kind:'internet',operator:'mtn'});ok(x.r.status===200&&Array.isArray(x.d.matches)&&x.d.notice&&!JSON.stringify(x.d).includes('operation_ref'),'recherche d’offre administrée ne déclenche aucune opération');
++ x=await api(user,'/cabine/operations','POST',{operation_type:'transfer'});ok(x.r.status===503&&x.d.code==='PROVIDER_NOT_CONNECTED','soumission bloquée côté serveur sans prestataire officiel');
++} catch(e){fail++;console.error(e)} finally {if(uid){for(const t of ['quick_access_codes','notifications','view_seen','ad_view_events','user_activity_events'])try{db.prepare(`DELETE FROM ${t} WHERE user_id=?`).run(uid)}catch{};try{db.prepare('DELETE FROM users WHERE id=?').run(uid)}catch{}}for(const [key,value] of Object.entries({quick_access_code_hours:old.hours,quick_access_code_max_attempts:old.attempts,cabine_fee_percent:old.fee,cabine_fee_enabled:old.feeEnabled}))if(value!==null)setSetting(key,value);console.log(`COLIS 34 API : ${pass}/${pass+fail}`);process.exitCode=fail?1:0;}})();
+--- COLIS-33/test-colis34-ui.js
++++ COLIS-34/test-colis34-ui.js
+@@ -0,0 +1,7 @@
++/* COLIS 34 — UI Playwright : compte rapide, Kbine et stabilité de scroll. */
++const { chromium }=require('playwright'); const {db}=require('./db');const BASE='http://127.0.0.1:3000',API=BASE+'/api';let pass=0,fail=0,uid=null;function ok(v,l){if(v){pass++;console.log('OK ',l)}else{fail++;console.error('KO ',l)}}async function api(token,url,method='GET',body){const r=await fetch(API+url,{method,headers:{...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return {r,d:await r.json().catch(()=>({}))}}
++(async()=>{let browser;try{let a=await api(null,'/auth/login','POST',{phone:'admin',password:'Klean@2026'}),admin=a.d.token,phone='0788'+String(Date.now()).slice(-6);let created=await api(admin,'/admin/users','POST',{name:'UI rapide COLIS 34',phone,type:'client'});uid=created.d.id;const code=created.d.temporary_code;const user=(await api(null,'/auth/login','POST',{phone,password:code})).d.token;browser=await chromium.launch({headless:true});
++ const login=await browser.newPage({viewport:{width:390,height:844}});let errs=[];login.on('pageerror',e=>errs.push(e.message));await login.goto(BASE+'/#/login',{waitUntil:'domcontentloaded'});await login.locator('#f-phone').fill(phone);await login.locator('#f-pass').fill(code);await login.locator('button.btn').first().click();await login.waitForTimeout(800);ok((await login.locator('body').innerText()).includes('Compte')&&!login.url().includes('/login'),'connexion UI immédiate avec le code provisoire');ok(!errs.length,'connexion rapide sans erreur JavaScript');await login.close();
++ const contexts=[['Bureau',{viewport:{width:1366,height:650}}],['Android',{viewport:{width:412,height:915},isMobile:true}],['iPhone',{viewport:{width:390,height:844},isMobile:true}]];for(const [label,opts] of contexts){const ctx=await browser.newContext(opts);await ctx.addInitScript(t=>localStorage.setItem('ks_token',t),user);const p=await ctx.newPage();let errors=[];p.on('pageerror',e=>errors.push(e.message));await p.goto(BASE+'/#/klean-cabine',{waitUntil:'domcontentloaded'});await p.waitForSelector('text=Transfert de crédit');ok(await p.locator('button.card').count()===2,`${label} : l’accueil Kbine ne présente que les deux choix de service`);ok(await p.locator('text=Souscription Appel/Internet').count()===1&&await p.locator('text=Paiement et exécution indisponibles').count()===1,`${label} : titre Kbine et verrou de sécurité visibles`);await p.locator('text=Transfert de crédit').last().click();await p.waitForSelector('#cabine-beneficiary-confirm');ok(await p.locator('label').filter({hasText:'Numéro à débiter (Numéro qui paye)'}).count()===1&&await p.locator('label').filter({hasText:'Confirmer le numéro bénéficiaire'}).count()===1,`${label} : transfert comporte le libellé et la confirmation requis`);await p.locator('#cabine-debit').fill('0700000001');await p.selectOption('#cabine-debit-operator','mtn');await p.locator('#cabine-beneficiary').fill('0700000002');await p.locator('#cabine-beneficiary-confirm').fill('0700000002');await p.selectOption('#cabine-beneficiary-operator','orange');await p.locator('#cabine-amount').fill('500');await p.locator('text=Vérifier le récapitulatif').click();await p.waitForSelector('text=Total estimé : 510');ok(await p.locator('text=Frais supplémentaires (2 %) : 10').count()===1&&await p.locator('button[disabled]').filter({hasText:'Valider ma demande indisponible'}).count()===1,`${label} : frais serveur récapitulés sans action de paiement`);await p.locator('text=Revenir corriger').click();await p.goto(BASE+'/#/klean-cabine/subscription',{waitUntil:'domcontentloaded'});await p.waitForSelector('#cabine-free-request');await p.locator('#cabine-debit').fill('0700000001');await p.selectOption('#cabine-debit-operator','mtn');await p.locator('#cabine-beneficiary').fill('0700000002');await p.locator('#cabine-beneficiary-confirm').fill('0700000002');await p.selectOption('#cabine-beneficiary-operator','orange');await p.locator('#cabine-free-request').fill('Internet pour mes appels');ok(await p.locator('text=☎️ Appel').count()===1&&await p.locator('text=🌐 Internet').count()===1,`${label} : souscription Appel/Internet et demande libre disponibles`);await p.goto(BASE+'/#/home',{waitUntil:'domcontentloaded'});await p.waitForSelector('text=SERVICES POPULAIRES');await p.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));await p.waitForTimeout(27000);const scroll=await p.evaluate(()=>window.scrollY);ok(scroll>=100,`${label} : le rafraîchissement automatique ne remonte pas la page`);ok(!errors.length,`${label} : parcours Kbine et scroll sans erreur JavaScript`);await ctx.close();}
++ const ad=await browser.newContext({viewport:{width:1366,height:900}});await ad.addInitScript(t=>localStorage.setItem('ks_admin_token',t),admin);const ap=await ad.newPage();await ap.goto(BASE+'/admin/#cabine',{waitUntil:'domcontentloaded'});await ap.waitForSelector('#cab-fee-percent');ok(await ap.locator('#cab-fee-percent').inputValue()==='2'&&await ap.locator('#cab-free-label').count()===1,'PDG : frais centralisés et demande libre configurables');await ad.close();
++}catch(e){fail++;console.error(e.stack||e)}finally{if(browser)await browser.close();if(uid){for(const t of ['quick_access_codes','notifications','view_seen','ad_view_events','user_activity_events'])try{db.prepare(`DELETE FROM ${t} WHERE user_id=?`).run(uid)}catch{};try{db.prepare('DELETE FROM users WHERE id=?').run(uid)}catch{}}console.log(`COLIS 34 UI : ${pass}/${pass+fail}`);process.exitCode=fail?1:0;}})();
+--- COLIS-33/LIVRAISON-COLIS-34.md
++++ COLIS-34/LIVRAISON-COLIS-34.md
+@@ -0,0 +1,49 @@
++# Livraison — COLIS 34
++
++## Objet
++Mise à jour additive de l’application Klean Services : comptes rapides à code provisoire, stabilité du défilement de l’accueil et préparation sûre de **Klean Kbine à distance**.
++
++## Inclus
++
++### 1. Comptes rapides et codes provisoires
++- Création de comptes rapides par les membres autorisés à gérer les comptes.
++- Code provisoire aléatoire de 10 caractères, sans caractères ambigus, protégé par hachage salé en base ; le code en clair n’est pas conservé ni inscrit dans le journal d’audit.
++- Durée de validité et nombre maximal d’essais configurables exclusivement par le rôle technique PDG dans Administration → Utilisateurs.
++- Statuts sûrs consultables : actif, remplacé, expiré, verrouillé ou révoqué. Aucun code n’est renvoyé dans les listes ou fiches.
++- Connexion immédiate avec téléphone + code provisoire, sans étape imposée de création de mot de passe.
++- Régénération/réinitialisation invalide immédiatement le code précédent. Les changements ou réinitialisations de mot de passe invalident aussi les codes actifs.
++- Le titulaire peut remplacer le code par un mot de passe depuis Compte → Paramètres du compte → Modifier mon mot de passe, après confirmation du nouveau mot de passe.
++- Aucun second compte n’est créé si le téléphone existe : l’administration reçoit une orientation vers la récupération/régénération d’accès.
++
++### 2. Accueil sans remontée de page involontaire
++- Le cycle de rendu distingue désormais une navigation demandée par l’utilisateur d’un rafraîchissement de données de l’accueil.
++- La position de défilement est préservée pour les rendus automatiques, y compris le rafraîchissement périodique du catalogue.
++- Les tests couvrent Bureau, Android et iPhone après plus de 25 secondes de rafraîchissement automatique.
++
++### 3. Klean Kbine à distance — préparation contrôlée
++- Nouveau libellé public : **Klean Kbine à distance** ; les routes/API techniques `cabine` restent conservées pour compatibilité.
++- L’écran d’entrée présente seulement : **Transfert de crédit** et **Souscription Appel/Internet**.
++- Le formulaire utilise le libellé **« Numéro à débiter (Numéro qui paye) »**, pré-remplit le numéro connu du compte quand disponible, rend le numéro bénéficiaire modifiable et oblige sa confirmation.
++- Les transferts calculent côté serveur les frais centralisés : 2 % par défaut, activables/désactivables, taux et arrondi FCFA administrables. Aucun prix n’est figé côté interface et les frais ne sont appliqués qu’une fois.
++- Les souscriptions proposent Appel/Internet, les seules offres réellement administrées, ainsi qu’une demande libre avec recherche indicative dans le catalogue. Cette recherche ne crée aucune opération.
++- Les récapitulatifs restent entièrement non engageants : aucun débit, paiement, transfert, forfait, historique fictif ou succès simulé n’est produit.
++- L’administration centralisée possède les réglages frais, arrondi, libellé et texte d’aide de la demande libre. Les offres, opérateurs et prix existants restent administrables.
++
++## Limite volontaire de cette livraison
++Aucune intégration officielle de paiement ou d’opérateur n’est fournie dans ce colis. Le serveur conserve `payment_enabled:false`, `checkout_available:false` et bloque toute soumission par `503 PROVIDER_NOT_CONNECTED`. La confirmation réelle, le dispatch fournisseur, les remboursements et les succès opérationnels seront traités uniquement après intégrations officielles vérifiées.
++
++## Validation effectuée
++- `npm run test:colis34` : **16/16**
++- `npm run test:colis34:ui` : **24/24** (Bureau, Android, iPhone)
++- Régressions API : COLIS 33 **22/22**, COLIS 32 **22/22**, COLIS 29 **31/31**, COLIS 30 **25/25**, COLIS 31 **16/16**
++- Régressions UI : COLIS 33 **9/9**, COLIS 29 **18/18**, COLIS 30 **16/16**, COLIS 31 **10/10**
++- Vérifications syntaxiques de `db.js`, `server.js`, `public/app.js`, `public/admin/admin.js` et des nouveaux tests.
++
++## Mise en service
++1. Sauvegarder la base SQLite active avant déploiement.
++2. Déployer les fichiers du colis en conservant la base, les comptes, les rôles, les routes et les téléversements existants.
++3. Installer les dépendances si nécessaire : `npm ci --no-audit --no-fund`.
++4. Redémarrer l’application : `npm start` ou le processus de production habituel.
++5. Le démarrage applique automatiquement les migrations additives de `db.js` pour `quick_access_codes` et les nouveaux réglages Kbine.
++
++Aucune donnée métier existante n’est supprimée par cette mise à jour.
+--- COLIS-33/COLIS-34-MANIFEST.md
++++ COLIS-34/COLIS-34-MANIFEST.md
+@@ -0,0 +1,22 @@
++# Manifeste — COLIS 34 essentiel
++
++## Fichiers d’application
++- `db.js` — migration additive des codes provisoires et réglages Klean Kbine.
++- `server.js` — authentification par code provisoire, gestion sécurisée d’accès, récapitulatifs Kbine et recherche d’offres sans exécution.
++- `public/app.js` — formulaires et parcours public Kbine, confirmation de mot de passe, conservation du défilement.
++- `public/admin/admin.js` — gestion des codes provisoires, échéances et réglages Kbine centralisés.
++- `package.json` — commandes de validation COLIS 34.
++
++## Tests inclus
++- `test-colis34.js` — 16 contrôles API avec création et nettoyage de données de test.
++- `test-colis34-ui.js` — 24 contrôles Playwright sur Bureau, Android et iPhone.
++- `test-colis29-ui.js` — libellé Kbine mis à jour dans la régression d’ordre des raccourcis.
++- `test-colis33.js` — récapitulatif Kbine mis à jour pour confirmation bénéficiaire et frais centralisés.
++- `test-colis33-ui.js` — parcours Kbine sécurisé mis à jour.
++
++## Documents d’intégrité
++- `LIVRAISON-COLIS-34.md` — contenu, sécurité, tests et procédure de mise en service.
++- `PATCH-COLIS-34.diff` — patch unifié COLIS 33 → COLIS 34.
++- `COLIS-34-MANIFEST.md` — présent manifeste.
++
++Les dépendances générées (`node_modules`), les caches, données de test et fichiers de travail temporaires ne font pas partie du colis.
