@@ -43,6 +43,80 @@ if (process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD.length >= 6) {
 // ---------- UPLOADS ----------
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+
+// ---------- ASSETS IMAGE DE CATALOGUE ----------
+// Les octets demeurent dans uploads/ et file_records. Le registre image_assets
+// donne une URL immuable par version, sans exposer les autres fichiers privés.
+function imageMimeForUrl(source) {
+  const ext=path.extname(String(source||'').split('?')[0]).toLowerCase();
+  return ({'.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif'})[ext] || null;
+}
+function readImageDimensions(file) {
+  try {
+    const b=fs.readFileSync(file); if(b.length<10)return { bytes:0 };
+    if(b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return {width:b.readUInt32BE(16),height:b.readUInt32BE(20),bytes:b.length};
+    if(b.subarray(0,3).toString('ascii')==='GIF') return {width:b.readUInt16LE(6),height:b.readUInt16LE(8),bytes:b.length};
+    if(b.subarray(0,2).toString('hex')==='ffd8') { let i=2; while(i+9<b.length) { if(b[i]!==0xff){i++;continue;} const marker=b[i+1],len=b.readUInt16BE(i+2); if([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker)) return {width:b.readUInt16BE(i+7),height:b.readUInt16BE(i+5),bytes:b.length}; if(!len)break;i+=2+len; } }
+    if(b.subarray(0,4).toString('ascii')==='RIFF'&&b.subarray(8,12).toString('ascii')==='WEBP') { const kind=b.subarray(12,16).toString('ascii'); if(kind==='VP8X')return {width:1+b.readUIntLE(24,3),height:1+b.readUIntLE(27,3),bytes:b.length}; if(kind==='VP8 '){const k=b.indexOf(Buffer.from([0x9d,0x01,0x2a]),20);if(k>0)return {width:b.readUInt16LE(k+3)&0x3fff,height:b.readUInt16LE(k+5)&0x3fff,bytes:b.length};} if(kind==='VP8L')return {width:1+((b[21]|(b[22]<<8))&0x3fff),height:1+(((b[22]>>6)|(b[23]<<2)|(b[24]<<10))&0x3fff),bytes:b.length}; }
+    return {bytes:b.length};
+  } catch { return {bytes:0}; }
+}
+function imageSourceInfo(sourceUrl) {
+  const source=String(sourceUrl||''); let disk=null,fileName=null,record=null;
+  if(source.startsWith('/uploads/')) { fileName=path.basename(source); record=db.prepare('SELECT mime,size FROM file_records WHERE name=?').get(fileName); disk=path.join(UPLOAD_DIR,fileName); }
+  else if(source.startsWith('/category-images/')) disk=path.join(__dirname,'public',source.replace(/^\//,''));
+  const dimensions=disk?readImageDimensions(disk):{bytes:0};
+  return { file_name:fileName, mime:(record&&record.mime)||imageMimeForUrl(source), width:dimensions.width||null, height:dimensions.height||null, bytes:Number((record&&record.size)||dimensions.bytes||0) };
+}
+function activeImageAsset(ownerType, ownerId) {
+  return db.prepare("SELECT * FROM image_assets WHERE owner_type=? AND owner_id=? AND status='active'").get(ownerType,Number(ownerId)) || null;
+}
+function versionedImageUrl(sourceUrl, asset) {
+  if(!sourceUrl)return null;
+  if(!asset || !asset.version)return sourceUrl;
+  return String(sourceUrl)+(String(sourceUrl).includes('?')?'&':'?')+'v='+encodeURIComponent(asset.version);
+}
+function retiredImageUrls(ownerType, ownerId) {
+  return db.prepare("SELECT source_url,version FROM image_assets WHERE owner_type=? AND owner_id=? AND status IN ('replaced','removed') ORDER BY retired_at DESC,id DESC LIMIT 12").all(ownerType,Number(ownerId)).map(a=>versionedImageUrl(a.source_url,a));
+}
+function publicImageAsset(asset, ownerType, ownerId) {
+  if(!asset)return null;
+  return { id:asset.id, url:versionedImageUrl(asset.source_url,asset), format:asset.mime||imageMimeForUrl(asset.source_url)||null,
+    width:asset.width||null, height:asset.height||null, bytes:Number(asset.bytes||0), version:asset.version,
+    created_at:asset.created_at, updated_at:asset.updated_at, owner_type:ownerType, owner_id:Number(ownerId), invalidated_urls:retiredImageUrls(ownerType,ownerId) };
+}
+// Appelée à l'intérieur de la même transaction SQLite que la référence de catégorie.
+function syncGrandCategoryImageAsset(categoryId, sourceUrl) {
+  const ownerId=Number(categoryId), next=sourceUrl || null, previous=activeImageAsset('grand_category',ownerId);
+  if(previous && previous.source_url===next) return previous;
+  if(previous) db.prepare("UPDATE image_assets SET status=?,retired_at=datetime('now'),updated_at=datetime('now') WHERE id=?").run(next?'replaced':'removed',previous.id);
+  if(!next) return null;
+  const info=imageSourceInfo(next), asset={ id:'img_'+crypto.randomBytes(12).toString('hex'), version:crypto.randomBytes(12).toString('hex'), ...info };
+  db.prepare(`INSERT INTO image_assets(id,owner_type,owner_id,source_url,file_name,version,mime,width,height,bytes,status)
+    VALUES(?,?,?,?,?,?,?,?,?,?, 'active')`).run(asset.id,'grand_category',ownerId,next,asset.file_name,asset.version,asset.mime,asset.width,asset.height,asset.bytes);
+  return activeImageAsset('grand_category',ownerId);
+}
+function grandCategoryPublic(grand) {
+  if(!grand)return grand;
+  const asset=activeImageAsset('grand_category',grand.id);
+  const image_asset=publicImageAsset(asset,'grand_category',grand.id);
+  return { ...grand, image_url:image_asset ? image_asset.url : (grand.image_url||null), image_asset };
+}
+function grandCategoryAdmin(grand) {
+  if(!grand)return grand;
+  const asset=activeImageAsset('grand_category',grand.id);
+  return { ...grand, image_public_url:versionedImageUrl(grand.image_url,asset), image_asset:publicImageAsset(asset,'grand_category',grand.id) };
+}
+function activePublicImageAsset(sourceUrl, version) {
+  if(!sourceUrl || !version)return null;
+  return db.prepare(`SELECT ia.* FROM image_assets ia JOIN grand_categories gc ON gc.id=ia.owner_id
+    WHERE ia.owner_type='grand_category' AND ia.source_url=? AND ia.version=? AND ia.status='active' AND gc.active=1`).get(sourceUrl,String(version)) || null;
+}
+function isPublicGrandCategoryUpload(name) {
+  return !!db.prepare(`SELECT 1 FROM image_assets ia JOIN grand_categories gc ON gc.id=ia.owner_id
+    WHERE ia.owner_type='grand_category' AND ia.status='active' AND gc.active=1 AND ia.source_url=?`).get('/uploads/'+name);
+}
 const storage = multer.diskStorage({
   destination: UPLOAD_DIR,
   filename: (req, file, cb) => {
@@ -72,7 +146,7 @@ function uploadIsPublicAd(name) {
 function canReadUpload(user, name) {
   // Une image de grande catégorie active est un visuel de catalogue explicitement publié.
   // Cette exception est évaluée avant l’exigence de session ; les médias privés restent protégés.
-  if (db.prepare("SELECT 1 FROM grand_categories WHERE active=1 AND image_url LIKE ?").get('%/uploads/' + name)) return true;
+  if (isPublicGrandCategoryUpload(name)) return true;
   // Une photo Braderie n'est publique que pendant la diffusion validée. Les photos
   // d'articles en attente, suspendus, vendus ou supprimés restent privées.
   const braderie = db.prepare("SELECT photos,videos FROM braderie_items WHERE status='available' AND (photos LIKE ? OR videos LIKE ?)").all('%/uploads/' + name + '%','%/uploads/' + name + '%');
@@ -107,7 +181,10 @@ app.get('/uploads/:name', async (req, res) => {
       if (data) fs.writeFileSync(disk, data); // restauration locale après redéploiement
     }
     if (!fs.existsSync(disk)) return res.status(404).end();
-    res.set('Cache-Control', 'private, no-store');
+    const publishedAsset=activePublicImageAsset('/uploads/'+name,req.query.v);
+    if (publishedAsset) {
+      res.set({ 'Cache-Control':'public, max-age=31536000, immutable', 'X-Klean-Public-Image':'1', 'X-Content-Type-Options':'nosniff' });
+    } else res.set('Cache-Control', 'private, no-store');
     res.sendFile(disk);
   } catch { res.status(404).end(); }
 });
@@ -287,6 +364,8 @@ function push(userId, type, data) {
   const msg = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of set) { try { res.write(msg); } catch {} }
 }
+// Seulement un signal de rafraîchissement : aucune donnée de catalogue ni identité n'est poussée.
+function catalogueImageBroadcast() { for (const [userId] of sseClients) push(userId,'catalogue-image',{changed:true}); }
 function sendWebPush(userId, payload) {
   if (!WEB_PUSH_READY) return;
   const subscriptions = db.prepare('SELECT id, subscription FROM push_subscriptions WHERE user_id=?').all(userId);
@@ -860,8 +939,9 @@ function publicTaskPriceMap(taskRows, city) {
   return prices;
 }
 function grandCategoryCatalogue(grandId, city) {
-  const grand = db.prepare('SELECT id,name,short_label,description,icon,image_url,sort,popular,popular_sort FROM grand_categories WHERE id=? AND active=1').get(grandId);
-  if (!grand) return null;
+  const row = db.prepare('SELECT id,name,short_label,description,icon,image_url,sort,popular,popular_sort FROM grand_categories WHERE id=? AND active=1').get(grandId);
+  if (!row) return null;
+  const grand = grandCategoryPublic(row);
   const categories = frenchSort(db.prepare('SELECT id,name,icon,sort FROM service_categories WHERE active=1 AND grand_category_id=?').all(grand.id));
   const svcs = catalogueServiceRows().filter(s => Number(s.grand_category_id) === Number(grand.id) && villeOk(s, city));
   const taskRows = frenchSort(db.prepare('SELECT id,service_id,name,description,sort FROM taches WHERE active=1').all());
@@ -900,6 +980,17 @@ app.get('/api/grand-categories/:id/catalogue', (req, res) => {
   const catalogue = grandCategoryCatalogue(Number(req.params.id), city && city.name);
   if (!catalogue) return res.status(404).json({ error:'Catégorie introuvable ou inactive.' });
   res.json(catalogue);
+});
+// Signal de diagnostic volontaire du navigateur : aucune identité, URL complète ni contenu privé n'est journalisé.
+const imageDiagnosticWindow = new Map();
+app.post('/api/image-diagnostics', optionalAuth, (req,res) => {
+  const b=req.body||{}, assetId=String(b.asset_id||'').slice(0,80), code=String(b.error_code||'load_failed').slice(0,40);
+  const context=['home','categories','admin','other'].includes(String(b.context||'')) ? String(b.context) : 'other';
+  if(!/^img_[a-f0-9]{24}$/i.test(assetId) || !['load_failed','retry_failed'].includes(code)) return res.status(400).json({error:'Diagnostic image invalide.'});
+  if(!db.prepare('SELECT 1 FROM image_assets WHERE id=?').get(assetId)) return res.status(404).json({error:'Asset introuvable.'});
+  const key=(req.ip||'')+'|'+assetId+'|'+code, now=Date.now();
+  if(now-(imageDiagnosticWindow.get(key)||0)>5*60*1000) { imageDiagnosticWindow.set(key,now); db.prepare('INSERT INTO image_delivery_diagnostics(asset_id,error_code,context) VALUES(?,?,?)').run(assetId,code,context); }
+  res.json({ok:true});
 });
 app.get('/api/services', (req, res) => {
   const cats = frenchSort(db.prepare(`SELECT c.*,gc.name grand_category,gc.icon grand_icon FROM service_categories c
@@ -4049,7 +4140,7 @@ A.delete('/pro-options/:id', (req, res) => { const r = db.prepare('DELETE FROM p
 
 // Catalogue complet (catégories + sous-catégories + services + tâches)
 A.get('/catalog', (req, res) => {
-  const grand_categories = frenchSort(db.prepare('SELECT * FROM grand_categories ORDER BY sort,id').all());
+  const grand_categories = frenchSort(db.prepare('SELECT * FROM grand_categories ORDER BY sort,id').all()).map(grandCategoryAdmin);
   const cats = frenchSort(db.prepare('SELECT * FROM service_categories').all());
   const subs = frenchSort(db.prepare('SELECT * FROM sous_categories').all());
   const svcs = frenchSort(db.prepare('SELECT * FROM services').all()).map(({ price_from, price_prefix, price_show, price_updated_at, ...s }) => ({ ...s, cities: JSON.parse(s.cities || '[]') }));
@@ -4062,15 +4153,15 @@ function cleanCategoryImageUrl(raw) {
   const value = String(raw || '').trim();
   if (!value) return null;
   if (value.startsWith('/uploads/')) {
-    const record = uploadRecordFor(value);
-    if (!record || record.state !== 'active' || !/^image\//i.test(record.mime || '')) throw new Error('La photo de catégorie doit être une image active téléversée.');
+    const record = uploadRecordFor(value), info=imageSourceInfo(value);
+    if (!record || record.state !== 'active' || !['image/jpeg','image/png','image/webp'].includes(String(record.mime||'').toLowerCase()) || !info.width || !info.height) throw new Error('La photo de catégorie doit être une image JPEG, PNG ou WebP active et lisible.');
     return value;
   }
   // Les six visuels historiques du catalogue et une URL HTTPS explicite restent compatibles.
   if (/^\/category-images\/[a-z0-9._-]+$/i.test(value) || /^https:\/\//i.test(value)) return value.slice(0, 1000);
   throw new Error('Utilisez une photo téléversée, un visuel catalogue ou une URL HTTPS.');
 }
-A.get('/grand-categories', (req, res) => res.json(frenchSort(db.prepare('SELECT * FROM grand_categories ORDER BY sort,id').all())));
+A.get('/grand-categories', (req, res) => res.json(frenchSort(db.prepare('SELECT * FROM grand_categories ORDER BY sort,id').all()).map(grandCategoryAdmin)));
 A.put('/grand-categories/populaires/ordre', pdgOnly, (req,res) => {
   const ids = Array.isArray((req.body||{}).ids) ? [...new Set(req.body.ids.map(Number).filter(Number.isInteger))] : null;
   if (!ids) return res.status(400).json({error:'Liste de catégories requise.'});
@@ -4083,27 +4174,40 @@ A.post('/grand-categories', pdgOnly, (req, res) => {
   const b=req.body||{}, name=String(b.name||'').trim().slice(0,120);
   if (!name) return res.status(400).json({ error:'Nom de grande catégorie requis.' });
   let imageUrl; try { imageUrl=cleanCategoryImageUrl(b.image_url); } catch(e) { return res.status(400).json({error:e.message}); }
-  try { const id=db.prepare('INSERT INTO grand_categories(name,short_label,description,icon,image_url,sort,popular) VALUES(?,?,?,?,?,?,?)').run(name,String(b.short_label||'').trim().slice(0,60)||null,String(b.description||'').trim().slice(0,1000),String(b.icon||'🧩').trim().slice(0,16),imageUrl,Number(b.sort)||99,b.popular?1:0).lastInsertRowid;
-    if (b.popular) { const max=db.prepare('SELECT COALESCE(MAX(popular_sort),0) n FROM grand_categories').get().n; db.prepare('UPDATE grand_categories SET popular_sort=? WHERE id=?').run(max+1,id); }
-    logAction(req.user, 'Création grande catégorie', { target_type:'grand_category', target_id:id, target_name:name, details:imageUrl ? 'Grande catégorie créée avec une photo principale.' : 'Grande catégorie créée sans photo principale.' });
-    res.status(201).json({id}); }
-  catch { res.status(409).json({ error:'Cette grande catégorie existe déjà.' }); }
+  try {
+    const created=db.transaction(() => {
+      const id=db.prepare('INSERT INTO grand_categories(name,short_label,description,icon,image_url,sort,popular) VALUES(?,?,?,?,?,?,?)').run(name,String(b.short_label||'').trim().slice(0,60)||null,String(b.description||'').trim().slice(0,1000),String(b.icon||'🧩').trim().slice(0,16),imageUrl,Number(b.sort)||99,b.popular?1:0).lastInsertRowid;
+      if (b.popular) { const max=db.prepare('SELECT COALESCE(MAX(popular_sort),0) n FROM grand_categories').get().n; db.prepare('UPDATE grand_categories SET popular_sort=? WHERE id=?').run(max+1,id); }
+      const asset=syncGrandCategoryImageAsset(id,imageUrl);
+      return {id,asset,category:db.prepare('SELECT * FROM grand_categories WHERE id=?').get(id)};
+    })();
+    logAction(req.user, 'Création grande catégorie', { target_type:'grand_category', target_id:created.id, target_name:name, details:imageUrl ? 'Grande catégorie créée avec une photo principale versionnée.' : 'Grande catégorie créée sans photo principale.' });
+    catalogueImageBroadcast();
+    res.status(201).json({id:created.id,category:grandCategoryAdmin(created.category),image_asset:publicImageAsset(created.asset,'grand_category',created.id)}); }
+  catch (e) { res.status(/UNIQUE/.test(String(e&&e.message||''))?409:400).json({ error:/UNIQUE/.test(String(e&&e.message||''))?'Cette grande catégorie existe déjà.':'Enregistrement de la catégorie impossible.' }); }
 });
 A.put('/grand-categories/:id', pdgOnly, (req,res) => {
   const old=db.prepare('SELECT * FROM grand_categories WHERE id=?').get(req.params.id); if(!old)return res.status(404).json({error:'Grande catégorie introuvable.'}); const b=req.body||{};
   let imageUrl = old.image_url;
   if (b.image_url !== undefined) { try { imageUrl=cleanCategoryImageUrl(b.image_url); } catch(e) { return res.status(400).json({error:e.message}); } }
-  const popular=b.popular===undefined?old.popular:(b.popular?1:0);
-  db.prepare(`UPDATE grand_categories SET name=COALESCE(?,name),short_label=CASE WHEN ?=1 THEN ? ELSE short_label END,description=COALESCE(?,description),icon=COALESCE(?,icon),image_url=?,active=COALESCE(?,active),sort=COALESCE(?,sort),popular=?,popular_sort=CASE WHEN ?=0 THEN NULL WHEN popular_sort IS NULL THEN (SELECT COALESCE(MAX(popular_sort),0)+1 FROM grand_categories) ELSE popular_sort END,updated_at=datetime('now') WHERE id=?`)
-    .run(b.name === undefined ? null : String(b.name).trim().slice(0,120),b.short_label === undefined ? 0 : 1,b.short_label === undefined ? null : (String(b.short_label || '').trim().slice(0,60) || null),b.description === undefined ? null : String(b.description || '').trim().slice(0,1000),b.icon === undefined ? null : String(b.icon).trim().slice(0,16),imageUrl,b.active === undefined ? null : (b.active ? 1 : 0),b.sort ?? null,popular,popular,old.id);
-  const imageChanged = (old.image_url || null) !== (imageUrl || null);
-  logAction(req.user, imageChanged ? (imageUrl ? 'Remplacement photo grande catégorie' : 'Suppression photo grande catégorie') : 'Mise à jour grande catégorie', { target_type:'grand_category', target_id:old.id, target_name:b.name === undefined ? old.name : String(b.name).trim().slice(0,120), details:imageChanged ? (imageUrl ? 'Photo principale modifiée et synchronisée sur les cartes publiques.' : 'Photo principale retirée : les cartes publiques reviennent au visuel sans image.') : 'Informations de catégorie mises à jour.' });
-  res.json({ok:true, image_url:imageUrl});
+  const popular=b.popular===undefined?old.popular:(b.popular?1:0), imageChanged=(old.image_url||null)!==(imageUrl||null);
+  try {
+    const saved=db.transaction(() => {
+      db.prepare(`UPDATE grand_categories SET name=COALESCE(?,name),short_label=CASE WHEN ?=1 THEN ? ELSE short_label END,description=COALESCE(?,description),icon=COALESCE(?,icon),image_url=?,active=COALESCE(?,active),sort=COALESCE(?,sort),popular=?,popular_sort=CASE WHEN ?=0 THEN NULL WHEN popular_sort IS NULL THEN (SELECT COALESCE(MAX(popular_sort),0)+1 FROM grand_categories) ELSE popular_sort END,updated_at=datetime('now') WHERE id=?`)
+        .run(b.name === undefined ? null : String(b.name).trim().slice(0,120),b.short_label === undefined ? 0 : 1,b.short_label === undefined ? null : (String(b.short_label || '').trim().slice(0,60) || null),b.description === undefined ? null : String(b.description||'').trim().slice(0,1000),b.icon === undefined ? null : String(b.icon).trim().slice(0,16),imageUrl,b.active === undefined ? null : (b.active ? 1 : 0),b.sort ?? null,popular,popular,old.id);
+      const asset=imageChanged ? syncGrandCategoryImageAsset(old.id,imageUrl) : activeImageAsset('grand_category',old.id);
+      return {asset,category:db.prepare('SELECT * FROM grand_categories WHERE id=?').get(old.id)};
+    })();
+    logAction(req.user, imageChanged ? (imageUrl ? 'Remplacement photo grande catégorie' : 'Suppression photo grande catégorie') : 'Mise à jour grande catégorie', { target_type:'grand_category', target_id:old.id, target_name:b.name === undefined ? old.name : String(b.name).trim().slice(0,120), details:imageChanged ? (imageUrl ? 'Photo principale remplacée : nouvelle version publique et caches obsolètes invalidés.' : 'Photo principale retirée : les cartes publiques reviennent au visuel sans image.') : 'Informations de catégorie mises à jour.' });
+    if (imageChanged) catalogueImageBroadcast();
+    res.json({ok:true,image_url:imageUrl,category:grandCategoryAdmin(saved.category),image_asset:publicImageAsset(saved.asset,'grand_category',old.id)});
+  } catch { res.status(400).json({error:'Mise à jour de la catégorie impossible.'}); }
 });
 A.delete('/grand-categories/:id', pdgOnly, (req,res) => {
   const used=db.prepare('SELECT COUNT(*) n FROM service_categories WHERE grand_category_id=?').get(req.params.id).n;
   if (used) return res.status(400).json({error:`Cette catégorie contient ${used} sous-catégorie(s)/métier(s). Réaffectez-les ou désactivez-la plutôt.`});
-  const r=db.prepare('DELETE FROM grand_categories WHERE id=?').run(req.params.id); if(!r.changes) return res.status(404).json({error:'Grande catégorie introuvable.'}); res.json({ok:true});
+  const r=db.transaction(() => { const row=db.prepare('DELETE FROM grand_categories WHERE id=?').run(req.params.id); if(row.changes) db.prepare("UPDATE image_assets SET status='removed',retired_at=datetime('now'),updated_at=datetime('now') WHERE owner_type='grand_category' AND owner_id=? AND status='active'").run(req.params.id); return row; })();
+  if(!r.changes) return res.status(404).json({error:'Grande catégorie introuvable.'}); catalogueImageBroadcast(); res.json({ok:true});
 });
 // Dictionnaire de recherche multi-niveaux. Les cibles ne sont jamais du texte libre :
 // elles référencent directement le catalogue central (grande catégorie → métier → prestation → tâche).
@@ -5647,6 +5751,20 @@ function diagnosticPage(res) {
   <p><b>Solution :</b> envoyez les dossiers <code>public/</code> et <code>public/admin/</code> complets
   dans votre dépôt GitHub (à côté de <code>server.js</code>), puis redéployez.</p></div></body></html>`);
 }
+// Les visuels catalogue historiques suivent désormais les mêmes règles que uploads :
+// une URL contenant la version active est publique, immuable et admissible au cache PWA.
+app.get('/category-images/:name', (req,res) => {
+  const name=path.basename(String(req.params.name||''));
+  if(!name || name!==req.params.name || !/^[a-z0-9._-]+$/i.test(name)) return res.status(404).end();
+  const source='/category-images/'+name, asset=activePublicImageAsset(source,req.query.v);
+  // Une ancienne URL explicitement versionnée ne doit jamais être revalidée comme version actuelle.
+  if(req.query.v && !asset) return res.status(404).end();
+  const disk=path.join(__dirname,'public','category-images',name);
+  if(!fs.existsSync(disk)) return res.status(404).end();
+  if(asset) res.set({'Cache-Control':'public, max-age=31536000, immutable','X-Klean-Public-Image':'1','X-Content-Type-Options':'nosniff'});
+  else res.set('Cache-Control','no-cache');
+  res.sendFile(disk);
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.get(/^\/admin(\/.*)?$/, (req, res) => {
   const f = path.join(__dirname, 'public/admin/index.html');

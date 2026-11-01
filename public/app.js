@@ -49,6 +49,88 @@ function mediaUrl(src) {
   if (!s || !s.startsWith('/uploads/') || !TOKEN) return s;
   return s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
 }
+
+// Images de catalogue : l'API livre une URL contenant une version non réutilisable après
+// remplacement. Les octets ne sont donc jamais confondus avec une ancienne photo du même domaine.
+const publicImagePreloads = new Set();
+function publicImageUrl(row) { return String(row && row.image_url || ''); }
+function publicImageAsset(row) { return row && row.image_asset && typeof row.image_asset === 'object' ? row.image_asset : null; }
+function reportPublicImageError(asset, code, context) {
+  if (!asset || !/^img_[a-f0-9]{24}$/i.test(String(asset.id || ''))) return;
+  api('/image-diagnostics', { method:'POST', body:{ asset_id:asset.id, error_code:code || 'load_failed', context:context || 'other' } }).catch(() => {});
+}
+function syncPublicImageCache(rows) {
+  if (!('serviceWorker' in navigator)) return;
+  const active_urls=[], invalidated_urls=[];
+  (rows || []).forEach(row => {
+    const asset=publicImageAsset(row), url=publicImageUrl(row);
+    if (url && asset) active_urls.push(url);
+    if (asset && Array.isArray(asset.invalidated_urls)) invalidated_urls.push(...asset.invalidated_urls);
+  });
+  if (!active_urls.length && !invalidated_urls.length) return;
+  const payload={ type:'KS_IMAGE_CACHE_SYNC', active_urls:[...new Set(active_urls)], invalidated_urls:[...new Set(invalidated_urls)] };
+  const send=worker => { try { if (worker) worker.postMessage(payload); } catch {} };
+  if (navigator.serviceWorker.controller) send(navigator.serviceWorker.controller);
+  else navigator.serviceWorker.ready.then(reg => send(reg.active)).catch(() => {});
+}
+function preloadPublicImages(rows, count=4) {
+  const queue=(rows || []).filter(row => publicImageUrl(row) && publicImageAsset(row)).slice(0,Math.max(0,count));
+  let cursor=0, active=0, concurrency=Math.min(3,queue.length);
+  const next=() => {
+    while(active<concurrency && cursor<queue.length) {
+      const row=queue[cursor++], url=publicImageUrl(row), asset=publicImageAsset(row);
+      if(publicImagePreloads.has(url)) continue;
+      publicImagePreloads.add(url); active++;
+      const image=new Image(); image.decoding='async';
+      image.onload=()=>{ active--; next(); };
+      image.onerror=()=>{ reportPublicImageError(asset,'load_failed','home'); active--; next(); };
+      image.src=url;
+    }
+  };
+  next();
+}
+function publicCategoryImageTag(row, index=0, context='other') {
+  const url=publicImageUrl(row), asset=publicImageAsset(row);
+  if(!url) return '';
+  const width=Math.max(1,Math.min(10000,Number(asset && asset.width) || 0)) || 1;
+  const height=Math.max(1,Math.min(10000,Number(asset && asset.height) || 0)) || 1;
+  const nearFold=Number(index)<4, assetId=asset && asset.id ? String(asset.id) : '';
+  return `<img src="${esc(url)}" alt="" width="${width}" height="${height}" ${nearFold?'loading="eager" fetchpriority="high"':'loading="lazy" fetchpriority="low"'} decoding="async" data-public-image-src="${esc(url)}" data-asset-id="${esc(assetId)}" data-image-context="${esc(context)}" onload="this.parentElement.classList.remove('image-missing')" onerror="A.publicImageError(this)">`;
+}
+function reconcileHomeCategoryImages(rows) {
+  (rows || []).forEach((row,index) => {
+    const id=Number(row && row.id); if(!Number.isInteger(id) || id<1) return;
+    document.querySelectorAll(`[data-grand-category-id="${id}"]`).forEach(card => {
+      const media=card.querySelector('.svc-card-media'), url=publicImageUrl(row), asset=publicImageAsset(row);
+      if(!media) return;
+      const image=media.querySelector('img[data-public-image-src]');
+      if(!url) {
+        if(image) media.innerHTML=`<span class="ic" aria-hidden="true">${esc(row.icon || '🧩')}</span>`;
+        card.classList.remove('has-image'); return;
+      }
+      if(!image) { media.innerHTML=publicCategoryImageTag(row,index,'home'); card.classList.add('has-image'); return; }
+      if(image.dataset.publicImageSrc===url) return;
+      const width=Math.max(1,Math.min(10000,Number(asset && asset.width)||0))||1, height=Math.max(1,Math.min(10000,Number(asset && asset.height)||0))||1;
+      image.dataset.publicImageSrc=url; image.dataset.assetId=asset&&asset.id||''; image.dataset.handledImageError='';
+      image.setAttribute('width',String(width)); image.setAttribute('height',String(height)); image.setAttribute('src',url);
+      media.classList.remove('image-missing'); card.classList.add('has-image');
+    });
+  });
+}
+let homeCatalogueRefreshInFlight=false;
+async function refreshHomeCatalogueState(withServices=false) {
+  if(homeCatalogueRefreshInFlight || (location.hash || '#/home') !== '#/home') return;
+  homeCatalogueRefreshInFlight=true;
+  try {
+    const cityQuery=USER && USER.ville ? '?ville='+encodeURIComponent(USER.ville) : '';
+    const requests=[api('/grand-categories/populaires'+cityQuery)]; if(withServices) requests.unshift(api('/services'+cityQuery));
+    const results=await Promise.all(requests), populaires=withServices?results[1]:results[0], services=withServices?results[0]:SERVICES;
+    syncPublicImageCache(populaires); preloadPublicImages(populaires,4);
+    const categoriesChanged=JSON.stringify(populaires)!==JSON.stringify(POPULAIRES), servicesChanged=withServices&&JSON.stringify(services)!==JSON.stringify(SERVICES);
+    if(categoriesChanged) reconcileHomeCategoryImages(populaires);
+    if(categoriesChanged||servicesChanged) { SERVICES=services; POPULAIRES=populaires; if(window.scrollY<8) render({preserveScroll:true}); }
+  } catch {} finally { homeCatalogueRefreshInFlight=false; }
+}
 function anonymousAdViewerKey() {
   let key=localStorage.getItem('ks_ad_viewer');
   if(!/^[a-z0-9_-]{18,120}$/i.test(key||'')) { key=(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)).replace(/[^a-z0-9_-]/gi,''); localStorage.setItem('ks_ad_viewer',key); }
@@ -166,6 +248,11 @@ function connectSSE() {
     // Activation, fin ou retrait d’autorisation : le serveur impose ensuite la même
     // décision aux API. Cette notification rend la bascule immédiate à l’écran.
     checkMaintenance().finally(() => render());
+  });
+  sse.addEventListener('catalogue-image', () => {
+    // Le serveur ne pousse aucun média : il signale seulement qu'une référence versionnée
+    // doit être relue. Une carte déjà visible est remplacée sans rechargement de page.
+    refreshHomeCatalogueState(false);
   });
   sse.addEventListener('message', e => {
     const m = JSON.parse(e.data);
@@ -602,7 +689,7 @@ function adsBandHtml(list) {if(!list.length)return '';return `<div class="ks-ads
 routes.home = async () => {
   // Les prix et services populaires affichés viennent toujours de la configuration actuelle du tableau de bord.
   const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
-  try { SERVICES = await api('/services' + cityQuery); POPULAIRES = await api('/grand-categories/populaires' + cityQuery); }
+  try { SERVICES = await api('/services' + cityQuery); POPULAIRES = await api('/grand-categories/populaires' + cityQuery); syncPublicImageCache(POPULAIRES); preloadPublicImages(POPULAIRES,4); }
   catch (e) { $app.innerHTML = header('Accueil', { brand: true }) + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home'); return; }
   try { GAMES = await api('/games/config'); } catch { }
   try { ADS = await api('/ads'); } catch { }
@@ -643,7 +730,7 @@ routes.home = async () => {
     ${adsBandHtml(homeMidAds)}
     ${POPULAIRES.length ? `<div class="sec-title">Services populaires</div>
     <div class="svc-grid">
-      ${POPULAIRES.map(s => `<button type="button" class="svc-card ${s.image_url ? 'has-image' : ''}" onclick="nav('#/categories/${s.id}')" aria-label="Ouvrir ${esc(s.name)}"><span class="svc-card-media">${s.image_url ? `<img src="${esc(s.image_url)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('image-missing')">` : `<span class="ic" aria-hidden="true">${esc(s.icon || '🧩')}</span>`}</span><span class="svc-card-copy"><span class="nm">${esc(grandLabel(s))}</span>${s.price_from ? `<span class="price-from">À partir de ${fmtFCFA(s.price_from)}</span>` : ''}</span></button>`).join('')}
+      ${POPULAIRES.map((s,index) => `<button type="button" class="svc-card ${s.image_url ? 'has-image' : ''}" data-grand-category-id="${Number(s.id)}" onclick="nav('#/categories/${s.id}')" aria-label="Ouvrir ${esc(s.name)}"><span class="svc-card-media">${s.image_url ? publicCategoryImageTag(s,index,'home') : `<span class="ic" aria-hidden="true">${esc(s.icon || '🧩')}</span>`}</span><span class="svc-card-copy"><span class="nm">${esc(grandLabel(s))}</span>${s.price_from ? `<span class="price-from">À partir de ${fmtFCFA(s.price_from)}</span>` : ''}</span></button>`).join('')}
     </div>` : ''}
     <button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>
     <div class="home-shortcuts" aria-label="Accès rapides">
@@ -780,18 +867,18 @@ routes.categories = async (param) => {
   const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
   const id = Number(param || 0);
   if (id) {
-    let cat; try { cat = await api('/grand-categories/' + id + '/catalogue' + cityQuery); }
+    let cat; try { cat = await api('/grand-categories/' + id + '/catalogue' + cityQuery); syncPublicImageCache([cat]); }
     catch (e) { toast(e.message, 'err'); nav('#/categories'); return; }
     const serviceChoices = cat.categories.flatMap(c => c.services.map(s => ({ ...s, category:c.name, category_icon:c.icon || '' })));
     let categoryAds=[]; try { categoryAds=adPlacementList(await api('/ads?category_id='+encodeURIComponent(cat.id)),['services_top'],'category_'+cat.id); } catch { }
     renderCategoryRequestForm(cat, serviceChoices, categoryAds);
     return;
   }
-  let cats; try { cats = await api('/grand-categories' + cityQuery); }
+  let cats; try { cats = await api('/grand-categories' + cityQuery); syncPublicImageCache(cats); preloadPublicImages(cats,2); }
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}</div>` + bottomNav('search'); return; }
   $app.innerHTML = `${header('Tous les services', { bell: !!USER })}<div class="content">
     <div class="hint">Toutes les grandes catégories actives, classées de A à Z.</div>
-    ${cats.map(c => `<div class="menu-item" onclick="nav('#/categories/${c.id}')"><span class="mi-ic ${c.image_url ? 'category-list-photo' : ''}">${c.image_url ? `<img src="${esc(c.image_url)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('image-missing')">` : esc(c.icon || '🧩')}</span><div class="grow"><b>${esc(grandLabel(c))}</b>${c.description ? `<div class="small muted">${esc(c.description)}</div>` : ''}${c.price_from ? `<div class="price-from">À partir de ${fmtFCFA(c.price_from)}</div>` : ''}</div><span class="mi-arr">›</span></div>`).join('') || emptyState('📋','Aucune grande catégorie active pour le moment.')}
+    ${cats.map((c,index) => `<div class="menu-item" onclick="nav('#/categories/${c.id}')"><span class="mi-ic ${c.image_url ? 'category-list-photo' : ''}">${c.image_url ? publicCategoryImageTag(c,index,'categories') : esc(c.icon || '🧩')}</span><div class="grow"><b>${esc(grandLabel(c))}</b>${c.description ? `<div class="small muted">${esc(c.description)}</div>` : ''}${c.price_from ? `<div class="price-from">À partir de ${fmtFCFA(c.price_from)}</div>` : ''}</div><span class="mi-arr">›</span></div>`).join('') || emptyState('📋','Aucune grande catégorie active pour le moment.')}
   </div>${bottomNav('search')}`;
   updateBadges();
 };
@@ -2368,6 +2455,21 @@ routes.kdo = async () => {
    ACTIONS GLOBALES
    ============================================================ */
 const A = {
+  publicImageError(image) {
+    if (!image || image.dataset.handledImageError === 'final') return;
+    const asset={ id:image.dataset.assetId || '' }, context=image.dataset.imageContext || 'other', source=image.dataset.publicImageSrc || image.currentSrc || image.src;
+    if (image.dataset.handledImageError !== 'retrying') {
+      image.dataset.handledImageError='retrying';
+      reportPublicImageError(asset,'load_failed',context);
+      // Réessai discret de la version exacte ; aucune ancienne URL ni logo de substitution
+      // n'est injecté, ce qui évite une photo de mauvaise catégorie.
+      setTimeout(() => { if (!image.isConnected) return; image.removeAttribute('src'); image.src=source; }, 900);
+      return;
+    }
+    image.dataset.handledImageError='final';
+    image.style.display='none'; if(image.parentElement) image.parentElement.classList.add('image-missing');
+    reportPublicImageError(asset,'retry_failed',context);
+  },
   adOpen(link,id,action='discover',placement='other'){const v=String(link||'').trim(),adId=Number(id);if(adId)api('/ad-clicks',{method:'POST',body:{ad_id:adId,placement,anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});if(adId&&(action==='buy'||action==='order'))api('/ad-interactions',{method:'POST',body:{ad_id:adId,type:'order_intent',anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});if(action==='claim_offer'&&adId)return A.adOfferClaim(adId);if(action==='contact'&&v.startsWith('tel:')){if(adId)api('/ad-interactions',{method:'POST',body:{ad_id:adId,type:'contact',anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});location.href=v;return;}if(!v){toast('Aucun lien n’est configuré pour cette publicité.','err');return;}if(v.startsWith('#/'))return nav(v);if(/^https:\/\//i.test(v))window.open(v,'_blank','noopener');else toast('Lien publicitaire invalide.','err');},
   async adOfferClaim(id){if(!USER){toast('Connectez-vous pour vérifier cette offre.','err');return nav('#/login');}const code=prompt('Code promotionnel (laissez vide si aucun code n’est requis) :','');if(code===null)return;try{const check=await api('/ads/'+id+'/promo/verify',{method:'POST',body:{code}});const price=check.price===null||check.price===undefined?'selon les conditions':Number(check.price).toLocaleString('fr-FR')+' FCFA';if(!confirm(`Offre vérifiée : ${price}. Cette action ne crée pas de paiement. Enregistrer une demande d’offre ?`))return;await api('/ads/'+id+'/promo/claim',{method:'POST',body:{code}});toast('Demande d’offre enregistrée. Aucun paiement ni commande n’a été exécuté.','ok');}catch(e){toast(e.message,'err');}},
   goSearch() { const v = document.getElementById('home-q').value.trim(); nav('#/search/' + encodeURIComponent(v)); },
@@ -3520,14 +3622,7 @@ function render(options = {}) {
   setInterval(async () => { const before=JSON.stringify([MAINT.active,MAINT.blocked,MAINT.scheduled,MAINT.until]); await checkMaintenance(); const changed=before!==JSON.stringify([MAINT.active,MAINT.blocked,MAINT.scheduled,MAINT.until]); if (TOKEN && !MAINT.blocked && !USER) { try { USER=await api('/me'); connectSSE(); refreshBadges(); } catch {} } if (changed) render(); }, 15000);
   // Prix et disponibilité catalogue : l'accueil reste synchronisé avec le tableau de bord,
   // même s'il est déjà ouvert au moment où le PDG change un prix.
-  setInterval(async () => {
-    if (!TOKEN || (location.hash || '#/home') !== '#/home') return;
-    try {
-      const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
-      const [services, populaires] = await Promise.all([api('/services' + cityQuery), api('/services/populaires' + cityQuery)]);
-      if (JSON.stringify(services) !== JSON.stringify(SERVICES) || JSON.stringify(populaires) !== JSON.stringify(POPULAIRES)) { SERVICES = services; POPULAIRES = populaires; if(window.scrollY<8) render({preserveScroll:true}); }
-    } catch { }
-  }, 25000);
+  setInterval(() => { refreshHomeCatalogueState(true); }, 10000);
   if (TOKEN && !MAINT.blocked) {
     try {
       USER = await api('/me');

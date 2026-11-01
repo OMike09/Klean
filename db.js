@@ -2813,4 +2813,86 @@ db.prepare(`INSERT OR IGNORE INTO ad_unique_views(ad_kind,ad_id,user_id,viewer_k
 // Compatibilité des affichages hérités : l’ancien emplacement accueil conserve son état public.
 db.prepare("UPDATE ads SET home_enabled=1,placements=CASE WHEN placement IN ('accueil','home_top') THEN '[\"home_top\"]' WHEN placement='home_mid' THEN '[\"home_mid\"]' ELSE placements END WHERE updated_at IS NULL AND (placements IS NULL OR placements='[]') AND placement IN ('accueil','home_top','home_mid')").run();
 
+
+// ============================================================
+// COLIS 37 — registre d'assets image de catalogue, versionné et persistant
+// Le binaire reste dans uploads/ (et dans PostgreSQL quand configuré) : cette table
+// ne constitue pas un second stockage. Elle porte uniquement le lien, les dimensions,
+// la version de diffusion et l'historique de remplacement.
+// ============================================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS image_assets (
+  id TEXT PRIMARY KEY,
+  owner_type TEXT NOT NULL CHECK(owner_type IN ('grand_category','service')),
+  owner_id INTEGER NOT NULL,
+  source_url TEXT NOT NULL,
+  file_name TEXT,
+  version TEXT NOT NULL,
+  mime TEXT,
+  width INTEGER,
+  height INTEGER,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','replaced','removed')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  retired_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_image_assets_owner_version ON image_assets(owner_type,owner_id,version);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_image_assets_one_active ON image_assets(owner_type,owner_id) WHERE status='active';
+CREATE INDEX IF NOT EXISTS idx_image_assets_source ON image_assets(source_url,status);
+CREATE INDEX IF NOT EXISTS idx_image_assets_retired ON image_assets(owner_type,owner_id,status,retired_at DESC);
+CREATE TABLE IF NOT EXISTS image_delivery_diagnostics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id TEXT REFERENCES image_assets(id) ON DELETE SET NULL,
+  error_code TEXT NOT NULL,
+  context TEXT NOT NULL DEFAULT 'public',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_image_delivery_diagnostics_asset ON image_delivery_diagnostics(asset_id,created_at DESC);
+`);
+function categoryImageMime(source) {
+  const ext=path.extname(String(source||'').split('?')[0]).toLowerCase();
+  return ({'.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif'})[ext] || null;
+}
+// Lecture légère des entêtes : aucune dépendance native ni conversion destructive.
+function categoryImageDimensions(file) {
+  try {
+    const b=fs.readFileSync(file); if(b.length<10)return {};
+    if(b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return {width:b.readUInt32BE(16),height:b.readUInt32BE(20),bytes:b.length};
+    if(b.subarray(0,3).toString('ascii')==='GIF') return {width:b.readUInt16LE(6),height:b.readUInt16LE(8),bytes:b.length};
+    if(b.subarray(0,2).toString('hex')==='ffd8') {
+      let i=2; while(i+9<b.length) { if(b[i]!==0xff){i++;continue;} const marker=b[i+1]; const len=b.readUInt16BE(i+2); if([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker)) return {width:b.readUInt16BE(i+7),height:b.readUInt16BE(i+5),bytes:b.length}; if(!len)break;i+=2+len; }
+    }
+    if(b.subarray(0,4).toString('ascii')==='RIFF'&&b.subarray(8,12).toString('ascii')==='WEBP') {
+      const kind=b.subarray(12,16).toString('ascii');
+      if(kind==='VP8X') return {width:1+b.readUIntLE(24,3),height:1+b.readUIntLE(27,3),bytes:b.length};
+      if(kind==='VP8 '){ const k=b.indexOf(Buffer.from([0x9d,0x01,0x2a]),20);if(k>0)return {width:b.readUInt16LE(k+3)&0x3fff,height:b.readUInt16LE(k+5)&0x3fff,bytes:b.length}; }
+      if(kind==='VP8L') return {width:1+((b[21]|(b[22]<<8))&0x3fff),height:1+(((b[22]>>6)|(b[23]<<2)|(b[24]<<10))&0x3fff),bytes:b.length};
+    }
+    return {bytes:b.length};
+  } catch { return {}; }
+}
+(function seedImageAssetRegistry() {
+  const existing=db.prepare("SELECT owner_id FROM image_assets WHERE owner_type='grand_category' AND status='active'");
+  const has=new Set(existing.all().map(r=>Number(r.owner_id)));
+  const categories=db.prepare("SELECT id,image_url,updated_at,created_at FROM grand_categories WHERE image_url IS NOT NULL AND trim(image_url)<>''").all();
+  const insert=db.prepare(`INSERT INTO image_assets(id,owner_type,owner_id,source_url,file_name,version,mime,width,height,bytes,status,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const enrich=db.prepare("UPDATE image_assets SET mime=COALESCE(mime,?),width=COALESCE(width,?),height=COALESCE(height,?),bytes=CASE WHEN bytes=0 THEN ? ELSE bytes END,updated_at=datetime('now') WHERE id=?");
+  for(const category of categories) {
+    let disk=null, fileName=null;
+    if(String(category.image_url).startsWith('/category-images/')) disk=path.join(__dirname,'public',category.image_url.replace(/^\//,''));
+    if(String(category.image_url).startsWith('/uploads/')) { fileName=path.basename(category.image_url); disk=path.join(__dirname,'uploads',fileName); }
+    const info=disk?categoryImageDimensions(disk):{};
+    const mime=categoryImageMime(category.image_url);
+    if(has.has(Number(category.id))) {
+      const asset=db.prepare("SELECT id FROM image_assets WHERE owner_type='grand_category' AND owner_id=? AND status='active'").get(category.id);
+      if(asset) enrich.run(mime,info.width||null,info.height||null,Number(info.bytes||0),asset.id);
+      continue;
+    }
+    const version=crypto.createHash('sha256').update('grand_category:'+category.id+':'+category.image_url+':'+(category.updated_at||category.created_at||'')).digest('hex').slice(0,20);
+    insert.run('img_'+crypto.randomBytes(12).toString('hex'),'grand_category',category.id,category.image_url,fileName,version,mime,info.width||null,info.height||null,Number(info.bytes||0),'active',category.created_at||new Date().toISOString(),category.updated_at||category.created_at||new Date().toISOString());
+  }
+})();
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

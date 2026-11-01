@@ -15,7 +15,15 @@ const ROLE_LB = { pdg: '👑 PDG', admin: 'Administrateur', gestionnaire: 'Gesti
 function can(k) { return ME && (ME.role === 'pdg' || (ME.perms || []).includes(k)); }
 
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-function mediaUrl(src) { const s = String(src || ''); return s.startsWith('/uploads/') && TOKEN ? s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN) : s; }
+function mediaUrl(src) { const s = String(src || ''); return s.startsWith('/uploads/') && TOKEN && !/[?&]v=[a-f0-9]{12,64}(?:&|$)/i.test(s) ? s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN) : s; }
+function categoryImageStatus(asset) {
+  if (!asset) return 'Photo en attente de publication';
+  const dims=asset.width&&asset.height ? `${Number(asset.width)} × ${Number(asset.height)} px` : 'dimensions en lecture';
+  const format=asset.format ? esc(String(asset.format).replace('image/','').toUpperCase()) : 'format inconnu';
+  const version=asset.version ? `v${String(asset.version).slice(0,8)}` : 'version en lecture';
+  const changed=asset.updated_at ? ` · modifiée ${esc(fmtD(asset.updated_at))}` : '';
+  return `ID ${esc(String(asset.id||'').slice(0,16))} · ${format} · ${dims} · ${version}${changed}`;
+}
 function fmtD(s) { if (!s) return ''; const d = new Date(s.replace(' ', 'T') + 'Z'); return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function fcfa(n) { return (n ?? 0).toLocaleString('fr-FR') + ' F'; }
 function zonesLabel(raw) { try { const z = Array.isArray(raw) ? raw : JSON.parse(raw || '[]'); return z && z.length ? z.join(', ') : '🌍 Toute la Côte d’Ivoire'; } catch { return '🌍 Toute la Côte d’Ivoire'; } }
@@ -444,13 +452,14 @@ views._grandPhotos = async () => {
   const d = CATD = await api('/admin/catalog');
   const rows = (d.grand_categories || []).slice().sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id);
   const cards = rows.map(g => {
+    const publicUrl=g.image_public_url || g.image_url;
     const photo = g.image_url
-      ? `<img src="${esc(mediaUrl(g.image_url))}" alt="${esc(g.name)}" style="width:100%;height:152px;object-fit:cover;display:block">`
+      ? `<img src="${esc(mediaUrl(publicUrl))}" alt="${esc(g.name)}" width="${Number(g.image_asset&&g.image_asset.width)||1}" height="${Number(g.image_asset&&g.image_asset.height)||1}" style="width:100%;height:152px;object-fit:cover;display:block" onerror="this.style.display='none'">`
       : '<div style="height:152px;display:grid;place-items:center;background:#edf5f3;font-size:38px">🖼️</div>';
     const action = ME && ME.role==='pdg'
       ? `<button class="btn sm ${g.image_url ? 'sec' : ''}" onclick="A.grandCategoryPhotoForm(${g.id})">${g.image_url ? 'Modifier la photo' : 'Ajouter une photo'}</button>`
       : '<span class="small muted">Modification réservée au PDG</span>';
-    return `<article class="grand-photo-card" style="min-width:0;overflow:hidden;background:#fff;border:1px solid #dce9e6;border-radius:12px;display:flex;flex-direction:column">${photo}<div style="padding:10px"><div style="display:flex;gap:6px;align-items:flex-start;justify-content:space-between"><b style="line-height:1.25">${esc(g.short_label || g.name)}</b>${g.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</div><div class="small muted" style="min-height:32px;margin:5px 0 9px">${g.image_url ? 'Photo principale publiée sur les cartes et associée à la catégorie #' + Number(g.id) : 'Aucune photo principale enregistrée.'}</div>${action}</div></article>`;
+    return `<article class="grand-photo-card" style="min-width:0;overflow:hidden;background:#fff;border:1px solid #dce9e6;border-radius:12px;display:flex;flex-direction:column">${photo}<div style="padding:10px"><div style="display:flex;gap:6px;align-items:flex-start;justify-content:space-between"><b style="line-height:1.25">${esc(g.short_label || g.name)}</b>${g.active ? '<span class="pill ok">Active</span>' : '<span class="pill off">Inactive</span>'}</div><div class="small muted" style="min-height:46px;margin:5px 0 9px">${g.image_url ? 'Photo principale publiée · catégorie #' + Number(g.id) + '<br>' + categoryImageStatus(g.image_asset) : 'Aucune photo principale enregistrée.'}</div>${action}</div></article>`;
   }).join('');
   shell(`<h1>🖼️ Catégories & photos</h1>
     <div class="tabs"><button onclick="sessionStorage.setItem('adm_cat_tab','cat');render()">🗂️ Catalogue</button><button onclick="sessionStorage.setItem('adm_cat_tab','pop');render()">⭐ Services populaires</button><button onclick="sessionStorage.setItem('adm_cat_tab','villes');render()">🏙️ Villes</button><button class="on">🖼️ Catégories & photos</button></div>
@@ -1325,14 +1334,14 @@ const A = {
     const source = (ESTD && ESTD.catalog) || CATD || { grand_categories:[] };
     const g=id ? (source.grand_categories || []).find(x=>x.id===id) : {name:'',icon:'🧩',description:'',active:1,sort:99,image_url:''};
     if (id && !g) return toast('Grande catégorie introuvable.','err');
-    const imageUrl=String(g.image_url || '');
+    const imageUrl=String(g.image_url || ''), imagePublicUrl=String(g.image_public_url || imageUrl || ''), imageAsset=g.image_asset || null;
     openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3>
       <label>Nom</label><input id="gc-name" style="width:100%" value="${esc(g.name||'')}">
       <label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px">
       <label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea>
       <input id="gc-image-url" type="hidden" value="${esc(imageUrl)}">
       <div style="margin:12px 0;padding:10px;border:1px solid #d9e7e4;border-radius:10px;background:#f8fcfb">
-        <b>Photo principale de la catégorie</b><div id="gc-photo-preview" style="margin-top:8px">${imageUrl ? `<img src="${esc(mediaUrl(imageUrl))}" alt="Aperçu photo catégorie" style="display:block;width:132px;height:92px;object-fit:cover;border-radius:8px;border:1px solid #cfe1dd"><div class="small muted" style="margin-top:5px">Photo actuellement publiée</div>` : '<div class="small muted">Aucune photo sélectionnée.</div>'}</div>
+        <b>Photo principale de la catégorie</b><div id="gc-photo-preview" style="margin-top:8px">${imageUrl ? `<img src="${esc(mediaUrl(imagePublicUrl))}" alt="Aperçu photo catégorie" width="${Number(imageAsset&&imageAsset.width)||1}" height="${Number(imageAsset&&imageAsset.height)||1}" style="display:block;width:132px;height:92px;object-fit:cover;border-radius:8px;border:1px solid #cfe1dd"><div class="small muted" style="margin-top:5px">Photo actuellement publiée · ${categoryImageStatus(imageAsset)}</div>` : '<div class="small muted">Aucune photo sélectionnée.</div>'}</div>
         <div class="small muted" style="margin:8px 0">La même photo est utilisée sur les cartes publiques et dans ce tableau de bord. Formats image, 15 Mo maximum.</div>
         <input id="gc-image-file" type="file" accept="image/jpeg,image/png,image/webp" style="max-width:100%">
         <div class="frow mt"><button id="gc-upload-btn" type="button" class="btn sm sec" onclick="A.uploadGrandCategoryImage()">Téléverser et remplacer</button><button id="gc-remove-btn" type="button" class="btn sm warn" onclick="A.clearGrandCategoryImage()" ${imageUrl?'':'disabled'}>Retirer la photo</button></div>
@@ -1342,10 +1351,11 @@ const A = {
   },
   // Entrée dédiée à la galerie PDG : elle réutilise la même fiche et la même source en base.
   grandCategoryPhotoForm(id) { this.grandCategoryForm(id); },
-  categoryImagePreview(url, message) {
+  categoryImagePreview(url, message, asset) {
     const target=document.getElementById('gc-photo-preview'); if (!target) return;
     if (!url) { target.innerHTML='<div class="small muted">Aucune photo sélectionnée.</div>'; return; }
-    target.innerHTML=`<img src="${esc(mediaUrl(url))}" alt="Aperçu photo catégorie" style="display:block;width:132px;height:92px;object-fit:cover;border-radius:8px;border:1px solid #cfe1dd"><div class="small muted" style="margin-top:5px">${esc(message || 'Photo actuellement sélectionnée')}</div>`;
+    const details=asset ? ` · ${categoryImageStatus(asset)}` : '';
+    target.innerHTML=`<img src="${esc(mediaUrl(url))}" alt="Aperçu photo catégorie" width="${Number(asset&&asset.width)||1}" height="${Number(asset&&asset.height)||1}" style="display:block;width:132px;height:92px;object-fit:cover;border-radius:8px;border:1px solid #cfe1dd"><div class="small muted" style="margin-top:5px">${esc(message || 'Photo actuellement sélectionnée')}${details}</div>`;
   },
   async uploadGrandCategoryImage() {
     const field=document.getElementById('gc-image-file'), button=document.getElementById('gc-upload-btn');
@@ -1367,7 +1377,9 @@ const A = {
   async saveGrandCategory(id) { 
     const image=document.getElementById('gc-image-url');
     const body={name:document.getElementById('gc-name').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked,image_url:image && image.value.trim() ? image.value.trim() : null};
-    try { await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});closeModal();toast('Grande catégorie et photo enregistrées ✓','ok');render(); } catch(e) { toast(e.message,'err'); }
+    try { const saved=await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});
+      if (saved && saved.category) { const c=saved.category; this.categoryImagePreview(c.image_public_url || c.image_url,'Photo publiée et synchronisée sur les appareils',c.image_asset); }
+      closeModal();toast('Grande catégorie et photo enregistrées ✓ — version publique synchronisée.','ok');render(); } catch(e) { toast(e.message,'err'); }
   },
   async saveGrandCategoryPhoto(id) { return this.saveGrandCategory(id); },
   async saveEstimationConfig() {
