@@ -55,8 +55,8 @@ function anonymousAdViewerKey() {
   return key;
 }
 function recordAdViews(items) {
-  const keys=[...new Set((items||[]).map(a=>String(a.analytics_key||((a.sponsor?'campaign:':'ad:')+String(a.id||'').replace(/^c/,'')))).filter(k=>/^(ad|campaign):\d+$/.test(k)))];
-  if(keys.length) api('/ad-views',{method:'POST',body:{keys,anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});
+  const entries=[...new Map((items||[]).map(a=>{const key=String(a.analytics_key || ((a.sponsor?'campaign:':'ad:')+String(a.id||'').replace(/^c/,'')));return [key,{key,placement:['home_top','home_mid','services_top','search_top','ticker'].includes(String(a.placement))?String(a.placement):'other'}];})).values()].filter(x=>/^(ad|campaign):\d+$/.test(x.key));
+  if(entries.length) api('/ad-views',{method:'POST',body:{entries,anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});
 }
 function fmtDate(s) { if (!s) return ''; const d = new Date(s.replace(' ', 'T') + (s.includes('Z') || s.includes('+') ? '' : 'Z')); return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
 function fmtFCFA(n) { return (n ?? 0).toLocaleString('fr-FR') + ' FCFA'; }
@@ -578,18 +578,23 @@ function proServiceChips(selectedIds) {
 
 /* Publicités : média entier, proportions préservées et choix de placement réel. */
 function adPlacementList(list, placements, slot) {
-  const rows=(list||[]).filter(a=>placements.includes(a.placement||'home_top')).sort((a,b)=>Number(a.sort||0)-Number(b.sort||0)||String(a.id).localeCompare(String(b.id)));
+  const rows=(list||[]).filter(a=>{const p=Array.isArray(a.placements)?a.placements:[a.placement||'home_top'];return placements.some(x=>p.includes(x));}).sort((a,b)=>Number(a.sort||0)-Number(b.sort||0)||String(a.id).localeCompare(String(b.id)));
   if(!rows.length)return [];
   const weighted=[];rows.forEach(a=>{for(let i=0;i<Math.max(1,Math.min(20,Number(a.frequency)||1));i++)weighted.push(a);});
-  const key='ks_ad_slot_'+slot,at=Number(sessionStorage.getItem(key)||0),chosen=weighted[at%weighted.length];sessionStorage.setItem(key,String(at+1));return chosen?[chosen]:[];
+  const key='ks_ad_slot_'+slot,at=Number(sessionStorage.getItem(key)||0),chosen=weighted[at%weighted.length];sessionStorage.setItem(key,String(at+1));return chosen?[{...chosen,placement:placements[0]}]:[];
 }
+function adCountdown(end){if(!end)return '';const ms=new Date(String(end).replace(' ','T')+'Z')-Date.now();if(ms<=0)return '';const h=Math.floor(ms/3600000),m=Math.floor((ms%3600000)/60000),d=Math.floor(h/24);return `<span class="small" style="color:#b45309;font-weight:700">⏳ Offre valable encore ${d?d+' j ':''}${h%24} h ${m} min</span>`;}
+function adPriceHtml(a){const normal=a.price_normal===null||a.price_normal===undefined?null:Number(a.price_normal),promo=a.promotion_active&&a.price_promo!==null&&a.price_promo!==undefined?Number(a.price_promo):null;if(normal===null&&!a.offer_benefit)return '';const cur='FCFA',badge=a.promotion_active&&a.discount_percent?`<span style="background:#dc2626;color:#fff;border-radius:999px;padding:2px 7px;font-weight:800;font-size:12px">-${Number(a.discount_percent).toLocaleString('fr-FR')} %</span>`:'';return `<div class="ks-ad-price" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${promo!==null?`<span class="small muted" style="text-decoration:line-through">${normal.toLocaleString('fr-FR')} ${cur}</span><b style="font-size:18px;color:#166534">${promo.toLocaleString('fr-FR')} ${cur}</b>${badge}<span class="small muted">Économie : ${Number(a.discount_amount||normal-promo).toLocaleString('fr-FR')} ${cur}</span>`:normal!==null?`<b>${a.price_label?esc(a.price_label)+' : ':''}${normal.toLocaleString('fr-FR')} ${cur}</b>`:''}${a.extra_fees?`<span class="small muted">+ frais ${Number(a.extra_fees).toLocaleString('fr-FR')} ${cur}</span>`:''}${a.offer_benefit?`<span class="small" style="font-weight:700">🎁 ${esc(a.offer_benefit)}</span>`:''}${adCountdown(a.promo_end_at)}</div>`;}
+function adCtaLabel(a){if(a.cta_label)return a.cta_label;return ({buy:'Acheter',order:'Commander',discover:'Découvrir',contact:'Contacter',claim_offer:"Profiter de l’offre",custom:'Voir les détails'})[a.cta_action||'discover']||'Découvrir';}
 function adCardHtml(a) {
-  const fit=a.media_fit==='cover'?'cover':'contain', isVideo=a.file&&a.type==='video';
+  const fit=a.media_fit==='cover'?'cover':'contain',isVideo=a.file&&a.type==='video',accent=/^#[0-9a-f]{6}$/i.test(a.accent_color||'')?a.accent_color:'#166534';
   const media=isVideo?`<video src="${esc(mediaUrl(a.file))}" controls muted playsinline preload="metadata" style="display:block;width:100%;max-height:min(52vh,420px);object-fit:${fit};background:#0b1320;border-radius:10px" aria-label="Vidéo publicitaire"></video>`:a.file&&a.type==='image'?`<img src="${esc(mediaUrl(a.file))}" alt="${esc(a.title||'Publicité')}" loading="lazy" style="display:block;width:100%;height:auto;max-height:min(58vh,460px);object-fit:${fit};background:#f6f8f8;border-radius:10px">`:'';
-  const tag=a.type==='video'?'📣 PUBLICITÉ VIDÉO':a.sponsor?'📣 PARTENAIRE':'📣 PUBLICITÉ';
-  const link=a.link?`<button class="btn ghost sm" onclick="A.adOpen('${esc(a.link)}')">Voir les détails</button>`:'';
-  return `<article class="ks-ad-card" style="background:#fff;border:1px solid #dce8e5;border-radius:14px;padding:10px;box-sizing:border-box"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="ad-tag">${tag}</span><span class="small muted">👁️ ${Number(a.views||0).toLocaleString('fr-FR')}</span></div>${a.title?`<div class="bold mt">${esc(a.title)}</div>`:''}${a.content?`<div class="small muted mt" style="white-space:pre-wrap">${esc(a.content)}</div>`:''}${media?`<div style="margin-top:8px">${media}</div>`:''}${link?`<div class="mt">${link}</div>`:''}</article>`;
+  const tag=a.promotion_active?'🏷️ OFFRE PROMOTIONNELLE':a.type==='video'?'📣 PUBLICITÉ VIDÉO':a.sponsor?'📣 PARTENAIRE':'📣 PUBLICITÉ';const action=a.cta_action||'discover',hasAction=!!a.link||action==='claim_offer';
+  const cta=hasAction?`<button class="btn ghost sm" data-link="${esc(a.link||'')}" data-ad-id="${esc(a.id)}" data-action="${esc(action)}" data-placement="${esc(a.placement||'other')}" onclick="A.adOpen(this.dataset.link,Number(this.dataset.adId),this.dataset.action,this.dataset.placement)">${esc(adCtaLabel(a))}</button>`:'';
+  const code=a.promotion_active&&a.promo_code?`<div class="small mt">Code : <b style="letter-spacing:.5px">${esc(a.promo_code)}</b></div>`:'';
+  return `<article class="ks-ad-card ks-ad-${esc(a.display_template||'classic')}" style="background:#fff;border:1px solid ${accent};border-radius:14px;padding:10px;box-sizing:border-box"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="ad-tag" style="border-color:${accent}">${tag}</span><span class="small muted">👁️ ${Number((a.unique_views ?? a.views) || 0).toLocaleString('fr-FR')}</span></div>${a.title?`<div class="bold mt">${esc(a.title)}</div>`:''}${a.content?`<div class="small muted mt" style="white-space:pre-wrap">${esc(a.content)}</div>`:''}${media?`<div style="margin-top:8px">${media}</div>`:''}${adPriceHtml(a)}${code}${a.offer_conditions&&a.promotion_active?`<div class="small muted mt">${esc(a.offer_conditions)}</div>`:''}${cta?`<div class="mt">${cta}</div>`:''}</article>`;
 }
+
 function adsBandHtml(list) {if(!list.length)return '';return `<div class="ks-ads-rack" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">${list.map(a=>`<div style="flex:0 0 min(100%,520px);scroll-snap-align:start">${adCardHtml(a)}</div>`).join('')}</div>`;}
 
 
@@ -610,7 +615,6 @@ routes.home = async () => {
   if (MAINT.active && MAINT.scope !== 'F') topZone.push(`<div style="border-left:3px solid #e67e22;background:#fff8f0">
       <div class="bold small">🛠️ Maintenance partielle</div>
       <div class="small muted" style="white-space:normal">${esc(MAINT.message || 'Certaines fonctions sont temporairement suspendues.')}</div></div>`);
-  homeAds.forEach(a => topZone.push(adCardHtml(a)));
   const gv = k => Number((GAMES.views && GAMES.views[k]) || 0).toLocaleString('fr-FR');
   if (GAMES.quiz) topZone.push(`<div onclick="nav('#/quiz')" style="cursor:pointer;text-align:center">
       <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🧠 QUIZ</span><span class="small muted">👁️ ${gv('quiz')}</span></div>
@@ -696,11 +700,12 @@ function readCategoryDraft(categoryId) {
   try { draft = JSON.parse(sessionStorage.getItem('ks_pending_request_draft') || '{}'); } catch { draft = {}; }
   return Number(draft.category_id) === Number(categoryId) ? draft : {};
 }
-function renderCategoryRequestForm(cat, serviceChoices) {
+function renderCategoryRequestForm(cat, serviceChoices, categoryAds = []) {
   const services = (serviceChoices || []).filter(s => Number(s.id));
   if (!services.length) {
     $app.innerHTML = `${header(grandLabel(cat), { bell: !!USER })}<div class="content">${emptyState('📋','Aucune prestation active n’est disponible dans cette catégorie pour le moment.')}</div>${bottomNav('search')}`;
-    updateBadges(); return;
+    if(categoryAds.length) recordAdViews(categoryAds);
+  updateBadges(); return;
   }
   const allTasks = services.flatMap(s => (s.taches || []).map(t => ({ id:Number(t.id), name:t.name, description:t.description || '', search_terms:Array.isArray(t.search_terms) ? t.search_terms : [], price_from:Number(t.price_from) || null, price_unit:t.price_unit || '', service_id:Number(s.id), service_name:s.name, category:s.category || '' })));
   const savedDraft = readCategoryDraft(cat.id);
@@ -728,6 +733,7 @@ function renderCategoryRequestForm(cat, serviceChoices) {
   $app.innerHTML = `${header(grandLabel(cat), { bell: !!USER })}
     <div class="content category-request-page">
       ${cat.description ? `<div class="category-request-intro">${esc(cat.description)}</div>` : ''}
+      ${adsBandHtml(categoryAds)}
       <div class="card category-request-card">
         <section class="request-section request-needs-section">
           <label class="request-label">Je choisis mon/mes besoins <span class="muted small">(facultatif)</span></label>
@@ -777,7 +783,8 @@ routes.categories = async (param) => {
     let cat; try { cat = await api('/grand-categories/' + id + '/catalogue' + cityQuery); }
     catch (e) { toast(e.message, 'err'); nav('#/categories'); return; }
     const serviceChoices = cat.categories.flatMap(c => c.services.map(s => ({ ...s, category:c.name, category_icon:c.icon || '' })));
-    renderCategoryRequestForm(cat, serviceChoices);
+    let categoryAds=[]; try { categoryAds=adPlacementList(await api('/ads?category_id='+encodeURIComponent(cat.id)),['services_top'],'category_'+cat.id); } catch { }
+    renderCategoryRequestForm(cat, serviceChoices, categoryAds);
     return;
   }
   let cats; try { cats = await api('/grand-categories' + cityQuery); }
@@ -795,7 +802,7 @@ routes.services = async (params) => {
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('search'); return; }
   if (!ADS.length) try { ADS = await api('/ads'); } catch { }
   const pubsServices = adPlacementList(ADS,['services_top'],'services');
-  const bandePub = adsBandHtml(pubsServices.map(adCardHtml));
+  const bandePub = adsBandHtml(pubsServices);
   if (pubsServices.length) recordAdViews(pubsServices);
   const catId = parseInt(params || 0, 10);
   const q = (sessionStorage.getItem('ks_cat_q') || '').toLowerCase().trim();
@@ -2037,7 +2044,7 @@ function bandeauColor(v,fallback){return /^#[0-9a-f]{6}$/i.test(String(v||''))?v
 function bandeauFont(f){return f==='serif'?'Georgia,serif':f==='mono'?'ui-monospace,SFMono-Regular,monospace':'system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';}
 function bandeauText(a,b){const t=BD_TYPES[a.type]||BD_TYPES.info,label=b.label_mode==='none'?'':(b.label_mode==='promo'||b.mode==='promotion'?'✨ PROMO':(a.type==='urgence'?'🚨 URGENT':t.lb));return `<span class="ks-band-item" ${a.link?`data-link="${esc(a.link)}" onclick="A.bandeauGo(this.dataset.link)" role="link" tabindex="0"`:''} style="color:${bandeauColor(a.color,b.text_color)};cursor:${a.link?'pointer':'default'}">${a.image_url?`<img src="${esc(mediaUrl(a.image_url))}" alt="" class="ks-band-img">`:`<span class="ks-band-icon">${esc(a.icon||t.ic)}</span>`}${label?`<b class="ks-band-label">${esc(label)}${a.theme?` · ${esc(a.theme)}`:''}</b>`:''}<span class="ks-band-copy">${esc(a.content||a.title||'')}</span></span>`;}
 async function bandeauMount(){if(BD_TIMER){clearInterval(BD_TIMER);BD_TIMER=null;}bandeauStopFade();BD_JSON='';await bandeauRender();BD_TIMER=setInterval(()=>{if(!document.getElementById('bandeau-host')){clearInterval(BD_TIMER);BD_TIMER=null;bandeauStopFade();return;}bandeauRender();},5000);}
-async function bandeauRender(){const host=document.getElementById('bandeau-host');if(!host)return;let b;try{b=await api('/annonces');}catch{return;}const j=JSON.stringify(b);if(j===BD_JSON&&host.innerHTML)return;BD_JSON=j;bandeauStopFade();const espace=document.getElementById('bandeau-espace');if(!b.enabled||!Array.isArray(b.items)||!b.items.length){host.innerHTML='';if(espace)espace.style.height='0';return;}const bg=bandeauColor(b.background,'#0b1320'),text=bandeauColor(b.text_color,'#fff'),border=bandeauColor(b.border_color,'#16a34a'),height=Math.max(28,Math.min(110,Number(b.height)||38)),fs=Math.max(10,Math.min(28,Number(b.font_size)||14)),weight=['400','500','600','700','800'].includes(String(b.font_weight))?b.font_weight:'700',mode=b.mode||'scroll',top=b.position==='top',reduce=b.reduce_motion&&matchMedia('(prefers-reduced-motion: reduce)').matches,items=b.items.map(a=>({...a,display_mode:a.display_mode==='inherit'||!a.display_mode?mode:a.display_mode})),baseStyle=`height:${height}px;background:${bg};color:${text};border:${Math.max(0,Number(b.border_width)||0)}px solid ${border};border-radius:${Math.max(0,Number(b.radius)||0)}px;font-size:${fs}px;font-weight:${weight};font-family:${bandeauFont(b.font_family)};`;
+async function bandeauRender(){const host=document.getElementById('bandeau-host');if(!host)return;let b;try{b=await api('/annonces');}catch{return;}const j=JSON.stringify(b);if(j===BD_JSON&&host.innerHTML)return;BD_JSON=j;bandeauStopFade();const espace=document.getElementById('bandeau-espace');if(!b.enabled||!Array.isArray(b.items)||!b.items.length){host.innerHTML='';if(espace)espace.style.height='0';return;}const bg=bandeauColor(b.background,'#0b1320'),text=bandeauColor(b.text_color,'#fff'),border=bandeauColor(b.border_color,'#16a34a'),height=Math.max(28,Math.min(110,Number(b.height)||38)),fs=Math.max(10,Math.min(28,Number(b.font_size)||14)),weight=['400','500','600','700','800'].includes(String(b.font_weight))?b.font_weight:'700',mode=b.mode||'scroll',top=b.position==='top',reduce=b.reduce_motion&&matchMedia('(prefers-reduced-motion: reduce)').matches,items=b.items.map(a=>({...a,display_mode:a.display_mode==='inherit'||!a.display_mode?mode:a.display_mode}));recordAdViews(items.filter(a=>a.ad_id).map(a=>({...a,id:a.ad_id,analytics_key:a.analytics_key||'ad:'+a.ad_id,placement:'ticker'})));const baseStyle=`height:${height}px;background:${bg};color:${text};border:${Math.max(0,Number(b.border_width)||0)}px solid ${border};border-radius:${Math.max(0,Number(b.radius)||0)}px;font-size:${fs}px;font-weight:${weight};font-family:${bandeauFont(b.font_family)};`;
 const shell=`<style>@keyframes ksBandRtl{from{transform:translate3d(0,0,0)}to{transform:translate3d(-50%,0,0)}}@keyframes ksBandLtr{from{transform:translate3d(-50%,0,0)}to{transform:translate3d(0,0,0)}}@keyframes ksBandUp{from{transform:translateY(100%)}to{transform:translateY(-100%)}}@keyframes ksBandFade{0%,100%{opacity:.05;transform:translateY(4px)}15%,84%{opacity:1;transform:translateY(0)}}.ks-band{position:fixed;${top?'top:calc(58px + var(--safe-t,0px))':'bottom:calc(57px + var(--safe-b,0px))'};left:50%;transform:translateX(-50%);width:min(calc(100% - 12px),560px);z-index:49;box-sizing:border-box;overflow:hidden;display:flex;align-items:center}.ks-band-track,.ks-band-segment{display:flex;align-items:center;flex:0 0 auto;white-space:nowrap;will-change:transform}.ks-band-item{display:inline-flex;align-items:center;gap:7px;padding:0 ${Math.max(4,Number(b.gap)||20)}px;min-height:100%;white-space:nowrap}.ks-band-img{width:26px;height:26px;border-radius:5px;object-fit:contain;background:#fff;flex:0 0 auto}.ks-band-icon{font-size:18px;line-height:1}.ks-band-label{font-weight:inherit}.ks-band-copy{opacity:.96}.ks-band-static{width:100%;padding:0 12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:center;box-sizing:border-box}.ks-band-cards{height:auto!important;min-height:${height}px;padding:6px;gap:7px;overflow:auto}.ks-band-cards .ks-band-item{background:rgba(255,255,255,.13);border-radius:8px;min-height:${Math.max(28,height-12)}px;padding:0 10px}.ks-band-pause:hover .ks-band-track,.ks-band-pause:active .ks-band-track{animation-play-state:paused}@media(prefers-reduced-motion:reduce){.ks-band-track,.ks-band-fade{animation:none!important}}</style>`;
 const selected=items.filter(a=>a.display_mode==='inherit'||a.display_mode===mode||mode==='news'||mode==='promotion');const shown=selected.length?selected:items,messages=shown.map(a=>bandeauText(a,b));const space=(top?0:height+10);if(espace)espace.style.height=space+'px';const holderClass='ks-band '+(b.pause_enabled?'ks-band-pause':'');
 if(mode==='fixed'){host.innerHTML=`${shell}<div class="${holderClass}" style="${baseStyle}"><div class="ks-band-static">${messages[0]}</div></div>`;return;}
@@ -2361,7 +2368,8 @@ routes.kdo = async () => {
    ACTIONS GLOBALES
    ============================================================ */
 const A = {
-  adOpen(link){const v=String(link||'').trim();if(!v)return;if(v.startsWith('#/'))return nav(v);if(/^https:\/\//i.test(v))window.open(v,'_blank','noopener');else toast('Lien publicitaire invalide.','err');},
+  adOpen(link,id,action='discover',placement='other'){const v=String(link||'').trim(),adId=Number(id);if(adId)api('/ad-clicks',{method:'POST',body:{ad_id:adId,placement,anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});if(adId&&(action==='buy'||action==='order'))api('/ad-interactions',{method:'POST',body:{ad_id:adId,type:'order_intent',anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});if(action==='claim_offer'&&adId)return A.adOfferClaim(adId);if(action==='contact'&&v.startsWith('tel:')){if(adId)api('/ad-interactions',{method:'POST',body:{ad_id:adId,type:'contact',anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});location.href=v;return;}if(!v){toast('Aucun lien n’est configuré pour cette publicité.','err');return;}if(v.startsWith('#/'))return nav(v);if(/^https:\/\//i.test(v))window.open(v,'_blank','noopener');else toast('Lien publicitaire invalide.','err');},
+  async adOfferClaim(id){if(!USER){toast('Connectez-vous pour vérifier cette offre.','err');return nav('#/login');}const code=prompt('Code promotionnel (laissez vide si aucun code n’est requis) :','');if(code===null)return;try{const check=await api('/ads/'+id+'/promo/verify',{method:'POST',body:{code}});const price=check.price===null||check.price===undefined?'selon les conditions':Number(check.price).toLocaleString('fr-FR')+' FCFA';if(!confirm(`Offre vérifiée : ${price}. Cette action ne crée pas de paiement. Enregistrer une demande d’offre ?`))return;await api('/ads/'+id+'/promo/claim',{method:'POST',body:{code}});toast('Demande d’offre enregistrée. Aucun paiement ni commande n’a été exécuté.','ok');}catch(e){toast(e.message,'err');}},
   goSearch() { const v = document.getElementById('home-q').value.trim(); nav('#/search/' + encodeURIComponent(v)); },
   _voiceSearch: null,
   async voiceSearchOpen() {

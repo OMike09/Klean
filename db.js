@@ -2716,4 +2716,101 @@ const COLIS35_DEFAULTS={
 };
 for(const [k,v] of Object.entries(COLIS35_DEFAULTS))if(getSetting(k)===null)setSetting(k,v);
 
+// ============================================================
+// COLIS 36 — promotions intégrées aux publicités et statistiques durables
+// ============================================================
+// Extension additive : les publicités et compteurs existants restent intacts.
+ensureColumn('ads','offer_kind',"TEXT NOT NULL DEFAULT 'service'");
+ensureColumn('ads','promotion_type',"TEXT NOT NULL DEFAULT 'simple'");
+ensureColumn('ads','code_discount_type',"TEXT NOT NULL DEFAULT 'none'");
+ensureColumn('ads','price_normal','INTEGER');
+ensureColumn('ads','price_promo','INTEGER');
+ensureColumn('ads','discount_amount','INTEGER');
+ensureColumn('ads','discount_percent','REAL');
+ensureColumn('ads','currency',"TEXT NOT NULL DEFAULT 'XOF'");
+ensureColumn('ads','price_label','TEXT');
+ensureColumn('ads','available_quantity','INTEGER');
+ensureColumn('ads','offer_conditions','TEXT');
+ensureColumn('ads','extra_fees','INTEGER');
+ensureColumn('ads','offer_benefit','TEXT');
+ensureColumn('ads','promo_code','TEXT');
+ensureColumn('ads','promo_end_at','TEXT');
+ensureColumn('ads','promo_end_behavior',"TEXT NOT NULL DEFAULT 'normal'");
+ensureColumn('ads','new_users_only','INTEGER NOT NULL DEFAULT 0');
+ensureColumn('ads','new_user_max_days','INTEGER');
+ensureColumn('ads','eligible_user_ids',"TEXT NOT NULL DEFAULT '[]'");
+ensureColumn('ads','max_uses','INTEGER');
+ensureColumn('ads','uses_per_account','INTEGER');
+ensureColumn('ads','minimum_purchase','INTEGER');
+ensureColumn('ads','stackable','INTEGER NOT NULL DEFAULT 0');
+ensureColumn('ads','display_template',"TEXT NOT NULL DEFAULT 'classic'");
+ensureColumn('ads','accent_color',"TEXT NOT NULL DEFAULT '#166534'");
+ensureColumn('ads','font_style',"TEXT NOT NULL DEFAULT 'system'");
+ensureColumn('ads','price_position',"TEXT NOT NULL DEFAULT 'below'");
+ensureColumn('ads','cta_label','TEXT');
+ensureColumn('ads','cta_action',"TEXT NOT NULL DEFAULT 'discover'");
+ensureColumn('ads','placements',"TEXT NOT NULL DEFAULT '[]'");
+ensureColumn('ads','home_enabled','INTEGER NOT NULL DEFAULT 0');
+ensureColumn('ads','home_format',"TEXT NOT NULL DEFAULT 'card'");
+ensureColumn('ads','ticker_enabled','INTEGER NOT NULL DEFAULT 0');
+ensureColumn('ads','display_days',"TEXT NOT NULL DEFAULT '[]'");
+ensureColumn('ads','daily_start_time','TEXT');
+ensureColumn('ads','daily_end_time','TEXT');
+ensureColumn('ads','max_impressions','INTEGER');
+ensureColumn('ads','target_categories',"TEXT NOT NULL DEFAULT '[]'");
+ensureColumn('ads','target_services',"TEXT NOT NULL DEFAULT '[]'");
+ensureColumn('ads','target_audience',"TEXT NOT NULL DEFAULT 'all'");
+ensureColumn('ads','draft','INTEGER NOT NULL DEFAULT 0');
+db.exec(`
+CREATE TABLE IF NOT EXISTS ad_unique_views (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ad_kind TEXT NOT NULL CHECK(ad_kind IN ('ad','campaign')),
+  ad_id INTEGER NOT NULL,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  viewer_key TEXT NOT NULL,
+  placement TEXT NOT NULL DEFAULT 'other',
+  first_viewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(ad_kind,ad_id,viewer_key)
+);
+CREATE INDEX IF NOT EXISTS idx_ad_unique_views_ad ON ad_unique_views(ad_kind,ad_id,first_viewed_at);
+CREATE INDEX IF NOT EXISTS idx_ad_unique_views_place ON ad_unique_views(placement,first_viewed_at);
+CREATE TABLE IF NOT EXISTS ad_click_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ad_id INTEGER NOT NULL REFERENCES ads(id) ON DELETE RESTRICT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  viewer_key TEXT NOT NULL,
+  placement TEXT NOT NULL DEFAULT 'other',
+  clicked_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ad_click_events_ad ON ad_click_events(ad_id,clicked_at);
+CREATE TABLE IF NOT EXISTS ad_interactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ad_id INTEGER NOT NULL REFERENCES ads(id) ON DELETE RESTRICT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  viewer_key TEXT NOT NULL,
+  interaction_type TEXT NOT NULL CHECK(interaction_type IN ('contact','order_intent','offer_claim','promo_verify')),
+  payload TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ad_interactions_ad ON ad_interactions(ad_id,interaction_type,created_at);
+CREATE TABLE IF NOT EXISTS ad_promo_claims (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ad_id INTEGER NOT NULL REFERENCES ads(id) ON DELETE RESTRICT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code TEXT,
+  quoted_price INTEGER,
+  status TEXT NOT NULL DEFAULT 'claimed' CHECK(status IN ('claimed','cancelled','converted')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ad_promo_claims_ad ON ad_promo_claims(ad_id,status,created_at);
+CREATE INDEX IF NOT EXISTS idx_ad_promo_claims_user ON ad_promo_claims(ad_id,user_id,status);
+`);
+// Les vues collectées avant COLIS 36 deviennent des vues uniques historiques, une seule fois
+// par identifiant visiteur, sans modifier la table source ni son historique quotidien.
+db.prepare(`INSERT OR IGNORE INTO ad_unique_views(ad_kind,ad_id,user_id,viewer_key,placement,first_viewed_at)
+  SELECT ad_kind,ad_id,MIN(user_id),viewer_key,'other',MIN(viewed_at)
+  FROM ad_view_events GROUP BY ad_kind,ad_id,viewer_key`).run();
+// Compatibilité des affichages hérités : l’ancien emplacement accueil conserve son état public.
+db.prepare("UPDATE ads SET home_enabled=1,placements=CASE WHEN placement IN ('accueil','home_top') THEN '[\"home_top\"]' WHEN placement='home_mid' THEN '[\"home_mid\"]' ELSE placements END WHERE updated_at IS NULL AND (placements IS NULL OR placements='[]') AND placement IN ('accueil','home_top','home_mid')").run();
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
