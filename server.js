@@ -65,8 +65,8 @@ function fileHasName(raw, name) {
 function uploadIsPublicAd(name) {
   // Les visuels explicitement publiés (publicité ou message du bandeau) sont les
   // seules exceptions à la protection générale des uploads.
-  return !!db.prepare("SELECT 1 FROM ads WHERE active=1 AND file LIKE ?").get('%/uploads/' + name)
-    || !!db.prepare("SELECT 1 FROM annonces WHERE active=1 AND image_url LIKE ?").get('%/uploads/' + name);
+  return !!db.prepare("SELECT 1 FROM ads WHERE active=1 AND archived_at IS NULL AND (start_at IS NULL OR start_at<=datetime('now')) AND (end_at IS NULL OR end_at>datetime('now')) AND file LIKE ?").get('%/uploads/' + name)
+    || !!db.prepare("SELECT 1 FROM annonces WHERE active=1 AND (start_at IS NULL OR start_at<=datetime('now')) AND (end_at IS NULL OR end_at>datetime('now')) AND image_url LIKE ?").get('%/uploads/' + name);
 }
 function canReadUpload(user, name) {
   // Une image de grande catégorie active est un visuel de catalogue explicitement publié.
@@ -2509,10 +2509,10 @@ app.post('/api/ecole-famille', auth, (req, res) => {
 function emergencyConfig() {
   let rawCategories = [];
   try { rawCategories = JSON.parse(getSetting('urgence_categories', '[]')); } catch { rawCategories = []; }
-  const contacts = db.prepare(`SELECT service_name,phone,label,source_name,source_url,source_date,verified_at,updated_at,group_key
+  const contacts = db.prepare(`SELECT service_name,phone,label,source_name,source_url,source_date,verified_at,updated_at,group_key,icon
     FROM emergency_contacts WHERE active=1 ORDER BY CASE group_key WHEN 'vital' THEN 0 ELSE 1 END,sort,id`).all()
     .map(c => ({ nom:c.service_name, tel:c.phone, label:c.label || '', source_name:c.source_name, source_url:c.source_url,
-      source_date:c.source_date || null, verified_at:c.verified_at, last_modified:c.updated_at, group:c.group_key }));
+      source_date:c.source_date || null, verified_at:c.verified_at, last_modified:c.updated_at, group:c.group_key, icon:c.icon||'📞' }));
   const categories = rawCategories.filter(c => c && c.name && c.active !== false).map(c => ({ name:String(c.name).slice(0,120), description:String(c.description||'').slice(0,300) }));
   return { info:getSetting('urgence_info',''), contacts, categories, assistance_available:getSetting('urgence_assistance_enabled','0') === '1' };
 }
@@ -2849,15 +2849,22 @@ function adViewer(req) {
   return payload ? db.prepare('SELECT id,ville FROM users WHERE id=?').get(payload.id) : null;
 }
 function adStats(kind,id) { return db.prepare(`SELECT COUNT(*) total_views,COUNT(DISTINCT viewer_key) unique_viewers FROM ad_view_events WHERE ad_kind=? AND ad_id=?`).get(kind,Number(id)); }
-function activeAdTarget(kind,id) { return kind==='ad' ? db.prepare('SELECT id FROM ads WHERE id=? AND active=1').get(id) : db.prepare("SELECT id FROM ad_campaigns WHERE id=? AND status='active'").get(id); }
+function adPlacement(value) { const v=String(value||'').trim(); return ({accueil:'home_top',services:'services_top'})[v] || (['home_top','home_mid','services_top','search_top'].includes(v)?v:'home_top'); }
+function adDate(value) { const v=String(value||'').trim(); if(!v)return null; const n=v.replace('T',' ').slice(0,19); if(!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(n)||Number.isNaN(Date.parse(n.replace(' ','T')+'Z')))throw new Error('Date de diffusion invalide.'); return n.length===16?n+':00':n; }
+function adState(row) { if(row.archived_at)return 'archivee'; if(!row.active)return 'suspendue'; const now=maintenanceDbNow();if(row.start_at&&row.start_at>now)return 'programmee';if(row.end_at&&row.end_at<=now)return 'expiree';return 'active'; }
+function adScheduleAllowed(row) { return adState(row)==='active'; }
+function adMedia(value,type,old) { if(value===undefined)return old&&old.file||null; if(value===null||value==='')return null;const rec=uploadRecordFor(String(value));if(!rec)throw new Error('Le média doit être un fichier envoyé sur Klean Services.');if(type==='image'&&!String(rec.mime||'').startsWith('image/'))throw new Error('Choisissez une image pour ce format.');if(type==='video'&&!String(rec.mime||'').startsWith('video/'))throw new Error('Choisissez une vidéo pour ce format.');return String(value); }
+function adPayload(body={},old=null) { const type=body.type===undefined?(old&&old.type||'texte'):String(body.type||'texte'),allowed=['texte','image','video'];if(!allowed.includes(type))throw new Error('Format publicitaire invalide.');const title=body.title===undefined?(old&&old.title||''):String(body.title||'').trim().slice(0,160),content=body.content===undefined?(old&&old.content||''):String(body.content||'').trim().slice(0,2000),link=body.link===undefined?(old&&old.link||null):String(body.link||'').trim().slice(0,500)||null,placement=body.placement===undefined?adPlacement(old&&old.placement):adPlacement(body.placement),duration=body.duration===undefined?Number(old&&old.duration||6):Number(body.duration),frequency=body.frequency===undefined?Number(old&&old.frequency||1):Number(body.frequency),media_fit=body.media_fit===undefined?(old&&old.media_fit||'contain'):String(body.media_fit||'contain'),start_at=body.start_at===undefined?(old&&old.start_at||null):adDate(body.start_at),end_at=body.end_at===undefined?(old&&old.end_at||null):adDate(body.end_at),sort=body.sort===undefined?Number(old&&old.sort||0):Number(body.sort),active=body.active===undefined?Number(old&&old.active!==undefined?old.active:1):(body.active?1:0);if(!Number.isInteger(Math.round(duration))||duration<3||duration>120)throw new Error('La durée doit être comprise entre 3 et 120 secondes.');if(!Number.isInteger(Math.round(frequency))||frequency<1||frequency>20)throw new Error('La fréquence doit être comprise entre 1 et 20.');if(!['contain','cover'].includes(media_fit))throw new Error('Mode d’affichage invalide.');if(start_at&&end_at&&end_at<=start_at)throw new Error('La fin doit être postérieure au début de diffusion.');let zones=body.zones===undefined?cleanZones(old&&old.zones):assertValidZones(body.zones);const file=adMedia(body.file,type,old);if(link&&!(link.startsWith('#/')||/^https:\/\//i.test(link)))throw new Error('Le lien doit commencer par https:// ou #/.');if(type!=='texte'&&!file)throw new Error('Un média est requis pour une publicité image ou vidéo.');if(!title&&!content&&!file)throw new Error('Indiquez un titre, un texte ou un média.');return {type,title,content,link,file,placement,duration:Math.round(duration),frequency:Math.round(frequency),media_fit,start_at,end_at,sort:Math.max(0,Math.min(9999,Math.round(sort)||0)),active,zones:JSON.stringify(zones)}; }
+function adLog(id,action,previous,user){db.prepare('INSERT INTO ad_history(ad_id,action,previous_data,changed_by) VALUES(?,?,?,?)').run(id,action,JSON.stringify(previous||{}),user&&user.id||null);}
+function activeAdTarget(kind,id) { return kind==='ad' ? (()=>{const r=db.prepare('SELECT * FROM ads WHERE id=?').get(id);return r&&adScheduleAllowed(r)?r:null;})() : db.prepare("SELECT id FROM ad_campaigns WHERE id=? AND status='active'").get(id); }
 app.get('/api/ads', (req, res) => {
   pubTick(); const viewer=adViewer(req);
-  const rows=db.prepare(`SELECT a.id,a.type,a.title,a.content,a.file,a.placement,a.duration,a.zones,
+  const rows=db.prepare(`SELECT a.id,a.type,a.title,a.content,a.link,a.file,a.placement,a.duration,a.frequency,a.media_fit,a.start_at,a.end_at,a.sort,a.zones,
     COALESCE((SELECT COUNT(*) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) AS views,
     COALESCE((SELECT COUNT(DISTINCT viewer_key) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) AS unique_views
-    FROM ads a WHERE a.active=1 ORDER BY a.sort,a.id`).all().filter(a=>adZoneAllowed(a.zones,viewer&&viewer.ville));
+    FROM ads a WHERE a.active=1 AND a.archived_at IS NULL AND (a.start_at IS NULL OR a.start_at<=datetime('now')) AND (a.end_at IS NULL OR a.end_at>datetime('now')) ORDER BY a.sort,a.id`).all().filter(a=>adZoneAllowed(a.zones,viewer&&viewer.ville)).map(a=>({...a,placement:adPlacement(a.placement),frequency:Math.max(1,Number(a.frequency)||1),media_fit:['contain','cover'].includes(a.media_fit)?a.media_fit:'contain'}));
   if(getSetting('pub_campagnes_enabled','1')==='1') { const dur=Math.max(3,parseInt(getSetting('pub_duree_affichage','6'),10)||6);
-    for(const c of db.prepare("SELECT * FROM ad_campaigns WHERE status='active' ORDER BY id").all()) { const zones=cleanZones(c.zones).length?c.zones:(c.zone?[c.zone]:[]);if(!adZoneAllowed(zones,viewer&&viewer.ville))continue;const stats=adStats('campaign',c.id),entry={id:'c'+c.id,analytics_key:'campaign:'+c.id,type:c.type,title:c.title,content:c.content,file:c.file,placement:c.placement,duration:dur,zones,views:Number(stats.total_views||0),unique_views:Number(stats.unique_viewers||0),sponsor:true};for(let i=0;i<pubPoids(c.priorite);i++)rows.push(entry); }
+    for(const c of db.prepare("SELECT * FROM ad_campaigns WHERE status='active' ORDER BY id").all()) { const zones=cleanZones(c.zones).length?c.zones:(c.zone?[c.zone]:[]);if(!adZoneAllowed(zones,viewer&&viewer.ville))continue;const stats=adStats('campaign',c.id),entry={id:'c'+c.id,analytics_key:'campaign:'+c.id,type:c.type,title:c.title,content:c.content,file:c.file,placement:adPlacement(c.placement),duration:dur,frequency:Math.max(1,pubPoids(c.priorite)),media_fit:'contain',zones,views:Number(stats.total_views||0),unique_views:Number(stats.unique_viewers||0),sponsor:true};rows.push(entry); }
   }
   res.json(rows.map(a=>({...a,analytics_key:a.analytics_key||'ad:'+a.id})));
 });
@@ -2875,28 +2882,14 @@ app.post('/api/ad-views', (req,res) => {
 // Les paramètres sont retournés à chaque lecture : l'accueil actualise donc réellement
 // le ruban après toute modification PDG, sans dépendre d'un cache du navigateur.
 function bandeauConfig() {
-  const pick = (k, def) => String(getSetting(k, def) || def);
-  const n = (k, def, min, max) => Math.max(min, Math.min(max, parseInt(pick(k, String(def)), 10) || def));
-  const style = pick('bandeau_style', 'classic');
-  const animation = pick('bandeau_animation', 'scroll');
-  return {
-    enabled: pick('bandeau_enabled', '0') === '1',
-    speed: n('bandeau_speed', 60, 10, 400),
-    style: ['classic','colored','icon','image','modern'].includes(style) ? style : 'classic',
-    background: pick('bandeau_background', '#0b1320').slice(0, 20),
-    text_color: pick('bandeau_text_color', '#ffffff').slice(0, 20),
-    font_size: n('bandeau_font_size', 14, 10, 28),
-    font_weight: ['400','500','600','700','800'].includes(pick('bandeau_font_weight','700')) ? pick('bandeau_font_weight','700') : '700',
-    height: n('bandeau_height', 38, 28, 86),
-    border_color: pick('bandeau_border_color', '#16a34a').slice(0, 20),
-    animation: ['scroll','slide','fade'].includes(animation) ? animation : 'scroll',
-    message_duration: n('bandeau_message_duration', 8, 3, 60)
-  };
+  const pick = (k, def) => String(getSetting(k, def) || def), n = (k, def, min, max) => Math.max(min, Math.min(max, parseInt(pick(k, String(def)), 10) || def));
+  const style = pick('bandeau_style', 'classic'), legacyAnimation=pick('bandeau_animation', 'scroll'), mode=pick('bandeau_mode',legacyAnimation);
+  return {enabled:pick('bandeau_enabled','0')==='1',speed:n('bandeau_speed',60,10,400),style:['classic','colored','icon','image','modern'].includes(style)?style:'classic',background:pick('bandeau_background','#0b1320').slice(0,20),text_color:pick('bandeau_text_color','#ffffff').slice(0,20),font_size:n('bandeau_font_size',14,10,28),font_weight:['400','500','600','700','800'].includes(pick('bandeau_font_weight','700'))?pick('bandeau_font_weight','700'):'700',height:n('bandeau_height',38,28,110),border_color:pick('bandeau_border_color','#16a34a').slice(0,20),animation:['scroll','slide','fade'].includes(legacyAnimation)?legacyAnimation:'scroll',message_duration:n('bandeau_message_duration',8,3,60),mode:['scroll','vertical','fixed','rotate','fade','cards','news','promotion'].includes(mode)?mode:'scroll',direction:['rtl','ltr','up'].includes(pick('bandeau_direction','rtl'))?pick('bandeau_direction','rtl'):'rtl',position:['top','bottom'].includes(pick('bandeau_position','bottom'))?pick('bandeau_position','bottom'):'bottom',gap:n('bandeau_gap',20,4,100),radius:n('bandeau_radius',0,0,32),border_width:n('bandeau_border_width',2,0,6),font_family:['system','serif','mono'].includes(pick('bandeau_font_family','system'))?pick('bandeau_font_family','system'):'system',label_mode:['news','promo','none'].includes(pick('bandeau_label_mode','news'))?pick('bandeau_label_mode','news'):'news',pause_enabled:pick('bandeau_pause_enabled','1')==='1',reduce_motion:pick('bandeau_reduce_motion','1')==='1'};
 }
 app.get('/api/annonces', (req, res) => {
   res.json({
     ...bandeauConfig(),
-    items: db.prepare('SELECT id, type, theme, title, content, icon, color, link, image_url, duration_seconds FROM annonces WHERE active=1 ORDER BY sort, id').all()
+    items: db.prepare("SELECT id,type,theme,title,content,icon,color,link,image_url,duration_seconds,display_mode,priority,start_at,end_at FROM annonces WHERE active=1 AND (start_at IS NULL OR start_at<=datetime('now')) AND (end_at IS NULL OR end_at>datetime('now')) ORDER BY priority DESC,sort,id").all()
   });
 });
 
@@ -4370,7 +4363,7 @@ function safeEmergencyContact(body, old = {}) {
   if (!service || !phone || !sourceName || !/^https:\/\//i.test(sourceUrl)) throw new Error('FIELDS');
   return { group_key:group, service_name:service, phone, label:String(b.label ?? old.label ?? '').trim().slice(0,240), source_name:sourceName, source_url:sourceUrl,
     source_date:String(b.source_date ?? old.source_date ?? '').trim().slice(0,32) || null, verified_at:String(b.verified_at ?? old.verified_at ?? '').trim().slice(0,32) || new Date().toISOString().slice(0,10),
-    active:b.active === undefined ? (old.active ?? 1) : (b.active ? 1 : 0), sort:Math.max(0, Math.min(9999, Number(b.sort ?? old.sort ?? 99) || 99)) };
+    icon:String(b.icon ?? old.icon ?? '📞').trim().slice(0,16)||'📞', active:b.active === undefined ? (old.active ?? 1) : (b.active ? 1 : 0), sort:Math.max(0, Math.min(9999, Number(b.sort ?? old.sort ?? 99) || 99)) };
 }
 function emergencyContactHistory(id, action, snapshot, user) {
   db.prepare('INSERT INTO emergency_contact_history(contact_id,action,previous_data,changed_by) VALUES(?,?,?,?)').run(id, action, JSON.stringify(snapshot || {}), user && user.id || null);
@@ -4380,10 +4373,10 @@ A.get('/emergency-contacts', pdgOnly, (req,res) => res.json(db.prepare(`SELECT c
   LEFT JOIN users u ON u.id=h.changed_by ORDER BY CASE c.group_key WHEN 'vital' THEN 0 ELSE 1 END,c.sort,c.id`).all()));
 A.get('/emergency-contacts/:id/history', pdgOnly, (req,res) => res.json(db.prepare(`SELECT h.*,u.name changed_by_name FROM emergency_contact_history h LEFT JOIN users u ON u.id=h.changed_by WHERE h.contact_id=? ORDER BY h.id DESC`).all(req.params.id)));
 A.post('/emergency-contacts', pdgOnly, (req,res) => { let c; try { c=safeEmergencyContact(req.body); } catch(e) { return res.status(400).json({error:'Renseignez un groupe, le service, le numéro, la source institutionnelle HTTPS et la date de vérification.'}); }
-  const id=db.prepare(`INSERT INTO emergency_contacts(group_key,service_name,phone,label,source_name,source_url,source_date,verified_at,active,sort) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(c.group_key,c.service_name,c.phone,c.label,c.source_name,c.source_url,c.source_date,c.verified_at,c.active,c.sort).lastInsertRowid;
+  const id=db.prepare(`INSERT INTO emergency_contacts(group_key,service_name,phone,label,source_name,source_url,source_date,verified_at,icon,active,sort) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(c.group_key,c.service_name,c.phone,c.label,c.source_name,c.source_url,c.source_date,c.verified_at,c.icon,c.active,c.sort).lastInsertRowid;
   emergencyContactHistory(id,'creation',c,req.user); res.status(201).json({id}); });
 A.put('/emergency-contacts/:id', pdgOnly, (req,res) => { const old=db.prepare('SELECT * FROM emergency_contacts WHERE id=?').get(req.params.id); if(!old)return res.status(404).json({error:'Contact introuvable.'}); let c; try { c=safeEmergencyContact(req.body,old); } catch(e) { return res.status(400).json({error:'Renseignez un groupe, le service, le numéro, la source institutionnelle HTTPS et la date de vérification.'}); }
-  db.prepare(`UPDATE emergency_contacts SET group_key=?,service_name=?,phone=?,label=?,source_name=?,source_url=?,source_date=?,verified_at=?,active=?,sort=?,updated_at=datetime('now') WHERE id=?`).run(c.group_key,c.service_name,c.phone,c.label,c.source_name,c.source_url,c.source_date,c.verified_at,c.active,c.sort,old.id);
+  db.prepare(`UPDATE emergency_contacts SET group_key=?,service_name=?,phone=?,label=?,source_name=?,source_url=?,source_date=?,verified_at=?,icon=?,active=?,sort=?,updated_at=datetime('now') WHERE id=?`).run(c.group_key,c.service_name,c.phone,c.label,c.source_name,c.source_url,c.source_date,c.verified_at,c.icon,c.active,c.sort,old.id);
   emergencyContactHistory(old.id,c.active ? 'modification' : 'désactivation',{before:old,after:c},req.user); res.json({ok:true}); });
 
 
@@ -4834,76 +4827,26 @@ A.post('/support/conversations/:id/status', (req, res) => {
   if (!out.changes) return res.status(404).json({ error: 'Conversation introuvable.' });
   res.json({ ok: true, status });
 });
-A.get('/ads', (req, res) => res.json(db.prepare(`SELECT a.*,
-  COALESCE((SELECT COUNT(*) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) AS views,
-  COALESCE((SELECT COUNT(DISTINCT viewer_key) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) AS unique_views
-  FROM ads a ORDER BY a.sort, a.id DESC`).all()));
-A.get('/ads/analytics', pdgOnly, (req,res) => {
-  const core=db.prepare(`SELECT a.id,'ad' kind,a.title,a.content,a.created_at,NULL published_at,a.active,
-    COALESCE((SELECT COUNT(*) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) total_views,
-    COALESCE((SELECT COUNT(DISTINCT viewer_key) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) unique_viewers FROM ads a`).all().map(x=>({...x,status:x.active?'active':'suspendue',advertiser:'Klean Services'}));
-  const campaigns=db.prepare(`SELECT c.id,'campaign' kind,c.title,c.content,c.created_at,c.start_at published_at,c.status,u.name advertiser,
-    COALESCE((SELECT COUNT(*) FROM ad_view_events v WHERE v.ad_kind='campaign' AND v.ad_id=c.id),0) total_views,
-    COALESCE((SELECT COUNT(DISTINCT viewer_key) FROM ad_view_events v WHERE v.ad_kind='campaign' AND v.ad_id=c.id),0) unique_viewers FROM ad_campaigns c JOIN users u ON u.id=c.user_id`).all();
-  res.json([...core,...campaigns].sort((a,b)=>String(b.published_at||b.created_at).localeCompare(String(a.published_at||a.created_at))));
-});
-A.get('/ads/analytics/:kind/:id/views', pdgOnly, (req,res) => {
-  const kind=['ad','campaign'].includes(req.params.kind)?req.params.kind:null,id=Number(req.params.id);if(!kind||!Number.isInteger(id))return res.status(400).json({error:'Publicité invalide.'});
-  const totals=adStats(kind,id),known=db.prepare(`SELECT e.user_id,u.name,MIN(e.viewed_at) first_view,MAX(e.viewed_at) last_view,COUNT(*) views FROM ad_view_events e JOIN users u ON u.id=e.user_id WHERE e.ad_kind=? AND e.ad_id=? AND e.user_id IS NOT NULL GROUP BY e.user_id,u.name ORDER BY last_view DESC`).all(kind,id),anonymous=db.prepare(`SELECT COUNT(*) views,COUNT(DISTINCT viewer_key) unique_viewers,MIN(viewed_at) first_view,MAX(viewed_at) last_view FROM ad_view_events WHERE ad_kind=? AND ad_id=? AND user_id IS NULL`).get(kind,id);
-  res.json({kind,id,total_views:Number(totals.total_views||0),unique_viewers:Number(totals.unique_viewers||0),known,anonymous:{views:Number(anonymous.views||0),unique_viewers:Number(anonymous.unique_viewers||0),first_view:anonymous.first_view||null,last_view:anonymous.last_view||null}});
-});
-A.get('/game-plays/vues', (req, res) => {
-  const gv = k => db.prepare('SELECT COUNT(*) n FROM view_seen WHERE key=?').get(k).n;
-  res.json({ quiz: gv('game:quiz'), flipfizz: gv('game:flipfizz'), kdo: gv('game:kdo') });
-});
-A.post('/ads', (req, res) => {
-  const { type, title, content, file, placement, duration, active } = req.body || {};
-  let zones; try { zones = assertValidZones((req.body || {}).zones); } catch (e) { return res.status(400).json({ error: e.message }); }
-  const info = db.prepare('INSERT INTO ads(type, title, content, file, placement, duration, active, zones) VALUES(?,?,?,?,?,?,?,?)')
-    .run(type || 'texte', title || '', content || '', file || null, placement || 'accueil', Number(duration) || 6, active === undefined ? 1 : (active ? 1 : 0), JSON.stringify(zones || []));
-  res.json({ id: info.lastInsertRowid, zones });
-});
-A.put('/ads/:id', (req, res) => {
-  const { title, content, placement, duration, active, sort } = req.body || {};
-  let zones = null;
-  if ((req.body || {}).zones !== undefined) { try { zones = JSON.stringify(assertValidZones(req.body.zones)); } catch (e) { return res.status(400).json({ error: e.message }); } }
-  db.prepare('UPDATE ads SET title=COALESCE(?,title), content=COALESCE(?,content), placement=COALESCE(?,placement), duration=COALESCE(?,duration), active=COALESCE(?,active), sort=COALESCE(?,sort), zones=COALESCE(?,zones) WHERE id=?')
-    .run(title ?? null, content ?? null, placement || null, duration ?? null, active ?? null, sort ?? null, zones, req.params.id);
-  res.json({ ok: true });
-});
-A.delete('/ads/:id', (req, res) => { db.prepare('DELETE FROM ads WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+A.get('/ads', (req, res) => {const rows=db.prepare(`SELECT a.*,COALESCE((SELECT COUNT(*) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) AS views,COALESCE((SELECT COUNT(DISTINCT viewer_key) FROM ad_view_events v WHERE v.ad_kind='ad' AND v.ad_id=a.id),0) AS unique_views FROM ads a ORDER BY CASE WHEN a.archived_at IS NULL THEN 0 ELSE 1 END,a.sort,a.id DESC`).all();res.json(rows.map(a=>({...a,placement:adPlacement(a.placement),frequency:Math.max(1,Number(a.frequency)||1),media_fit:['contain','cover'].includes(a.media_fit)?a.media_fit:'contain',status:adState(a)})));});
+A.get('/ads/:id/history', (req,res)=>res.json(db.prepare(`SELECT h.*,u.name changed_by_name FROM ad_history h LEFT JOIN users u ON u.id=h.changed_by WHERE h.ad_id=? ORDER BY h.id DESC`).all(Number(req.params.id))));
+A.post('/ads', (req, res) => {try{const p=adPayload(req.body||{});const id=db.prepare(`INSERT INTO ads(type,title,content,link,file,placement,duration,frequency,media_fit,start_at,end_at,active,sort,zones) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(p.type,p.title,p.content,p.link,p.file,p.placement,p.duration,p.frequency,p.media_fit,p.start_at,p.end_at,p.active,p.sort,p.zones).lastInsertRowid;adLog(id,'creation',p,req.user);logAction(req.user,'publicite_creee',{target_type:'ads',target_id:id,target_name:p.title||p.type});res.status(201).json({id,status:adState({...p,archived_at:null})});}catch(e){res.status(400).json({error:e.message||'Publicité invalide.'});}});
+A.put('/ads/:id', (req, res) => {const old=db.prepare('SELECT * FROM ads WHERE id=?').get(Number(req.params.id));if(!old)return res.status(404).json({error:'Publicité introuvable.'});try{const p=adPayload(req.body||{},old);db.prepare(`UPDATE ads SET type=?,title=?,content=?,link=?,file=?,placement=?,duration=?,frequency=?,media_fit=?,start_at=?,end_at=?,active=?,sort=?,zones=?,archived_at=CASE WHEN ? THEN NULL ELSE archived_at END,updated_at=datetime('now') WHERE id=?`).run(p.type,p.title,p.content,p.link,p.file,p.placement,p.duration,p.frequency,p.media_fit,p.start_at,p.end_at,p.active,p.sort,p.zones,req.body&&req.body.restore?1:0,old.id);adLog(old.id,'modification',old,req.user);logAction(req.user,'publicite_modifiee',{target_type:'ads',target_id:old.id,target_name:p.title||p.type});res.json({ok:true,status:adState({...old,...p,archived_at:req.body&&req.body.restore?null:old.archived_at})});}catch(e){res.status(400).json({error:e.message||'Publicité invalide.'});}});
+A.delete('/ads/:id', (req, res) => {const old=db.prepare('SELECT * FROM ads WHERE id=?').get(Number(req.params.id));if(!old)return res.status(404).json({error:'Publicité introuvable.'});db.prepare("UPDATE ads SET active=0,archived_at=datetime('now'),updated_at=datetime('now') WHERE id=?").run(old.id);adLog(old.id,'archivage',old,req.user);logAction(req.user,'publicite_archivee',{target_type:'ads',target_id:old.id,target_name:old.title||old.type});res.json({ok:true,archived:true});});
 // ----- Bandeau d'annonces défilantes -----
 A.get('/annonces', (req, res) => res.json(db.prepare('SELECT * FROM annonces ORDER BY sort, id').all()));
-const TYPES_BANDEAU = { pub: '📢', info: 'ℹ️', urgence: '🚨' }; // icône posée automatiquement selon le type
+const TYPES_BANDEAU = { pub:'📢', info:'ℹ️', urgence:'🚨', promo:'🏷️', official:'📌', service:'🛎️' }; // icône par catégorie
 function bandeauImageUrl(value) {
   const v=String(value||'').trim(); if(!v) return null;
   const rec=uploadRecordFor(v); if(!rec || !String(rec.mime||'').startsWith('image/')) throw new Error('L’image du bandeau doit être une image envoyée sur la plateforme.');
   return v;
 }
 function bandeauDuration(value, fallback=8) { const n=parseInt(value,10); if(!Number.isInteger(n)||n<3||n>60) return fallback; return n; }
-A.post('/annonces', pdgOnly, (req, res) => {
-  try { const { type, theme, title, content, color, link, icon, image_url, duration_seconds } = req.body || {};
-    if (!(content || '').trim() && !(title || '').trim()) return res.status(400).json({ error: 'Écrivez le message à faire défiler.' });
-    const t = TYPES_BANDEAU[type] ? type : 'info', image=bandeauImageUrl(image_url), customIcon=String(icon||'').trim().slice(0,16);
-    const info = db.prepare('INSERT INTO annonces(type, theme, title, content, icon, color, link, image_url, duration_seconds) VALUES(?,?,?,?,?,?,?,?,?)')
-      .run(t, String(theme||'').trim().slice(0,80), String(title||'').trim().slice(0,160), String(content||'').trim().slice(0,1000), customIcon||TYPES_BANDEAU[t],
-        String(color||'#ffffff').trim().slice(0,20)||'#ffffff', String(link||'').trim().slice(0,500)||null, image, bandeauDuration(duration_seconds));
-    db.prepare('UPDATE annonces SET sort=? WHERE id=?').run(info.lastInsertRowid, info.lastInsertRowid);
-    logAction(req.user,'bandeau_message_ajoute',{target_type:'annonce',target_id:info.lastInsertRowid});res.json({ ok: true, id: info.lastInsertRowid });
-  } catch(e){res.status(400).json({error:e.message||'Message invalide.'});}
-});
-A.put('/annonces/:id', pdgOnly, (req, res) => {
-  try { const { type, theme, title, content, color, link, active, sort, icon, image_url, duration_seconds } = req.body || {};
-    const t = (type !== undefined && type !== null) ? (TYPES_BANDEAU[type] ? type : 'info') : null;
-    const image=image_url===undefined?undefined:bandeauImageUrl(image_url), customIcon=icon===undefined?undefined:String(icon||'').trim().slice(0,16);
-    db.prepare(`UPDATE annonces SET type=COALESCE(?,type), theme=COALESCE(?,theme), icon=COALESCE(?,icon),
-      title=COALESCE(?,title), content=COALESCE(?,content), color=COALESCE(?,color), link=COALESCE(?,link), active=COALESCE(?,active), sort=COALESCE(?,sort),
-      image_url=CASE WHEN ? THEN ? ELSE image_url END, duration_seconds=COALESCE(?,duration_seconds) WHERE id=?`)
-      .run(t, theme===undefined?null:String(theme||'').trim().slice(0,80), customIcon===undefined?(t?TYPES_BANDEAU[t]:null):customIcon, title===undefined?null:String(title||'').trim().slice(0,160), content===undefined?null:String(content||'').trim().slice(0,1000),
-        color===undefined?null:String(color||'').trim().slice(0,20), link===undefined?null:String(link||'').trim().slice(0,500)||null, active===undefined?null:(active?1:0), sort===undefined?null:Math.max(0,parseInt(sort,10)||0), image_url!==undefined,image, duration_seconds===undefined?null:bandeauDuration(duration_seconds), req.params.id);
-    logAction(req.user,'bandeau_message_modifie',{target_type:'annonce',target_id:Number(req.params.id)});res.json({ ok: true });
-  } catch(e){res.status(400).json({error:e.message||'Message invalide.'});}
-});
+function bandeauDate(value){return adDate(value);}
+function bandeauMode(value,fallback='inherit'){const v=String(value===undefined?fallback:value||'inherit');if(!['inherit','scroll','vertical','fixed','rotate','fade','cards','news','promotion'].includes(v))throw new Error('Mode d’apparition invalide.');return v;}
+function bandeauPriority(value,fallback=0){const n=parseInt(value===undefined?fallback:value,10);if(!Number.isInteger(n)||n<0||n>9999)throw new Error('Priorité invalide.');return n;}
+function bandeauLink(value,fallback=null){if(value===undefined)return fallback||null;const v=String(value||'').trim().slice(0,500);if(!v)return null;if(!(v.startsWith('#/')||/^https:\/\//i.test(v)))throw new Error('Le lien doit commencer par https:// ou #/.');return v;}
+A.post('/annonces', pdgOnly, (req, res) => {try {const b=req.body||{},type=TYPES_BANDEAU[b.type]?b.type:'info',content=String(b.content||b.title||'').trim().slice(0,1000),start_at=bandeauDate(b.start_at),end_at=bandeauDate(b.end_at);if(!content)throw new Error('Écrivez le message à afficher.');if(start_at&&end_at&&end_at<=start_at)throw new Error('La fin doit suivre le début.');const image=bandeauImageUrl(b.image_url),icon=String(b.icon||'').trim().slice(0,16)||TYPES_BANDEAU[type],info=db.prepare('INSERT INTO annonces(type,theme,title,content,icon,color,link,image_url,duration_seconds,start_at,end_at,display_mode,priority) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(type,String(b.theme||'').trim().slice(0,80),String(b.title||'').trim().slice(0,160),content,icon,String(b.color||'#ffffff').trim().slice(0,20)||'#ffffff',bandeauLink(b.link),image,bandeauDuration(b.duration_seconds),start_at,end_at,bandeauMode(b.display_mode),bandeauPriority(b.priority));db.prepare('UPDATE annonces SET sort=? WHERE id=?').run(info.lastInsertRowid,info.lastInsertRowid);logAction(req.user,'bandeau_message_ajoute',{target_type:'annonce',target_id:info.lastInsertRowid});res.status(201).json({ok:true,id:info.lastInsertRowid});}catch(e){res.status(400).json({error:e.message||'Message invalide.'});}});
+A.put('/annonces/:id', pdgOnly, (req,res)=>{const old=db.prepare('SELECT * FROM annonces WHERE id=?').get(Number(req.params.id));if(!old)return res.status(404).json({error:'Message introuvable.'});try{const b=req.body||{},type=b.type===undefined?old.type:(TYPES_BANDEAU[b.type]?b.type:'info'),start_at=b.start_at===undefined?old.start_at:bandeauDate(b.start_at),end_at=b.end_at===undefined?old.end_at:bandeauDate(b.end_at);if(start_at&&end_at&&end_at<=start_at)throw new Error('La fin doit suivre le début.');const image=b.image_url===undefined?old.image_url:bandeauImageUrl(b.image_url),icon=b.icon===undefined?old.icon:(String(b.icon||'').trim().slice(0,16)||TYPES_BANDEAU[type]);db.prepare('UPDATE annonces SET type=?,theme=?,title=?,content=?,icon=?,color=?,link=?,image_url=?,duration_seconds=?,start_at=?,end_at=?,display_mode=?,priority=?,active=COALESCE(?,active),sort=COALESCE(?,sort) WHERE id=?').run(type,b.theme===undefined?old.theme:String(b.theme||'').trim().slice(0,80),b.title===undefined?old.title:String(b.title||'').trim().slice(0,160),b.content===undefined?old.content:String(b.content||'').trim().slice(0,1000),icon,b.color===undefined?old.color:String(b.color||'#ffffff').trim().slice(0,20),bandeauLink(b.link,old.link),image,b.duration_seconds===undefined?old.duration_seconds:bandeauDuration(b.duration_seconds),start_at,end_at,b.display_mode===undefined?old.display_mode:bandeauMode(b.display_mode),b.priority===undefined?old.priority:bandeauPriority(b.priority),b.active===undefined?null:(b.active?1:0),b.sort===undefined?null:Math.max(0,parseInt(b.sort,10)||0),old.id);logAction(req.user,'bandeau_message_modifie',{target_type:'annonce',target_id:old.id});res.json({ok:true});}catch(e){res.status(400).json({error:e.message||'Message invalide.'});}});
 A.delete('/annonces/:id', pdgOnly, (req, res) => { db.prepare('DELETE FROM annonces WHERE id=?').run(req.params.id); logAction(req.user,'bandeau_message_supprime',{target_type:'annonce',target_id:Number(req.params.id)}); res.json({ ok: true }); });
 // L'ancien endpoint est conservé, mais passe par le système ciblé et historisé.
 A.post('/broadcast', (req, res) => {
@@ -5525,25 +5468,9 @@ A.get('/voice-search/stats', pdgOnly, (req,res) => { const period=['day','week',
 
 // ----- Bande défilante : apparence et animation réservées au PDG -----
 A.get('/bandeau/config', pdgOnly, (req,res) => res.json(bandeauConfig()));
-A.put('/bandeau/config', pdgOnly, (req,res) => {
-  try { const b=req.body||{}, current=bandeauConfig(), hex=v=>typeof v==='string'&&/^#[0-9a-fA-F]{6}$/.test(v); const int=(v,min,max,name)=>{const n=parseInt(v,10);if(!Number.isInteger(n)||n<min||n>max)throw new Error(`${name} invalide.`);return n;};
-    const next={...current};
-    if(b.enabled!==undefined){if(![true,false,0,1,'0','1'].includes(b.enabled))throw new Error('Activation invalide.');next.enabled=[true,1,'1'].includes(b.enabled);}
-    if(b.speed!==undefined)next.speed=int(b.speed,10,400,'Vitesse');
-    if(b.style!==undefined){if(!['classic','colored','icon','image','modern'].includes(b.style))throw new Error('Présentation invalide.');next.style=b.style;}
-    if(b.background!==undefined){if(!hex(b.background))throw new Error('Couleur de fond invalide.');next.background=b.background;}
-    if(b.text_color!==undefined){if(!hex(b.text_color))throw new Error('Couleur du texte invalide.');next.text_color=b.text_color;}
-    if(b.font_size!==undefined)next.font_size=int(b.font_size,10,28,'Taille de police');
-    if(b.font_weight!==undefined){if(!['400','500','600','700','800'].includes(String(b.font_weight)))throw new Error('Graisse de police invalide.');next.font_weight=String(b.font_weight);}
-    if(b.height!==undefined)next.height=int(b.height,28,86,'Hauteur');
-    if(b.border_color!==undefined){if(!hex(b.border_color))throw new Error('Couleur de bordure invalide.');next.border_color=b.border_color;}
-    if(b.animation!==undefined){if(!['scroll','slide','fade'].includes(b.animation))throw new Error('Animation invalide.');next.animation=b.animation;}
-    if(b.message_duration!==undefined)next.message_duration=int(b.message_duration,3,60,'Durée des messages');
-    const keys={enabled:'bandeau_enabled',speed:'bandeau_speed',style:'bandeau_style',background:'bandeau_background',text_color:'bandeau_text_color',font_size:'bandeau_font_size',font_weight:'bandeau_font_weight',height:'bandeau_height',border_color:'bandeau_border_color',animation:'bandeau_animation',message_duration:'bandeau_message_duration'};
-    Object.keys(keys).forEach(k=>{if(b[k]!==undefined)setSetting(keys[k],typeof next[k]==='boolean'?(next[k]?'1':'0'):next[k]);});
-    logAction(req.user,'bandeau_configuration',{target_type:'annonce',details:'Paramètres de la bande défilante mis à jour'});res.json({ok:true,config:bandeauConfig()});
-  } catch(e){res.status(400).json({error:e.message||'Configuration invalide.'});}
-});
+A.get('/bandeau/history', pdgOnly, (req,res)=>res.json(db.prepare(`SELECT h.*,u.name changed_by_name FROM bandeau_style_history h LEFT JOIN users u ON u.id=h.changed_by ORDER BY h.id DESC LIMIT 30`).all()));
+A.put('/bandeau/config', pdgOnly, (req,res) => {try {const b=req.body||{},current=bandeauConfig(),hex=v=>typeof v==='string'&&/^#[0-9a-fA-F]{6}$/.test(v),int=(v,min,max,name)=>{const n=parseInt(v,10);if(!Number.isInteger(n)||n<min||n>max)throw new Error(`${name} invalide.`);return n;},flag=v=>[true,1,'1'].includes(v),bool=v=>[true,false,0,1,'0','1'].includes(v);const next={...current};if(b.enabled!==undefined){if(!bool(b.enabled))throw new Error('Activation invalide.');next.enabled=flag(b.enabled);}if(b.speed!==undefined)next.speed=int(b.speed,10,400,'Vitesse');if(b.style!==undefined){if(!['classic','colored','icon','image','modern'].includes(b.style))throw new Error('Présentation invalide.');next.style=b.style;}['background','text_color','border_color'].forEach(k=>{if(b[k]!==undefined){if(!hex(b[k]))throw new Error('Couleur invalide.');next[k]=b[k];}});if(b.font_size!==undefined)next.font_size=int(b.font_size,10,28,'Taille de police');if(b.font_weight!==undefined){if(!['400','500','600','700','800'].includes(String(b.font_weight)))throw new Error('Graisse invalide.');next.font_weight=String(b.font_weight);}if(b.height!==undefined)next.height=int(b.height,28,110,'Hauteur');if(b.message_duration!==undefined)next.message_duration=int(b.message_duration,3,60,'Durée');if(b.gap!==undefined)next.gap=int(b.gap,4,100,'Espacement');if(b.radius!==undefined)next.radius=int(b.radius,0,32,'Arrondi');if(b.border_width!==undefined)next.border_width=int(b.border_width,0,6,'Bordure');if(b.mode!==undefined){if(!['scroll','vertical','fixed','rotate','fade','cards','news','promotion'].includes(b.mode))throw new Error('Mode invalide.');next.mode=b.mode;}if(b.direction!==undefined){if(!['rtl','ltr','up'].includes(b.direction))throw new Error('Sens invalide.');next.direction=b.direction;}if(b.position!==undefined){if(!['top','bottom'].includes(b.position))throw new Error('Position invalide.');next.position=b.position;}if(b.font_family!==undefined){if(!['system','serif','mono'].includes(b.font_family))throw new Error('Police invalide.');next.font_family=b.font_family;}if(b.label_mode!==undefined){if(!['news','promo','none'].includes(b.label_mode))throw new Error('Libellé invalide.');next.label_mode=b.label_mode;}['pause_enabled','reduce_motion'].forEach(k=>{if(b[k]!==undefined){if(!bool(b[k]))throw new Error('Option invalide.');next[k]=flag(b[k]);}});db.prepare('INSERT INTO bandeau_style_history(config_json,changed_by) VALUES(?,?)').run(JSON.stringify(current),req.user.id);const keys={enabled:'bandeau_enabled',speed:'bandeau_speed',style:'bandeau_style',background:'bandeau_background',text_color:'bandeau_text_color',font_size:'bandeau_font_size',font_weight:'bandeau_font_weight',height:'bandeau_height',border_color:'bandeau_border_color',message_duration:'bandeau_message_duration',mode:'bandeau_mode',direction:'bandeau_direction',position:'bandeau_position',gap:'bandeau_gap',radius:'bandeau_radius',border_width:'bandeau_border_width',font_family:'bandeau_font_family',label_mode:'bandeau_label_mode',pause_enabled:'bandeau_pause_enabled',reduce_motion:'bandeau_reduce_motion'};Object.entries(keys).forEach(([k,key])=>setSetting(key,typeof next[k]==='boolean'?(next[k]?'1':'0'):next[k]));setSetting('bandeau_animation',['scroll','fade'].includes(next.mode)?next.mode:'scroll');logAction(req.user,'bandeau_configuration',{target_type:'annonce',details:'Configuration de bandeau enregistrée et versionnée'});res.json({ok:true,config:bandeauConfig()});}catch(e){res.status(400).json({error:e.message||'Configuration invalide.'});}});
+A.post('/bandeau/history/:id/restore',pdgOnly,(req,res)=>{const h=db.prepare('SELECT * FROM bandeau_style_history WHERE id=?').get(Number(req.params.id));if(!h)return res.status(404).json({error:'Version introuvable.'});let c;try{c=JSON.parse(h.config_json)}catch{return res.status(400).json({error:'Version invalide.'})}Object.entries({enabled:'bandeau_enabled',speed:'bandeau_speed',style:'bandeau_style',background:'bandeau_background',text_color:'bandeau_text_color',font_size:'bandeau_font_size',font_weight:'bandeau_font_weight',height:'bandeau_height',border_color:'bandeau_border_color',message_duration:'bandeau_message_duration',mode:'bandeau_mode',direction:'bandeau_direction',position:'bandeau_position',gap:'bandeau_gap',radius:'bandeau_radius',border_width:'bandeau_border_width',font_family:'bandeau_font_family',label_mode:'bandeau_label_mode',pause_enabled:'bandeau_pause_enabled',reduce_motion:'bandeau_reduce_motion'}).forEach(([k,key])=>{if(c[k]!==undefined)setSetting(key,typeof c[k]==='boolean'?(c[k]?'1':'0'):c[k])});logAction(req.user,'bandeau_configuration_restaurée',{target_type:'annonce',details:'Version '+h.id});res.json({ok:true,config:bandeauConfig()});});
 
 // ----- Braderie d’articles : pilotage réservé au PDG -----
 A.get('/braderie/config', pdgOnly, (req,res) => res.json(braderieSettings()));

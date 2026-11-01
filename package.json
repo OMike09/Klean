@@ -32,7 +32,10 @@
     "test:colis33": "node test-colis33.js",
     "test:colis33:ui": "node test-colis33-ui.js",
     "test:colis34": "node test-colis34.js",
-    "test:colis34:ui": "node test-colis34-ui.js"
+    "test:colis34:ui": "node test-colis34-ui.js",
+    "test:colis35": "node test-colis35.js",
+    "test:colis35:ui": "node test-colis35-ui.js",
+    "test:colis35:ticker": "node test-colis35-ticker-ui.js"
   },
   "keywords": [],
   "author": "",

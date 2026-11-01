@@ -2674,4 +2674,46 @@ db.prepare("UPDATE cabine_notification_templates SET title=?,body=? WHERE code='
 
 if(getSetting('cabine_unavailable_message')==='Les opérations Klean Cabine sont momentanément indisponibles : aucun prestataire de paiement et opérateur vérifié n’est encore connecté.')setSetting('cabine_unavailable_message','Les opérations Klean Kbine à distance sont momentanément indisponibles : aucun prestataire de paiement et opérateur vérifié n’est encore connecté.');
 
+// ============================================================
+// COLIS 35 — diffusion publicitaire, bandeau et urgences (additif)
+// ============================================================
+// Les colonnes conservent toutes les publicités et statistiques existantes. Une suppression
+// est désormais une archive logique, jamais une destruction immédiate de l'historique.
+ensureColumn('ads','start_at','TEXT');
+ensureColumn('ads','end_at','TEXT');
+ensureColumn('ads','frequency','INTEGER NOT NULL DEFAULT 1');
+ensureColumn('ads','media_fit',"TEXT NOT NULL DEFAULT 'contain'");
+ensureColumn('ads','link','TEXT');
+ensureColumn('ads','archived_at','TEXT');
+ensureColumn('ads','updated_at','TEXT');
+db.exec(`
+CREATE INDEX IF NOT EXISTS idx_ads_schedule ON ads(active,archived_at,start_at,end_at,sort);
+CREATE TABLE IF NOT EXISTS bandeau_style_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  config_json TEXT NOT NULL,
+  changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS ad_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ad_id INTEGER NOT NULL REFERENCES ads(id) ON DELETE RESTRICT,
+  action TEXT NOT NULL,
+  previous_data TEXT NOT NULL DEFAULT '{}',
+  changed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ad_history_ad ON ad_history(ad_id,created_at DESC);
+`);
+ensureColumn('emergency_contacts','icon',"TEXT NOT NULL DEFAULT '📞'");
+ensureColumn('annonces','start_at','TEXT');
+ensureColumn('annonces','end_at','TEXT');
+ensureColumn('annonces','display_mode',"TEXT NOT NULL DEFAULT 'inherit'");
+ensureColumn('annonces','priority','INTEGER NOT NULL DEFAULT 0');
+const COLIS35_DEFAULTS={
+  bandeau_mode:'scroll', bandeau_direction:'rtl', bandeau_position:'bottom', bandeau_gap:'20',
+  bandeau_radius:'0', bandeau_border_width:'2', bandeau_font_family:'system', bandeau_label_mode:'news',
+  bandeau_pause_enabled:'1', bandeau_reduce_motion:'1'
+};
+for(const [k,v] of Object.entries(COLIS35_DEFAULTS))if(getSetting(k)===null)setSetting(k,v);
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

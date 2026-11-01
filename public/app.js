@@ -576,31 +576,22 @@ function proServiceChips(selectedIds) {
       <div class="choices pro-cat-services ${i === 0 ? 'open' : ''}">${c.services.map(s => `<button type="button" class="chip ${sel.includes(s.id) ? 'on' : ''}" data-sid="${s.id}" onclick="this.classList.toggle('on')">${esc(s.name)}</button>`).join('')}</div></div>`).join('');
 }
 
-/* Carte publicité / info : la vidéo s'affiche en grand et démarre automatiquement (muette) */
+/* Publicités : média entier, proportions préservées et choix de placement réel. */
+function adPlacementList(list, placements, slot) {
+  const rows=(list||[]).filter(a=>placements.includes(a.placement||'home_top')).sort((a,b)=>Number(a.sort||0)-Number(b.sort||0)||String(a.id).localeCompare(String(b.id)));
+  if(!rows.length)return [];
+  const weighted=[];rows.forEach(a=>{for(let i=0;i<Math.max(1,Math.min(20,Number(a.frequency)||1));i++)weighted.push(a);});
+  const key='ks_ad_slot_'+slot,at=Number(sessionStorage.getItem(key)||0),chosen=weighted[at%weighted.length];sessionStorage.setItem(key,String(at+1));return chosen?[chosen]:[];
+}
 function adCardHtml(a) {
-  const media = a.file && a.type === 'video'
-    ? `<video src="${esc(a.file)}" autoplay muted loop playsinline controls preload="metadata"
-         style="display:block;width:100%;max-height:150px;border-radius:8px;margin-top:6px;background:#000;object-fit:contain"></video>`
-    : a.file && a.type === 'image'
-      ? `<img src="${esc(mediaUrl(a.file))}" alt="" style="display:block;width:100%;max-height:120px;border-radius:8px;margin-top:6px;object-fit:cover">`
-      : '';
-  return `<div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span class="ad-tag">${a.title && /urgen/i.test(a.title) ? '🚨 URGENT' : a.type === 'video' ? '📣 PUBLICITÉ' : 'ℹ️ INFORMATION'}</span>
-        <span class="small muted">👁️ ${Number(a.views || 0).toLocaleString('fr-FR')}</span>
-      </div>
-      ${a.title ? `<div class="bold small">${esc(a.title)}</div>` : ''}
-      ${a.content ? `<div class="small muted" style="white-space:normal">${esc(a.content)}</div>` : ''}
-      ${media}</div>`;
+  const fit=a.media_fit==='cover'?'cover':'contain', isVideo=a.file&&a.type==='video';
+  const media=isVideo?`<video src="${esc(mediaUrl(a.file))}" controls muted playsinline preload="metadata" style="display:block;width:100%;max-height:min(52vh,420px);object-fit:${fit};background:#0b1320;border-radius:10px" aria-label="Vidéo publicitaire"></video>`:a.file&&a.type==='image'?`<img src="${esc(mediaUrl(a.file))}" alt="${esc(a.title||'Publicité')}" loading="lazy" style="display:block;width:100%;height:auto;max-height:min(58vh,460px);object-fit:${fit};background:#f6f8f8;border-radius:10px">`:'';
+  const tag=a.type==='video'?'📣 PUBLICITÉ VIDÉO':a.sponsor?'📣 PARTENAIRE':'📣 PUBLICITÉ';
+  const link=a.link?`<button class="btn ghost sm" onclick="A.adOpen('${esc(a.link)}')">Voir les détails</button>`:'';
+  return `<article class="ks-ad-card" style="background:#fff;border:1px solid #dce8e5;border-radius:14px;padding:10px;box-sizing:border-box"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="ad-tag">${tag}</span><span class="small muted">👁️ ${Number(a.views||0).toLocaleString('fr-FR')}</span></div>${a.title?`<div class="bold mt">${esc(a.title)}</div>`:''}${a.content?`<div class="small muted mt" style="white-space:pre-wrap">${esc(a.content)}</div>`:''}${media?`<div style="margin-top:8px">${media}</div>`:''}${link?`<div class="mt">${link}</div>`:''}</article>`;
 }
-/* Bande pub/info affichée en haut des écrans d'accueil et de services */
-function adsBandHtml(list) {
-  if (!list.length) return '';
-  const aVideo = list.some(c => c.includes('<video'));
-  return `<div style="display:flex;gap:8px;overflow-x:auto;padding:0 2px 6px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">
-    ${list.map(c => `<div style="flex:0 0 ${list.length > 1 ? '84%' : '100%'};scroll-snap-align:start;background:#fff;border:1px solid #e8e8ef;border-radius:12px;padding:8px 10px;${aVideo ? '' : 'max-height:118px;overflow:hidden'}">${c}</div>`).join('')}
-  </div>`;
-}
+function adsBandHtml(list) {if(!list.length)return '';return `<div class="ks-ads-rack" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">${list.map(a=>`<div style="flex:0 0 min(100%,520px);scroll-snap-align:start">${adCardHtml(a)}</div>`).join('')}</div>`;}
+
 
 /* ---------- Accueil ---------- */
 routes.home = async () => {
@@ -613,7 +604,8 @@ routes.home = async () => {
   let BRADERIE_HOME = { home_visible: false, enabled: false }, CABINE_HOME = { enabled:false }, VOICE_HOME = { enabled:false, home_visible:false, max_seconds:25 };
   try { [BRADERIE_HOME, CABINE_HOME, VOICE_HOME] = await Promise.all([api('/braderie/config'), api('/cabine/config'), api('/voice-search/config')]); } catch { }
   window._voiceHomeConfig = VOICE_HOME;
-  const homeAds = ADS; // toutes les publicités actives sortent sur l'écran d'accueil
+  const homeAds = adPlacementList(ADS,['home_top'],'home_top');
+  const homeMidAds = adPlacementList(ADS,['home_mid'],'home_mid');
   const topZone = [];
   if (MAINT.active && MAINT.scope !== 'F') topZone.push(`<div style="border-left:3px solid #e67e22;background:#fff8f0">
       <div class="bold small">🛠️ Maintenance partielle</div>
@@ -632,8 +624,9 @@ routes.home = async () => {
   $app.innerHTML = `
   ${header('', { brand: true, back: 'contextual', bell: !!USER })}
   <div class="content" style="padding-top:0">
+    ${adsBandHtml(homeAds)}
+    ${topZone.length?`<div class="ks-ads-rack" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">${topZone.map(x=>`<div style="flex:0 0 min(100%,520px);scroll-snap-align:start">${x}</div>`).join('')}</div>`:''}
     <div id="home-fixe" style="position:sticky;top:calc(58px + var(--safe-t));z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
-      ${adsBandHtml(topZone)}
       <div class="searchbar" style="margin:0 2px">
         <input type="text" id="home-q" placeholder="🔎 Décrivez votre besoin…" enterkeyhint="search" autocomplete="off">
         ${VOICE_HOME.home_visible ? `<button type="button" onclick="A.voiceSearchOpen()" aria-label="Rechercher par note vocale" title="Rechercher par note vocale" style="font-size:18px">🎤</button>` : ''}
@@ -643,6 +636,7 @@ routes.home = async () => {
     </div>
     <div id="quiz-live"></div>
     <div class="hint">Ex : « mon eau coule », « ma clime est gâtée », « je veux laver ma maison »…</div>
+    ${adsBandHtml(homeMidAds)}
     ${POPULAIRES.length ? `<div class="sec-title">Services populaires</div>
     <div class="svc-grid">
       ${POPULAIRES.map(s => `<button type="button" class="svc-card ${s.image_url ? 'has-image' : ''}" onclick="nav('#/categories/${s.id}')" aria-label="Ouvrir ${esc(s.name)}"><span class="svc-card-media">${s.image_url ? `<img src="${esc(s.image_url)}" alt="" loading="lazy" onerror="this.parentElement.classList.add('image-missing')">` : `<span class="ic" aria-hidden="true">${esc(s.icon || '🧩')}</span>`}</span><span class="svc-card-copy"><span class="nm">${esc(grandLabel(s))}</span>${s.price_from ? `<span class="price-from">À partir de ${fmtFCFA(s.price_from)}</span>` : ''}</span></button>`).join('')}
@@ -662,7 +656,7 @@ routes.home = async () => {
   quizLiveMount(); // le quiz actif s'affiche automatiquement, sans aucun clic
   bandeauMount();  // bandeau d'annonces défilantes en bas de l'accueil
   // Consultation publicitaire dédupliquée par jour ; les jeux gardent leur comptage historique connecté.
-  recordAdViews(homeAds);
+  recordAdViews([...homeAds,...homeMidAds]);
   const vues=[]; if (GAMES.quiz) vues.push('game:quiz'); if (GAMES.flipfizz) vues.push('game:flipfizz'); if (GAMES.kdo) vues.push('game:kdo');
   if (vues.length && USER) api('/vues', { method: 'POST', body: { keys: vues } }).catch(() => { });
   const q = document.getElementById('home-q');
@@ -673,9 +667,12 @@ routes.home = async () => {
 /* ---------- Recherche ---------- */
 routes.search = async (params) => {
   const q = decodeURIComponent(params || '');
+  try { ADS = await api('/ads'); } catch { }
+  const searchAds = adPlacementList(ADS,['search_top'],'search_top');
   $app.innerHTML = `
   ${header('Rechercher', { bell: !!USER })}
   <div class="content">
+    ${adsBandHtml(searchAds)}
     <div class="searchbar">
       <input type="text" id="s-q" placeholder="🔎 Que recherchez-vous ?" value="${esc(q)}" enterkeyhint="search">
       <button onclick="A.doSearch()">🔍</button>
@@ -686,6 +683,7 @@ routes.search = async (params) => {
   inp.addEventListener('input', () => A.liveSearch('s-q', 's-results', false));
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') A.doSearch(); });
   if (q) A.doSearch(); else inp.focus();
+  recordAdViews(searchAds);
   updateBadges();
 };
 
@@ -796,7 +794,7 @@ routes.services = async (params) => {
   try { CATALOGUE = await api('/catalogue' + (USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '')); }
   catch (e) { $app.innerHTML = header('Tous les services') + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('search'); return; }
   if (!ADS.length) try { ADS = await api('/ads'); } catch { }
-  const pubsServices = ADS.filter(a => a.placement === 'services');
+  const pubsServices = adPlacementList(ADS,['services_top'],'services');
   const bandePub = adsBandHtml(pubsServices.map(adCardHtml));
   if (pubsServices.length) recordAdViews(pubsServices);
   const catId = parseInt(params || 0, 10);
@@ -1875,21 +1873,9 @@ routes['ecole-famille'] = async () => {
 
 /* ---------- Urgences ---------- */
 routes.urgence = async () => {
-  let cfg = { info: '', contacts: [], categories: [], assistance_available: false };
-  try { cfg = await api('/urgence/config'); } catch { }
-  const available = !!cfg.assistance_available;
-  $app.innerHTML = `${header('Urgences', { bell: !!USER })}
-  <div class="content">
-    <div class="status-banner ${available ? 'warn' : 'bad'}"><b>${available ? 'Assistance Klean Services disponible' : 'Assistance Klean Services indisponible'}</b>${cfg.info ? `<div class="small mt">${esc(cfg.info)}</div>` : `<div class="small mt">Aucune disponibilité n’est actuellement configurée.</div>`}</div>
-    <div class="card emergency-disclaimer"><b>Information importante</b><div class="small">Klean Services ne remplace pas les secours publics. En cas de danger immédiat, contactez uniquement les services publics officiels dont le numéro est vérifié dans votre zone.</div></div>
-    <div class="sec-title">Services et catégories disponibles</div>
-    ${cfg.categories && cfg.categories.length ? cfg.categories.map(c=>`<div class="menu-item"><span class="mi-ic">🚨</span><div><b>${esc(c.name)}</b>${c.description?`<div class="small muted">${esc(c.description)}</div>`:''}</div></div>`).join('') : `<div class="hint">Aucun service d’assistance n’est configuré actuellement.</div>`}
-    <div class="sec-title">Urgences vitales</div>
-    ${cfg.contacts && cfg.contacts.filter(c=>c.group==='vital').length ? cfg.contacts.filter(c=>c.group==='vital').map(c => `<a class="menu-item" href="tel:${esc(c.tel)}" style="text-decoration:none;color:inherit"><span class="mi-ic">📞</span><div><b>${esc(c.nom)}</b>${c.label?`<div class="small muted">${esc(c.label)}</div>`:''}<div class="small muted">${esc(c.source_name)}${c.source_date ? ' · ' + esc(c.source_date) : ''}<br>Vérifié le ${esc(c.verified_at)}${c.last_modified ? ' · mis à jour le ' + esc(c.last_modified) : ''}</div></div><span class="mi-arr bold">${esc(c.tel)}</span></a>`).join('') : `<div class="hint">Aucun contact officiel n’est disponible. Aucun numéro n’est inventé.</div>`}
-    <div class="sec-title">Services publics et assistance</div>
-    ${cfg.contacts && cfg.contacts.filter(c=>c.group==='public_assistance').length ? cfg.contacts.filter(c=>c.group==='public_assistance').map(c => `<a class="menu-item" href="tel:${esc(c.tel)}" style="text-decoration:none;color:inherit"><span class="mi-ic">📞</span><div><b>${esc(c.nom)}</b>${c.label?`<div class="small muted">${esc(c.label)}</div>`:''}<div class="small muted">${esc(c.source_name)}${c.source_date ? ' · ' + esc(c.source_date) : ''}<br>Vérifié le ${esc(c.verified_at)}${c.last_modified ? ' · mis à jour le ' + esc(c.last_modified) : ''}</div></div><span class="mi-arr bold">${esc(c.tel)}</span></a>`).join('') : `<div class="hint">Aucun service public officiel n’est disponible.</div>`}
-    ${available ? `<button class="sos-btn" onclick="A.sosConfirm()">🚨 DEMANDER UNE ASSISTANCE</button><div class="muted small center">Une confirmation vous sera demandée. Cette demande est envoyée à l’équipe Klean Services, pas aux secours publics.</div>` : ''}
-  </div>${bottomNav('account')}`;
+  let cfg={contacts:[],assistance_available:false};try{cfg=await api('/urgence/config');}catch(e){toast(e.message,'err');}
+  const contacts=(cfg.contacts||[]), row=c=>`<a class="menu-item" href="tel:${esc(c.tel)}" aria-label="Appeler ${esc(c.nom)} au ${esc(c.tel)}" style="text-decoration:none;color:inherit;align-items:center"><span class="mi-ic">${esc(c.icon||'📞')}</span><div class="grow"><b>${esc(c.nom)} — ${esc(c.tel)}</b></div><span class="btn sm" style="pointer-events:none">Appeler</span></a>`;
+  $app.innerHTML=`${header('Urgences',{bell:!!USER})}<div class="content"><div class="small muted mb">Numéros officiels vérifiés</div>${contacts.length?`<div class="card" style="padding:4px">${contacts.map(row).join('')}</div>`:emptyState('📞','Aucun numéro officiel vérifié n’est disponible pour le moment.')}${cfg.assistance_available?`<button class="btn sec mt" onclick="A.sosConfirm()">Demander une assistance Klean Services</button>`:''}</div>${bottomNav('account')}`;
 };
 
 /* ---------- Mes informations / adresses / sécurité / paramètres ---------- */
@@ -2043,70 +2029,22 @@ routes.payments = async () => {
   </div>${bottomNav('account')}`;
 };
 
-/* ---------- Bandeau fixe en bas de l'accueil : ruban continu, paramétré par le PDG ---------- */
-let BD_TIMER = null, BD_FADE_TIMER = null, BD_JSON = '';
-const BD_TYPES = { pub: { ic: '📢', lb: 'Pub' }, info: { ic: 'ℹ️', lb: 'Info' }, urgence: { ic: '🚨', lb: 'Urgence' } };
-function bandeauStopFade() { if (BD_FADE_TIMER) { clearInterval(BD_FADE_TIMER); BD_FADE_TIMER = null; } }
-function bandeauColor(v, fallback) { return /^#[0-9a-f]{6}$/i.test(String(v || '')) ? v : fallback; }
-async function bandeauMount() {
-  if (BD_TIMER) { clearInterval(BD_TIMER); BD_TIMER = null; }
-  bandeauStopFade(); BD_JSON = '';
-  await bandeauRender();
-  // Une comparaison du JSON évite de réinjecter le DOM toutes les quelques secondes :
-  // le ruban ne repart donc jamais au début tant que le PDG ne l'a pas réellement modifié.
-  BD_TIMER = setInterval(() => {
-    if (!document.getElementById('bandeau-host')) { clearInterval(BD_TIMER); BD_TIMER = null; bandeauStopFade(); return; }
-    bandeauRender();
-  }, 5000);
-}
-async function bandeauRender() {
-  const host = document.getElementById('bandeau-host');
-  if (!host) return;
-  let b; try { b = await api('/annonces'); } catch { return; }
-  const j = JSON.stringify(b);
-  if (j === BD_JSON && host.innerHTML) return;
-  BD_JSON = j; bandeauStopFade();
-  const espace = document.getElementById('bandeau-espace');
-  if (!b.enabled || !Array.isArray(b.items) || !b.items.length) { host.innerHTML = ''; if (espace) espace.style.height = '0'; return; }
-  const bg=bandeauColor(b.background,'#0b1320'), text=bandeauColor(b.text_color,'#ffffff'), border=bandeauColor(b.border_color,'#16a34a');
-  const height=Math.max(28,Math.min(86,Number(b.height)||38)), fs=Math.max(10,Math.min(28,Number(b.font_size)||14)), weight=['400','500','600','700','800'].includes(String(b.font_weight))?b.font_weight:'700';
-  const item = a => { const t=BD_TYPES[a.type]||BD_TYPES.info, useImage=b.style==='image'&&a.image_url, useIcon=b.style!=='classic'&&!useImage;
-    return `<span class="ks-band-item" ${a.link ? `data-link="${esc(a.link)}" onclick="A.bandeauGo(this.dataset.link)" role="link" tabindex="0"` : ''} style="color:${bandeauColor(a.color,text)};cursor:${a.link?'pointer':'default'}">
-      ${useImage ? `<img src="${esc(mediaUrl(a.image_url))}" alt="" class="ks-band-img">` : useIcon ? `<span class="ks-band-icon">${esc(a.icon||t.ic)}</span>` : ''}
-      <b style="font-weight:${weight};${(a.type||'info')==='urgence'?'color:#ff8a8a':''}">${esc(t.lb)}${(a.theme||'').trim()?' ('+esc(a.theme.trim())+')':''} :</b>
-      <span class="ks-band-copy">${esc(a.content||a.title||'')}</span><span class="ks-band-dot">◆</span></span>`; };
-  const messages=b.items.map(item), bloc=messages.join('');
-  const shell=`<style>
-    @keyframes ksBandeauScroll { from { transform:translate3d(0,0,0) } to { transform:translate3d(-50%,0,0) } }
-    @keyframes ksBandeauFade { 0%,100%{opacity:.05;transform:translateY(3px)} 16%,82%{opacity:1;transform:translateY(0)} }
-    .ks-band{position:fixed;bottom:calc(57px + var(--safe-b,0px));left:50%;transform:translateX(-50%);width:100%;max-width:560px;z-index:49;overflow:hidden;display:flex;align-items:center;box-sizing:border-box}
-    .ks-band-track,.ks-band-segment{display:flex;align-items:center;flex:0 0 auto;white-space:nowrap;will-change:transform}
-    .ks-band-item{display:inline-flex;align-items:center;gap:7px;padding:0 20px;min-height:100%;white-space:nowrap}
-    .ks-band-img{width:26px;height:26px;border-radius:5px;object-fit:cover;flex:0 0 auto}.ks-band-icon{font-size:18px;line-height:1}.ks-band-copy{opacity:.94}.ks-band-dot{opacity:.35;padding-left:18px}
-    .ks-band-track:hover,.ks-band-track:active{animation-play-state:paused}.ks-band-fade{width:100%;text-align:center;white-space:nowrap;overflow:hidden;animation:ksBandeauFade var(--ks-fade-duration,8s) ease-in-out infinite}
-  </style>`;
-  if (b.animation === 'fade') {
-    host.innerHTML=`${shell}<div class="ks-band" style="height:${height}px;background:${bg};border-top:2px solid ${border};font-size:${fs}px;font-weight:${weight};color:${text}"><div id="ks-band-fade" class="ks-band-fade" style="--ks-fade-duration:${Math.max(3,Math.min(60,Number(b.items[0] && b.items[0].duration_seconds)||Number(b.message_duration)||8))}s">${messages[0]}</div></div>`;
-    if(espace)espace.style.height=(height+8)+'px'; let i=0;
-    // Chaque message peut définir sa durée (3 à 60 s). Le réglage général sert de
-    // valeur de repli : ce n’est donc pas un champ décoratif dans le tableau PDG.
-    const fadeDelay=index=>Math.max(3,Math.min(60,Number(b.items[index] && b.items[index].duration_seconds)||Number(b.message_duration)||8))*1000;
-    const nextFade=()=>{const el=document.getElementById('ks-band-fade');if(!el){bandeauStopFade();return;}i=(i+1)%messages.length;el.innerHTML=messages[i];el.style.setProperty('--ks-fade-duration',(fadeDelay(i)/1000)+'s');el.style.animation='none';void el.offsetWidth;el.style.animation='';BD_FADE_TIMER=setTimeout(nextFade,fadeDelay(i));};
-    BD_FADE_TIMER=setTimeout(nextFade,fadeDelay(0));
-    return;
-  }
-  host.innerHTML=`${shell}<div id="ks-band" class="ks-band" style="height:${height}px;background:${bg};border-top:2px solid ${border};font-size:${fs}px;font-weight:${weight};color:${text}"><div id="ks-band-track" class="ks-band-track"><div id="ks-band-segment" class="ks-band-segment">${bloc}</div></div></div>`;
-  if(espace)espace.style.height=(height+8)+'px';
-  requestAnimationFrame(()=>{
-    const band=document.getElementById('ks-band'),track=document.getElementById('ks-band-track'),segment=document.getElementById('ks-band-segment');if(!band||!track||!segment)return;
-    // On allonge le premier segment jusqu'à dépasser l'écran, puis on le duplique une seule fois.
-    // Le déplacement exact de 50 % retombe donc sur un segment identique, sans saut ni blanc.
-    let loops=0;while(segment.scrollWidth<band.clientWidth*1.25&&loops++<12)segment.insertAdjacentHTML('beforeend',bloc);
-    const clone=segment.cloneNode(true);clone.removeAttribute('id');clone.setAttribute('aria-hidden','true');track.appendChild(clone);
-    const duration=Math.max(6,segment.scrollWidth/Math.max(10,Number(b.speed)||60));
-    track.style.animation=`ksBandeauScroll ${duration}s ${b.animation==='slide'?'linear':'linear'} infinite`;
-  });
-}
+/* ---------- Bandeau administré : modes réels, sans déplacer le défilement de l’utilisateur ---------- */
+let BD_TIMER=null,BD_FADE_TIMER=null,BD_JSON='';
+const BD_TYPES={pub:{ic:'📢',lb:'Annonce'},info:{ic:'ℹ️',lb:'Info'},urgence:{ic:'🚨',lb:'URGENT'},promo:{ic:'🏷️',lb:'Promo'},official:{ic:'📌',lb:'Officiel'},service:{ic:'🛎️',lb:'Service'}};
+function bandeauStopFade(){if(BD_FADE_TIMER){clearTimeout(BD_FADE_TIMER);BD_FADE_TIMER=null;}}
+function bandeauColor(v,fallback){return /^#[0-9a-f]{6}$/i.test(String(v||''))?v:fallback;}
+function bandeauFont(f){return f==='serif'?'Georgia,serif':f==='mono'?'ui-monospace,SFMono-Regular,monospace':'system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';}
+function bandeauText(a,b){const t=BD_TYPES[a.type]||BD_TYPES.info,label=b.label_mode==='none'?'':(b.label_mode==='promo'||b.mode==='promotion'?'✨ PROMO':(a.type==='urgence'?'🚨 URGENT':t.lb));return `<span class="ks-band-item" ${a.link?`data-link="${esc(a.link)}" onclick="A.bandeauGo(this.dataset.link)" role="link" tabindex="0"`:''} style="color:${bandeauColor(a.color,b.text_color)};cursor:${a.link?'pointer':'default'}">${a.image_url?`<img src="${esc(mediaUrl(a.image_url))}" alt="" class="ks-band-img">`:`<span class="ks-band-icon">${esc(a.icon||t.ic)}</span>`}${label?`<b class="ks-band-label">${esc(label)}${a.theme?` · ${esc(a.theme)}`:''}</b>`:''}<span class="ks-band-copy">${esc(a.content||a.title||'')}</span></span>`;}
+async function bandeauMount(){if(BD_TIMER){clearInterval(BD_TIMER);BD_TIMER=null;}bandeauStopFade();BD_JSON='';await bandeauRender();BD_TIMER=setInterval(()=>{if(!document.getElementById('bandeau-host')){clearInterval(BD_TIMER);BD_TIMER=null;bandeauStopFade();return;}bandeauRender();},5000);}
+async function bandeauRender(){const host=document.getElementById('bandeau-host');if(!host)return;let b;try{b=await api('/annonces');}catch{return;}const j=JSON.stringify(b);if(j===BD_JSON&&host.innerHTML)return;BD_JSON=j;bandeauStopFade();const espace=document.getElementById('bandeau-espace');if(!b.enabled||!Array.isArray(b.items)||!b.items.length){host.innerHTML='';if(espace)espace.style.height='0';return;}const bg=bandeauColor(b.background,'#0b1320'),text=bandeauColor(b.text_color,'#fff'),border=bandeauColor(b.border_color,'#16a34a'),height=Math.max(28,Math.min(110,Number(b.height)||38)),fs=Math.max(10,Math.min(28,Number(b.font_size)||14)),weight=['400','500','600','700','800'].includes(String(b.font_weight))?b.font_weight:'700',mode=b.mode||'scroll',top=b.position==='top',reduce=b.reduce_motion&&matchMedia('(prefers-reduced-motion: reduce)').matches,items=b.items.map(a=>({...a,display_mode:a.display_mode==='inherit'||!a.display_mode?mode:a.display_mode})),baseStyle=`height:${height}px;background:${bg};color:${text};border:${Math.max(0,Number(b.border_width)||0)}px solid ${border};border-radius:${Math.max(0,Number(b.radius)||0)}px;font-size:${fs}px;font-weight:${weight};font-family:${bandeauFont(b.font_family)};`;
+const shell=`<style>@keyframes ksBandRtl{from{transform:translate3d(0,0,0)}to{transform:translate3d(-50%,0,0)}}@keyframes ksBandLtr{from{transform:translate3d(-50%,0,0)}to{transform:translate3d(0,0,0)}}@keyframes ksBandUp{from{transform:translateY(100%)}to{transform:translateY(-100%)}}@keyframes ksBandFade{0%,100%{opacity:.05;transform:translateY(4px)}15%,84%{opacity:1;transform:translateY(0)}}.ks-band{position:fixed;${top?'top:calc(58px + var(--safe-t,0px))':'bottom:calc(57px + var(--safe-b,0px))'};left:50%;transform:translateX(-50%);width:min(calc(100% - 12px),560px);z-index:49;box-sizing:border-box;overflow:hidden;display:flex;align-items:center}.ks-band-track,.ks-band-segment{display:flex;align-items:center;flex:0 0 auto;white-space:nowrap;will-change:transform}.ks-band-item{display:inline-flex;align-items:center;gap:7px;padding:0 ${Math.max(4,Number(b.gap)||20)}px;min-height:100%;white-space:nowrap}.ks-band-img{width:26px;height:26px;border-radius:5px;object-fit:contain;background:#fff;flex:0 0 auto}.ks-band-icon{font-size:18px;line-height:1}.ks-band-label{font-weight:inherit}.ks-band-copy{opacity:.96}.ks-band-static{width:100%;padding:0 12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:center;box-sizing:border-box}.ks-band-cards{height:auto!important;min-height:${height}px;padding:6px;gap:7px;overflow:auto}.ks-band-cards .ks-band-item{background:rgba(255,255,255,.13);border-radius:8px;min-height:${Math.max(28,height-12)}px;padding:0 10px}.ks-band-pause:hover .ks-band-track,.ks-band-pause:active .ks-band-track{animation-play-state:paused}@media(prefers-reduced-motion:reduce){.ks-band-track,.ks-band-fade{animation:none!important}}</style>`;
+const selected=items.filter(a=>a.display_mode==='inherit'||a.display_mode===mode||mode==='news'||mode==='promotion');const shown=selected.length?selected:items,messages=shown.map(a=>bandeauText(a,b));const space=(top?0:height+10);if(espace)espace.style.height=space+'px';const holderClass='ks-band '+(b.pause_enabled?'ks-band-pause':'');
+if(mode==='fixed'){host.innerHTML=`${shell}<div class="${holderClass}" style="${baseStyle}"><div class="ks-band-static">${messages[0]}</div></div>`;return;}
+if(mode==='cards'){host.innerHTML=`${shell}<div class="${holderClass} ks-band-cards" style="${baseStyle}">${messages.slice(0,3).join('')}</div>`;return;}
+if(mode==='fade'||mode==='rotate'||mode==='vertical'){const vertical=mode==='vertical',fade=mode==='fade';host.innerHTML=`${shell}<div class="${holderClass}" style="${baseStyle}"><div id="ks-band-fade" class="ks-band-static ${fade?'ks-band-fade':''}" style="${fade?'animation:ksBandFade '+Math.max(3,Number(shown[0].duration_seconds)||Number(b.message_duration)||8)+'s ease-in-out infinite':''}">${messages[0]}</div></div>`;let i=0;const delay=index=>Math.max(3,Math.min(60,Number(shown[index]&&shown[index].duration_seconds)||Number(b.message_duration)||8))*1000;const next=()=>{const el=document.getElementById('ks-band-fade');if(!el){bandeauStopFade();return;}i=(i+1)%messages.length;el.innerHTML=messages[i];if(vertical){el.style.transform='translateY(12px)';el.style.opacity='.1';setTimeout(()=>{el.style.transition='transform .28s ease,opacity .28s ease';el.style.transform='translateY(0)';el.style.opacity='1';},20);}if(fade){el.style.animation='none';void el.offsetWidth;el.style.animation='';}BD_FADE_TIMER=setTimeout(next,delay(i));};BD_FADE_TIMER=setTimeout(next,delay(0));return;}
+host.innerHTML=`${shell}<div id="ks-band" class="${holderClass}" style="${baseStyle}"><div id="ks-band-track" class="ks-band-track"><div id="ks-band-segment" class="ks-band-segment">${messages.join('')}</div></div></div>`;requestAnimationFrame(()=>{const band=document.getElementById('ks-band'),track=document.getElementById('ks-band-track'),segment=document.getElementById('ks-band-segment');if(!band||!track||!segment)return;let loops=0,bloc=messages.join('');while(segment.scrollWidth<band.clientWidth*1.25&&loops++<12)segment.insertAdjacentHTML('beforeend',bloc);const clone=segment.cloneNode(true);clone.removeAttribute('id');clone.setAttribute('aria-hidden','true');track.appendChild(clone);if(reduce)return;const duration=Math.max(6,segment.scrollWidth/Math.max(10,Number(b.speed)||60));track.style.animation=`${b.direction==='ltr'?'ksBandLtr':'ksBandRtl'} ${duration}s linear infinite`;});}
+
 
 /* ---------- Quiz synchronisé sur l'accueil ---------- */
 let QL_TIMER = null, QL_ETAT = null, QL_TICK = 0;
@@ -2423,6 +2361,7 @@ routes.kdo = async () => {
    ACTIONS GLOBALES
    ============================================================ */
 const A = {
+  adOpen(link){const v=String(link||'').trim();if(!v)return;if(v.startsWith('#/'))return nav(v);if(/^https:\/\//i.test(v))window.open(v,'_blank','noopener');else toast('Lien publicitaire invalide.','err');},
   goSearch() { const v = document.getElementById('home-q').value.trim(); nav('#/search/' + encodeURIComponent(v)); },
   _voiceSearch: null,
   async voiceSearchOpen() {
