@@ -14,6 +14,7 @@ let PRO_SKILLS = [];         // arbre central catégorie → sous-catégorie des
 let GAMES = { quiz: false, flipfizz: false, kdo: false };
 let MAINT = { active: false }; // état de maintenance de la plateforme
 let ADS = [];
+let PUBLIC_FEATURES = []; // indicateurs actifs livrés par le centre de fonctionnalités
 let navStack = [];
 let suppressPush = false;
 let sse = null;
@@ -48,6 +49,15 @@ function mediaUrl(src) {
   const s = String(src || '');
   if (!s || !s.startsWith('/uploads/') || !TOKEN) return s;
   return s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+}
+const PUBLIC_ROUTE_FEATURE = { home:'public.home',search:'public.search',services:'module.services',categories:'module.services',request:'module.services',account:'public.account',addresses:'public.account',settings:'public.account',notifications:'public.notifications',messages:'public.messages',missions:'module.missions',mission:'module.missions',payments:'module.payments','my-reviews':'public.reviews',urgence:'module.urgence','avis-recherche':'module.avis',jobs:'module.jobs',ecole:'module.ecole','ecole-famille':'module.ecole',braderie:'module.braderie','articles-seconde-main':'module.braderie','braderie-space':'module.braderie','klean-cabine':'module.cabine','cabine-operation':'module.cabine','cabine-operations':'module.cabine',quiz:'module.games',flip:'module.games',kdo:'module.games',pro:'pro.space','pro-edit':'pro.space','pro-revenus':'pro.space',visibilite:'pro.visibility',pub:'pro.advertising' };
+function publicFeatureVisible(key, placement) {
+  if(!key || !Array.isArray(PUBLIC_FEATURES) || !PUBLIC_FEATURES.length) return true;
+  const row=PUBLIC_FEATURES.find(x=>x.key===key); if(!row || row.status!=='active') return !row;
+  return !placement || !(Array.isArray(row.placements)) || row.placements.includes(placement);
+}
+async function refreshPublicFeatures(redraw=true) {
+  try { const next=(await api('/features/public')).items||[]; const changed=JSON.stringify(next)!==JSON.stringify(PUBLIC_FEATURES); PUBLIC_FEATURES=next; if(changed&&redraw) render({preserveScroll:true}); } catch {}
 }
 
 // Images de catalogue : l'API livre une URL contenant une version non réutilisable après
@@ -254,6 +264,7 @@ function connectSSE() {
     // doit être relue. Une carte déjà visible est remplacée sans rechargement de page.
     refreshHomeCatalogueState(false);
   });
+  sse.addEventListener('feature-control', () => { refreshPublicFeatures(true); });
   sse.addEventListener('message', e => {
     const m = JSON.parse(e.data);
     if (currentChat === m.mission_id) { appendChatMsg(m); api('/missions/' + m.mission_id + '/messages').catch(() => { }); }
@@ -682,17 +693,17 @@ function adCardHtml(a) {
   return `<article class="ks-ad-card ks-ad-${esc(a.display_template||'classic')}" style="background:#fff;border:1px solid ${accent};border-radius:14px;padding:10px;box-sizing:border-box"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="ad-tag" style="border-color:${accent}">${tag}</span><span class="small muted">👁️ ${Number((a.unique_views ?? a.views) || 0).toLocaleString('fr-FR')}</span></div>${a.title?`<div class="bold mt">${esc(a.title)}</div>`:''}${a.content?`<div class="small muted mt" style="white-space:pre-wrap">${esc(a.content)}</div>`:''}${media?`<div style="margin-top:8px">${media}</div>`:''}${adPriceHtml(a)}${code}${a.offer_conditions&&a.promotion_active?`<div class="small muted mt">${esc(a.offer_conditions)}</div>`:''}${cta?`<div class="mt">${cta}</div>`:''}</article>`;
 }
 
-function adsBandHtml(list) {if(!list.length)return '';return `<div class="ks-ads-rack" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">${list.map(a=>`<div style="flex:0 0 min(100%,520px);scroll-snap-align:start">${adCardHtml(a)}</div>`).join('')}</div>`;}
+function adsBandHtml(list) {if(!publicFeatureVisible('module.ads','home')||!list.length)return '';return `<div class="ks-ads-rack" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">${list.map(a=>`<div style="flex:0 0 min(100%,520px);scroll-snap-align:start">${adCardHtml(a)}</div>`).join('')}</div>`;}
 
 
 /* ---------- Accueil ---------- */
 routes.home = async () => {
   // Les prix et services populaires affichés viennent toujours de la configuration actuelle du tableau de bord.
   const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
-  try { SERVICES = await api('/services' + cityQuery); POPULAIRES = await api('/grand-categories/populaires' + cityQuery); syncPublicImageCache(POPULAIRES); preloadPublicImages(POPULAIRES,4); }
+  try { if (publicFeatureVisible('module.services','home')) { SERVICES = await api('/services' + cityQuery); POPULAIRES = await api('/grand-categories/populaires' + cityQuery); syncPublicImageCache(POPULAIRES); preloadPublicImages(POPULAIRES,4); } else { SERVICES=[]; POPULAIRES=[]; } }
   catch (e) { $app.innerHTML = header('Accueil', { brand: true }) + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home'); return; }
   try { GAMES = await api('/games/config'); } catch { }
-  try { ADS = await api('/ads'); } catch { }
+  if (publicFeatureVisible('module.ads','home')) { try { ADS = await api('/ads'); } catch { ADS=[]; } } else ADS=[];
   let BRADERIE_HOME = { home_visible: false, enabled: false }, CABINE_HOME = { enabled:false }, VOICE_HOME = { enabled:false, home_visible:false, max_seconds:25 };
   try { [BRADERIE_HOME, CABINE_HOME, VOICE_HOME] = await Promise.all([api('/braderie/config'), api('/cabine/config'), api('/voice-search/config')]); } catch { }
   window._voiceHomeConfig = VOICE_HOME;
@@ -703,13 +714,13 @@ routes.home = async () => {
       <div class="bold small">🛠️ Maintenance partielle</div>
       <div class="small muted" style="white-space:normal">${esc(MAINT.message || 'Certaines fonctions sont temporairement suspendues.')}</div></div>`);
   const gv = k => Number((GAMES.views && GAMES.views[k]) || 0).toLocaleString('fr-FR');
-  if (GAMES.quiz) topZone.push(`<div onclick="nav('#/quiz')" style="cursor:pointer;text-align:center">
+  if (GAMES.quiz && publicFeatureVisible('module.games','home')) topZone.push(`<div onclick="nav('#/quiz')" style="cursor:pointer;text-align:center">
       <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🧠 QUIZ</span><span class="small muted">👁️ ${gv('quiz')}</span></div>
       <div class="bold small">🧠 Quiz — jouez maintenant !</div></div>`);
-  if (GAMES.flipfizz) topZone.push(`<div onclick="nav('#/flip')" style="cursor:pointer;text-align:center">
+  if (GAMES.flipfizz && publicFeatureVisible('module.games','home')) topZone.push(`<div onclick="nav('#/flip')" style="cursor:pointer;text-align:center">
       <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🎮 JEU</span><span class="small muted">👁️ ${gv('flipfizz')}</span></div>
       <div class="bold small">🎲 Flip Fizz</div></div>`);
-  if (GAMES.kdo) topZone.push(`<div onclick="nav('#/kdo')" style="cursor:pointer;text-align:center">
+  if (GAMES.kdo && publicFeatureVisible('module.games','home')) topZone.push(`<div onclick="nav('#/kdo')" style="cursor:pointer;text-align:center">
       <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🎮 JEU</span><span class="small muted">👁️ ${gv('kdo')}</span></div>
       <div class="bold small">🎁 Kdo</div></div>`);
   $app.innerHTML = `
@@ -720,7 +731,7 @@ routes.home = async () => {
     <div id="home-fixe" style="position:sticky;top:calc(58px + var(--safe-t));z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
       <div class="searchbar" style="margin:0 2px">
         <input type="text" id="home-q" placeholder="🔎 Décrivez votre besoin…" enterkeyhint="search" autocomplete="off">
-        ${VOICE_HOME.home_visible ? `<button type="button" onclick="A.voiceSearchOpen()" aria-label="Rechercher par note vocale" title="Rechercher par note vocale" style="font-size:18px">🎤</button>` : ''}
+        ${VOICE_HOME.home_visible && publicFeatureVisible('module.voice_search','home') ? `<button type="button" onclick="A.voiceSearchOpen()" aria-label="Rechercher par note vocale" title="Rechercher par note vocale" style="font-size:18px">🎤</button>` : ''}
         <button onclick="A.goSearch()" aria-label="Rechercher">🔍</button>
       </div>
       <div id="home-search-results" class="live-search-results"></div>
@@ -732,23 +743,23 @@ routes.home = async () => {
     <div class="svc-grid">
       ${POPULAIRES.map((s,index) => `<button type="button" class="svc-card ${s.image_url ? 'has-image' : ''}" data-grand-category-id="${Number(s.id)}" onclick="nav('#/categories/${s.id}')" aria-label="Ouvrir ${esc(s.name)}"><span class="svc-card-media">${s.image_url ? publicCategoryImageTag(s,index,'home') : `<span class="ic" aria-hidden="true">${esc(s.icon || '🧩')}</span>`}</span><span class="svc-card-copy"><span class="nm">${esc(grandLabel(s))}</span>${s.price_from ? `<span class="price-from">À partir de ${fmtFCFA(s.price_from)}</span>` : ''}</span></button>`).join('')}
     </div>` : ''}
-    <button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>
+    ${publicFeatureVisible('module.services','home') ? `<button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>` : ''}
     <div class="home-shortcuts" aria-label="Accès rapides">
-      <button class="home-shortcut" onclick="nav('#/jobs')"><span>💼</span><div><b>Trouver ou proposer un job</b><small>Consulter les offres ou publier la vôtre</small></div><i>›</i></button>
-      ${BRADERIE_HOME.home_visible ? `<button class="home-shortcut" onclick="nav('#/articles-seconde-main')"><span>🏷️</span><div><b>Articles seconde main</b><small>${BRADERIE_HOME.enabled ? 'Découvrir, rechercher et acheter' : 'Prochainement disponible'}</small></div><i>›</i></button>` : ''}
-      ${CABINE_HOME.enabled ? `<button class="home-shortcut" onclick="nav('#/klean-cabine')"><span>${esc(CABINE_HOME.icon||'📲')}</span><div><b>Klean Kbine à distance</b><small>Crédit et forfaits — disponibilité vérifiée</small></div><i>›</i></button>` : ''}
-      <button class="home-shortcut" onclick="nav('#/avis-recherche')"><span>📢</span><div><b>Avis de recherche</b><small>Publier ou consulter un avis</small></div><i>›</i></button>
-      <button class="home-shortcut urgent" onclick="nav('#/urgence')"><span>🚨</span><div><b>Urgences</b><small>Contacts et assistance configurés</small></div><i>›</i></button>
+      ${publicFeatureVisible('module.jobs','home') ? `<button class="home-shortcut" onclick="nav('#/jobs')"><span>💼</span><div><b>Trouver ou proposer un job</b><small>Consulter les offres ou publier la vôtre</small></div><i>›</i></button>` : ''}
+      ${BRADERIE_HOME.home_visible && publicFeatureVisible('module.braderie','home') ? `<button class="home-shortcut" onclick="nav('#/articles-seconde-main')"><span>🏷️</span><div><b>Articles seconde main</b><small>${BRADERIE_HOME.enabled ? 'Découvrir, rechercher et acheter' : 'Prochainement disponible'}</small></div><i>›</i></button>` : ''}
+      ${CABINE_HOME.enabled && publicFeatureVisible('module.cabine','home') ? `<button class="home-shortcut" onclick="nav('#/klean-cabine')"><span>${esc(CABINE_HOME.icon||'📲')}</span><div><b>Klean Kbine à distance</b><small>Crédit et forfaits — disponibilité vérifiée</small></div><i>›</i></button>` : ''}
+      ${publicFeatureVisible('module.avis','home') ? `<button class="home-shortcut" onclick="nav('#/avis-recherche')"><span>📢</span><div><b>Avis de recherche</b><small>Publier ou consulter un avis</small></div><i>›</i></button>` : ''}
+      ${publicFeatureVisible('module.urgence','home') ? `<button class="home-shortcut urgent" onclick="nav('#/urgence')"><span>🚨</span><div><b>Urgences</b><small>Contacts et assistance configurés</small></div><i>›</i></button>` : ''}
     </div>
     <div id="bandeau-espace"></div>
   </div><div id="bandeau-host"></div>${bottomNav('home')}`;
   updateBadges();
   installCtaMount();
-  quizLiveMount(); // le quiz actif s'affiche automatiquement, sans aucun clic
-  bandeauMount();  // bandeau d'annonces défilantes en bas de l'accueil
+  if (publicFeatureVisible('module.games','home')) quizLiveMount(); // le quiz actif s'affiche automatiquement, sans aucun clic
+  if (publicFeatureVisible('module.ads','home')) bandeauMount();  // bandeau d'annonces défilantes en bas de l'accueil
   // Consultation publicitaire dédupliquée par jour ; les jeux gardent leur comptage historique connecté.
   recordAdViews([...homeAds,...homeMidAds]);
-  const vues=[]; if (GAMES.quiz) vues.push('game:quiz'); if (GAMES.flipfizz) vues.push('game:flipfizz'); if (GAMES.kdo) vues.push('game:kdo');
+  const vues=[]; if (publicFeatureVisible('module.games','home')) { if (GAMES.quiz) vues.push('game:quiz'); if (GAMES.flipfizz) vues.push('game:flipfizz'); if (GAMES.kdo) vues.push('game:kdo'); }
   if (vues.length && USER) api('/vues', { method: 'POST', body: { keys: vues } }).catch(() => { });
   const q = document.getElementById('home-q');
   q.addEventListener('input', () => A.liveSearch('home-q', 'home-search-results', true));
@@ -3594,6 +3605,10 @@ function render(options = {}) {
   if (MAINT.active && MAINT.blocked) { maintenanceScreen(); return; }
   const publicRoutes = ['home','search','services','categories','request','jobs','avis-recherche','urgence','about','login','register','account','braderie','articles-seconde-main','klean-cabine'];
   if (!TOKEN && !publicRoutes.includes(route)) { publicAuthGate(); return; }
+  const routeFeature=PUBLIC_ROUTE_FEATURE[route];
+  if (routeFeature && !publicFeatureVisible(routeFeature, route==='home'?'home':(route==='pro'||route==='pro-edit'||route==='pro-revenus'?'pro':null))) {
+    $app.innerHTML = header('Fonctionnalité indisponible', { bell: !!USER }) + `<div class="content">${emptyState('⏸️','Cette fonctionnalité est temporairement indisponible.')}</div>` + bottomNav('home'); return;
+  }
   if (USER && USER.must_change_password) { setTimeout(forcePasswordModal, 50); }
   const fn = routes[route] || routes.home;
   Promise.resolve(fn(param)).then(() => {
@@ -3619,7 +3634,11 @@ function render(options = {}) {
   }
   applyFont(localStorage.getItem('ks_font') || 16);
   await checkMaintenance();
+  await refreshPublicFeatures(false);
   setInterval(async () => { const before=JSON.stringify([MAINT.active,MAINT.blocked,MAINT.scheduled,MAINT.until]); await checkMaintenance(); const changed=before!==JSON.stringify([MAINT.active,MAINT.blocked,MAINT.scheduled,MAINT.until]); if (TOKEN && !MAINT.blocked && !USER) { try { USER=await api('/me'); connectSSE(); refreshBadges(); } catch {} } if (changed) render(); }, 15000);
+  // Les visiteurs non connectés relisent aussi les indicateurs centraux ; les sessions
+  // connectées reçoivent en complément le signal SSE sans attendre ce contrôle.
+  setInterval(() => { refreshPublicFeatures(true); }, 20000);
   // Prix et disponibilité catalogue : l'accueil reste synchronisé avec le tableau de bord,
   // même s'il est déjà ouvert au moment où le PDG change un prix.
   setInterval(() => { refreshHomeCatalogueState(true); }, 10000);

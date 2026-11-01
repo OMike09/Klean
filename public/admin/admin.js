@@ -5,6 +5,7 @@
 const root = document.getElementById('root');
 let TOKEN = localStorage.getItem('ks_admin_token') || null;
 let STATS = {};
+let FEATURE_DATA = null; // registre central servi par le serveur
 let ME = null; // compte connecté : { role, perms: [...] }
 let VIEW = location.hash.replace('#', '') || 'dashboard';
 let ADMIN_STACK = [VIEW], ADMIN_CURSOR = 0, ADMIN_CURRENT = VIEW;
@@ -28,6 +29,13 @@ function fmtD(s) { if (!s) return ''; const d = new Date(s.replace(' ', 'T') + '
 function fcfa(n) { return (n ?? 0).toLocaleString('fr-FR') + ' F'; }
 function zonesLabel(raw) { try { const z = Array.isArray(raw) ? raw : JSON.parse(raw || '[]'); return z && z.length ? z.join(', ') : '🌍 Toute la Côte d’Ivoire'; } catch { return '🌍 Toute la Côte d’Ivoire'; } }
 function toast(m, cls) { const z = document.getElementById('toast'); const t = document.createElement('div'); t.className = 'toast ' + (cls || ''); t.textContent = m; z.appendChild(t); setTimeout(() => t.remove(), 4500); }
+// Évite les doubles clics pendant les enregistrements du tableau de bord.
+// Cette aide est locale à l'interface d'administration (elle n'est pas chargée avec public/app.js).
+function busy(btn, on, label) {
+  if (!btn) return;
+  if (on) { if (!btn.dataset.ksBusyLabel) btn.dataset.ksBusyLabel=btn.textContent; btn.disabled=true; btn.textContent=label||'Enregistrement…'; }
+  else { btn.disabled=false; btn.textContent=btn.dataset.ksBusyLabel||btn.textContent; delete btn.dataset.ksBusyLabel; }
+}
 
 async function api(path, opts = {}) {
   const headers = {};
@@ -110,10 +118,19 @@ const MENU = [
   ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['bandeau', '📺 Gestion bande défilante', null, 'PDG'], ['support', '📩 Messages Klean Services', null, 'communication'], ['broadcast', '📨 Messages généraux', null, 'communication']]],
   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
   ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Trouver ou proposer un job', null, 'contenu'], ['braderie', '🏷️ Articles seconde main', null, 'PDG'], ['cabine', '📲 Gestion de Klean Kbine à distance', null, 'PDG'], ['ecole', '🏫 École & famille', null, 'contenu'], ['voice-search', '🎤 Recherche vocale', null, 'PDG'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
-  ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
+  ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['features', '🧭 Gestion des fonctionnalités', null, 'feature_management'], ['journal', '🧾 Journal des actions', null, 'journal']]],
   ['CONFIGURATION', [['estimates', '🧠 Tarifs & estimations intelligentes', null, 'PDG'], ['commerce', '💰 Paramètres commerciaux', null, 'parametres'], ['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
 ];
-function menuVisible(perm) { return !perm || (perm === 'PDG' ? ME && ME.role === 'pdg' : can(perm)); }
+const ADMIN_VIEW_FEATURE = { dashboard:'admin.dashboard',frequentation:'admin.frequentation',users:'admin.users',pros:'admin.pros',catalog:'admin.catalog',questions:'admin.questions',missions:'admin.missions',payments:'admin.payments',finances:'admin.finances',ads:'admin.ads',bandeau:'admin.bandeau',support:'admin.support',broadcast:'admin.broadcast',rules:'admin.rules',reports:'admin.reports',urgences:'admin.urgences',files:'admin.files',avis:'admin.avis',jobs:'admin.jobs',braderie:'admin.braderie',cabine:'admin.cabine',ecole:'admin.ecole','voice-search':'admin.voice_search',games:'admin.games',staff:'admin.staff',prooptions:'admin.prooptions',maintenance:'admin.maintenance',journal:'admin.journal',estimates:'admin.estimates',commerce:'admin.commerce',settings:'admin.settings',features:'admin.feature_management' };
+function adminFeatureRow(view) { const key=ADMIN_VIEW_FEATURE[view]; return key && FEATURE_DATA && Array.isArray(FEATURE_DATA.items) ? FEATURE_DATA.items.find(x=>x.feature_key===key) : null; }
+function adminFeatureVisible(view) {
+  const key=ADMIN_VIEW_FEATURE[view]; if(!key || !FEATURE_DATA || !Array.isArray(FEATURE_DATA.items)) return true;
+  const row=adminFeatureRow(view); if(!row) return true;
+  const menu=(row.placements||[]).find(x=>x.placement==='admin_menu');
+  return row.effective_status==='active' && (!menu || !!menu.visible);
+}
+function adminFeatureOrder(view) { const row=adminFeatureRow(view); return row ? Number(row.sort_order||999999) : 999999; }
+function menuVisible(perm,view) { return (!perm || (perm === 'PDG' ? ME && ME.role === 'pdg' : can(perm))) && adminFeatureVisible(view); }
 
 function shell(content) {
   root.innerHTML = `
@@ -122,7 +139,7 @@ function shell(content) {
       <div class="logo">Klean Services<br><span class="small" style="color:#6d9c94;font-weight:600">Administration</span>
       ${ME ? `<br><span class="small" style="color:#9fc8c0">${esc(ME.name || '')} — ${ROLE_LB[ME.role] || ME.role}</span>` : ''}</div>
       ${MENU.map(([grp, items]) => {
-        const vis = items.filter(it => menuVisible(it[3]));
+        const vis = items.filter(it => menuVisible(it[3],it[0])).sort((a,b)=>adminFeatureOrder(a[0])-adminFeatureOrder(b[0]) || String(a[1]).localeCompare(String(b[1]),'fr'));
         return vis.length ? `<div class="grp">${grp}</div>` + vis.map(([id, lb, cnt]) =>
           `<button class="${VIEW === id ? 'on' : ''}" onclick="go('${id}')">${lb}${cnt && STATS[cnt] ? `<span class="cnt">${STATS[cnt]}</span>` : ''}</button>`).join('') : '';
       }).join('')}
@@ -467,6 +484,28 @@ views._grandPhotos = async () => {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:14px">${cards}</div>`);
 };
 
+
+/* ---------- Centre universel des fonctionnalités ---------- */
+function featureStatePill(row) {
+  const state=row.effective_status||row.status||'active';
+  const map={active:['Actif','ok'],disabled:['Désactivé','bad'],suspended:['Suspendu','warn'],archived:['Archivé','off'],deleted:['Supprimé définitivement','bad']};
+  const d=map[state]||[state,'off'];
+  const scheduled=row.status==='suspended'&&row.suspend_from&&row.effective_status==='active'?' · programmé':'';
+  return `<span class="pill ${d[1]}">${esc(d[0]+scheduled)}</span>`;
+}
+views.features = async () => {
+  const q=sessionStorage.getItem('adm_feature_q')||'', space=sessionStorage.getItem('adm_feature_space')||'', state=sessionStorage.getItem('adm_feature_state')||'';
+  const query=new URLSearchParams();if(q)query.set('q',q);if(space)query.set('space',space);if(state)query.set('status',state);
+  const [data,history]=await Promise.all([api('/admin/features?'+query.toString()),api('/admin/features/history')]); FEATURE_DATA=data;
+  const rows=data.items||[], groups=new Map(); rows.forEach(row=>{if(!groups.has(row.space))groups.set(row.space,[]);groups.get(row.space).push(row);});
+  const card=row=>{const hidden=(row.placements||[]).filter(p=>!p.visible).map(p=>p.placement).join(', '), protection=row.protected?'<span class="small muted">Protection essentielle — retrait bloqué</span>':'';
+    return `<article class="panel" style="margin:0;padding:12px" data-feature="${esc(row.feature_key)}"><div style="display:flex;gap:9px;align-items:flex-start"><input class="feature-check" type="checkbox" value="${esc(row.feature_key)}" ${row.protected||row.status==='deleted'?'disabled':''} aria-label="Sélectionner ${esc(row.label)}"><div style="min-width:0;flex:1"><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><b>${esc(row.label)}</b>${featureStatePill(row)}<span class="small muted">${esc(row.feature_type)}</span></div><div class="small muted" style="margin-top:3px">${esc(row.description||'')}</div><div class="small muted" style="margin-top:5px">Clé : ${esc(row.feature_key)} · modifiée ${esc(fmtD(row.updated_at)||'—')}${hidden?` · masquée : ${esc(hidden)}`:''}</div>${protection}</div></div><div class="frow" style="margin-top:10px;gap:6px">${!row.protected&&row.status!=='deleted'?`<button class="btn sm ${row.effective_status==='active'?'sec':''}" data-feature-key="${esc(row.feature_key)}" onclick="A.featureAction(this.dataset.featureKey,'activate')">Activer</button><button class="btn sm sec" data-feature-key="${esc(row.feature_key)}" onclick="A.featureAction(this.dataset.featureKey,'disable')">Désactiver</button><button class="btn sm sec" data-feature-key="${esc(row.feature_key)}" onclick="A.featureAction(this.dataset.featureKey,'suspend')">Suspendre</button><button class="btn sm sec" data-feature-key="${esc(row.feature_key)}" onclick="A.featurePlacement(this.dataset.featureKey,'hide')">Masquer</button><button class="btn sm sec" data-feature-key="${esc(row.feature_key)}" onclick="A.featurePlacement(this.dataset.featureKey,'show')">Afficher</button>${ME&&ME.role==='pdg'?`<button class="btn sm warn" data-feature-key="${esc(row.feature_key)}" onclick="A.featureAction(this.dataset.featureKey,'delete')">Supprimer définitivement</button>`:''}`:'<span class="small muted">Aucune action destructive autorisée.</span>'}</div>${row.feature_type==='admin_menu'&&row.status!=='deleted'?`<div class="small muted" style="margin-top:8px">Ordre du menu <input type="number" min="0" max="100000" value="${Number(row.sort_order)||0}" style="width:76px" data-feature-order="${esc(row.feature_key)}"><button class="btn sm sec" data-feature-key="${esc(row.feature_key)}" onclick="A.featureOrder(this.dataset.featureKey)">Réorganiser</button></div>`:''}</article>`;};
+  shell(`<h1>🧭 Gestion des fonctionnalités</h1>
+    <div class="panel"><div class="small muted">Centre de contrôle des modules réellement raccordés aux interfaces et routes serveur. Désactiver ou suspendre conserve les données. Une suppression est archivante, bloque l’accès technique et requiert toujours le mot de passe actuel du PDG.</div><div class="frow" style="margin-top:10px"><input id="feature-q" placeholder="Rechercher une fonctionnalité…" value="${esc(q)}" style="flex:2;min-width:210px"><select id="feature-space" style="flex:1"><option value="">Tous les espaces</option>${(data.spaces||[]).map(x=>`<option value="${esc(x)}" ${space===x?'selected':''}>${esc(x)}</option>`).join('')}</select><select id="feature-state" style="flex:1"><option value="">Tous les états</option>${[['active','Actif'],['disabled','Désactivé'],['suspended','Suspendu'],['deleted','Supprimé']].map(([v,l])=>`<option value="${v}" ${state===v?'selected':''}>${l}</option>`).join('')}</select><button class="btn sm" onclick="A.featureFilter()">Filtrer</button></div></div>
+    <div class="panel"><div class="frow"><b style="flex:1">Actions groupées</b><select id="feature-bulk-action"><option value="disable">Désactiver</option><option value="activate">Activer</option><option value="suspend">Suspendre</option><option value="hide">Masquer à des emplacements</option><option value="show">Afficher à des emplacements</option>${data.can_delete?'<option value="delete">Supprimer définitivement</option>':''}</select><button class="btn" onclick="A.featureBulk()">Appliquer à la sélection</button></div><div class="small muted mt">Les suppressions groupées affichent la liste exacte et demandent une unique vérification du mot de passe PDG.</div></div>
+    ${[...groups.entries()].map(([group,list])=>`<section style="margin:18px 0"><h2 style="margin:0 0 8px">${esc(group)} <span class="small muted">(${list.length})</span></h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:10px">${list.map(card).join('')}</div></section>`).join('')||'<div class="panel muted">Aucune fonctionnalité ne correspond au filtre.</div>'}
+    <div class="panel"><h2 style="margin-top:0">Historique des décisions</h2><div class="small muted mb">Les échecs de mot de passe et les suppressions vérifiées sont journalisés sans jamais enregistrer le mot de passe.</div><div style="max-height:420px;overflow:auto"><table><tr><th>Date</th><th>Fonctionnalité</th><th>Action</th><th>Administrateur</th><th>Motif / sécurité</th></tr>${(history.items||[]).slice(0,200).map(h=>`<tr><td class="small">${esc(fmtD(h.created_at)||'')}</td><td><b>${esc(h.label)}</b><br><span class="small muted">${esc(h.space)}</span></td><td>${esc(h.action)}</td><td>${esc(h.actor_name||'Système')}</td><td class="small">${esc(h.reason||'—')}<br><span class="${h.security_result==='verified'?'ok':h.security_result==='failed'?'bad':'muted'}">${esc(h.security_result==='verified'?'Mot de passe vérifié':h.security_result==='failed'?'Mot de passe refusé':'Aucune vérification requise')}</span></td></tr>`).join('')||'<tr><td colspan="5" class="muted">Aucune décision enregistrée.</td></tr>'}</table></div></div>`);
+};
 
 /* ---------- Tarifs et estimations intelligentes (PDG) ---------- */
 views.estimates = async () => {
@@ -1161,6 +1200,23 @@ views.cabine = async () => {
 
 
 const A = {
+  featureKeys() { return [...document.querySelectorAll('.feature-check:checked')].map(x=>x.value); },
+  featureFilter() { sessionStorage.setItem('adm_feature_q',(document.getElementById('feature-q')||{}).value||'');sessionStorage.setItem('adm_feature_space',(document.getElementById('feature-space')||{}).value||'');sessionStorage.setItem('adm_feature_state',(document.getElementById('feature-state')||{}).value||'');render(); },
+  async featureApply(keys, action, extra={}) { try { const r=await api('/admin/features/action',{method:'POST',body:{keys,action,...extra}}); FEATURE_DATA=null; toast((r.keys||keys).length+' fonctionnalité(s) mise(s) à jour.','ok'); render(); } catch(e) { toast(e.message,'err'); } },
+  featureAction(key, action) {
+    if(action==='delete') return this.featureDelete([key]);
+    if(action==='suspend') return this.featureSuspend([key]);
+    const reason=prompt('Motif facultatif :')||''; this.featureApply([key],action,{reason});
+  },
+  featureOrder(key) { const field=document.querySelector('[data-feature-order="'+key+'"]'); if(!field)return; this.featureApply([key],'order',{sort_order:field.value,reason:'Réorganisation du menu'}); },
+  featureBulk() { const keys=this.featureKeys(), action=(document.getElementById('feature-bulk-action')||{}).value;if(!keys.length)return toast('Sélectionnez au moins une fonctionnalité.','err');if(action==='delete')return this.featureDelete(keys);if(action==='suspend')return this.featureSuspend(keys);if(['hide','show'].includes(action))return this.featurePlacementMany(keys,action);const reason=prompt('Motif facultatif pour l’action groupée :')||'';this.featureApply(keys,action,{reason}); },
+  featureSuspend(keys) { openModal(`<h3>Suspendre temporairement</h3><p class="small muted">La suspension bloque les interfaces et routes liées jusqu’à la réactivation. Laissez la fin vide pour une suspension manuelle.</p><label>Début <input id="fc-suspend-from" type="datetime-local" value="${new Date().toISOString().slice(0,16)}"></label><label>Réactivation automatique <input id="fc-suspend-until" type="datetime-local"></label><label>Motif facultatif</label><textarea id="fc-reason" rows="3"></textarea><div class="btn-row"><button class="btn warn" onclick="A.featureSuspendConfirm()">Suspendre ${keys.length} élément(s)</button><button class="btn sec" onclick="closeModal()">Annuler</button></div>`);window._featurePending={keys}; },
+  featureSuspendConfirm() { const p=window._featurePending||{}, from=(document.getElementById('fc-suspend-from')||{}).value,until=(document.getElementById('fc-suspend-until')||{}).value,reason=(document.getElementById('fc-reason')||{}).value;if(!from)return toast('Indiquez une date de suspension.','err');closeModal();this.featureApply(p.keys||[],'suspend',{suspend_from:from,suspend_until:until||null,reason}); },
+  featurePlacement(key,action) { this.featurePlacementMany([key],action); },
+  featurePlacementMany(keys,action) { const all=(FEATURE_DATA&&FEATURE_DATA.placements)||['home','main_menu','account','pro','admin_menu'];openModal(`<h3>${action==='hide'?'Masquer':'Afficher'} à des emplacements</h3><p class="small muted">Le module reste conservé. Seuls les emplacements sélectionnés changent.</p><div class="choices">${all.map(x=>`<label class="check-line"><input class="fc-placement" type="checkbox" value="${esc(x)}" checked> ${esc(x)}</label>`).join('')}</div><label>Motif facultatif</label><textarea id="fc-place-reason" rows="2"></textarea><div class="btn-row"><button class="btn" onclick="A.featurePlacementConfirm('${action}')">Confirmer</button><button class="btn sec" onclick="closeModal()">Annuler</button></div>`);window._featurePending={keys}; },
+  featurePlacementConfirm(action) { const p=window._featurePending||{},placements=[...document.querySelectorAll('.fc-placement:checked')].map(x=>x.value),reason=(document.getElementById('fc-place-reason')||{}).value;if(!placements.length)return toast('Choisissez au moins un emplacement.','err');closeModal();this.featureApply(p.keys||[],action,{placements,reason}); },
+  async featureDelete(keys) { try { const r=await api('/admin/features/delete-confirmation',{method:'POST',body:{keys}});openModal(`<h3>Suppression définitive protégée</h3><p class="small bad">Les éléments seront archivés définitivement et leurs routes seront bloquées. Cette action ne peut pas être annulée.</p><div class="panel small">${(r.items||[]).map(x=>`<b>${esc(x.label)}</b><br><span class="muted">${esc(x.space)}</span>`).join('<hr>')}</div><label>Motif facultatif</label><textarea id="fc-delete-reason" rows="2"></textarea><label>Mot de passe actuel du PDG</label><input id="fc-delete-password" type="password" autocomplete="current-password"><div class="btn-row"><button class="btn warn" onclick="A.featureDeleteConfirm('${esc(r.confirmation_id)}')">Vérifier et supprimer ${keys.length} élément(s)</button><button class="btn sec" onclick="closeModal()">Annuler</button></div><div class="small muted mt">Confirmation valable jusqu’au ${esc(fmtD(r.expires_at))}. Cinq essais maximum.</div>`);window._featurePending={keys};}catch(e){toast(e.message,'err');} },
+  async featureDeleteConfirm(confirmationId) { const p=window._featurePending||{},password=(document.getElementById('fc-delete-password')||{}).value,reason=(document.getElementById('fc-delete-reason')||{}).value;if(!password)return toast('Le mot de passe PDG est obligatoire.','err');try{await api('/admin/features/action',{method:'POST',body:{keys:p.keys||[],action:'delete',confirmation_id:confirmationId,password,reason}});closeModal();toast('Suppression définitive enregistrée et accès bloqué.','ok');render();}catch(e){const f=document.getElementById('fc-delete-password');if(f)f.value='';toast(e.message,'err');} },
   async userDetail(id) {
     try {
       const u = await api('/admin/users/' + id);
@@ -2290,12 +2346,13 @@ async function render() {
   if (!TOKEN) { renderLogin(); return; }
   try {
     if (!ME) ME = await api('/me');
-    STATS = await api('/admin/stats');
+    const boot=await Promise.all([api('/admin/stats'),api('/admin/features')]); STATS=boot[0]; FEATURE_DATA=boot[1];
     const f = parseInt(STATS.admin_font_size || 16, 10); // taille du tableau de bord définie par le PDG
     document.body.style.zoom = f === 16 ? '' : String(f / 16);
   } catch (e) { return; }
   const fn = views[VIEW] || views.dashboard;
-  try { await fn(); if(['settings','commerce','estimates','catalog','questions','rules','maintenance','prooptions','staff','ads'].includes(VIEW)) adminArmDraft(document.getElementById('root'),true); }
+  if (!adminFeatureVisible(VIEW)) { shell(`<h1>Fonctionnalité indisponible</h1><div class="panel">Cette rubrique a été désactivée, suspendue ou masquée par la direction. Son accès est aussi bloqué côté serveur.</div>`); return; }
+  try { await fn(); if(['settings','commerce','estimates','catalog','questions','rules','maintenance','prooptions','staff','ads','features'].includes(VIEW)) adminArmDraft(document.getElementById('root'),true); }
   catch (e) { shell(`<h1>Erreur</h1><div class="panel">${esc(e.message)}<br><button class="btn" style="margin-top:10px" onclick="render()">Réessayer</button></div>`); }
 }
 window.render = render;

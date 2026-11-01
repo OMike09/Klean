@@ -299,11 +299,12 @@ const PERM_KEYS = {
   parametres: 'Paramètres généraux',
   frequentation: 'Statistiques de fréquentation',
   journal: 'Journal des actions',
+  feature_management: 'Gestion centralisée des fonctionnalités',
 };
 // Valeurs par défaut par rôle (modifiables par le PDG, compte par compte)
 const DEFAULT_PERMS = {
   pdg: Object.keys(PERM_KEYS),
-  admin: Object.keys(PERM_KEYS).filter(k => !['comptes_suppr','reassign_missions'].includes(k)),
+  admin: Object.keys(PERM_KEYS).filter(k => !['comptes_suppr','reassign_missions','feature_management'].includes(k)),
   gestionnaire: ['comptes', 'pros', 'missions', 'contenu', 'frequentation'],
   agent: ['missions'],
 };
@@ -327,6 +328,129 @@ function pdgOnly(req, res, next) {
   if (req.user.role !== 'pdg') return res.status(403).json({ error: 'Action réservée au PDG.' });
   next();
 }
+
+// ---------- CENTRE UNIVERSEL DES FONCTIONNALITÉS ----------
+// Ce catalogue est la source de contrôle réellement consommée par les interfaces et le
+// middleware API. Les flags ne doublonnent pas les paramètres métier : ils gouvernent
+// l'accès/affichage des modules existants, sans déplacer leurs données.
+const FEATURE_CATALOG = [
+  ['core.auth','Authentification','Connexion, jetons et contrôle de session.','Sécurité et maintenance','security',true,['auth']],
+  ['core.password','Vérification de mot de passe','Changement et vérification sécurisée des mots de passe.','Sécurité et maintenance','security',true,['auth','account']],
+  ['core.security','Contrôles de sécurité','Autorisations, protections serveur et audit.','Sécurité et maintenance','security',true,['server']],
+  ['core.backup','Sauvegarde et récupération','Sauvegarde base/fichiers et restauration persistante.','Sécurité et maintenance','security',true,['server']],
+  ['public.home','Page d’accueil','Accueil, raccourcis et cartes publiques.','Page d’accueil','page',false,['home','main_menu']],
+  ['public.search','Recherche de services','Recherche textuelle et résultats de services.','Page d’accueil','tool',false,['home','main_menu']],
+  ['module.services','Services et catégories','Catalogue public, catégories, prestations, tâches et demandes.','Services et catégories','module',false,['home','main_menu','account']],
+  ['public.account','Compte utilisateur','Profil, adresses, réglages et compte utilisateur.','Compte utilisateur','module',false,['account','main_menu']],
+  ['public.notifications','Notifications','Centre de notifications et badges.','Notifications et annonces','module',false,['account','main_menu']],
+  ['public.messages','Messagerie','Conversations liées aux demandes et support.','Notifications et annonces','module',false,['account','main_menu']],
+  ['module.missions','Demandes et missions','Création, suivi et traitement des demandes de service.','Services et catégories','module',false,['account','pro']],
+  ['module.payments','Paiements et transactions','Paiements, commissions, reçus et historiques associés.','Paiements et transactions','module',false,['account','pro']],
+  ['public.reviews','Évaluations','Avis et évaluations de missions.','Autres modules et outils existants','module',false,['account','pro']],
+  ['module.urgence','Urgences','Répertoire et demandes d’assistance urgente.','Sécurité et maintenance','module',false,['home','main_menu']],
+  ['module.avis','Avis de recherche','Publication et consultation des avis de recherche.','Notifications et annonces','module',false,['home','main_menu']],
+  ['module.jobs','Trouver ou proposer un job','Offres, candidatures et publication de jobs.','Autres modules et outils existants','module',false,['home','main_menu']],
+  ['module.ecole','École et famille','Espace école et famille.','Autres modules et outils existants','module',false,['account']],
+  ['module.braderie','Articles seconde main','Catalogue, publication, espace vendeur et alertes Braderie.','Articles seconde main','module',false,['home','account','main_menu']],
+  ['module.cabine','Klean Kbine','Demandes Klean Kbine à distance et offres administrées.','Klean Kbine','module',false,['home','account','main_menu']],
+  ['module.games','Jeux et divertissements','Quiz, Flip Fizz, Kdo et sessions associées.','Jeux et divertissements','module',false,['home','main_menu']],
+  ['module.ads','Publicités et annonces publiques','Diffusion de publicités, promotions et annonces.','Gestion des publicités','module',false,['home','main_menu']],
+  ['module.voice_search','Recherche vocale','Recherche par transcription vocale.','Page d’accueil','tool',false,['home']],
+  ['pro.space','Espace professionnel','Tableau professionnel, profil et disponibilité.','Espace professionnel','module',false,['account','pro']],
+  ['pro.visibility','Visibilité professionnelle','Formules et souscriptions de visibilité.','Espace professionnel','option',false,['pro']],
+  ['pro.advertising','Publicité professionnelle','Création de campagnes depuis l’espace professionnel.','Espace professionnel','option',false,['pro']],
+  ['admin.dashboard','Vue d’ensemble administration','Indicateurs et raccourcis du tableau de bord.','Tableau de bord PDG','admin_menu',false,['admin_menu']],
+  ['admin.frequentation','Statistiques de fréquentation','Activité, audiences et indicateurs de fréquentation.','Statistiques et rapports','admin_menu',false,['admin_menu']],
+  ['admin.users','Gestion des utilisateurs','Comptes, accès et états des utilisateurs.','Gestion des utilisateurs','admin_menu',false,['admin_menu']],
+  ['admin.pros','Gestion des professionnels','Validation et suivi des professionnels.','Gestion des professionnels','admin_menu',false,['admin_menu']],
+  ['admin.catalog','Services & catégories (administration)','Catalogue, grandes catégories, villes et photos.','Services et catégories','admin_menu',false,['admin_menu']],
+  ['admin.questions','Questions dynamiques','Questions configurables des demandes.','Services et catégories','admin_menu',false,['admin_menu']],
+  ['admin.missions','Demandes & missions (administration)','Pilotage opérationnel des demandes et missions.','Tableau de bord gestionnaire','admin_menu',false,['admin_menu']],
+  ['admin.payments','Paiements & commissions','Paiements, commissions et rapprochements.','Paiements et transactions','admin_menu',false,['admin_menu']],
+  ['admin.finances','Finances & revenus','Rapports financiers et revenus.','Statistiques et rapports','admin_menu',false,['admin_menu']],
+  ['admin.ads','Gestion des publicités','Publicités, promotions et statistiques de diffusion.','Gestion des publicités','admin_menu',false,['admin_menu']],
+  ['admin.bandeau','Annonces et bande défilante','Messages, bandeau et information publique.','Notifications et annonces','admin_menu',false,['admin_menu']],
+  ['admin.support','Support Klean Services','Conversations de support et réponses.','Notifications et annonces','admin_menu',false,['admin_menu']],
+  ['admin.broadcast','Messages généraux','Messages ciblés et communication plateforme.','Notifications et annonces','admin_menu',false,['admin_menu']],
+  ['admin.rules','Règles & conditions','Textes, règles d’utilisation et conditions.','Paramètres','admin_menu',false,['admin_menu']],
+  ['admin.reports','Signalements','Modération, signalements et traitement.','Sécurité et maintenance','admin_menu',false,['admin_menu']],
+  ['admin.urgences','Urgences (administration)','Contacts vérifiés et demandes urgentes.','Sécurité et maintenance','admin_menu',false,['admin_menu']],
+  ['admin.files','Gestion des fichiers','Cycle de conservation, archive et récupération de fichiers.','Sécurité et maintenance','admin_menu',false,['admin_menu']],
+  ['admin.avis','Avis de recherche (administration)','Modération des avis de recherche.','Notifications et annonces','admin_menu',false,['admin_menu']],
+  ['admin.jobs','Jobs (administration)','Modération et gestion des jobs.','Autres modules et outils existants','admin_menu',false,['admin_menu']],
+  ['admin.braderie','Articles seconde main (administration)','Paramètres, plans et pilotage Braderie.','Articles seconde main','admin_menu',false,['admin_menu']],
+  ['admin.cabine','Klean Kbine (administration)','Configuration des offres et garde-fous Kbine.','Klean Kbine','admin_menu',false,['admin_menu']],
+  ['admin.ecole','École & famille (administration)','Gestion de l’espace école et famille.','Autres modules et outils existants','admin_menu',false,['admin_menu']],
+  ['admin.voice_search','Recherche vocale (administration)','Configuration de la recherche vocale.','Page d’accueil','admin_menu',false,['admin_menu']],
+  ['admin.games','Jeux (administration)','Sessions et contenus de jeux.','Jeux et divertissements','admin_menu',false,['admin_menu']],
+  ['admin.staff','Équipe & permissions','Rôles, agents, gestionnaires et permissions.','Gestion des agents et gestionnaires','admin_menu',false,['admin_menu']],
+  ['admin.prooptions','Options comptes pro','Options configurables des comptes professionnels.','Espace professionnel','admin_menu',false,['admin_menu']],
+  ['admin.maintenance','Maintenance / suspension','Maintenance et suspension globale.','Sécurité et maintenance','admin_menu',false,['admin_menu']],
+  ['admin.journal','Journal des actions','Historique administratif et traçabilité.','Statistiques et rapports','admin_menu',false,['admin_menu']],
+  ['admin.estimates','Tarifs & estimations','Règles de prix et estimations intelligentes.','Services et catégories','admin_menu',false,['admin_menu']],
+  ['admin.commerce','Paramètres commerciaux','Réglages commerciaux et commissions.','Paiements et transactions','admin_menu',false,['admin_menu']],
+  ['admin.settings','Paramètres généraux','Réglages généraux de la plateforme.','Paramètres','admin_menu',false,['admin_menu']],
+  ['admin.feature_management','Gestion des fonctionnalités','Centre central de contrôle des fonctionnalités et options.','Tableau de bord PDG','admin_menu',true,['admin_menu']],
+];
+const FEATURE_BY_KEY = new Map(FEATURE_CATALOG.map(([feature_key,label,description,space,feature_type,protectedFeature,placements],sort_order) => [feature_key,{feature_key,label,description,space,feature_type,protected:protectedFeature?1:0,placements,sort_order}]));
+function seedFeatureRegistry() {
+  const insert=db.prepare(`INSERT INTO feature_controls(feature_key,label,description,space,feature_type,protected,sort_order)
+    VALUES(?,?,?,?,?,?,?) ON CONFLICT(feature_key) DO UPDATE SET label=excluded.label,description=excluded.description,space=excluded.space,feature_type=excluded.feature_type,protected=MAX(feature_controls.protected,excluded.protected),sort_order=excluded.sort_order`);
+  const placement=db.prepare('INSERT OR IGNORE INTO feature_control_placements(feature_key,placement,visible) VALUES(?,?,1)');
+  for(const row of FEATURE_BY_KEY.values()) { insert.run(row.feature_key,row.label,row.description,row.space,row.feature_type,row.protected,row.sort_order); (row.placements||[]).forEach(place=>placement.run(row.feature_key,place)); }
+}
+seedFeatureRegistry();
+function featureNow() { return new Date().toISOString().slice(0,19).replace('T',' '); }
+function refreshFeatureSuspensions() { db.prepare("UPDATE feature_controls SET status='active',suspend_from=NULL,suspend_until=NULL,updated_at=datetime('now') WHERE status='suspended' AND suspend_until IS NOT NULL AND suspend_until<=datetime('now')").run(); }
+function featureEffectiveState(row, now=featureNow()) {
+  if(!row) return 'active';
+  if(row.status!=='suspended') return row.status;
+  if(row.suspend_from && row.suspend_from>now) return 'active';
+  if(row.suspend_until && row.suspend_until<=now) return 'active';
+  return 'suspended';
+}
+function featurePlacementVisible(key, placement) {
+  if(!placement) return true;
+  const row=db.prepare('SELECT visible FROM feature_control_placements WHERE feature_key=? AND placement=?').get(key,placement);
+  return !row || !!row.visible;
+}
+function featureAvailable(key, placement) {
+  refreshFeatureSuspensions();
+  const row=db.prepare('SELECT * FROM feature_controls WHERE feature_key=?').get(key);
+  return featureEffectiveState(row)==='active' && featurePlacementVisible(key,placement);
+}
+function featureRows(includeDeleted=true) {
+  refreshFeatureSuspensions();
+  const placements=db.prepare('SELECT feature_key,placement,visible,updated_at FROM feature_control_placements').all();
+  const byKey=new Map(); placements.forEach(p=>{if(!byKey.has(p.feature_key))byKey.set(p.feature_key,[]);byKey.get(p.feature_key).push(p);});
+  return db.prepare('SELECT * FROM feature_controls '+(includeDeleted?'':'WHERE status<>\'deleted\' ')+'ORDER BY space,sort_order,label').all().map(row=>({ ...row,effective_status:featureEffectiveState(row),placements:byKey.get(row.feature_key)||[] }));
+}
+function featurePublicPayload() { return featureRows(false).filter(f=>!f.feature_key.startsWith('admin.')).map(f=>({key:f.feature_key,status:f.effective_status,placements:f.placements.filter(p=>p.visible).map(p=>p.placement),updated_at:f.updated_at})); }
+const FEATURE_API_RULES = [
+  [/^\/admin\/features(?:\/|$)/,'admin.feature_management'],
+  [/^\/admin\/(catalog|categories|sous-categories|services|taches|villes|communes|grand-categories|search-terms)/,'admin.catalog'],
+  [/^\/admin\/questions/,'admin.questions'], [/^\/admin\/missions/,'admin.missions'], [/^\/admin\/(payments|transactions|commissions)/,'admin.payments'], [/^\/admin\/(finances|visibilite)/,'admin.finances'],
+  [/^\/admin\/ads/,'admin.ads'], [/^\/admin\/annonces|^\/admin\/bandeau/,'admin.bandeau'], [/^\/admin\/(support)/,'admin.support'], [/^\/admin\/(broadcast|general-messages)/,'admin.broadcast'],
+  [/^\/admin\/(rules)/,'admin.rules'], [/^\/admin\/(signalements)/,'admin.reports'], [/^\/admin\/(urgences|emergency-contacts)/,'admin.urgences'], [/^\/admin\/files/,'admin.files'],
+  [/^\/admin\/(avis-recherche|avis-categories)/,'admin.avis'], [/^\/admin\/(jobs|job-offers)/,'admin.jobs'], [/^\/admin\/braderie/,'admin.braderie'], [/^\/admin\/cabine/,'admin.cabine'],
+  [/^\/admin\/ecole-famille/,'admin.ecole'], [/^\/admin\/voice-search/,'admin.voice_search'], [/^\/admin\/(quiz|kdo|game-plays|quiz-sessions)/,'admin.games'],
+  [/^\/admin\/staff/,'admin.staff'], [/^\/admin\/pro-options/,'admin.prooptions'], [/^\/admin\/maintenance/,'admin.maintenance'], [/^\/admin\/journal/,'admin.journal'],
+  [/^\/admin\/(estimation-rules|estimation-config|estimation-test)/,'admin.estimates'], [/^\/admin\/commerce/,'admin.commerce'], [/^\/admin\/settings/,'admin.settings'], [/^\/admin\/frequentation/,'admin.frequentation'],
+  [/^\/grand-categories|^\/services|^\/catalogue|^\/pro-skill-catalogue|^\/estimates/,'module.services'], [/^\/search/,'public.search'], [/^\/pro(?:\/|$)/,'pro.space'],
+  [/^\/missions/,'module.missions'], [/^\/payments|^\/transactions|^\/commerce/,'module.payments'], [/^\/reviews/,'public.reviews'], [/^\/urgence/,'module.urgence'], [/^\/avis-recherche/,'module.avis'], [/^\/jobs|^\/job-offers/,'module.jobs'],
+  [/^\/ecole-famille/,'module.ecole'], [/^\/braderie/,'module.braderie'], [/^\/cabine/,'module.cabine'], [/^\/games|^\/quiz|^\/kdo|^\/flip/,'module.games'], [/^\/voice-search/,'module.voice_search'],
+  [/^\/ads|^\/ad-views|^\/ad-clicks|^\/ad-interactions|^\/annonces/,'module.ads'], [/^\/pub/,'pro.advertising'], [/^\/visibilite/,'pro.visibility'],
+  [/^\/notifications|^\/badges/,'public.notifications'], [/^\/conversations|^\/support\/conversations|^\/messages/,'public.messages'], [/^\/addresses/,'public.account']
+];
+function featureForApiPath(pathname) { const row=FEATURE_API_RULES.find(([re])=>re.test(pathname)); return row&&row[1]||null; }
+function featureGate(req,res,next) {
+  const key=featureForApiPath(req.path); if(!key || featureAvailable(key)) return next();
+  const row=FEATURE_BY_KEY.get(key)||{}; return res.status(423).json({error:'La fonctionnalité « '+(row.label||key)+' » est actuellement indisponible.',code:'FEATURE_UNAVAILABLE',feature:key});
+}
+// Ce middleware précède toutes les routes API métier. Authentification, sécurité, maintenance
+// et le centre de fonctionnalités lui-même restent toujours accessibles par conception protégée.
+app.use('/api', featureGate);
+app.get('/api/features/public', (req,res)=>res.json({items:featurePublicPayload(),generated_at:featureNow()}));
 function reassignMissionAllowed(req,res,next) {
   if (!hasPerm(req.user,'reassign_missions')) return res.status(403).json({ error:'Réattribution réservée au PDG ou à un compte auquel il a accordé cette permission.' });
   next();
@@ -3498,6 +3622,7 @@ A.use(auth, admin);
 
 // Chaque section du tableau de bord correspond à une permission (le PDG a toujours tout)
 const PERM_ROUTES = [
+  [/^\/features/, 'feature_management'], // centre universel ; suppression reste PDG + mot de passe
   [/^\/staff/, 'PDG'], // gestion de l'équipe : réservé au PDG
   [/^\/pro-options/, 'PDG'], // options professionnelles : choix de direction
   [/^\/maintenance/, 'PDG'], // mode maintenance : réservé au PDG
@@ -3566,7 +3691,10 @@ const ACTION_LABELS = [
 A.use((req, res, next) => {
   // L'écran « Questions dynamiques » lit le catalogue : la permission « questions » suffit pour la LECTURE du catalogue
   const lectureCatalogue = req.method === 'GET' && /^\/catalog/.test(req.path) && (hasPerm(req.user, 'catalogue') || hasPerm(req.user, 'questions'));
-  const rule = lectureCatalogue ? null : PERM_ROUTES.find(([re]) => re.test(req.path));
+  // La lecture du registre sert aussi à masquer les menus désactivés chez les autres rôles ;
+  // aucune écriture n'est autorisée sans la permission dédiée (et la suppression reste PDG).
+  const lectureFeatures = req.method === 'GET' && /^\/features(?:\/|$)/.test(req.path);
+  const rule = (lectureCatalogue || lectureFeatures) ? null : PERM_ROUTES.find(([re]) => re.test(req.path));
   if (rule) {
     if (rule[1] === 'PDG') { if (req.user.role !== 'pdg') return res.status(403).json({ error: 'Action réservée au PDG.' }); }
     else if (!hasPerm(req.user, rule[1])) return res.status(403).json({ error: 'Vous n\u2019avez pas la permission « ' + (PERM_KEYS[rule[1]] || rule[1]) + ' ». Contactez le PDG.' });
@@ -3589,6 +3717,108 @@ A.use((req, res, next) => {
     });
   }
   next();
+});
+
+// ----- Centre universel de gestion des fonctionnalités -----
+const FEATURE_PLACEMENTS = new Set(['home','main_menu','account','pro','admin_menu','server','auth']);
+function featureManagedKeys(raw) {
+  const keys=[...new Set((Array.isArray(raw)?raw:[]).map(v=>String(v||'').trim()).filter(Boolean))];
+  if(!keys.length || keys.length>100) throw new Error('Sélectionnez entre 1 et 100 fonctionnalités.');
+  if(keys.some(key=>!FEATURE_BY_KEY.has(key))) throw new Error('La sélection contient une fonctionnalité inconnue.');
+  return keys.sort();
+}
+function featureDate(raw,label) {
+  if(raw===undefined || raw===null || raw==='') return null;
+  const ms=Date.parse(String(raw)); if(!Number.isFinite(ms)) throw new Error(label+' invalide.');
+  return new Date(ms).toISOString().slice(0,19).replace('T',' ');
+}
+function featureSnapshot(row) { return { status:row.status,suspend_from:row.suspend_from||null,suspend_until:row.suspend_until||null,reason:row.reason||null,sort_order:Number(row.sort_order||0),deleted_at:row.deleted_at||null }; }
+function featureHistory(featureKey,action,oldState,newState,placements,actor,reason,security='not_required') {
+  db.prepare(`INSERT INTO feature_control_history(feature_key,action,old_state,new_state,placements,reason,actor_id,actor_name,security_result)
+    VALUES(?,?,?,?,?,?,?,?,?)`).run(featureKey,action,JSON.stringify(oldState||{}),JSON.stringify(newState||{}),JSON.stringify(placements||[]),reason||null,actor&&actor.id||null,actor&&actor.name||null,security);
+}
+function featureControlBroadcast() { for(const [userId] of sseClients) push(userId,'feature-control',{changed:true}); }
+function featureActionAllowed(row,action) {
+  if(!row) throw new Error('Fonctionnalité introuvable.');
+  if(row.status==='deleted' && action!=='delete') throw new Error('« '+row.label+' » a été supprimée définitivement et ne peut plus être réactivée.');
+  if(row.protected && ['disable','suspend','hide','delete','archive'].includes(action)) throw new Error('« '+row.label+' » est une protection essentielle et ne peut pas être retirée.');
+}
+function featureActionTransaction(keys,body,actor,security='not_required') {
+  const action=String(body.action||''), reason=String(body.reason||'').trim().slice(0,1000)||null;
+  if(!['activate','disable','suspend','hide','show','delete','order'].includes(action)) throw new Error('Action de fonctionnalité invalide.');
+  const placements=[...new Set((Array.isArray(body.placements)?body.placements:[]).map(v=>String(v||'').trim()).filter(v=>FEATURE_PLACEMENTS.has(v)))];
+  if(['hide','show'].includes(action) && !placements.length) throw new Error('Choisissez au moins un emplacement à modifier.');
+  const suspendFrom=action==='suspend'?featureDate(body.suspend_from,'Date de suspension'):null;
+  const suspendUntil=action==='suspend'?featureDate(body.suspend_until,'Date de réactivation'):null;
+  if(action==='suspend' && suspendUntil && suspendFrom && suspendUntil<=suspendFrom) throw new Error('La réactivation doit suivre la suspension.');
+  const rows=keys.map(key=>db.prepare('SELECT * FROM feature_controls WHERE feature_key=?').get(key)); rows.forEach(row=>featureActionAllowed(row,action));
+  const update=db.prepare("UPDATE feature_controls SET status=?,suspend_from=?,suspend_until=?,reason=?,deleted_at=?,deleted_by=?,updated_at=datetime('now') WHERE feature_key=?");
+  const placementUpdate=db.prepare(`INSERT INTO feature_control_placements(feature_key,placement,visible,updated_at,updated_by) VALUES(?,?,?,datetime('now'),?)
+    ON CONFLICT(feature_key,placement) DO UPDATE SET visible=excluded.visible,updated_at=excluded.updated_at,updated_by=excluded.updated_by`);
+  const orderUpdate=db.prepare("UPDATE feature_controls SET sort_order=?,updated_at=datetime('now') WHERE feature_key=?");
+  for(const row of rows) {
+    const old=featureSnapshot(row);
+    if(action==='activate') update.run('active',null,null,reason,null,null,row.feature_key);
+    else if(action==='disable') update.run('disabled',null,null,reason,null,null,row.feature_key);
+    else if(action==='suspend') update.run('suspended',suspendFrom||featureNow(),suspendUntil,reason,null,null,row.feature_key);
+    else if(action==='delete') update.run('deleted',null,null,reason,featureNow(),actor.id,row.feature_key);
+    else if(action==='order') { const n=Math.max(0,Math.min(100000,Number(body.sort_order))); if(!Number.isFinite(n)) throw new Error('Ordre invalide.'); orderUpdate.run(n,row.feature_key); }
+    else placements.forEach(place=>placementUpdate.run(row.feature_key,place,action==='show'?1:0,actor.id));
+    const current=db.prepare('SELECT * FROM feature_controls WHERE feature_key=?').get(row.feature_key);
+    featureHistory(row.feature_key,action,old,featureSnapshot(current),placements,actor,reason,security);
+  }
+  return rows.map(r=>r.feature_key);
+}
+A.get('/features', (req,res) => {
+  const q=String(req.query.q||'').trim().toLocaleLowerCase('fr'), space=String(req.query.space||''), status=String(req.query.status||'');
+  let items=featureRows(true);
+  if(q) items=items.filter(x=>(x.label+' '+x.description+' '+x.feature_key+' '+x.space).toLocaleLowerCase('fr').includes(q));
+  if(space) items=items.filter(x=>x.space===space); if(status) items=items.filter(x=>x.effective_status===status || x.status===status);
+  res.json({items,spaces:[...new Set(featureRows(true).map(x=>x.space))].sort((a,b)=>a.localeCompare(b,'fr')),placements:[...FEATURE_PLACEMENTS],can_delete:req.user.role==='pdg'});
+});
+A.get('/features/history', (req,res) => {
+  const q=String(req.query.q||'').trim().toLocaleLowerCase('fr'), feature=String(req.query.feature_key||''), action=String(req.query.action||'');
+  let rows=db.prepare('SELECT * FROM feature_control_history ORDER BY id DESC LIMIT 1000').all().map(row=>({ ...row,label:(FEATURE_BY_KEY.get(row.feature_key)||{}).label||row.feature_key,space:(FEATURE_BY_KEY.get(row.feature_key)||{}).space||'Autres modules et outils existants' }));
+  if(feature) rows=rows.filter(r=>r.feature_key===feature); if(action) rows=rows.filter(r=>r.action===action);
+  if(q) rows=rows.filter(r=>(r.label+' '+r.feature_key+' '+r.action+' '+(r.reason||'')+' '+(r.actor_name||'')).toLocaleLowerCase('fr').includes(q));
+  res.json({items:rows.slice(0,500)});
+});
+A.post('/features/delete-confirmation', pdgOnly, (req,res) => {
+  let keys; try { keys=featureManagedKeys((req.body||{}).keys); } catch(e) { return res.status(400).json({error:e.message}); }
+  const rows=keys.map(key=>db.prepare('SELECT * FROM feature_controls WHERE feature_key=?').get(key));
+  try { rows.forEach(row=>featureActionAllowed(row,'delete')); } catch(e) { return res.status(400).json({error:e.message}); }
+  const id='fdc_'+crypto.randomBytes(18).toString('hex'), expires=new Date(Date.now()+5*60*1000).toISOString().slice(0,19).replace('T',' ');
+  db.prepare('DELETE FROM feature_delete_confirmations WHERE expires_at<=datetime(\'now\') OR used_at IS NOT NULL').run();
+  db.prepare('INSERT INTO feature_delete_confirmations(id,requested_by,feature_keys,expires_at) VALUES(?,?,?,?)').run(id,req.user.id,JSON.stringify(keys),expires);
+  res.status(201).json({confirmation_id:id,expires_at:expires,items:rows.map(r=>({key:r.feature_key,label:r.label,space:r.space,description:r.description}))});
+});
+A.post('/features/action', (req,res) => {
+  const body=req.body||{}; let keys;
+  try { keys=featureManagedKeys(body.keys); } catch(e) { return res.status(400).json({error:e.message}); }
+  const action=String(body.action||'');
+  if(action==='delete') {
+    if(req.user.role!=='pdg') return res.status(403).json({error:'La suppression définitive est réservée au PDG.'});
+    const confirmationId=String(body.confirmation_id||''), confirmation=db.prepare('SELECT * FROM feature_delete_confirmations WHERE id=? AND requested_by=?').get(confirmationId,req.user.id);
+    const expected=JSON.stringify(keys);
+    if(!confirmation || confirmation.used_at || confirmation.expires_at<=featureNow() || confirmation.feature_keys!==expected) return res.status(400).json({error:'Confirmation expirée, utilisée ou différente de la sélection. Recommencez la suppression.'});
+    if(Number(confirmation.attempts)>=5) return res.status(429).json({error:'Trop de tentatives. Créez une nouvelle confirmation de suppression.'});
+    const recentFailures=db.prepare("SELECT COUNT(*) n FROM feature_control_history WHERE actor_id=? AND action='delete_password_failed' AND created_at>=datetime('now','-15 minutes')").get(req.user.id).n;
+    if(recentFailures>=10) return res.status(429).json({error:'Trop de tentatives de suppression récentes. Réessayez plus tard.'});
+    const password=String(body.password||'');
+    if(!password || req.user.password_hash!==hashPassword(password,req.user.salt)) {
+      db.prepare('UPDATE feature_delete_confirmations SET attempts=attempts+1 WHERE id=?').run(confirmation.id);
+      keys.forEach(key=>featureHistory(key,'delete_password_failed',{}, {},[],req.user,String(body.reason||'').slice(0,1000)||null,'failed'));
+      return res.status(403).json({error:'Mot de passe PDG incorrect. La suppression est annulée.'});
+    }
+    try { db.transaction(()=>{featureActionTransaction(keys,body,req.user,'verified');db.prepare('UPDATE feature_delete_confirmations SET used_at=datetime(\'now\') WHERE id=?').run(confirmation.id);})(); }
+    catch(e) { return res.status(400).json({error:e.message}); }
+  } else {
+    if(!hasPerm(req.user,'feature_management')) return res.status(403).json({error:'Permission de gestion des fonctionnalités requise.'});
+    try { db.transaction(()=>featureActionTransaction(keys,body,req.user,'not_required'))(); } catch(e) { return res.status(400).json({error:e.message}); }
+  }
+  featureControlBroadcast();
+  logAction(req.user,'Gestion des fonctionnalités : '+action,{target_type:'feature_controls',target_name:keys.join(', '),details:'Action '+action+' sur '+keys.length+' fonctionnalité(s)',reason:String(body.reason||'').slice(0,1000)||null});
+  res.json({ok:true,keys,items:featureRows(true).filter(x=>keys.includes(x.feature_key))});
 });
 
 A.get('/stats', (req, res) => {

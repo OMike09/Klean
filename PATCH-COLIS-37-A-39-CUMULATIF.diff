@@ -1,0 +1,677 @@
+--- a/db.js
++++ b/db.js
+@@ -2895,4 +2895,64 @@
+   }
+ })();
+ 
++
++// ============================================================
++// COLIS 38 — centre universel de gestion des fonctionnalités
++// Registre central : les données métier existantes restent dans leurs tables.
++// ============================================================
++db.exec(`
++CREATE TABLE IF NOT EXISTS feature_controls (
++  feature_key TEXT PRIMARY KEY,
++  label TEXT NOT NULL,
++  description TEXT NOT NULL DEFAULT '',
++  space TEXT NOT NULL,
++  feature_type TEXT NOT NULL DEFAULT 'module',
++  protected INTEGER NOT NULL DEFAULT 0,
++  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled','suspended','archived','deleted')),
++  suspend_from TEXT,
++  suspend_until TEXT,
++  reason TEXT,
++  sort_order INTEGER NOT NULL DEFAULT 0,
++  deleted_at TEXT,
++  deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
++  created_at TEXT NOT NULL DEFAULT (datetime('now')),
++  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
++);
++CREATE INDEX IF NOT EXISTS idx_feature_controls_space ON feature_controls(space,status,sort_order);
++CREATE TABLE IF NOT EXISTS feature_control_placements (
++  feature_key TEXT NOT NULL REFERENCES feature_controls(feature_key) ON DELETE CASCADE,
++  placement TEXT NOT NULL,
++  visible INTEGER NOT NULL DEFAULT 1,
++  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
++  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
++  PRIMARY KEY(feature_key,placement)
++);
++CREATE INDEX IF NOT EXISTS idx_feature_placements_place ON feature_control_placements(placement,visible);
++CREATE TABLE IF NOT EXISTS feature_control_history (
++  id INTEGER PRIMARY KEY AUTOINCREMENT,
++  feature_key TEXT NOT NULL,
++  action TEXT NOT NULL,
++  old_state TEXT NOT NULL DEFAULT '{}',
++  new_state TEXT NOT NULL DEFAULT '{}',
++  placements TEXT NOT NULL DEFAULT '[]',
++  reason TEXT,
++  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
++  actor_name TEXT,
++  security_result TEXT NOT NULL DEFAULT 'not_required' CHECK(security_result IN ('not_required','verified','failed','blocked')),
++  created_at TEXT NOT NULL DEFAULT (datetime('now'))
++);
++CREATE INDEX IF NOT EXISTS idx_feature_history_feature ON feature_control_history(feature_key,created_at DESC);
++CREATE INDEX IF NOT EXISTS idx_feature_history_created ON feature_control_history(created_at DESC);
++CREATE TABLE IF NOT EXISTS feature_delete_confirmations (
++  id TEXT PRIMARY KEY,
++  requested_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
++  feature_keys TEXT NOT NULL,
++  expires_at TEXT NOT NULL,
++  attempts INTEGER NOT NULL DEFAULT 0,
++  used_at TEXT,
++  created_at TEXT NOT NULL DEFAULT (datetime('now'))
++);
++CREATE INDEX IF NOT EXISTS idx_feature_delete_confirmations_actor ON feature_delete_confirmations(requested_by,expires_at);
++`);
++
+ module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
+--- a/server.js
++++ b/server.js
+@@ -299,11 +299,12 @@
+   parametres: 'Paramètres généraux',
+   frequentation: 'Statistiques de fréquentation',
+   journal: 'Journal des actions',
++  feature_management: 'Gestion centralisée des fonctionnalités',
+ };
+ // Valeurs par défaut par rôle (modifiables par le PDG, compte par compte)
+ const DEFAULT_PERMS = {
+   pdg: Object.keys(PERM_KEYS),
+-  admin: Object.keys(PERM_KEYS).filter(k => !['comptes_suppr','reassign_missions'].includes(k)),
++  admin: Object.keys(PERM_KEYS).filter(k => !['comptes_suppr','reassign_missions','feature_management'].includes(k)),
+   gestionnaire: ['comptes', 'pros', 'missions', 'contenu', 'frequentation'],
+   agent: ['missions'],
+ };
+@@ -327,6 +328,129 @@
+   if (req.user.role !== 'pdg') return res.status(403).json({ error: 'Action réservée au PDG.' });
+   next();
+ }
++
++// ---------- CENTRE UNIVERSEL DES FONCTIONNALITÉS ----------
++// Ce catalogue est la source de contrôle réellement consommée par les interfaces et le
++// middleware API. Les flags ne doublonnent pas les paramètres métier : ils gouvernent
++// l'accès/affichage des modules existants, sans déplacer leurs données.
++const FEATURE_CATALOG = [
++  ['core.auth','Authentification','Connexion, jetons et contrôle de session.','Sécurité et maintenance','security',true,['auth']],
++  ['core.password','Vérification de mot de passe','Changement et vérification sécurisée des mots de passe.','Sécurité et maintenance','security',true,['auth','account']],
++  ['core.security','Contrôles de sécurité','Autorisations, protections serveur et audit.','Sécurité et maintenance','security',true,['server']],
++  ['core.backup','Sauvegarde et récupération','Sauvegarde base/fichiers et restauration persistante.','Sécurité et maintenance','security',true,['server']],
++  ['public.home','Page d’accueil','Accueil, raccourcis et cartes publiques.','Page d’accueil','page',false,['home','main_menu']],
++  ['public.search','Recherche de services','Recherche textuelle et résultats de services.','Page d’accueil','tool',false,['home','main_menu']],
++  ['module.services','Services et catégories','Catalogue public, catégories, prestations, tâches et demandes.','Services et catégories','module',false,['home','main_menu','account']],
++  ['public.account','Compte utilisateur','Profil, adresses, réglages et compte utilisateur.','Compte utilisateur','module',false,['account','main_menu']],
++  ['public.notifications','Notifications','Centre de notifications et badges.','Notifications et annonces','module',false,['account','main_menu']],
++  ['public.messages','Messagerie','Conversations liées aux demandes et support.','Notifications et annonces','module',false,['account','main_menu']],
++  ['module.missions','Demandes et missions','Création, suivi et traitement des demandes de service.','Services et catégories','module',false,['account','pro']],
++  ['module.payments','Paiements et transactions','Paiements, commissions, reçus et historiques associés.','Paiements et transactions','module',false,['account','pro']],
++  ['public.reviews','Évaluations','Avis et évaluations de missions.','Autres modules et outils existants','module',false,['account','pro']],
++  ['module.urgence','Urgences','Répertoire et demandes d’assistance urgente.','Sécurité et maintenance','module',false,['home','main_menu']],
++  ['module.avis','Avis de recherche','Publication et consultation des avis de recherche.','Notifications et annonces','module',false,['home','main_menu']],
++  ['module.jobs','Trouver ou proposer un job','Offres, candidatures et publication de jobs.','Autres modules et outils existants','module',false,['home','main_menu']],
++  ['module.ecole','École et famille','Espace école et famille.','Autres modules et outils existants','module',false,['account']],
++  ['module.braderie','Articles seconde main','Catalogue, publication, espace vendeur et alertes Braderie.','Articles seconde main','module',false,['home','account','main_menu']],
++  ['module.cabine','Klean Kbine','Demandes Klean Kbine à distance et offres administrées.','Klean Kbine','module',false,['home','account','main_menu']],
++  ['module.games','Jeux et divertissements','Quiz, Flip Fizz, Kdo et sessions associées.','Jeux et divertissements','module',false,['home','main_menu']],
++  ['module.ads','Publicités et annonces publiques','Diffusion de publicités, promotions et annonces.','Gestion des publicités','module',false,['home','main_menu']],
++  ['module.voice_search','Recherche vocale','Recherche par transcription vocale.','Page d’accueil','tool',false,['home']],
++  ['pro.space','Espace professionnel','Tableau professionnel, profil et disponibilité.','Espace professionnel','module',false,['account','pro']],
++  ['pro.visibility','Visibilité professionnelle','Formules et souscriptions de visibilité.','Espace professionnel','option',false,['pro']],
++  ['pro.advertising','Publicité professionnelle','Création de campagnes depuis l’espace professionnel.','Espace professionnel','option',false,['pro']],
++  ['admin.dashboard','Vue d’ensemble administration','Indicateurs et raccourcis du tableau de bord.','Tableau de bord PDG','admin_menu',false,['admin_menu']],
++  ['admin.frequentation','Statistiques de fréquentation','Activité, audiences et indicateurs de fréquentation.','Statistiques et rapports','admin_menu',false,['admin_menu']],
++  ['admin.users','Gestion des utilisateurs','Comptes, accès et états des utilisateurs.','Gestion des utilisateurs','admin_menu',false,['admin_menu']],
++  ['admin.pros','Gestion des professionnels','Validation et suivi des professionnels.','Gestion des professionnels','admin_menu',false,['admin_menu']],
++  ['admin.catalog','Services & catégories (administration)','Catalogue, grandes catégories, villes et photos.','Services et catégories','admin_menu',false,['admin_menu']],
++  ['admin.questions','Questions dynamiques','Questions configurables des demandes.','Services et catégories','admin_menu',false,['admin_menu']],
++  ['admin.missions','Demandes & missions (administration)','Pilotage opérationnel des demandes et missions.','Tableau de bord gestionnaire','admin_menu',false,['admin_menu']],
++  ['admin.payments','Paiements & commissions','Paiements, commissions et rapprochements.','Paiements et transactions','admin_menu',false,['admin_menu']],
++  ['admin.finances','Finances & revenus','Rapports financiers et revenus.','Statistiques et rapports','admin_menu',false,['admin_menu']],
++  ['admin.ads','Gestion des publicités','Publicités, promotions et statistiques de diffusion.','Gestion des publicités','admin_menu',false,['admin_menu']],
++  ['admin.bandeau','Annonces et bande défilante','Messages, bandeau et information publique.','Notifications et annonces','admin_menu',false,['admin_menu']],
++  ['admin.support','Support Klean Services','Conversations de support et réponses.','Notifications et annonces','admin_menu',false,['admin_menu']],
++  ['admin.broadcast','Messages généraux','Messages ciblés et communication plateforme.','Notifications et annonces','admin_menu',false,['admin_menu']],
++  ['admin.rules','Règles & conditions','Textes, règles d’utilisation et conditions.','Paramètres','admin_menu',false,['admin_menu']],
++  ['admin.reports','Signalements','Modération, signalements et traitement.','Sécurité et maintenance','admin_menu',false,['admin_menu']],
++  ['admin.urgences','Urgences (administration)','Contacts vérifiés et demandes urgentes.','Sécurité et maintenance','admin_menu',false,['admin_menu']],
++  ['admin.files','Gestion des fichiers','Cycle de conservation, archive et récupération de fichiers.','Sécurité et maintenance','admin_menu',false,['admin_menu']],
++  ['admin.avis','Avis de recherche (administration)','Modération des avis de recherche.','Notifications et annonces','admin_menu',false,['admin_menu']],
++  ['admin.jobs','Jobs (administration)','Modération et gestion des jobs.','Autres modules et outils existants','admin_menu',false,['admin_menu']],
++  ['admin.braderie','Articles seconde main (administration)','Paramètres, plans et pilotage Braderie.','Articles seconde main','admin_menu',false,['admin_menu']],
++  ['admin.cabine','Klean Kbine (administration)','Configuration des offres et garde-fous Kbine.','Klean Kbine','admin_menu',false,['admin_menu']],
++  ['admin.ecole','École & famille (administration)','Gestion de l’espace école et famille.','Autres modules et outils existants','admin_menu',false,['admin_menu']],
++  ['admin.voice_search','Recherche vocale (administration)','Configuration de la recherche vocale.','Page d’accueil','admin_menu',false,['admin_menu']],
++  ['admin.games','Jeux (administration)','Sessions et contenus de jeux.','Jeux et divertissements','admin_menu',false,['admin_menu']],
++  ['admin.staff','Équipe & permissions','Rôles, agents, gestionnaires et permissions.','Gestion des agents et gestionnaires','admin_menu',false,['admin_menu']],
++  ['admin.prooptions','Options comptes pro','Options configurables des comptes professionnels.','Espace professionnel','admin_menu',false,['admin_menu']],
++  ['admin.maintenance','Maintenance / suspension','Maintenance et suspension globale.','Sécurité et maintenance','admin_menu',false,['admin_menu']],
++  ['admin.journal','Journal des actions','Historique administratif et traçabilité.','Statistiques et rapports','admin_menu',false,['admin_menu']],
++  ['admin.estimates','Tarifs & estimations','Règles de prix et estimations intelligentes.','Services et catégories','admin_menu',false,['admin_menu']],
++  ['admin.commerce','Paramètres commerciaux','Réglages commerciaux et commissions.','Paiements et transactions','admin_menu',false,['admin_menu']],
++  ['admin.settings','Paramètres généraux','Réglages généraux de la plateforme.','Paramètres','admin_menu',false,['admin_menu']],
++  ['admin.feature_management','Gestion des fonctionnalités','Centre central de contrôle des fonctionnalités et options.','Tableau de bord PDG','admin_menu',true,['admin_menu']],
++];
++const FEATURE_BY_KEY = new Map(FEATURE_CATALOG.map(([feature_key,label,description,space,feature_type,protectedFeature,placements],sort_order) => [feature_key,{feature_key,label,description,space,feature_type,protected:protectedFeature?1:0,placements,sort_order}]));
++function seedFeatureRegistry() {
++  const insert=db.prepare(`INSERT INTO feature_controls(feature_key,label,description,space,feature_type,protected,sort_order)
++    VALUES(?,?,?,?,?,?,?) ON CONFLICT(feature_key) DO UPDATE SET label=excluded.label,description=excluded.description,space=excluded.space,feature_type=excluded.feature_type,protected=MAX(feature_controls.protected,excluded.protected),sort_order=excluded.sort_order`);
++  const placement=db.prepare('INSERT OR IGNORE INTO feature_control_placements(feature_key,placement,visible) VALUES(?,?,1)');
++  for(const row of FEATURE_BY_KEY.values()) { insert.run(row.feature_key,row.label,row.description,row.space,row.feature_type,row.protected,row.sort_order); (row.placements||[]).forEach(place=>placement.run(row.feature_key,place)); }
++}
++seedFeatureRegistry();
++function featureNow() { return new Date().toISOString().slice(0,19).replace('T',' '); }
++function refreshFeatureSuspensions() { db.prepare("UPDATE feature_controls SET status='active',suspend_from=NULL,suspend_until=NULL,updated_at=datetime('now') WHERE status='suspended' AND suspend_until IS NOT NULL AND suspend_until<=datetime('now')").run(); }
++function featureEffectiveState(row, now=featureNow()) {
++  if(!row) return 'active';
++  if(row.status!=='suspended') return row.status;
++  if(row.suspend_from && row.suspend_from>now) return 'active';
++  if(row.suspend_until && row.suspend_until<=now) return 'active';
++  return 'suspended';
++}
++function featurePlacementVisible(key, placement) {
++  if(!placement) return true;
++  const row=db.prepare('SELECT visible FROM feature_control_placements WHERE feature_key=? AND placement=?').get(key,placement);
++  return !row || !!row.visible;
++}
++function featureAvailable(key, placement) {
++  refreshFeatureSuspensions();
++  const row=db.prepare('SELECT * FROM feature_controls WHERE feature_key=?').get(key);
++  return featureEffectiveState(row)==='active' && featurePlacementVisible(key,placement);
++}
++function featureRows(includeDeleted=true) {
++  refreshFeatureSuspensions();
++  const placements=db.prepare('SELECT feature_key,placement,visible,updated_at FROM feature_control_placements').all();
++  const byKey=new Map(); placements.forEach(p=>{if(!byKey.has(p.feature_key))byKey.set(p.feature_key,[]);byKey.get(p.feature_key).push(p);});
++  return db.prepare('SELECT * FROM feature_controls '+(includeDeleted?'':'WHERE status<>\'deleted\' ')+'ORDER BY space,sort_order,label').all().map(row=>({ ...row,effective_status:featureEffectiveState(row),placements:byKey.get(row.feature_key)||[] }));
++}
++function featurePublicPayload() { return featureRows(false).filter(f=>!f.feature_key.startsWith('admin.')).map(f=>({key:f.feature_key,status:f.effective_status,placements:f.placements.filter(p=>p.visible).map(p=>p.placement),updated_at:f.updated_at})); }
++const FEATURE_API_RULES = [
++  [/^\/admin\/features(?:\/|$)/,'admin.feature_management'],
++  [/^\/admin\/(catalog|categories|sous-categories|services|taches|villes|communes|grand-categories|search-terms)/,'admin.catalog'],
++  [/^\/admin\/questions/,'admin.questions'], [/^\/admin\/missions/,'admin.missions'], [/^\/admin\/(payments|transactions|commissions)/,'admin.payments'], [/^\/admin\/(finances|visibilite)/,'admin.finances'],
++  [/^\/admin\/ads/,'admin.ads'], [/^\/admin\/annonces|^\/admin\/bandeau/,'admin.bandeau'], [/^\/admin\/(support)/,'admin.support'], [/^\/admin\/(broadcast|general-messages)/,'admin.broadcast'],
++  [/^\/admin\/(rules)/,'admin.rules'], [/^\/admin\/(signalements)/,'admin.reports'], [/^\/admin\/(urgences|emergency-contacts)/,'admin.urgences'], [/^\/admin\/files/,'admin.files'],
++  [/^\/admin\/(avis-recherche|avis-categories)/,'admin.avis'], [/^\/admin\/(jobs|job-offers)/,'admin.jobs'], [/^\/admin\/braderie/,'admin.braderie'], [/^\/admin\/cabine/,'admin.cabine'],
++  [/^\/admin\/ecole-famille/,'admin.ecole'], [/^\/admin\/voice-search/,'admin.voice_search'], [/^\/admin\/(quiz|kdo|game-plays|quiz-sessions)/,'admin.games'],
++  [/^\/admin\/staff/,'admin.staff'], [/^\/admin\/pro-options/,'admin.prooptions'], [/^\/admin\/maintenance/,'admin.maintenance'], [/^\/admin\/journal/,'admin.journal'],
++  [/^\/admin\/(estimation-rules|estimation-config|estimation-test)/,'admin.estimates'], [/^\/admin\/commerce/,'admin.commerce'], [/^\/admin\/settings/,'admin.settings'], [/^\/admin\/frequentation/,'admin.frequentation'],
++  [/^\/grand-categories|^\/services|^\/catalogue|^\/pro-skill-catalogue|^\/estimates/,'module.services'], [/^\/search/,'public.search'], [/^\/pro(?:\/|$)/,'pro.space'],
++  [/^\/missions/,'module.missions'], [/^\/payments|^\/transactions|^\/commerce/,'module.payments'], [/^\/reviews/,'public.reviews'], [/^\/urgence/,'module.urgence'], [/^\/avis-recherche/,'module.avis'], [/^\/jobs|^\/job-offers/,'module.jobs'],
++  [/^\/ecole-famille/,'module.ecole'], [/^\/braderie/,'module.braderie'], [/^\/cabine/,'module.cabine'], [/^\/games|^\/quiz|^\/kdo|^\/flip/,'module.games'], [/^\/voice-search/,'module.voice_search'],
++  [/^\/ads|^\/ad-views|^\/ad-clicks|^\/ad-interactions|^\/annonces/,'module.ads'], [/^\/pub/,'pro.advertising'], [/^\/visibilite/,'pro.visibility'],
++  [/^\/notifications|^\/badges/,'public.notifications'], [/^\/conversations|^\/support\/conversations|^\/messages/,'public.messages'], [/^\/addresses/,'public.account']
++];
++function featureForApiPath(pathname) { const row=FEATURE_API_RULES.find(([re])=>re.test(pathname)); return row&&row[1]||null; }
++function featureGate(req,res,next) {
++  const key=featureForApiPath(req.path); if(!key || featureAvailable(key)) return next();
++  const row=FEATURE_BY_KEY.get(key)||{}; return res.status(423).json({error:'La fonctionnalité « '+(row.label||key)+' » est actuellement indisponible.',code:'FEATURE_UNAVAILABLE',feature:key});
++}
++// Ce middleware précède toutes les routes API métier. Authentification, sécurité, maintenance
++// et le centre de fonctionnalités lui-même restent toujours accessibles par conception protégée.
++app.use('/api', featureGate);
++app.get('/api/features/public', (req,res)=>res.json({items:featurePublicPayload(),generated_at:featureNow()}));
+ function reassignMissionAllowed(req,res,next) {
+   if (!hasPerm(req.user,'reassign_missions')) return res.status(403).json({ error:'Réattribution réservée au PDG ou à un compte auquel il a accordé cette permission.' });
+   next();
+@@ -3498,6 +3622,7 @@
+ 
+ // Chaque section du tableau de bord correspond à une permission (le PDG a toujours tout)
+ const PERM_ROUTES = [
++  [/^\/features/, 'feature_management'], // centre universel ; suppression reste PDG + mot de passe
+   [/^\/staff/, 'PDG'], // gestion de l'équipe : réservé au PDG
+   [/^\/pro-options/, 'PDG'], // options professionnelles : choix de direction
+   [/^\/maintenance/, 'PDG'], // mode maintenance : réservé au PDG
+@@ -3566,7 +3691,10 @@
+ A.use((req, res, next) => {
+   // L'écran « Questions dynamiques » lit le catalogue : la permission « questions » suffit pour la LECTURE du catalogue
+   const lectureCatalogue = req.method === 'GET' && /^\/catalog/.test(req.path) && (hasPerm(req.user, 'catalogue') || hasPerm(req.user, 'questions'));
+-  const rule = lectureCatalogue ? null : PERM_ROUTES.find(([re]) => re.test(req.path));
++  // La lecture du registre sert aussi à masquer les menus désactivés chez les autres rôles ;
++  // aucune écriture n'est autorisée sans la permission dédiée (et la suppression reste PDG).
++  const lectureFeatures = req.method === 'GET' && /^\/features(?:\/|$)/.test(req.path);
++  const rule = (lectureCatalogue || lectureFeatures) ? null : PERM_ROUTES.find(([re]) => re.test(req.path));
+   if (rule) {
+     if (rule[1] === 'PDG') { if (req.user.role !== 'pdg') return res.status(403).json({ error: 'Action réservée au PDG.' }); }
+     else if (!hasPerm(req.user, rule[1])) return res.status(403).json({ error: 'Vous n\u2019avez pas la permission « ' + (PERM_KEYS[rule[1]] || rule[1]) + ' ». Contactez le PDG.' });
+@@ -3591,6 +3719,108 @@
+   next();
+ });
+ 
++// ----- Centre universel de gestion des fonctionnalités -----
++const FEATURE_PLACEMENTS = new Set(['home','main_menu','account','pro','admin_menu','server','auth']);
++function featureManagedKeys(raw) {
++  const keys=[...new Set((Array.isArray(raw)?raw:[]).map(v=>String(v||'').trim()).filter(Boolean))];
++  if(!keys.length || keys.length>100) throw new Error('Sélectionnez entre 1 et 100 fonctionnalités.');
++  if(keys.some(key=>!FEATURE_BY_KEY.has(key))) throw new Error('La sélection contient une fonctionnalité inconnue.');
++  return keys.sort();
++}
++function featureDate(raw,label) {
++  if(raw===undefined || raw===null || raw==='') return null;
++  const ms=Date.parse(String(raw)); if(!Number.isFinite(ms)) throw new Error(label+' invalide.');
++  return new Date(ms).toISOString().slice(0,19).replace('T',' ');
++}
++function featureSnapshot(row) { return { status:row.status,suspend_from:row.suspend_from||null,suspend_until:row.suspend_until||null,reason:row.reason||null,sort_order:Number(row.sort_order||0),deleted_at:row.deleted_at||null }; }
++function featureHistory(featureKey,action,oldState,newState,placements,actor,reason,security='not_required') {
++  db.prepare(`INSERT INTO feature_control_history(feature_key,action,old_state,new_state,placements,reason,actor_id,actor_name,security_result)
++    VALUES(?,?,?,?,?,?,?,?,?)`).run(featureKey,action,JSON.stringify(oldState||{}),JSON.stringify(newState||{}),JSON.stringify(placements||[]),reason||null,actor&&actor.id||null,actor&&actor.name||null,security);
++}
++function featureControlBroadcast() { for(const [userId] of sseClients) push(userId,'feature-control',{changed:true}); }
++function featureActionAllowed(row,action) {
++  if(!row) throw new Error('Fonctionnalité introuvable.');
++  if(row.status==='deleted' && action!=='delete') throw new Error('« '+row.label+' » a été supprimée définitivement et ne peut plus être réactivée.');
++  if(row.protected && ['disable','suspend','hide','delete','archive'].includes(action)) throw new Error('« '+row.label+' » est une protection essentielle et ne peut pas être retirée.');
++}
++function featureActionTransaction(keys,body,actor,security='not_required') {
++  const action=String(body.action||''), reason=String(body.reason||'').trim().slice(0,1000)||null;
++  if(!['activate','disable','suspend','hide','show','delete','order'].includes(action)) throw new Error('Action de fonctionnalité invalide.');
++  const placements=[...new Set((Array.isArray(body.placements)?body.placements:[]).map(v=>String(v||'').trim()).filter(v=>FEATURE_PLACEMENTS.has(v)))];
++  if(['hide','show'].includes(action) && !placements.length) throw new Error('Choisissez au moins un emplacement à modifier.');
++  const suspendFrom=action==='suspend'?featureDate(body.suspend_from,'Date de suspension'):null;
++  const suspendUntil=action==='suspend'?featureDate(body.suspend_until,'Date de réactivation'):null;
++  if(action==='suspend' && suspendUntil && suspendFrom && suspendUntil<=suspendFrom) throw new Error('La réactivation doit suivre la suspension.');
++  const rows=keys.map(key=>db.prepare('SELECT * FROM feature_controls WHERE feature_key=?').get(key)); rows.forEach(row=>featureActionAllowed(row,action));
++  const update=db.prepare("UPDATE feature_controls SET status=?,suspend_from=?,suspend_until=?,reason=?,deleted_at=?,deleted_by=?,updated_at=datetime('now') WHERE feature_key=?");
++  const placementUpdate=db.prepare(`INSERT INTO feature_control_placements(feature_key,placement,visible,updated_at,updated_by) VALUES(?,?,?,datetime('now'),?)
++    ON CONFLICT(feature_key,placement) DO UPDATE SET visible=excluded.visible,updated_at=excluded.updated_at,updated_by=excluded.updated_by`);
++  const orderUpdate=db.prepare("UPDATE feature_controls SET sort_order=?,updated_at=datetime('now') WHERE feature_key=?");
++  for(const row of rows) {
++    const old=featureSnapshot(row);
++    if(action==='activate') update.run('active',null,null,reason,null,null,row.feature_key);
++    else if(action==='disable') update.run('disabled',null,null,reason,null,null,row.feature_key);
++    else if(action==='suspend') update.run('suspended',suspendFrom||featureNow(),suspendUntil,reason,null,null,row.feature_key);
++    else if(action==='delete') update.run('deleted',null,null,reason,featureNow(),actor.id,row.feature_key);
++    else if(action==='order') { const n=Math.max(0,Math.min(100000,Number(body.sort_order))); if(!Number.isFinite(n)) throw new Error('Ordre invalide.'); orderUpdate.run(n,row.feature_key); }
++    else placements.forEach(place=>placementUpdate.run(row.feature_key,place,action==='show'?1:0,actor.id));
++    const current=db.prepare('SELECT * FROM feature_controls WHERE feature_key=?').get(row.feature_key);
++    featureHistory(row.feature_key,action,old,featureSnapshot(current),placements,actor,reason,security);
++  }
++  return rows.map(r=>r.feature_key);
++}
++A.get('/features', (req,res) => {
++  const q=String(req.query.q||'').trim().toLocaleLowerCase('fr'), space=String(req.query.space||''), status=String(req.query.status||'');
++  let items=featureRows(true);
++  if(q) items=items.filter(x=>(x.label+' '+x.description+' '+x.feature_key+' '+x.space).toLocaleLowerCase('fr').includes(q));
++  if(space) items=items.filter(x=>x.space===space); if(status) items=items.filter(x=>x.effective_status===status || x.status===status);
++  res.json({items,spaces:[...new Set(featureRows(true).map(x=>x.space))].sort((a,b)=>a.localeCompare(b,'fr')),placements:[...FEATURE_PLACEMENTS],can_delete:req.user.role==='pdg'});
++});
++A.get('/features/history', (req,res) => {
++  const q=String(req.query.q||'').trim().toLocaleLowerCase('fr'), feature=String(req.query.feature_key||''), action=String(req.query.action||'');
++  let rows=db.prepare('SELECT * FROM feature_control_history ORDER BY id DESC LIMIT 1000').all().map(row=>({ ...row,label:(FEATURE_BY_KEY.get(row.feature_key)||{}).label||row.feature_key,space:(FEATURE_BY_KEY.get(row.feature_key)||{}).space||'Autres modules et outils existants' }));
++  if(feature) rows=rows.filter(r=>r.feature_key===feature); if(action) rows=rows.filter(r=>r.action===action);
++  if(q) rows=rows.filter(r=>(r.label+' '+r.feature_key+' '+r.action+' '+(r.reason||'')+' '+(r.actor_name||'')).toLocaleLowerCase('fr').includes(q));
++  res.json({items:rows.slice(0,500)});
++});
++A.post('/features/delete-confirmation', pdgOnly, (req,res) => {
++  let keys; try { keys=featureManagedKeys((req.body||{}).keys); } catch(e) { return res.status(400).json({error:e.message}); }
++  const rows=keys.map(key=>db.prepare('SELECT * FROM feature_controls WHERE feature_key=?').get(key));
++  try { rows.forEach(row=>featureActionAllowed(row,'delete')); } catch(e) { return res.status(400).json({error:e.message}); }
++  const id='fdc_'+crypto.randomBytes(18).toString('hex'), expires=new Date(Date.now()+5*60*1000).toISOString().slice(0,19).replace('T',' ');
++  db.prepare('DELETE FROM feature_delete_confirmations WHERE expires_at<=datetime(\'now\') OR used_at IS NOT NULL').run();
++  db.prepare('INSERT INTO feature_delete_confirmations(id,requested_by,feature_keys,expires_at) VALUES(?,?,?,?)').run(id,req.user.id,JSON.stringify(keys),expires);
++  res.status(201).json({confirmation_id:id,expires_at:expires,items:rows.map(r=>({key:r.feature_key,label:r.label,space:r.space,description:r.description}))});
++});
++A.post('/features/action', (req,res) => {
++  const body=req.body||{}; let keys;
++  try { keys=featureManagedKeys(body.keys); } catch(e) { return res.status(400).json({error:e.message}); }
++  const action=String(body.action||'');
++  if(action==='delete') {
++    if(req.user.role!=='pdg') return res.status(403).json({error:'La suppression définitive est réservée au PDG.'});
++    const confirmationId=String(body.confirmation_id||''), confirmation=db.prepare('SELECT * FROM feature_delete_confirmations WHERE id=? AND requested_by=?').get(confirmationId,req.user.id);
++    const expected=JSON.stringify(keys);
++    if(!confirmation || confirmation.used_at || confirmation.expires_at<=featureNow() || confirmation.feature_keys!==expected) return res.status(400).json({error:'Confirmation expirée, utilisée ou différente de la sélection. Recommencez la suppression.'});
++    if(Number(confirmation.attempts)>=5) return res.status(429).json({error:'Trop de tentatives. Créez une nouvelle confirmation de suppression.'});
++    const recentFailures=db.prepare("SELECT COUNT(*) n FROM feature_control_history WHERE actor_id=? AND action='delete_password_failed' AND created_at>=datetime('now','-15 minutes')").get(req.user.id).n;
++    if(recentFailures>=10) return res.status(429).json({error:'Trop de tentatives de suppression récentes. Réessayez plus tard.'});
++    const password=String(body.password||'');
++    if(!password || req.user.password_hash!==hashPassword(password,req.user.salt)) {
++      db.prepare('UPDATE feature_delete_confirmations SET attempts=attempts+1 WHERE id=?').run(confirmation.id);
++      keys.forEach(key=>featureHistory(key,'delete_password_failed',{}, {},[],req.user,String(body.reason||'').slice(0,1000)||null,'failed'));
++      return res.status(403).json({error:'Mot de passe PDG incorrect. La suppression est annulée.'});
++    }
++    try { db.transaction(()=>{featureActionTransaction(keys,body,req.user,'verified');db.prepare('UPDATE feature_delete_confirmations SET used_at=datetime(\'now\') WHERE id=?').run(confirmation.id);})(); }
++    catch(e) { return res.status(400).json({error:e.message}); }
++  } else {
++    if(!hasPerm(req.user,'feature_management')) return res.status(403).json({error:'Permission de gestion des fonctionnalités requise.'});
++    try { db.transaction(()=>featureActionTransaction(keys,body,req.user,'not_required'))(); } catch(e) { return res.status(400).json({error:e.message}); }
++  }
++  featureControlBroadcast();
++  logAction(req.user,'Gestion des fonctionnalités : '+action,{target_type:'feature_controls',target_name:keys.join(', '),details:'Action '+action+' sur '+keys.length+' fonctionnalité(s)',reason:String(body.reason||'').slice(0,1000)||null});
++  res.json({ok:true,keys,items:featureRows(true).filter(x=>keys.includes(x.feature_key))});
++});
++
+ A.get('/stats', (req, res) => {
+   const g = q => db.prepare(q).get().n;
+   res.json({
+--- a/public/app.js
++++ b/public/app.js
+@@ -14,6 +14,7 @@
+ let GAMES = { quiz: false, flipfizz: false, kdo: false };
+ let MAINT = { active: false }; // état de maintenance de la plateforme
+ let ADS = [];
++let PUBLIC_FEATURES = []; // indicateurs actifs livrés par le centre de fonctionnalités
+ let navStack = [];
+ let suppressPush = false;
+ let sse = null;
+@@ -49,6 +50,15 @@
+   if (!s || !s.startsWith('/uploads/') || !TOKEN) return s;
+   return s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+ }
++const PUBLIC_ROUTE_FEATURE = { home:'public.home',search:'public.search',services:'module.services',categories:'module.services',request:'module.services',account:'public.account',addresses:'public.account',settings:'public.account',notifications:'public.notifications',messages:'public.messages',missions:'module.missions',mission:'module.missions',payments:'module.payments','my-reviews':'public.reviews',urgence:'module.urgence','avis-recherche':'module.avis',jobs:'module.jobs',ecole:'module.ecole','ecole-famille':'module.ecole',braderie:'module.braderie','articles-seconde-main':'module.braderie','braderie-space':'module.braderie','klean-cabine':'module.cabine','cabine-operation':'module.cabine','cabine-operations':'module.cabine',quiz:'module.games',flip:'module.games',kdo:'module.games',pro:'pro.space','pro-edit':'pro.space','pro-revenus':'pro.space',visibilite:'pro.visibility',pub:'pro.advertising' };
++function publicFeatureVisible(key, placement) {
++  if(!key || !Array.isArray(PUBLIC_FEATURES) || !PUBLIC_FEATURES.length) return true;
++  const row=PUBLIC_FEATURES.find(x=>x.key===key); if(!row || row.status!=='active') return !row;
++  return !placement || !(Array.isArray(row.placements)) || row.placements.includes(placement);
++}
++async function refreshPublicFeatures(redraw=true) {
++  try { const next=(await api('/features/public')).items||[]; const changed=JSON.stringify(next)!==JSON.stringify(PUBLIC_FEATURES); PUBLIC_FEATURES=next; if(changed&&redraw) render({preserveScroll:true}); } catch {}
++}
+ 
+ // Images de catalogue : l'API livre une URL contenant une version non réutilisable après
+ // remplacement. Les octets ne sont donc jamais confondus avec une ancienne photo du même domaine.
+@@ -254,6 +264,7 @@
+     // doit être relue. Une carte déjà visible est remplacée sans rechargement de page.
+     refreshHomeCatalogueState(false);
+   });
++  sse.addEventListener('feature-control', () => { refreshPublicFeatures(true); });
+   sse.addEventListener('message', e => {
+     const m = JSON.parse(e.data);
+     if (currentChat === m.mission_id) { appendChatMsg(m); api('/missions/' + m.mission_id + '/messages').catch(() => { }); }
+@@ -682,17 +693,17 @@
+   return `<article class="ks-ad-card ks-ad-${esc(a.display_template||'classic')}" style="background:#fff;border:1px solid ${accent};border-radius:14px;padding:10px;box-sizing:border-box"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="ad-tag" style="border-color:${accent}">${tag}</span><span class="small muted">👁️ ${Number((a.unique_views ?? a.views) || 0).toLocaleString('fr-FR')}</span></div>${a.title?`<div class="bold mt">${esc(a.title)}</div>`:''}${a.content?`<div class="small muted mt" style="white-space:pre-wrap">${esc(a.content)}</div>`:''}${media?`<div style="margin-top:8px">${media}</div>`:''}${adPriceHtml(a)}${code}${a.offer_conditions&&a.promotion_active?`<div class="small muted mt">${esc(a.offer_conditions)}</div>`:''}${cta?`<div class="mt">${cta}</div>`:''}</article>`;
+ }
+ 
+-function adsBandHtml(list) {if(!list.length)return '';return `<div class="ks-ads-rack" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">${list.map(a=>`<div style="flex:0 0 min(100%,520px);scroll-snap-align:start">${adCardHtml(a)}</div>`).join('')}</div>`;}
++function adsBandHtml(list) {if(!publicFeatureVisible('module.ads','home')||!list.length)return '';return `<div class="ks-ads-rack" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">${list.map(a=>`<div style="flex:0 0 min(100%,520px);scroll-snap-align:start">${adCardHtml(a)}</div>`).join('')}</div>`;}
+ 
+ 
+ /* ---------- Accueil ---------- */
+ routes.home = async () => {
+   // Les prix et services populaires affichés viennent toujours de la configuration actuelle du tableau de bord.
+   const cityQuery = USER && USER.ville ? '?ville=' + encodeURIComponent(USER.ville) : '';
+-  try { SERVICES = await api('/services' + cityQuery); POPULAIRES = await api('/grand-categories/populaires' + cityQuery); syncPublicImageCache(POPULAIRES); preloadPublicImages(POPULAIRES,4); }
++  try { if (publicFeatureVisible('module.services','home')) { SERVICES = await api('/services' + cityQuery); POPULAIRES = await api('/grand-categories/populaires' + cityQuery); syncPublicImageCache(POPULAIRES); preloadPublicImages(POPULAIRES,4); } else { SERVICES=[]; POPULAIRES=[]; } }
+   catch (e) { $app.innerHTML = header('Accueil', { brand: true }) + `<div class="content">${emptyState('📶', e.message)}<button class="btn" onclick="render()">Réessayer</button></div>` + bottomNav('home'); return; }
+   try { GAMES = await api('/games/config'); } catch { }
+-  try { ADS = await api('/ads'); } catch { }
++  if (publicFeatureVisible('module.ads','home')) { try { ADS = await api('/ads'); } catch { ADS=[]; } } else ADS=[];
+   let BRADERIE_HOME = { home_visible: false, enabled: false }, CABINE_HOME = { enabled:false }, VOICE_HOME = { enabled:false, home_visible:false, max_seconds:25 };
+   try { [BRADERIE_HOME, CABINE_HOME, VOICE_HOME] = await Promise.all([api('/braderie/config'), api('/cabine/config'), api('/voice-search/config')]); } catch { }
+   window._voiceHomeConfig = VOICE_HOME;
+@@ -703,13 +714,13 @@
+       <div class="bold small">🛠️ Maintenance partielle</div>
+       <div class="small muted" style="white-space:normal">${esc(MAINT.message || 'Certaines fonctions sont temporairement suspendues.')}</div></div>`);
+   const gv = k => Number((GAMES.views && GAMES.views[k]) || 0).toLocaleString('fr-FR');
+-  if (GAMES.quiz) topZone.push(`<div onclick="nav('#/quiz')" style="cursor:pointer;text-align:center">
++  if (GAMES.quiz && publicFeatureVisible('module.games','home')) topZone.push(`<div onclick="nav('#/quiz')" style="cursor:pointer;text-align:center">
+       <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🧠 QUIZ</span><span class="small muted">👁️ ${gv('quiz')}</span></div>
+       <div class="bold small">🧠 Quiz — jouez maintenant !</div></div>`);
+-  if (GAMES.flipfizz) topZone.push(`<div onclick="nav('#/flip')" style="cursor:pointer;text-align:center">
++  if (GAMES.flipfizz && publicFeatureVisible('module.games','home')) topZone.push(`<div onclick="nav('#/flip')" style="cursor:pointer;text-align:center">
+       <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🎮 JEU</span><span class="small muted">👁️ ${gv('flipfizz')}</span></div>
+       <div class="bold small">🎲 Flip Fizz</div></div>`);
+-  if (GAMES.kdo) topZone.push(`<div onclick="nav('#/kdo')" style="cursor:pointer;text-align:center">
++  if (GAMES.kdo && publicFeatureVisible('module.games','home')) topZone.push(`<div onclick="nav('#/kdo')" style="cursor:pointer;text-align:center">
+       <div style="display:flex;justify-content:space-between;align-items:center"><span class="ad-tag">🎮 JEU</span><span class="small muted">👁️ ${gv('kdo')}</span></div>
+       <div class="bold small">🎁 Kdo</div></div>`);
+   $app.innerHTML = `
+@@ -720,7 +731,7 @@
+     <div id="home-fixe" style="position:sticky;top:calc(58px + var(--safe-t));z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
+       <div class="searchbar" style="margin:0 2px">
+         <input type="text" id="home-q" placeholder="🔎 Décrivez votre besoin…" enterkeyhint="search" autocomplete="off">
+-        ${VOICE_HOME.home_visible ? `<button type="button" onclick="A.voiceSearchOpen()" aria-label="Rechercher par note vocale" title="Rechercher par note vocale" style="font-size:18px">🎤</button>` : ''}
++        ${VOICE_HOME.home_visible && publicFeatureVisible('module.voice_search','home') ? `<button type="button" onclick="A.voiceSearchOpen()" aria-label="Rechercher par note vocale" title="Rechercher par note vocale" style="font-size:18px">🎤</button>` : ''}
+         <button onclick="A.goSearch()" aria-label="Rechercher">🔍</button>
+       </div>
+       <div id="home-search-results" class="live-search-results"></div>
+@@ -732,23 +743,23 @@
+     <div class="svc-grid">
+       ${POPULAIRES.map((s,index) => `<button type="button" class="svc-card ${s.image_url ? 'has-image' : ''}" data-grand-category-id="${Number(s.id)}" onclick="nav('#/categories/${s.id}')" aria-label="Ouvrir ${esc(s.name)}"><span class="svc-card-media">${s.image_url ? publicCategoryImageTag(s,index,'home') : `<span class="ic" aria-hidden="true">${esc(s.icon || '🧩')}</span>`}</span><span class="svc-card-copy"><span class="nm">${esc(grandLabel(s))}</span>${s.price_from ? `<span class="price-from">À partir de ${fmtFCFA(s.price_from)}</span>` : ''}</span></button>`).join('')}
+     </div>` : ''}
+-    <button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>
++    ${publicFeatureVisible('module.services','home') ? `<button class="btn sec mt" onclick="nav('#/categories')">Voir tous les services</button>` : ''}
+     <div class="home-shortcuts" aria-label="Accès rapides">
+-      <button class="home-shortcut" onclick="nav('#/jobs')"><span>💼</span><div><b>Trouver ou proposer un job</b><small>Consulter les offres ou publier la vôtre</small></div><i>›</i></button>
+-      ${BRADERIE_HOME.home_visible ? `<button class="home-shortcut" onclick="nav('#/articles-seconde-main')"><span>🏷️</span><div><b>Articles seconde main</b><small>${BRADERIE_HOME.enabled ? 'Découvrir, rechercher et acheter' : 'Prochainement disponible'}</small></div><i>›</i></button>` : ''}
+-      ${CABINE_HOME.enabled ? `<button class="home-shortcut" onclick="nav('#/klean-cabine')"><span>${esc(CABINE_HOME.icon||'📲')}</span><div><b>Klean Kbine à distance</b><small>Crédit et forfaits — disponibilité vérifiée</small></div><i>›</i></button>` : ''}
+-      <button class="home-shortcut" onclick="nav('#/avis-recherche')"><span>📢</span><div><b>Avis de recherche</b><small>Publier ou consulter un avis</small></div><i>›</i></button>
+-      <button class="home-shortcut urgent" onclick="nav('#/urgence')"><span>🚨</span><div><b>Urgences</b><small>Contacts et assistance configurés</small></div><i>›</i></button>
++      ${publicFeatureVisible('module.jobs','home') ? `<button class="home-shortcut" onclick="nav('#/jobs')"><span>💼</span><div><b>Trouver ou proposer un job</b><small>Consulter les offres ou publier la vôtre</small></div><i>›</i></button>` : ''}
++      ${BRADERIE_HOME.home_visible && publicFeatureVisible('module.braderie','home') ? `<button class="home-shortcut" onclick="nav('#/articles-seconde-main')"><span>🏷️</span><div><b>Articles seconde main</b><small>${BRADERIE_HOME.enabled ? 'Découvrir, rechercher et acheter' : 'Prochainement disponible'}</small></div><i>›</i></button>` : ''}
++      ${CABINE_HOME.enabled && publicFeatureVisible('module.cabine','home') ? `<button class="home-shortcut" onclick="nav('#/klean-cabine')"><span>${esc(CABINE_HOME.icon||'📲')}</span><div><b>Klean Kbine à distance</b><small>Crédit et forfaits — disponibilité vérifiée</small></div><i>›</i></button>` : ''}
++      ${publicFeatureVisible('module.avis','home') ? `<button class="home-shortcut" onclick="nav('#/avis-recherche')"><span>📢</span><div><b>Avis de recherche</b><small>Publier ou consulter un avis</small></div><i>›</i></button>` : ''}
++      ${publicFeatureVisible('module.urgence','home') ? `<button class="home-shortcut urgent" onclick="nav('#/urgence')"><span>🚨</span><div><b>Urgences</b><small>Contacts et assistance configurés</small></div><i>›</i></button>` : ''}
+     </div>
+     <div id="bandeau-espace"></div>
+   </div><div id="bandeau-host"></div>${bottomNav('home')}`;
+   updateBadges();
+   installCtaMount();
+-  quizLiveMount(); // le quiz actif s'affiche automatiquement, sans aucun clic
+-  bandeauMount();  // bandeau d'annonces défilantes en bas de l'accueil
++  if (publicFeatureVisible('module.games','home')) quizLiveMount(); // le quiz actif s'affiche automatiquement, sans aucun clic
++  if (publicFeatureVisible('module.ads','home')) bandeauMount();  // bandeau d'annonces défilantes en bas de l'accueil
+   // Consultation publicitaire dédupliquée par jour ; les jeux gardent leur comptage historique connecté.
+   recordAdViews([...homeAds,...homeMidAds]);
+-  const vues=[]; if (GAMES.quiz) vues.push('game:quiz'); if (GAMES.flipfizz) vues.push('game:flipfizz'); if (GAMES.kdo) vues.push('game:kdo');
++  const vues=[]; if (publicFeatureVisible('module.games','home')) { if (GAMES.quiz) vues.push('game:quiz'); if (GAMES.flipfizz) vues.push('game:flipfizz'); if (GAMES.kdo) vues.push('game:kdo'); }
+   if (vues.length && USER) api('/vues', { method: 'POST', body: { keys: vues } }).catch(() => { });
+   const q = document.getElementById('home-q');
+   q.addEventListener('input', () => A.liveSearch('home-q', 'home-search-results', true));
+@@ -3594,6 +3605,10 @@
+   if (MAINT.active && MAINT.blocked) { maintenanceScreen(); return; }
+   const publicRoutes = ['home','search','services','categories','request','jobs','avis-recherche','urgence','about','login','register','account','braderie','articles-seconde-main','klean-cabine'];
+   if (!TOKEN && !publicRoutes.includes(route)) { publicAuthGate(); return; }
++  const routeFeature=PUBLIC_ROUTE_FEATURE[route];
++  if (routeFeature && !publicFeatureVisible(routeFeature, route==='home'?'home':(route==='pro'||route==='pro-edit'||route==='pro-revenus'?'pro':null))) {
++    $app.innerHTML = header('Fonctionnalité indisponible', { bell: !!USER }) + `<div class="content">${emptyState('⏸️','Cette fonctionnalité est temporairement indisponible.')}</div>` + bottomNav('home'); return;
++  }
+   if (USER && USER.must_change_password) { setTimeout(forcePasswordModal, 50); }
+   const fn = routes[route] || routes.home;
+   Promise.resolve(fn(param)).then(() => {
+@@ -3619,7 +3634,11 @@
+   }
+   applyFont(localStorage.getItem('ks_font') || 16);
+   await checkMaintenance();
++  await refreshPublicFeatures(false);
+   setInterval(async () => { const before=JSON.stringify([MAINT.active,MAINT.blocked,MAINT.scheduled,MAINT.until]); await checkMaintenance(); const changed=before!==JSON.stringify([MAINT.active,MAINT.blocked,MAINT.scheduled,MAINT.until]); if (TOKEN && !MAINT.blocked && !USER) { try { USER=await api('/me'); connectSSE(); refreshBadges(); } catch {} } if (changed) render(); }, 15000);
++  // Les visiteurs non connectés relisent aussi les indicateurs centraux ; les sessions
++  // connectées reçoivent en complément le signal SSE sans attendre ce contrôle.
++  setInterval(() => { refreshPublicFeatures(true); }, 20000);
+   // Prix et disponibilité catalogue : l'accueil reste synchronisé avec le tableau de bord,
+   // même s'il est déjà ouvert au moment où le PDG change un prix.
+   setInterval(() => { refreshHomeCatalogueState(true); }, 10000);
+--- a/public/admin/admin.js
++++ b/public/admin/admin.js
+@@ -5,6 +5,7 @@
+ const root = document.getElementById('root');
+ let TOKEN = localStorage.getItem('ks_admin_token') || null;
+ let STATS = {};
++let FEATURE_DATA = null; // registre central servi par le serveur
+ let ME = null; // compte connecté : { role, perms: [...] }
+ let VIEW = location.hash.replace('#', '') || 'dashboard';
+ let ADMIN_STACK = [VIEW], ADMIN_CURSOR = 0, ADMIN_CURRENT = VIEW;
+@@ -28,6 +29,13 @@
+ function fcfa(n) { return (n ?? 0).toLocaleString('fr-FR') + ' F'; }
+ function zonesLabel(raw) { try { const z = Array.isArray(raw) ? raw : JSON.parse(raw || '[]'); return z && z.length ? z.join(', ') : '🌍 Toute la Côte d’Ivoire'; } catch { return '🌍 Toute la Côte d’Ivoire'; } }
+ function toast(m, cls) { const z = document.getElementById('toast'); const t = document.createElement('div'); t.className = 'toast ' + (cls || ''); t.textContent = m; z.appendChild(t); setTimeout(() => t.remove(), 4500); }
++// Évite les doubles clics pendant les enregistrements du tableau de bord.
++// Cette aide est locale à l'interface d'administration (elle n'est pas chargée avec public/app.js).
++function busy(btn, on, label) {
++  if (!btn) return;
++  if (on) { if (!btn.dataset.ksBusyLabel) btn.dataset.ksBusyLabel=btn.textContent; btn.disabled=true; btn.textContent=label||'Enregistrement…'; }
++  else { btn.disabled=false; btn.textContent=btn.dataset.ksBusyLabel||btn.textContent; delete btn.dataset.ksBusyLabel; }
++}
+ 
+ async function api(path, opts = {}) {
+   const headers = {};
+@@ -110,10 +118,19 @@
+   ['COMMUNICATION', [['ads', '📣 Publicités & infos', null, 'communication'], ['bandeau', '📺 Gestion bande défilante', null, 'PDG'], ['support', '📩 Messages Klean Services', null, 'communication'], ['broadcast', '📨 Messages généraux', null, 'communication']]],
+   ['SÉCURITÉ', [['rules', '📜 Règles & conditions', null, 'securite'], ['reports', '⚠️ Signalements', 'signalements', 'securite'], ['urgences', '🚨 Urgences', 'urgences', 'securite'], ['files', '🗄️ Gestion des fichiers', null, 'securite']]],
+   ['CONTENU', [['avis', '📢 Avis de recherche', null, 'contenu'], ['jobs', '💼 Trouver ou proposer un job', null, 'contenu'], ['braderie', '🏷️ Articles seconde main', null, 'PDG'], ['cabine', '📲 Gestion de Klean Kbine à distance', null, 'PDG'], ['ecole', '🏫 École & famille', null, 'contenu'], ['voice-search', '🎤 Recherche vocale', null, 'PDG'], ['games', '🎮 Quiz / Flip Fizz / Kdo', null, 'contenu']]],
+-  ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['journal', '🧾 Journal des actions', null, 'journal']]],
++  ['DIRECTION', [['staff', '👑 Équipe & permissions', null, 'PDG'], ['prooptions', '🧩 Options comptes pro', null, 'PDG'], ['maintenance', '🛠 Maintenance / suspension', null, 'PDG'], ['features', '🧭 Gestion des fonctionnalités', null, 'feature_management'], ['journal', '🧾 Journal des actions', null, 'journal']]],
+   ['CONFIGURATION', [['estimates', '🧠 Tarifs & estimations intelligentes', null, 'PDG'], ['commerce', '💰 Paramètres commerciaux', null, 'parametres'], ['settings', '⚙️ Paramètres généraux', null, 'parametres']]],
+ ];
+-function menuVisible(perm) { return !perm || (perm === 'PDG' ? ME && ME.role === 'pdg' : can(perm)); }
++const ADMIN_VIEW_FEATURE = { dashboard:'admin.dashboard',frequentation:'admin.frequentation',users:'admin.users',pros:'admin.pros',catalog:'admin.catalog',questions:'admin.questions',missions:'admin.missions',payments:'admin.payments',finances:'admin.finances',ads:'admin.ads',bandeau:'admin.bandeau',support:'admin.support',broadcast:'admin.broadcast',rules:'admin.rules',reports:'admin.reports',urgences:'admin.urgences',files:'admin.files',avis:'admin.avis',jobs:'admin.jobs',braderie:'admin.braderie',cabine:'admin.cabine',ecole:'admin.ecole','voice-search':'admin.voice_search',games:'admin.games',staff:'admin.staff',prooptions:'admin.prooptions',maintenance:'admin.maintenance',journal:'admin.journal',estimates:'admin.estimates',commerce:'admin.commerce',settings:'admin.settings',features:'admin.feature_management' };
++function adminFeatureRow(view) { const key=ADMIN_VIEW_FEATURE[view]; return key && FEATURE_DATA && Array.isArray(FEATURE_DATA.items) ? FEATURE_DATA.items.find(x=>x.feature_key===key) : null; }
++function adminFeatureVisible(view) {
++  const key=ADMIN_VIEW_FEATURE[view]; if(!key || !FEATURE_DATA || !Array.isArray(FEATURE_DATA.items)) return true;
++  const row=adminFeatureRow(view); if(!row) return true;
++  const menu=(row.placements||[]).find(x=>x.placement==='admin_menu');
++  return row.effective_status==='active' && (!menu || !!menu.visible);
++}
++function adminFeatureOrder(view) { const row=adminFeatureRow(view); return row ? Number(row.sort_order||999999) : 999999; }
++function menuVisible(perm,view) { return (!perm || (perm === 'PDG' ? ME && ME.role === 'pdg' : can(perm))) && adminFeatureVisible(view); }
+ 
+ function shell(content) {
+   root.innerHTML = `
+@@ -122,7 +139,7 @@
+       <div class="logo">Klean Services<br><span class="small" style="color:#6d9c94;font-weight:600">Administration</span>
+       ${ME ? `<br><span class="small" style="color:#9fc8c0">${esc(ME.name || '')} — ${ROLE_LB[ME.role] || ME.role}</span>` : ''}</div>
+       ${MENU.map(([grp, items]) => {
+-        const vis = items.filter(it => menuVisible(it[3]));
++        const vis = items.filter(it => menuVisible(it[3],it[0])).sort((a,b)=>adminFeatureOrder(a[0])-adminFeatureOrder(b[0]) || String(a[1]).localeCompare(String(b[1]),'fr'));
+         return vis.length ? `<div class="grp">${grp}</div>` + vis.map(([id, lb, cnt]) =>
+           `<button class="${VIEW === id ? 'on' : ''}" onclick="go('${id}')">${lb}${cnt && STATS[cnt] ? `<span class="cnt">${STATS[cnt]}</span>` : ''}</button>`).join('') : '';
+       }).join('')}
+@@ -468,6 +485,28 @@
+ };
+ 
+ 
++/* ---------- Centre universel des fonctionnalités ---------- */
++function featureStatePill(row) {
++  const state=row.effective_status||row.status||'active';
++  const map={active:['Actif','ok'],disabled:['Désactivé','bad'],suspended:['Suspendu','warn'],archived:['Archivé','off'],deleted:['Supprimé définitivement','bad']};
++  const d=map[state]||[state,'off'];
++  const scheduled=row.status==='suspended'&&row.suspend_from&&row.effective_status==='active'?' · programmé':'';
++  return `<span class="pill ${d[1]}">${esc(d[0]+scheduled)}</span>`;
++}
++views.features = async () => {
++  const q=sessionStorage.getItem('adm_feature_q')||'', space=sessionStorage.getItem('adm_feature_space')||'', state=sessionStorage.getItem('adm_feature_state')||'';
++  const query=new URLSearchParams();if(q)query.set('q',q);if(space)query.set('space',space);if(state)query.set('status',state);
++  const [data,history]=await Promise.all([api('/admin/features?'+query.toString()),api('/admin/features/history')]); FEATURE_DATA=data;
++  const rows=data.items||[], groups=new Map(); rows.forEach(row=>{if(!groups.has(row.space))groups.set(row.space,[]);groups.get(row.space).push(row);});
++  const card=row=>{const hidden=(row.placements||[]).filter(p=>!p.visible).map(p=>p.placement).join(', '), protection=row.protected?'<span class="small muted">Protection essentielle — retrait bloqué</span>':'';
++    return `<article class="panel" style="margin:0;padding:12px" data-feature="${esc(row.feature_key)}"><div style="display:flex;gap:9px;align-items:flex-start"><input class="feature-check" type="checkbox" value="${esc(row.feature_key)}" ${row.protected||row.status==='deleted'?'disabled':''} aria-label="Sélectionner ${esc(row.label)}"><div style="min-width:0;flex:1"><div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><b>${esc(row.label)}</b>${featureStatePill(row)}<span class="small muted">${esc(row.feature_type)}</span></div><div class="small muted" style="margin-top:3px">${esc(row.description||'')}</div><div class="small muted" style="margin-top:5px">Clé : ${esc(row.feature_key)} · modifiée ${esc(fmtD(row.updated_at)||'—')}${hidden?` · masquée : ${esc(hidden)}`:''}</div>${protection}</div></div><div class="frow" style="margin-top:10px;gap:6px">${!row.protected&&row.status!=='deleted'?`<button class="btn sm ${row.effective_status==='active'?'sec':''}" data-feature-key="${esc(row.feature_key)}" onclick="A.featureAction(this.dataset.featureKey,'activate')">Activer</button><button class="btn sm sec" data-feature-key="${esc(row.feature_key)}" onclick="A.featureAction(this.dataset.featureKey,'disable')">Désactiver</button><button class="btn sm sec" data-feature-key="${esc(row.feature_key)}" onclick="A.featureAction(this.dataset.featureKey,'suspend')">Suspendre</button><button class="btn sm sec" data-feature-key="${esc(row.feature_key)}" onclick="A.featurePlacement(this.dataset.featureKey,'hide')">Masquer</button><button class="btn sm sec" data-feature-key="${esc(row.feature_key)}" onclick="A.featurePlacement(this.dataset.featureKey,'show')">Afficher</button>${ME&&ME.role==='pdg'?`<button class="btn sm warn" data-feature-key="${esc(row.feature_key)}" onclick="A.featureAction(this.dataset.featureKey,'delete')">Supprimer définitivement</button>`:''}`:'<span class="small muted">Aucune action destructive autorisée.</span>'}</div>${row.feature_type==='admin_menu'&&row.status!=='deleted'?`<div class="small muted" style="margin-top:8px">Ordre du menu <input type="number" min="0" max="100000" value="${Number(row.sort_order)||0}" style="width:76px" data-feature-order="${esc(row.feature_key)}"><button class="btn sm sec" data-feature-key="${esc(row.feature_key)}" onclick="A.featureOrder(this.dataset.featureKey)">Réorganiser</button></div>`:''}</article>`;};
++  shell(`<h1>🧭 Gestion des fonctionnalités</h1>
++    <div class="panel"><div class="small muted">Centre de contrôle des modules réellement raccordés aux interfaces et routes serveur. Désactiver ou suspendre conserve les données. Une suppression est archivante, bloque l’accès technique et requiert toujours le mot de passe actuel du PDG.</div><div class="frow" style="margin-top:10px"><input id="feature-q" placeholder="Rechercher une fonctionnalité…" value="${esc(q)}" style="flex:2;min-width:210px"><select id="feature-space" style="flex:1"><option value="">Tous les espaces</option>${(data.spaces||[]).map(x=>`<option value="${esc(x)}" ${space===x?'selected':''}>${esc(x)}</option>`).join('')}</select><select id="feature-state" style="flex:1"><option value="">Tous les états</option>${[['active','Actif'],['disabled','Désactivé'],['suspended','Suspendu'],['deleted','Supprimé']].map(([v,l])=>`<option value="${v}" ${state===v?'selected':''}>${l}</option>`).join('')}</select><button class="btn sm" onclick="A.featureFilter()">Filtrer</button></div></div>
++    <div class="panel"><div class="frow"><b style="flex:1">Actions groupées</b><select id="feature-bulk-action"><option value="disable">Désactiver</option><option value="activate">Activer</option><option value="suspend">Suspendre</option><option value="hide">Masquer à des emplacements</option><option value="show">Afficher à des emplacements</option>${data.can_delete?'<option value="delete">Supprimer définitivement</option>':''}</select><button class="btn" onclick="A.featureBulk()">Appliquer à la sélection</button></div><div class="small muted mt">Les suppressions groupées affichent la liste exacte et demandent une unique vérification du mot de passe PDG.</div></div>
++    ${[...groups.entries()].map(([group,list])=>`<section style="margin:18px 0"><h2 style="margin:0 0 8px">${esc(group)} <span class="small muted">(${list.length})</span></h2><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:10px">${list.map(card).join('')}</div></section>`).join('')||'<div class="panel muted">Aucune fonctionnalité ne correspond au filtre.</div>'}
++    <div class="panel"><h2 style="margin-top:0">Historique des décisions</h2><div class="small muted mb">Les échecs de mot de passe et les suppressions vérifiées sont journalisés sans jamais enregistrer le mot de passe.</div><div style="max-height:420px;overflow:auto"><table><tr><th>Date</th><th>Fonctionnalité</th><th>Action</th><th>Administrateur</th><th>Motif / sécurité</th></tr>${(history.items||[]).slice(0,200).map(h=>`<tr><td class="small">${esc(fmtD(h.created_at)||'')}</td><td><b>${esc(h.label)}</b><br><span class="small muted">${esc(h.space)}</span></td><td>${esc(h.action)}</td><td>${esc(h.actor_name||'Système')}</td><td class="small">${esc(h.reason||'—')}<br><span class="${h.security_result==='verified'?'ok':h.security_result==='failed'?'bad':'muted'}">${esc(h.security_result==='verified'?'Mot de passe vérifié':h.security_result==='failed'?'Mot de passe refusé':'Aucune vérification requise')}</span></td></tr>`).join('')||'<tr><td colspan="5" class="muted">Aucune décision enregistrée.</td></tr>'}</table></div></div>`);
++};
++
+ /* ---------- Tarifs et estimations intelligentes (PDG) ---------- */
+ views.estimates = async () => {
+   const [catalog, rules, cfg, villes, terms] = await Promise.all([
+@@ -1161,6 +1200,23 @@
+ 
+ 
+ const A = {
++  featureKeys() { return [...document.querySelectorAll('.feature-check:checked')].map(x=>x.value); },
++  featureFilter() { sessionStorage.setItem('adm_feature_q',(document.getElementById('feature-q')||{}).value||'');sessionStorage.setItem('adm_feature_space',(document.getElementById('feature-space')||{}).value||'');sessionStorage.setItem('adm_feature_state',(document.getElementById('feature-state')||{}).value||'');render(); },
++  async featureApply(keys, action, extra={}) { try { const r=await api('/admin/features/action',{method:'POST',body:{keys,action,...extra}}); FEATURE_DATA=null; toast((r.keys||keys).length+' fonctionnalité(s) mise(s) à jour.','ok'); render(); } catch(e) { toast(e.message,'err'); } },
++  featureAction(key, action) {
++    if(action==='delete') return this.featureDelete([key]);
++    if(action==='suspend') return this.featureSuspend([key]);
++    const reason=prompt('Motif facultatif :')||''; this.featureApply([key],action,{reason});
++  },
++  featureOrder(key) { const field=document.querySelector('[data-feature-order="'+key+'"]'); if(!field)return; this.featureApply([key],'order',{sort_order:field.value,reason:'Réorganisation du menu'}); },
++  featureBulk() { const keys=this.featureKeys(), action=(document.getElementById('feature-bulk-action')||{}).value;if(!keys.length)return toast('Sélectionnez au moins une fonctionnalité.','err');if(action==='delete')return this.featureDelete(keys);if(action==='suspend')return this.featureSuspend(keys);if(['hide','show'].includes(action))return this.featurePlacementMany(keys,action);const reason=prompt('Motif facultatif pour l’action groupée :')||'';this.featureApply(keys,action,{reason}); },
++  featureSuspend(keys) { openModal(`<h3>Suspendre temporairement</h3><p class="small muted">La suspension bloque les interfaces et routes liées jusqu’à la réactivation. Laissez la fin vide pour une suspension manuelle.</p><label>Début <input id="fc-suspend-from" type="datetime-local" value="${new Date().toISOString().slice(0,16)}"></label><label>Réactivation automatique <input id="fc-suspend-until" type="datetime-local"></label><label>Motif facultatif</label><textarea id="fc-reason" rows="3"></textarea><div class="btn-row"><button class="btn warn" onclick="A.featureSuspendConfirm()">Suspendre ${keys.length} élément(s)</button><button class="btn sec" onclick="closeModal()">Annuler</button></div>`);window._featurePending={keys}; },
++  featureSuspendConfirm() { const p=window._featurePending||{}, from=(document.getElementById('fc-suspend-from')||{}).value,until=(document.getElementById('fc-suspend-until')||{}).value,reason=(document.getElementById('fc-reason')||{}).value;if(!from)return toast('Indiquez une date de suspension.','err');closeModal();this.featureApply(p.keys||[],'suspend',{suspend_from:from,suspend_until:until||null,reason}); },
++  featurePlacement(key,action) { this.featurePlacementMany([key],action); },
++  featurePlacementMany(keys,action) { const all=(FEATURE_DATA&&FEATURE_DATA.placements)||['home','main_menu','account','pro','admin_menu'];openModal(`<h3>${action==='hide'?'Masquer':'Afficher'} à des emplacements</h3><p class="small muted">Le module reste conservé. Seuls les emplacements sélectionnés changent.</p><div class="choices">${all.map(x=>`<label class="check-line"><input class="fc-placement" type="checkbox" value="${esc(x)}" checked> ${esc(x)}</label>`).join('')}</div><label>Motif facultatif</label><textarea id="fc-place-reason" rows="2"></textarea><div class="btn-row"><button class="btn" onclick="A.featurePlacementConfirm('${action}')">Confirmer</button><button class="btn sec" onclick="closeModal()">Annuler</button></div>`);window._featurePending={keys}; },
++  featurePlacementConfirm(action) { const p=window._featurePending||{},placements=[...document.querySelectorAll('.fc-placement:checked')].map(x=>x.value),reason=(document.getElementById('fc-place-reason')||{}).value;if(!placements.length)return toast('Choisissez au moins un emplacement.','err');closeModal();this.featureApply(p.keys||[],action,{placements,reason}); },
++  async featureDelete(keys) { try { const r=await api('/admin/features/delete-confirmation',{method:'POST',body:{keys}});openModal(`<h3>Suppression définitive protégée</h3><p class="small bad">Les éléments seront archivés définitivement et leurs routes seront bloquées. Cette action ne peut pas être annulée.</p><div class="panel small">${(r.items||[]).map(x=>`<b>${esc(x.label)}</b><br><span class="muted">${esc(x.space)}</span>`).join('<hr>')}</div><label>Motif facultatif</label><textarea id="fc-delete-reason" rows="2"></textarea><label>Mot de passe actuel du PDG</label><input id="fc-delete-password" type="password" autocomplete="current-password"><div class="btn-row"><button class="btn warn" onclick="A.featureDeleteConfirm('${esc(r.confirmation_id)}')">Vérifier et supprimer ${keys.length} élément(s)</button><button class="btn sec" onclick="closeModal()">Annuler</button></div><div class="small muted mt">Confirmation valable jusqu’au ${esc(fmtD(r.expires_at))}. Cinq essais maximum.</div>`);window._featurePending={keys};}catch(e){toast(e.message,'err');} },
++  async featureDeleteConfirm(confirmationId) { const p=window._featurePending||{},password=(document.getElementById('fc-delete-password')||{}).value,reason=(document.getElementById('fc-delete-reason')||{}).value;if(!password)return toast('Le mot de passe PDG est obligatoire.','err');try{await api('/admin/features/action',{method:'POST',body:{keys:p.keys||[],action:'delete',confirmation_id:confirmationId,password,reason}});closeModal();toast('Suppression définitive enregistrée et accès bloqué.','ok');render();}catch(e){const f=document.getElementById('fc-delete-password');if(f)f.value='';toast(e.message,'err');} },
+   async userDetail(id) {
+     try {
+       const u = await api('/admin/users/' + id);
+@@ -2290,12 +2346,13 @@
+   if (!TOKEN) { renderLogin(); return; }
+   try {
+     if (!ME) ME = await api('/me');
+-    STATS = await api('/admin/stats');
++    const boot=await Promise.all([api('/admin/stats'),api('/admin/features')]); STATS=boot[0]; FEATURE_DATA=boot[1];
+     const f = parseInt(STATS.admin_font_size || 16, 10); // taille du tableau de bord définie par le PDG
+     document.body.style.zoom = f === 16 ? '' : String(f / 16);
+   } catch (e) { return; }
+   const fn = views[VIEW] || views.dashboard;
+-  try { await fn(); if(['settings','commerce','estimates','catalog','questions','rules','maintenance','prooptions','staff','ads'].includes(VIEW)) adminArmDraft(document.getElementById('root'),true); }
++  if (!adminFeatureVisible(VIEW)) { shell(`<h1>Fonctionnalité indisponible</h1><div class="panel">Cette rubrique a été désactivée, suspendue ou masquée par la direction. Son accès est aussi bloqué côté serveur.</div>`); return; }
++  try { await fn(); if(['settings','commerce','estimates','catalog','questions','rules','maintenance','prooptions','staff','ads','features'].includes(VIEW)) adminArmDraft(document.getElementById('root'),true); }
+   catch (e) { shell(`<h1>Erreur</h1><div class="panel">${esc(e.message)}<br><button class="btn" style="margin-top:10px" onclick="render()">Réessayer</button></div>`); }
+ }
+ window.render = render;
+--- a/package.json
++++ b/package.json
+@@ -38,7 +38,10 @@
+     "test:colis35:ticker": "node test-colis35-ticker-ui.js",
+     "test:colis36": "node test-colis36.js",
+     "test:colis36:ui": "node test-colis36-ui.js",
+-    "test:colis37": "node test-colis37-images.js"
++    "test:colis37": "node test-colis37-images.js",
++    "test:colis38": "node test-colis38-features.js",
++    "test:colis38:ui": "node test-colis38-ui.js",
++    "test:colis39": "node test-colis39-busy.js"
+   },
+   "keywords": [],
+   "author": "",
+--- a/test-colis38-features.js
++++ b/test-colis38-features.js
+@@ -0,0 +1,18 @@
++/* COLIS 38 — centre universel des fonctionnalités : contrôles, sécurité et non-contournement. */
++'use strict';
++const { db }=require('./db');
++const BASE='http://127.0.0.1:3000/api'; let pass=0,fail=0;
++function ok(v,l){if(v){pass++;console.log('✓',l);}else{fail++;console.error('✗',l);}}
++async function api(token,path,method='GET',body){const r=await fetch(BASE+path,{method,headers:{...(token?{authorization:'Bearer '+token}:{}),...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return{r,d:await r.json().catch(()=>({}))};}
++const initial={ history:0, logs:0, features:[], places:[], confirmations:[] };
++function cleanup(){try{const restore=db.prepare('UPDATE feature_controls SET status=?,suspend_from=?,suspend_until=?,reason=?,sort_order=?,deleted_at=?,deleted_by=?,updated_at=? WHERE feature_key=?');const clearPlaces=db.prepare('DELETE FROM feature_control_placements WHERE feature_key=?');const put=db.prepare('INSERT INTO feature_control_placements(feature_key,placement,visible,updated_at,updated_by) VALUES(?,?,?,?,?)');initial.features.forEach(row=>{restore.run(row.status,row.suspend_from,row.suspend_until,row.reason,row.sort_order,row.deleted_at,row.deleted_by,row.updated_at,row.feature_key);clearPlaces.run(row.feature_key);});initial.places.forEach(x=>put.run(x.feature_key,x.placement,x.visible,x.updated_at,x.updated_by));db.prepare('DELETE FROM feature_control_history WHERE id>?').run(initial.history);const originalConfirmations=new Set(initial.confirmations);const removeConfirmation=db.prepare('DELETE FROM feature_delete_confirmations WHERE id=?');db.prepare('SELECT id FROM feature_delete_confirmations').all().forEach(x=>{if(!originalConfirmations.has(x.id))removeConfirmation.run(x.id)});db.prepare("DELETE FROM admin_log WHERE id>?").run(initial.logs);}catch(e){console.error('cleanup',e.message)}}
++(async()=>{try{initial.history=db.prepare('SELECT COALESCE(MAX(id),0) n FROM feature_control_history').get().n;initial.logs=db.prepare('SELECT COALESCE(MAX(id),0) n FROM admin_log').get().n;initial.confirmations=db.prepare('SELECT id FROM feature_delete_confirmations').all().map(x=>x.id);const touched=['module.games','admin.games','pro.visibility','pro.advertising','module.voice_search'];initial.features=db.prepare(`SELECT * FROM feature_controls WHERE feature_key IN (${touched.map(()=>'?').join(',')})`).all(...touched);initial.places=db.prepare(`SELECT * FROM feature_control_placements WHERE feature_key IN (${touched.map(()=>'?').join(',')})`).all(...touched);
++let x=await api(null,'/auth/login','POST',{phone:'admin',password:'Klean@2026'}),token=x.d.token;ok(x.r.status===200&&!!token,'connexion PDG');
++x=await api(token,'/admin/features');const catalog=x.d.items||[];ok(x.r.status===200&&catalog.length>=55&&catalog.some(f=>f.feature_key==='admin.feature_management')&&catalog.some(f=>f.feature_key==='admin.catalog'),'registre couvre les modules et le tableau PDG');ok(catalog.some(f=>f.space==='Page d’accueil')&&catalog.some(f=>f.space==='Tableau de bord PDG')&&catalog.some(f=>f.space==='Sécurité et maintenance'),'classement par espaces réels disponible');
++x=await api(token,'/admin/features/action','POST',{keys:['core.auth'],action:'disable'});ok(x.r.status===400&&/protection essentielle/i.test(x.d.error||''),'protection essentielle techniquement non désactivable');
++x=await api(token,'/admin/features/action','POST',{keys:['module.games'],action:'disable',reason:'test temporaire'});ok(x.r.status===200,'désactivation individuelle enregistrée');x=await api(null,'/games/config');ok(x.r.status===423&&x.d.code==='FEATURE_UNAVAILABLE','API historique bloquée après désactivation');await api(token,'/admin/features/action','POST',{keys:['module.games'],action:'activate',reason:'restauration test'});x=await api(null,'/games/config');ok(x.r.status===200,'réactivation restaure le module sans toucher aux données');
++x=await api(token,'/admin/features/action','POST',{keys:['admin.games'],action:'hide',placements:['admin_menu'],reason:'masquage test'});ok(x.r.status===200&&x.d.items[0].placements.some(p=>p.placement==='admin_menu'&&!p.visible),'masquage ciblé du menu PDG conservant le module');x=await api(token,'/admin/features/action','POST',{keys:['admin.games'],action:'show',placements:['admin_menu'],reason:'restauration test'});ok(x.r.status===200&&x.d.items[0].placements.some(p=>p.placement==='admin_menu'&&p.visible),'réaffichage ciblé du menu PDG');x=await api(token,'/admin/features/action','POST',{keys:['admin.games'],action:'order',sort_order:1,reason:'réorganisation test'});ok(x.r.status===200&&Number(x.d.items[0].sort_order)===1,'ordre administrable pour les rubriques du menu PDG');
++x=await api(token,'/admin/features/action','POST',{keys:['pro.visibility','pro.advertising'],action:'suspend',suspend_from:new Date().toISOString(),suspend_until:new Date(Date.now()+3600000).toISOString(),reason:'test groupé'});ok(x.r.status===200&&x.d.keys.length===2,'suspension groupée exacte des deux éléments sélectionnés');x=await api(token,'/visibilite');ok(x.r.status===423,'route liée à une fonctionnalité suspendue bloquée côté serveur');await api(token,'/admin/features/action','POST',{keys:['pro.visibility','pro.advertising'],action:'activate',reason:'restauration test'});x=await api(token,'/visibilite');ok(x.r.status===200,'réactivation groupée rétablit l’API');x=await api(token,'/admin/features/action','POST',{keys:['module.voice_search'],action:'suspend',suspend_from:new Date(Date.now()-120000).toISOString(),suspend_until:new Date(Date.now()-60000).toISOString(),reason:'expiration test'});x=await api(null,'/voice-search/config');ok(x.r.status===200,'suspension arrivée à échéance levée automatiquement côté serveur');
++x=await api(token,'/admin/features/delete-confirmation','POST',{keys:['module.voice_search']});const first=x.d.confirmation_id;ok(x.r.status===201&&!!first&&x.d.items.length===1,'suppression prépare une confirmation limitée à la sélection exacte');x=await api(token,'/admin/features/action','POST',{keys:['module.voice_search'],action:'delete',confirmation_id:first,password:'mot-de-passe-invalide',reason:'test refus'});ok(x.r.status===403&&/mot de passe/i.test(x.d.error||''),'mot de passe incorrect empêche réellement la suppression');x=await api(token,'/admin/features');ok(x.d.items.find(f=>f.feature_key==='module.voice_search').status==='active','échec mot de passe ne modifie pas l’état');
++x=await api(token,'/admin/features/delete-confirmation','POST',{keys:['module.voice_search']});const second=x.d.confirmation_id;x=await api(token,'/admin/features/action','POST',{keys:['module.voice_search'],action:'delete',confirmation_id:second,password:'Klean@2026',reason:'validation test'});ok(x.r.status===200,'mot de passe PDG valide autorise la suppression confirmée');x=await api(null,'/voice-search/config');ok(x.r.status===423,'fonction supprimée inaccessible par son ancienne API');x=await api(token,'/admin/features/history?feature_key=module.voice_search');ok((x.d.items||[]).some(h=>h.action==='delete'&&h.security_result==='verified')&&(x.d.items||[]).some(h=>h.action==='delete_password_failed'&&h.security_result==='failed'),'historique conserve résultats de vérification sans mot de passe');
++}catch(e){fail++;console.error(e.stack||e)}finally{cleanup();console.log(`COLIS 38 fonctionnalités API : ${pass}/${pass+fail}`);process.exitCode=fail?1:0;}})();
+--- a/test-colis38-ui.js
++++ b/test-colis38-ui.js
+@@ -0,0 +1,13 @@
++/* COLIS 38 — UI desktop, Android/iPhone et menus administratifs pilotés. */
++'use strict';
++const {chromium}=require('playwright');const {db}=require('./db');
++const BASE='http://127.0.0.1:3000',API=BASE+'/api';let pass=0,fail=0,browser=null;
++function ok(v,l){if(v){pass++;console.log('✓',l)}else{fail++;console.error('✗',l)}}
++async function api(t,p,m='GET',b){const r=await fetch(API+p,{method:m,headers:{...(t?{authorization:'Bearer '+t}:{}),...(b?{'content-type':'application/json'}:{})},body:b?JSON.stringify(b):undefined});return{r,d:await r.json().catch(()=>({}))}}
++const snap={rows:[],places:[],history:0,logs:0};function restore(){try{const u=db.prepare('UPDATE feature_controls SET status=?,suspend_from=?,suspend_until=?,reason=?,sort_order=?,deleted_at=?,deleted_by=?,updated_at=? WHERE feature_key=?'),d=db.prepare('DELETE FROM feature_control_placements WHERE feature_key=?'),i=db.prepare('INSERT INTO feature_control_placements(feature_key,placement,visible,updated_at,updated_by) VALUES(?,?,?,?,?)');snap.rows.forEach(x=>{u.run(x.status,x.suspend_from,x.suspend_until,x.reason,x.sort_order,x.deleted_at,x.deleted_by,x.updated_at,x.feature_key);d.run(x.feature_key)});snap.places.forEach(x=>i.run(x.feature_key,x.placement,x.visible,x.updated_at,x.updated_by));db.prepare('DELETE FROM feature_control_history WHERE id>?').run(snap.history);db.prepare('DELETE FROM admin_log WHERE id>?').run(snap.logs)}catch(e){console.error('restore',e.message)}}
++(async()=>{try{const keys=['admin.games','module.games','module.voice_search'];snap.rows=db.prepare(`SELECT * FROM feature_controls WHERE feature_key IN (${keys.map(()=>'?').join(',')})`).all(...keys);snap.places=db.prepare(`SELECT * FROM feature_control_placements WHERE feature_key IN (${keys.map(()=>'?').join(',')})`).all(...keys);snap.history=db.prepare('SELECT COALESCE(MAX(id),0) n FROM feature_control_history').get().n;snap.logs=db.prepare('SELECT COALESCE(MAX(id),0) n FROM admin_log').get().n;
++let login=await api(null,'/auth/login','POST',{phone:'admin',password:'Klean@2026'}),token=login.d.token;ok(!!token,'connexion PDG pour contrôles UI');browser=await chromium.launch({headless:true});
++for(const [label,opt] of [['bureau',{viewport:{width:1280,height:850}}],['Android',{viewport:{width:390,height:844},isMobile:true}]]){const c=await browser.newContext(opt);await c.addInitScript(t=>localStorage.setItem('ks_admin_token',t),token);const p=await c.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));await p.goto(BASE+'/admin/#features');await p.waitForSelector('text=Actions groupées');ok(await p.locator('[data-feature]').count()>=55,`${label} : registre universel visible et groupé`);ok(await p.locator('text=Protection essentielle',{exact:false}).count()>=4,`${label} : protections système clairement distinguées`);ok(await p.locator('input[placeholder*="Rechercher une fonctionnalité"]').count()===1&&await p.locator('#feature-bulk-action').count()===1,`${label} : recherche, filtres et actions groupées disponibles`);if(label==='bureau'){await p.locator('[data-feature="module.voice_search"] button.warn').click();await p.waitForSelector('#fc-delete-password');ok(await p.locator('#fc-delete-password').getAttribute('type')==='password'&&await p.locator('text=Suppression définitive protégée').count()===1,'bureau : suppression impose une fenêtre mot de passe PDG');}ok(!errors.length,`${label} : centre de fonctionnalités sans erreur JavaScript`);await c.close()}
++let x=await api(token,'/admin/features/action','POST',{keys:['admin.games'],action:'hide',placements:['admin_menu'],reason:'test UI'});ok(x.r.status===200,'masquage du menu PDG appliqué');let c=await browser.newContext({viewport:{width:1200,height:800}});await c.addInitScript(t=>localStorage.setItem('ks_admin_token',t),token);let p=await c.newPage();await p.goto(BASE+'/admin/#dashboard');await p.waitForSelector('#side');ok(await p.locator('#side').getByText('Quiz / Flip Fizz / Kdo',{exact:true}).count()===0,'menu PDG masqué disparaît sans supprimer le module');await c.close();await api(token,'/admin/features/action','POST',{keys:['admin.games'],action:'show',placements:['admin_menu'],reason:'restauration test'});
++x=await api(token,'/admin/features/action','POST',{keys:['module.games'],action:'disable',reason:'test URL historique'});ok(x.r.status===200,'désactivation module préparée pour test iPhone');c=await browser.newContext({viewport:{width:390,height:844},isMobile:true});await c.addInitScript(t=>localStorage.setItem('ks_token',t),token);p=await c.newPage();let errors=[];p.on('pageerror',e=>errors.push(e.message));await p.goto(BASE+'/#/quiz');await p.waitForSelector('text=Fonctionnalité indisponible');ok(await p.locator('text=Fonctionnalité indisponible').count()===1,'iPhone : ancienne route cliente bloquée après désactivation');ok(!errors.length,'iPhone : garde de route sans erreur JavaScript');await c.close();await api(token,'/admin/features/action','POST',{keys:['module.games'],action:'activate',reason:'restauration test'});
++}catch(e){fail++;console.error(e.stack||e)}finally{try{if(browser)await browser.close()}catch{}restore();console.log(`COLIS 38 fonctionnalités UI : ${pass}/${pass+fail}`);process.exitCode=fail?1:0}})();
+--- a/test-colis39-busy.js
++++ b/test-colis39-busy.js
+@@ -0,0 +1,20 @@
++/* COLIS 39 — régression publication publicité : verrouillage du bouton administration. */
++'use strict';
++const { chromium }=require('playwright');
++const BASE='http://127.0.0.1:3000'; let pass=0, fail=0;
++function ok(value,label){if(value){pass++;console.log('✓',label)}else{fail++;console.error('✗',label)}}
++(async()=>{let browser;try{
++  const login=await fetch(BASE+'/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({phone:'admin',password:'Klean@2026'})});
++  const {token}=await login.json(); ok(!!token,'connexion de direction');
++  browser=await chromium.launch({headless:true}); const context=await browser.newContext({viewport:{width:1280,height:850}});
++  await context.addInitScript(t=>localStorage.setItem('ks_admin_token',t),token);
++  const page=await context.newPage(),errors=[]; page.on('pageerror',e=>errors.push(e.message));
++  await page.goto(BASE+'/admin/#ads'); await page.getByText('Créer une publicité').click(); await page.waitForSelector('#ade-preview');
++  await page.locator('#ade-title').fill('Contrôle publication sans écriture'); await page.locator('#ade-content').fill('Cette requête est interceptée par le test.');
++  let publicationIntercepted=false;
++  await page.route('**/api/admin/ads',route=>{if(route.request().method()==='POST'){publicationIntercepted=true;return route.fulfill({status:200,contentType:'application/json',body:'{}'});}return route.continue();});
++  await page.getByRole('button',{name:'Publier',exact:true}).click(); await page.waitForTimeout(250);
++  ok(publicationIntercepted,'clic Publier atteint bien le flux d’enregistrement');
++  ok(await page.locator('#modal').count()===0,'publication termine et ferme le formulaire');
++  ok(!errors.some(message=>/busy is not defined/i.test(message))&&!errors.length,'aucune erreur JavaScript busy is not defined');
++}catch(e){fail++;console.error(e.stack||e)}finally{try{if(browser)await browser.close()}catch{}console.log(`COLIS 39 publication : ${pass}/${pass+fail}`);process.exitCode=fail?1:0;}})();

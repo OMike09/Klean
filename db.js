@@ -2895,4 +2895,64 @@ function categoryImageDimensions(file) {
   }
 })();
 
+
+// ============================================================
+// COLIS 38 — centre universel de gestion des fonctionnalités
+// Registre central : les données métier existantes restent dans leurs tables.
+// ============================================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS feature_controls (
+  feature_key TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  space TEXT NOT NULL,
+  feature_type TEXT NOT NULL DEFAULT 'module',
+  protected INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled','suspended','archived','deleted')),
+  suspend_from TEXT,
+  suspend_until TEXT,
+  reason TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT,
+  deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_feature_controls_space ON feature_controls(space,status,sort_order);
+CREATE TABLE IF NOT EXISTS feature_control_placements (
+  feature_key TEXT NOT NULL REFERENCES feature_controls(feature_key) ON DELETE CASCADE,
+  placement TEXT NOT NULL,
+  visible INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  PRIMARY KEY(feature_key,placement)
+);
+CREATE INDEX IF NOT EXISTS idx_feature_placements_place ON feature_control_placements(placement,visible);
+CREATE TABLE IF NOT EXISTS feature_control_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  feature_key TEXT NOT NULL,
+  action TEXT NOT NULL,
+  old_state TEXT NOT NULL DEFAULT '{}',
+  new_state TEXT NOT NULL DEFAULT '{}',
+  placements TEXT NOT NULL DEFAULT '[]',
+  reason TEXT,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  actor_name TEXT,
+  security_result TEXT NOT NULL DEFAULT 'not_required' CHECK(security_result IN ('not_required','verified','failed','blocked')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_feature_history_feature ON feature_control_history(feature_key,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_feature_history_created ON feature_control_history(created_at DESC);
+CREATE TABLE IF NOT EXISTS feature_delete_confirmations (
+  id TEXT PRIMARY KEY,
+  requested_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  feature_keys TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_feature_delete_confirmations_actor ON feature_delete_confirmations(requested_by,expires_at);
+`);
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
