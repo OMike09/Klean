@@ -2955,4 +2955,21 @@ CREATE TABLE IF NOT EXISTS feature_delete_confirmations (
 CREATE INDEX IF NOT EXISTS idx_feature_delete_confirmations_actor ON feature_delete_confirmations(requested_by,expires_at);
 `);
 
+// ============================================================
+// COLIS 40 — contacts publicitaires et identité visuelle versionnée
+// Extension additive : les annonces existantes et leurs statistiques restent intactes.
+// Les coordonnées sont stockées côté administration et ne sont jamais sérialisées
+// publiquement lorsque la politique de contact les masque.
+// ============================================================
+ensureColumn('ads','contact_name','TEXT');
+ensureColumn('ads','contact_phone','TEXT');
+ensureColumn('ads','whatsapp_phone','TEXT');
+ensureColumn('ads','contact_visibility',"TEXT NOT NULL DEFAULT 'default'");
+const COLIS40_DEFAULTS={
+  ads_contact_default_mode:'hidden',
+  app_logo_url:'/logo.png',
+  app_logo_version:crypto.randomBytes(12).toString('hex')
+};
+for(const [k,v] of Object.entries(COLIS40_DEFAULTS)) if(getSetting(k)===null)setSetting(k,v);
+
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };

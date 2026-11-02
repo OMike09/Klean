@@ -9,6 +9,7 @@
 <title>Klean Services</title>
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/logo.png" type="image/png">
+<link rel="preload" href="/logo.png" as="image" fetchpriority="high">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/modern-ui.css">
@@ -18,7 +19,7 @@
 <body>
 <div id="app">
   <div class="splash" aria-label="Klean Services">
-  <img class="splash-logo splash-image" src="/logo.png" alt="Logo Klean Services">
+  <img class="splash-logo splash-image" data-klean-logo src="/logo.png" alt="Logo Klean Services" decoding="async" fetchpriority="high">
   <div class="splash-name">Klean Services</div>
   <div class="splash-tagline">Exprimez votre besoin, un professionnel arrive.</div>
 </div>

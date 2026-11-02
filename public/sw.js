@@ -1,5 +1,5 @@
 /* Klean Services — PWA publique : coque + images de catalogue versionnées, aucune donnée privée. */
-const SHELL_CACHE = 'ks-v11-public-shell';
+const SHELL_CACHE = 'ks-v12-public-shell';
 const IMAGE_CACHE = 'ks-v1-public-images';
 const MAX_PUBLIC_IMAGES = 96;
 const SHELL = ['/', '/index.html', '/styles.css', '/modern-ui.css', '/category-request.css', '/category-cards.css', '/app.js', '/manifest.json', '/logo.png', '/icon-192.png', '/icon-512.png'];

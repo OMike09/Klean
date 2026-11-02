@@ -14,6 +14,7 @@ let PRO_SKILLS = [];         // arbre central catégorie → sous-catégorie des
 let GAMES = { quiz: false, flipfizz: false, kdo: false };
 let MAINT = { active: false }; // état de maintenance de la plateforme
 let ADS = [];
+let APP_BRANDING = { logo_url:'/logo.png', source_url:'/logo.png', version:'' };
 let PUBLIC_FEATURES = []; // indicateurs actifs livrés par le centre de fonctionnalités
 let navStack = [];
 let suppressPush = false;
@@ -50,6 +51,18 @@ function mediaUrl(src) {
   if (!s || !s.startsWith('/uploads/') || !TOKEN) return s;
   return s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
 }
+function appLogoUrl() { return String(APP_BRANDING && APP_BRANDING.logo_url || '/logo.png'); }
+function applyAppBranding(next) {
+  if (!next || !/^\/(?:logo\.png|uploads\/[A-Za-z0-9._-]+)(?:\?[^\s]*)?$/i.test(String(next.logo_url||''))) return;
+  const before=appLogoUrl(); APP_BRANDING={...APP_BRANDING,...next}; const current=appLogoUrl();
+  document.querySelectorAll('[data-klean-logo]').forEach(image=>{ if(image.src!==new URL(current,location.origin).href) image.src=current; });
+  if (before!==current && 'serviceWorker' in navigator) {
+    const payload={type:'KS_IMAGE_CACHE_SYNC',active_urls:[current],invalidated_urls:before?[before]:[]};
+    const send=worker=>{try{worker&&worker.postMessage(payload)}catch{}};
+    if(navigator.serviceWorker.controller)send(navigator.serviceWorker.controller);else navigator.serviceWorker.ready.then(r=>send(r.active)).catch(()=>{});
+  }
+}
+async function refreshAppBranding() { try { applyAppBranding(await api('/app-branding')); } catch {} }
 const PUBLIC_ROUTE_FEATURE = { home:'public.home',search:'public.search',services:'module.services',categories:'module.services',request:'module.services',account:'public.account',addresses:'public.account',settings:'public.account',notifications:'public.notifications',messages:'public.messages',missions:'module.missions',mission:'module.missions',payments:'module.payments','my-reviews':'public.reviews',urgence:'module.urgence','avis-recherche':'module.avis',jobs:'module.jobs',ecole:'module.ecole','ecole-famille':'module.ecole',braderie:'module.braderie','articles-seconde-main':'module.braderie','braderie-space':'module.braderie','klean-cabine':'module.cabine','cabine-operation':'module.cabine','cabine-operations':'module.cabine',quiz:'module.games',flip:'module.games',kdo:'module.games',pro:'pro.space','pro-edit':'pro.space','pro-revenus':'pro.space',visibilite:'pro.visibility',pub:'pro.advertising' };
 function publicFeatureVisible(key, placement) {
   if(!key || !Array.isArray(PUBLIC_FEATURES) || !PUBLIC_FEATURES.length) return true;
@@ -265,6 +278,7 @@ function connectSSE() {
     refreshHomeCatalogueState(false);
   });
   sse.addEventListener('feature-control', () => { refreshPublicFeatures(true); });
+  sse.addEventListener('app-branding', e => { try { applyAppBranding(JSON.parse(e.data)); } catch { refreshAppBranding(); } });
   sse.addEventListener('message', e => {
     const m = JSON.parse(e.data);
     if (currentChat === m.mission_id) { appendChatMsg(m); api('/missions/' + m.mission_id + '/messages').catch(() => { }); }
@@ -524,7 +538,7 @@ function header(title, opts = {}) {
   const showBack = opts.back === 'contextual' ? hasNavigationHistory() : opts.back !== false;
   return `<div class="hdr">
     ${showBack ? `<button type="button" class="back-btn" onclick="back()" aria-label="Retour à l’écran précédent">←<span>Retour</span></button>` : ''}
-    ${opts.brand ? `<div class="brand" aria-label="Klean Services"><img src="/logo.png" alt=""> <span>Klean Services</span></div>` : `<div class="title">${esc(title)}</div>`}
+    ${opts.brand ? `<div class="brand" aria-label="Klean Services"><img data-klean-logo src="${esc(appLogoUrl())}" alt=""> <span>Klean Services</span></div>` : `<div class="title">${esc(title)}</div>`}
     ${opts.bell !== false ? `<button type="button" class="bell" onclick="nav('#/notifications')" aria-label="Voir les notifications">🔔<span class="js-bell-badge"></span></button>` : ''}
   </div>`;
 }
@@ -565,7 +579,7 @@ const routes = {};
 routes.login = () => {
   $app.innerHTML = `
   <div class="content no-nav" style="padding-top:52px">
-    <div class="center mb"><img class="splash-logo splash-image" src="/logo.png" alt="Logo Klean Services" style="margin:0 auto">
+    <div class="center mb"><img class="splash-logo splash-image" data-klean-logo src="${esc(appLogoUrl())}" alt="Logo Klean Services" style="margin:0 auto">
       <h2 style="margin:14px 0 2px">Klean Services</h2>
       <div class="muted">Tous vos services à portée de main</div></div>
     <div class="card">
@@ -689,8 +703,9 @@ function adCardHtml(a) {
   const media=isVideo?`<video src="${esc(mediaUrl(a.file))}" controls muted playsinline preload="metadata" style="display:block;width:100%;max-height:min(52vh,420px);object-fit:${fit};background:#0b1320;border-radius:10px" aria-label="Vidéo publicitaire"></video>`:a.file&&a.type==='image'?`<img src="${esc(mediaUrl(a.file))}" alt="${esc(a.title||'Publicité')}" loading="lazy" style="display:block;width:100%;height:auto;max-height:min(58vh,460px);object-fit:${fit};background:#f6f8f8;border-radius:10px">`:'';
   const tag=a.promotion_active?'🏷️ OFFRE PROMOTIONNELLE':a.type==='video'?'📣 PUBLICITÉ VIDÉO':a.sponsor?'📣 PARTENAIRE':'📣 PUBLICITÉ';const action=a.cta_action||'discover',hasAction=!!a.link||action==='claim_offer';
   const cta=hasAction?`<button class="btn ghost sm" data-link="${esc(a.link||'')}" data-ad-id="${esc(a.id)}" data-action="${esc(action)}" data-placement="${esc(a.placement||'other')}" onclick="A.adOpen(this.dataset.link,Number(this.dataset.adId),this.dataset.action,this.dataset.placement)">${esc(adCtaLabel(a))}</button>`:'';
+  const contact=a.contact&&typeof a.contact==='object'?a.contact:{},contactLabel=contact.name?`<div class="small muted mt">Contact : ${esc(contact.name)}</div>`:'',shownPhone=contact.phone?`<div class="small bold mt">${esc(contact.phone)}</div>`:'',call=contact.call_url?`<a class="btn sec sm" href="${esc(contact.call_url)}" onclick="return A.adContact(Number(this.dataset.adId),'call',this.href)" data-ad-id="${esc(a.id)}">📞 Appeler</a>`:'',whatsapp=contact.whatsapp_url?`<a class="btn sm" href="${esc(contact.whatsapp_url)}" target="_blank" rel="noopener" onclick="return A.adContact(Number(this.dataset.adId),'whatsapp',this.href)" data-ad-id="${esc(a.id)}">💬 WhatsApp</a>`:'',contacts=(call||whatsapp)?`<div class="btn-row mt ks-ad-contacts">${call}${whatsapp}</div>`:'';
   const code=a.promotion_active&&a.promo_code?`<div class="small mt">Code : <b style="letter-spacing:.5px">${esc(a.promo_code)}</b></div>`:'';
-  return `<article class="ks-ad-card ks-ad-${esc(a.display_template||'classic')}" style="background:#fff;border:1px solid ${accent};border-radius:14px;padding:10px;box-sizing:border-box"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="ad-tag" style="border-color:${accent}">${tag}</span><span class="small muted">👁️ ${Number((a.unique_views ?? a.views) || 0).toLocaleString('fr-FR')}</span></div>${a.title?`<div class="bold mt">${esc(a.title)}</div>`:''}${a.content?`<div class="small muted mt" style="white-space:pre-wrap">${esc(a.content)}</div>`:''}${media?`<div style="margin-top:8px">${media}</div>`:''}${adPriceHtml(a)}${code}${a.offer_conditions&&a.promotion_active?`<div class="small muted mt">${esc(a.offer_conditions)}</div>`:''}${cta?`<div class="mt">${cta}</div>`:''}</article>`;
+  return `<article class="ks-ad-card ks-ad-${esc(a.display_template||'classic')}" style="background:#fff;border:1px solid ${accent};border-radius:14px;padding:10px;box-sizing:border-box"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="ad-tag" style="border-color:${accent}">${tag}</span><span class="small muted">👁️ ${Number((a.unique_views ?? a.views) || 0).toLocaleString('fr-FR')}</span></div>${a.title?`<div class="bold mt">${esc(a.title)}</div>`:''}${a.content?`<div class="small muted mt" style="white-space:pre-wrap">${esc(a.content)}</div>`:''}${media?`<div style="margin-top:8px">${media}</div>`:''}${adPriceHtml(a)}${code}${a.offer_conditions&&a.promotion_active?`<div class="small muted mt">${esc(a.offer_conditions)}</div>`:''}${contactLabel}${shownPhone}${cta?`<div class="mt">${cta}</div>`:''}${contacts}</article>`;
 }
 
 function adsBandHtml(list) {if(!publicFeatureVisible('module.ads','home')||!list.length)return '';return `<div class="ks-ads-rack" style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch">${list.map(a=>`<div style="flex:0 0 min(100%,520px);scroll-snap-align:start">${adCardHtml(a)}</div>`).join('')}</div>`;}
@@ -731,8 +746,7 @@ routes.home = async () => {
     <div id="home-fixe" style="position:sticky;top:calc(58px + var(--safe-t));z-index:39;background:var(--bg,#f5f7f7);padding:8px 0 4px;margin:0 -2px">
       <div class="searchbar" style="margin:0 2px">
         <input type="text" id="home-q" placeholder="🔎 Décrivez votre besoin…" enterkeyhint="search" autocomplete="off">
-        ${VOICE_HOME.home_visible && publicFeatureVisible('module.voice_search','home') ? `<button type="button" onclick="A.voiceSearchOpen()" aria-label="Rechercher par note vocale" title="Rechercher par note vocale" style="font-size:18px">🎤</button>` : ''}
-        <button onclick="A.goSearch()" aria-label="Rechercher">🔍</button>
+        ${VOICE_HOME.home_visible && publicFeatureVisible('module.voice_search','home') ? `<button type="button" class="voice-search-button" onclick="A.voiceSearchOpen()" aria-label="Rechercher par note vocale" title="Rechercher par note vocale" style="font-size:18px">🎤</button>` : ''}
       </div>
       <div id="home-search-results" class="live-search-results"></div>
     </div>
@@ -2482,6 +2496,7 @@ const A = {
     reportPublicImageError(asset,'retry_failed',context);
   },
   adOpen(link,id,action='discover',placement='other'){const v=String(link||'').trim(),adId=Number(id);if(adId)api('/ad-clicks',{method:'POST',body:{ad_id:adId,placement,anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});if(adId&&(action==='buy'||action==='order'))api('/ad-interactions',{method:'POST',body:{ad_id:adId,type:'order_intent',anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});if(action==='claim_offer'&&adId)return A.adOfferClaim(adId);if(action==='contact'&&v.startsWith('tel:')){if(adId)api('/ad-interactions',{method:'POST',body:{ad_id:adId,type:'contact',anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});location.href=v;return;}if(!v){toast('Aucun lien n’est configuré pour cette publicité.','err');return;}if(v.startsWith('#/'))return nav(v);if(/^https:\/\//i.test(v))window.open(v,'_blank','noopener');else toast('Lien publicitaire invalide.','err');},
+  adContact(id,channel,url){const target=String(url||'');if(!Number.isInteger(Number(id))||!['call','whatsapp'].includes(channel)||!target)return false;api('/ads/'+Number(id)+'/contact',{method:'POST',body:{channel,anonymous_key:anonymousAdViewerKey()}}).catch(()=>{});if(channel==='call')location.href=target;else window.open(target,'_blank','noopener');return false;}, 
   async adOfferClaim(id){if(!USER){toast('Connectez-vous pour vérifier cette offre.','err');return nav('#/login');}const code=prompt('Code promotionnel (laissez vide si aucun code n’est requis) :','');if(code===null)return;try{const check=await api('/ads/'+id+'/promo/verify',{method:'POST',body:{code}});const price=check.price===null||check.price===undefined?'selon les conditions':Number(check.price).toLocaleString('fr-FR')+' FCFA';if(!confirm(`Offre vérifiée : ${price}. Cette action ne crée pas de paiement. Enregistrer une demande d’offre ?`))return;await api('/ads/'+id+'/promo/claim',{method:'POST',body:{code}});toast('Demande d’offre enregistrée. Aucun paiement ni commande n’a été exécuté.','ok');}catch(e){toast(e.message,'err');}},
   goSearch() { const v = document.getElementById('home-q').value.trim(); nav('#/search/' + encodeURIComponent(v)); },
   _voiceSearch: null,
@@ -3627,12 +3642,13 @@ function render(options = {}) {
   let splashReleased = false;
   // La sortie est planifiée indépendamment du réseau : un API lent ne laisse jamais le splash bloqué.
   const releaseSplash = () => { if (splashReleased) return; splashReleased = true; render(); };
-  const splashTimer = setTimeout(releaseSplash, 3000);
+  const splashTimer = setTimeout(releaseSplash, 900);
   if ('serviceWorker' in navigator) {
     try { navigator.serviceWorker.register('/sw.js'); } catch { }
     navigator.serviceWorker.addEventListener('message', event => { const d = event.data || {}; if (d.type === 'navigate' && d.link && d.link.startsWith('#/')) nav(d.link); });
   }
   applyFont(localStorage.getItem('ks_font') || 16);
+  refreshAppBranding(); // ne retarde pas l’ouverture : le logo officiel préchargé reste immédiatement visible
   await checkMaintenance();
   await refreshPublicFeatures(false);
   setInterval(async () => { const before=JSON.stringify([MAINT.active,MAINT.blocked,MAINT.scheduled,MAINT.until]); await checkMaintenance(); const changed=before!==JSON.stringify([MAINT.active,MAINT.blocked,MAINT.scheduled,MAINT.until]); if (TOKEN && !MAINT.blocked && !USER) { try { USER=await api('/me'); connectSSE(); refreshBadges(); } catch {} } if (changed) render(); }, 15000);
@@ -3652,7 +3668,7 @@ function render(options = {}) {
   if (!location.hash) location.hash = '#/home';
   currentHash = normalHash(location.hash); navStack = [currentHash]; navCursor = 0;
   const releasedBeforeBoot = splashReleased;
-  const splashWait = MAINT.active && MAINT.blocked ? 0 : Math.max(0, 3000 - (Date.now() - splashStartedAt));
+  const splashWait = MAINT.active && MAINT.blocked ? 0 : Math.max(0, 900 - (Date.now() - splashStartedAt));
   if (!splashReleased && splashWait) await new Promise(resolve => setTimeout(resolve, splashWait));
   clearTimeout(splashTimer);
   releaseSplash();

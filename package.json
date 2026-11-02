@@ -41,7 +41,8 @@
     "test:colis37": "node test-colis37-images.js",
     "test:colis38": "node test-colis38-features.js",
     "test:colis38:ui": "node test-colis38-ui.js",
-    "test:colis39": "node test-colis39-busy.js"
+    "test:colis39": "node test-colis39-busy.js",
+    "test:colis40": "node test-colis40-contacts-logo-search.js"
   },
   "keywords": [],
   "author": "",

@@ -264,3 +264,16 @@ img.msg-missing{display:none}
 .pro-skill-root summary{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:12px;cursor:pointer;color:var(--txt,#173a35);list-style:none}.pro-skill-root summary::-webkit-details-marker{display:none}.pro-skill-root summary:after{content:'⌄';color:var(--p,#0b7a6b);font-weight:800}.pro-skill-root[open] summary:after{transform:rotate(180deg)}
 .pro-skill-body{padding:0 12px 10px;border-top:1px solid var(--line,#e8efed)}.pro-skill-category{padding:10px 0;border-bottom:1px solid #edf2f1}.pro-skill-category:last-child{border-bottom:0}.pro-skill-options{display:flex;flex-wrap:wrap;gap:7px;margin-top:7px}.pro-skill-options .check-line{margin:0;padding:7px 9px;border-radius:8px;background:#f5faf8;font-size:13px;min-width:calc(50% - 4px)}
 @media(max-width:520px){.pro-skill-root summary{padding:11px 10px}.pro-skill-options{display:block}.pro-skill-options .check-line{display:flex;margin:5px 0;width:100%}}
+
+/* COLIS 40 — ouverture progressive : l'identité officielle est déjà préchargée dans index.html. */
+.splash-logo,.splash-name,.splash-tagline{will-change:opacity,transform}
+.splash-logo{opacity:0;transform:scale(.88);animation:ks-logo-enter .52s cubic-bezier(.2,.82,.25,1) .06s both}
+.splash-name{opacity:0;transform:translateY(10px);animation:ks-copy-enter .42s ease-out .25s both}
+.splash-tagline{opacity:0;transform:translateY(8px);animation:ks-copy-enter .42s ease-out .36s both}
+@keyframes ks-logo-enter{to{opacity:1;transform:scale(1)}}
+@keyframes ks-copy-enter{to{opacity:1;transform:translateY(0)}}
+/* La préférence système reste prioritaire : aucun mouvement forcé. */
+@media (prefers-reduced-motion:reduce){.splash-logo,.splash-name,.splash-tagline{animation:none;opacity:1;transform:none;will-change:auto}}
+/* Le micro reste l’unique commande ronde de l’accueil : la loupe est déjà dans l’indication du champ. */
+#home-fixe .searchbar .voice-search-button{background:var(--p);color:#fff}
+.ks-ad-contacts{align-items:stretch;flex-wrap:wrap}.ks-ad-contacts .btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;min-width:0}
