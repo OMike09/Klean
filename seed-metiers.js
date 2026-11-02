@@ -21,7 +21,6 @@ const METIERS = [
   { n:'Spécialisé', sv:[
     { n:'Nettoyage de vitres', k:'vitres,fenetres,baies', t:['Lavage de vitres intérieures','Lavage de vitres extérieures','Vitres en hauteur'] },
     { n:'Désinfection & désinsectisation', k:'desinfection,cafards,moustiques,punaises,rats,deratisation', t:['Désinsectisation (cafards, punaises)','Dératisation','Désinfection de locaux','Traitement anti-moustiques'] },
-    { n:'Vidange de fosse septique', k:'fosse,septique,vidange,wc', t:['Vidange de fosse septique','Curage de canalisations'] },
     { n:'Entretien de piscine', k:'piscine,traitement eau', t:['Nettoyage de piscine','Traitement de l\u2019eau'] } ] } ] },
 
 { m:'Plomberie', i:'🔧', sc:[
@@ -167,13 +166,16 @@ const METIERS = [
   { n:'Mode & accessoires', sv:[
     { n:'Stylisme & accessoires', k:'styliste,mode,sac,perles,accessoires', t:['Création de collection','Confection d\u2019accessoires','Conseil en style'] } ] } ] },
 
-{ m:'Coiffure & beauté', i:'💇', sc:[
-  { n:'Coiffure', sv:[
-    { n:'Coiffure femme', k:'coiffure,tresses,meches,tissage,perruque,nattes', t:['Tresses','Tissage','Pose de perruque','Défrisage','Coupe et brushing','Coiffure à domicile'] },
-    { n:'Coiffure homme', k:'coiffeur,barbier,degrade,barbe', t:['Coupe homme','Dégradé','Taille de barbe','Coiffure enfant'] } ] },
-  { n:'Esthétique', sv:[
+{ m:'Beauté et coiffure femme', i:'💇‍♀️', sc:[
+  { n:'Coiffure femme', sv:[
+    { n:'Coiffure femme', k:'coiffure,tresses,meches,tissage,perruque,nattes', t:['Tresses','Tissage','Pose de perruque','Défrisage','Coupe et brushing','Coiffure à domicile'] } ] },
+  { n:'Esthétique et maquillage femme', sv:[
     { n:'Soins esthétiques', k:'esthetique,manucure,pedicure,ongles,soins visage,epilation', t:['Manucure','Pédicure','Pose d\u2019ongles','Soin du visage','Épilation','Massage bien-être'] },
     { n:'Maquillage', k:'maquillage,makeup,mariee', t:['Maquillage de mariée','Maquillage événement','Cours d\u2019auto-maquillage'] } ] } ] },
+
+{ m:'Beauté et coiffure homme', i:'💇‍♂️', sc:[
+  { n:'Coiffure homme et barbier', sv:[
+    { n:'Coiffure homme', k:'coiffeur,barbier,degrade,barbe', t:['Coupe homme','Dégradé','Taille de barbe','Coiffure enfant'] } ] } ] },
 
 { m:'Photo & vidéo', i:'📸', sc:[
   { n:'Prestations', sv:[
@@ -194,14 +196,24 @@ const METIERS = [
   { n:'Pâtisserie', sv:[
     { n:'Gâteaux & pâtisserie', k:'patisserie,gateau,anniversaire,mariage', t:['Gâteau d\u2019anniversaire','Gâteau de mariage','Pâtisseries assorties'] } ] } ] },
 
-{ m:'Cours & formation', i:'📚', sc:[
+{ m:'Cours à domicile', i:'📚', sc:[
   { n:'Cours à domicile', sv:[
     { n:'Soutien scolaire', k:'cours,repetiteur,maths,francais,anglais,physique,domicile', t:['Mathématiques','Français','Anglais','Physique-Chimie','Préparation BEPC','Préparation BAC','Aide aux devoirs (primaire)'] },
     { n:'Cours de langues', k:'anglais,allemand,espagnol,langue', t:['Anglais','Espagnol','Allemand','Chinois'] },
-    { n:'Cours d\u2019informatique', k:'informatique,bureautique,word,excel', t:['Initiation à l\u2019ordinateur','Word / Excel / PowerPoint','Internet et e-mail'] } ] },
+    { n:'Cours d\u2019informatique', k:'informatique,bureautique,word,excel', t:['Initiation à l\u2019ordinateur','Word / Excel / PowerPoint','Internet et e-mail'] } ] } ] },
+
+{ m:'Formation et coaching', i:'🎯', sc:[
   { n:'Formation professionnelle', sv:[
     { n:'Formations métiers', k:'formation,apprentissage,metier', t:['Formation en couture','Formation en coiffure','Formation en pâtisserie','Formation en informatique','Permis de conduire (accompagnement)'] },
     { n:'Musique & arts', k:'musique,piano,guitare,chant,danse,dessin', t:['Cours de piano','Cours de guitare','Cours de chant','Cours de danse','Cours de dessin'] } ] } ] },
+
+{ m:'Coaching et accompagnement', i:'🎯', sc:[
+  { n:'Coaching sportif et bien-être', sv:[
+    { n:'Sport & coaching', k:'coach,sport,fitness,gym', t:['Coach sportif personnel','Cours de fitness en groupe','Programme de remise en forme'] } ] } ] }, 
+
+{ m:'Vidange et assainissement', i:'🚛', sc:[
+  { n:'Fosses septiques, curage et eaux usées', sv:[
+    { n:'Vidange de fosse septique', k:'fosse,septique,vidange,wc', t:['Vidange de fosse septique','Curage de canalisations'] } ] } ] },
 
 { m:'Rédaction & traduction', i:'✍️', sc:[
   { n:'Services linguistiques', sv:[
@@ -233,7 +245,7 @@ const METIERS = [
     { n:'Aide ménagère familiale', k:'aide menagere,domestique,maison', t:['Aide ménagère à temps plein','Aide ménagère à temps partiel'] } ] },
   { n:'Santé & bien-être', sv:[
     { n:'Soins à domicile', k:'infirmier,soins,injection,pansement,tension', t:['Soins infirmiers à domicile','Injections et pansements','Suivi de tension / diabète'] },
-    { n:'Sport & coaching', k:'coach,sport,fitness,gym', t:['Coach sportif personnel','Cours de fitness en groupe','Programme de remise en forme'] } ] } ] },
+    ] } ] },
 
 { m:'Animaux', i:'🐾', sc:[
   { n:'Services animaliers', sv:[
@@ -346,8 +358,8 @@ const PRIX_CATEGORIES = {
   'Informatique': 10000, 'Téléphones & électronique': 5000, 'Réseaux & internet': 15000,
   'Mécanique automobile': 15000, 'Moto & engins 2 roues': 5000, 'Lavage auto & moto': 2000,
   'Transport & livraison': 2000, 'Jardinage & espaces verts': 10000, 'Agriculture & élevage': 15000,
-  'Couture & mode': 5000, 'Coiffure & beauté': 5000, 'Photo & vidéo': 25000, 'Événementiel': 50000,
-  'Cuisine & traiteur': 25000, 'Cours & formation': 10000, 'Rédaction & traduction': 10000,
+  'Couture & mode': 5000, 'Beauté et coiffure femme': 5000, 'Beauté et coiffure homme': 1500, 'Photo & vidéo': 25000, 'Événementiel': 50000,
+  'Cuisine & traiteur': 25000, 'Cours à domicile': 10000, 'Formation et coaching': 10000, 'Vidange et assainissement': 35000, 'Rédaction & traduction': 10000,
   'Administratif & comptabilité': 15000, 'Marketing & communication': 25000, 'Sécurité & gardiennage': 50000,
   'Aide à la personne': 40000, 'Animaux': 5000, 'Services funéraires': 50000, 'Commerce & vente': 10000,
   'Artisanat & réparations diverses': 5000, 'Services aux entreprises': 50000,

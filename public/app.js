@@ -277,6 +277,12 @@ function connectSSE() {
     // doit être relue. Une carte déjà visible est remplacée sans rechargement de page.
     refreshHomeCatalogueState(false);
   });
+  sse.addEventListener('catalogue', () => {
+    // Une seule source est relue après une décision PDG : aucun tableau local de
+    // catégories ne survit à une réorganisation centrale.
+    SERVICES=null; CATALOGUE=null; GRAND_CATEGORIES=[]; PRO_SKILLS=[];
+    if(/^#\/(?:home|categories|services|search|pro|pro-edit)(?:\/|$)/.test(location.hash||'#/home')) render();
+  });
   sse.addEventListener('feature-control', () => { refreshPublicFeatures(true); });
   sse.addEventListener('app-branding', e => { try { applyAppBranding(JSON.parse(e.data)); } catch { refreshAppBranding(); } });
   sse.addEventListener('message', e => {
@@ -819,7 +825,7 @@ function renderCategoryRequestForm(cat, serviceChoices, categoryAds = []) {
     if(categoryAds.length) recordAdViews(categoryAds);
   updateBadges(); return;
   }
-  const allTasks = services.flatMap(s => (s.taches || []).map(t => ({ id:Number(t.id), name:t.name, description:t.description || '', search_terms:Array.isArray(t.search_terms) ? t.search_terms : [], price_from:Number(t.price_from) || null, price_unit:t.price_unit || '', service_id:Number(s.id), service_name:s.name, category:s.category || '' })));
+  const allTasks = services.flatMap(s => (s.taches || []).map(t => ({ id:Number(t.id), name:t.name, description:t.description || '', search_terms:Array.isArray(t.search_terms) ? t.search_terms : [], price_from:Number(t.price_from) || null, price_unit:t.price_unit || '', service_id:Number(s.id), service_name:s.name, category:s.category || '', subcategory:s.subcategory || s.sub_category || '' })));
   const savedDraft = readCategoryDraft(cat.id);
   const taskById = new Map(allTasks.map(t => [Number(t.id), t]));
   let selectedTasks = (savedDraft.taches || []).map(raw => {
@@ -894,7 +900,7 @@ routes.categories = async (param) => {
   if (id) {
     let cat; try { cat = await api('/grand-categories/' + id + '/catalogue' + cityQuery); syncPublicImageCache([cat]); }
     catch (e) { toast(e.message, 'err'); nav('#/categories'); return; }
-    const serviceChoices = cat.categories.flatMap(c => c.services.map(s => ({ ...s, category:c.name, category_icon:c.icon || '' })));
+    const serviceChoices = cat.categories.flatMap(c => c.services.map(s => ({ ...s, category:c.name, category_icon:c.icon || '', subcategory:s.sub_category || '' })));
     let categoryAds=[]; try { categoryAds=adPlacementList(await api('/ads?category_id='+encodeURIComponent(cat.id)),['services_top'],'category_'+cat.id); } catch { }
     renderCategoryRequestForm(cat, serviceChoices, categoryAds);
     return;
@@ -947,7 +953,7 @@ routes.services = async (params) => {
     const seenSearch = new Set();
     CATALOGUE.forEach(c => c.services.forEach(s => {
       if (!seenSearch.has(Number(s.id)) && (hit(s.name) || hit(c.name) || s.taches.some(t => hit(t.name)))) {
-        seenSearch.add(Number(s.id)); out.push({ ...s, icon: c.icon, path: c.name });
+        seenSearch.add(Number(s.id)); out.push({ ...s, icon: c.icon, path: [c.name,s.sub_category].filter(Boolean).join(' › ') });
       }
     }));
     out.sort((a,b)=>String(a.name).localeCompare(String(b.name),'fr',{sensitivity:'base',numeric:true}));
@@ -960,7 +966,7 @@ routes.services = async (params) => {
     const seen = new Set();
     const all = [];
     CATALOGUE.forEach(c => (c.services || []).forEach(s => {
-      if (!seen.has(Number(s.id))) { seen.add(Number(s.id)); all.push({ ...s, icon: s.icon || c.icon, path: [c.grand_category, c.name].filter(Boolean).join(' › ') }); }
+      if (!seen.has(Number(s.id))) { seen.add(Number(s.id)); all.push({ ...s, icon: s.icon || c.icon, path: [c.grand_category, c.name, s.sub_category].filter(Boolean).join(' › ') }); }
     }));
     all.sort((a,b) => String(a.name).localeCompare(String(b.name), 'fr', { sensitivity:'base', numeric:true }));
     listHtml = all.length ? `<div class="small muted mb">${all.length} service${all.length > 1 ? 's' : ''} actif${all.length > 1 ? 's' : ''}, classé${all.length > 1 ? 's' : ''} de A à Z.</div>` + all.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')">
@@ -1008,7 +1014,7 @@ routes.request = async (serviceId) => {
   $app.innerHTML = `
   ${header(data.service.name, { bell: !!USER })}
   <div class="content"><div class="card">
-      <div class="small muted mb">${esc(data.service.grand_category || data.service.category || '')}${data.service.category && data.service.grand_category ? ' › ' + esc(data.service.category) : ''} › ${esc(data.service.name)}</div>
+      <div class="small muted mb">${esc(data.service.grand_category || data.service.category || '')}${data.service.category && data.service.grand_category ? ' › ' + esc(data.service.category) : ''}${data.service.sub_category ? ' › ' + esc(data.service.sub_category) : ''} › ${esc(data.service.name)}</div>
       ${tasksHtml}
       <div class="field"><label>Je décris mon besoin ci-dessous. <span class="req">*</span></label>
         <textarea id="r-desc" maxlength="5000" placeholder="Ex : Le robinet de ma cuisine coule depuis ce matin…" oninput="A.requestDescriptionChanged()">${esc(savedDraft.description || selection.query || '')}</textarea><div id="r-language-hint" class="small muted" aria-live="polite"></div></div>
@@ -2651,7 +2657,7 @@ const A = {
     const confidence = s.confidence === 'élevée' ? 'Correspondance très probable' : s.confidence === 'moyenne' ? 'Correspondance possible' : 'Autre résultat pertinent';
     return `<div class="menu-item" onclick="A.openSearchResult(${Number(s.id)},${Number(s.task_id || 0)})">
       <span class="mi-ic">${esc(s.icon || '🔹')}</span><div class="grow"><div><b>${esc(s.name)}</b></div>
-      <div class="small muted">${esc(s.grand_category || s.category || '')}${s.category && s.grand_category ? ' › ' + esc(s.category) : ''}${task}</div>
+      <div class="small muted">${esc(s.grand_category || s.category || '')}${s.category && s.grand_category ? ' › ' + esc(s.category) : ''}${s.sub_category ? ' › ' + esc(s.sub_category) : ''}${task}</div>
       ${prixHtml(s, true)}${compact ? '' : `<div class="small muted" style="margin-top:3px">${confidence}</div>`}</div><span class="mi-arr">›</span></div>`;
   },
   openSearchResult(serviceId, taskId) {
@@ -2699,7 +2705,7 @@ const A = {
     const groups = (REQ.category_services || []).map(service => {
       const tasks = (REQ.category_tasks || []).filter(t => Number(t.service_id) === Number(service.id) && (!query || normalize(`${t.name} ${t.description || ''} ${(t.search_terms || []).join(' ')}`).includes(query)));
       // Le nom de la prestation organise les tâches ; le nom de la grande catégorie reste seulement dans l’en-tête vert.
-      return tasks.length ? `<section class="category-task-group"><h4>${esc(service.name)}</h4>${tasks.map(choice).join('')}</section>` : '';
+      return tasks.length ? `<section class="category-task-group"><h4>${service.subcategory ? `<span class="small muted">${esc(service.subcategory)} › </span>` : ''}${esc(service.name)}</h4>${tasks.map(choice).join('')}</section>` : '';
     }).filter(Boolean);
     zone.innerHTML = groups.length ? groups.join('') : '<div class="hint">Aucun besoin trouvé. Vous pouvez décrire votre demande librement.</div>';
   },

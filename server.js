@@ -499,6 +499,9 @@ function push(userId, type, data) {
 }
 // Seulement un signal de rafraîchissement : aucune donnée de catalogue ni identité n'est poussée.
 function catalogueImageBroadcast() { for (const [userId] of sseClients) push(userId,'catalogue-image',{changed:true}); }
+// La structure elle-même reste en base ; le signal force chaque interface ouverte à relire
+// cette source unique après une modification PDG, sans pousser de données privées.
+function catalogueBroadcast(reason='updated') { for (const [userId] of sseClients) push(userId,'catalogue',{changed:true,reason}); }
 function sendWebPush(userId, payload) {
   if (!WEB_PUSH_READY) return;
   const subscriptions = db.prepare('SELECT id, subscription FROM push_subscriptions WHERE user_id=?').all(userId);
@@ -1090,7 +1093,7 @@ function grandCategoryCatalogue(grandId, city) {
     (!d.task_id && !d.service_id && !d.sub_id && !d.category_id && Number(d.grand_category_id || 0) === Number(grand.id))
   ).map(d => d.term))];
   return { ...grand, price_from: categoryReferencePrice(grand.id, city), categories: categories.map(c => ({ ...c,
-    services: svcs.filter(s => Number(s.category_id) === Number(c.id)).map(s => ({ id:s.id,name:s.name,icon:s.icon,description:s.description || '',
+    services: svcs.filter(s => Number(s.category_id) === Number(c.id)).map(s => ({ id:s.id,name:s.name,icon:s.icon,description:s.description || '',sub_id:s.sub_id || null,sub_category:s.sous_cat || null,
       taches: taskRows.filter(t => Number(t.service_id) === Number(s.id)).map(t => {
         const price = taskPrices.get(Number(t.id));
         return { id:t.id,name:t.name,description:t.description || '',search_terms:termsFor(s,t),price_from:price && price.amount || null,price_unit:price && price.unit || null };
@@ -1141,7 +1144,7 @@ app.get('/api/catalogue', (req, res) => {
   res.json(cats.map(c => ({
     id: c.id, name: c.name, icon: c.icon, grand_category_id: c.grand_category_id, grand_category: c.grand_category, grand_icon: c.grand_icon,
     services: svcs.filter(s => s.category_id === c.id).map(s => ({
-      id: s.id, name: s.name, popular: s.popular, seasonal: s.seasonal,
+      id: s.id, name: s.name, popular: s.popular, seasonal: s.seasonal, sub_id:s.sub_id || null, sub_category:s.sous_cat || null,
       taches: tas.filter(t => t.service_id === s.id).map(t => ({ id: t.id, name: t.name, description: t.description || '' }))
     }))
   })).filter(c => c.services.length));
@@ -1176,7 +1179,7 @@ app.get('/api/services/:id/questions', (req, res) => {
   const questions = db.prepare('SELECT * FROM service_questions WHERE service_id=? AND active=1 ORDER BY sort,id').all(svc.id)
     .map(q => ({ ...q, options: JSON.parse(q.options) }));
   const taches = frenchSort(db.prepare('SELECT id, name, description FROM taches WHERE service_id=? AND active=1').all(svc.id));
-  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat, grand_category_id: svc.grand_category_id, grand_category: svc.grand_category }, questions, taches,
+  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat, sub_category: svc.sub_id ? (db.prepare('SELECT name FROM sous_categories WHERE id=?').get(svc.sub_id)||{}).name || null : null, grand_category_id: svc.grand_category_id, grand_category: svc.grand_category }, questions, taches,
     limits: { photos: settingInt('request_image_limit', 3, 0, 3), audio_seconds: settingInt('request_audio_max_seconds', 25, 1, 25) } });
 });
 
@@ -1260,7 +1263,7 @@ function intelligentSearch(query, city, contextGrandId) {
       if (score > bestScore) { bestScore = score; bestTask = task; bestMatch = task.name; }
     });
     return {
-      id: s.id, name: s.name, category: s.cat, grand_category: s.grand_category || null, grand_category_id: s.grand_category_id || null,
+      id: s.id, name: s.name, category: s.cat, sub_category:s.sous_cat || null, grand_category: s.grand_category || null, grand_category_id: s.grand_category_id || null,
       icon: s.icon,
       task_id: bestTask && bestTask.id || null, tache_suggeree: bestTask && bestTask.name || null,
       confidence: bestScore >= 80 ? 'élevée' : bestScore >= 24 ? 'moyenne' : 'faible', match: bestMatch || null, score: bestScore
@@ -4394,6 +4397,7 @@ A.get('/catalog', (req, res) => {
   res.json({ grand_categories, categories: cats, sous_categories: subs, services: svcs, taches: tas, questions: qs });
 });
 // GRANDES CATÉGORIES : racine stable administrée exclusivement par le PDG.
+function legacyRootName(name) { return ['beauté, coiffure et bien-être','cours et formation'].includes(normalize(String(name||''))); }
 function cleanCategoryImageUrl(raw) {
   const value = String(raw || '').trim();
   if (!value) return null;
@@ -4418,6 +4422,7 @@ A.put('/grand-categories/populaires/ordre', pdgOnly, (req,res) => {
 A.post('/grand-categories', pdgOnly, (req, res) => {
   const b=req.body||{}, name=String(b.name||'').trim().slice(0,120);
   if (!name) return res.status(400).json({ error:'Nom de grande catégorie requis.' });
+  if (legacyRootName(name)) return res.status(400).json({ error:'Cette ancienne grande catégorie a été remplacée par la structure centrale. Utilisez les catégories actuelles.' });
   let imageUrl; try { imageUrl=cleanCategoryImageUrl(b.image_url); } catch(e) { return res.status(400).json({error:e.message}); }
   try {
     const created=db.transaction(() => {
@@ -4427,12 +4432,13 @@ A.post('/grand-categories', pdgOnly, (req, res) => {
       return {id,asset,category:db.prepare('SELECT * FROM grand_categories WHERE id=?').get(id)};
     })();
     logAction(req.user, 'Création grande catégorie', { target_type:'grand_category', target_id:created.id, target_name:name, details:imageUrl ? 'Grande catégorie créée avec une photo principale versionnée.' : 'Grande catégorie créée sans photo principale.' });
-    catalogueImageBroadcast();
+    catalogueImageBroadcast(); catalogueBroadcast('grand-category-created');
     res.status(201).json({id:created.id,category:grandCategoryAdmin(created.category),image_asset:publicImageAsset(created.asset,'grand_category',created.id)}); }
   catch (e) { res.status(/UNIQUE/.test(String(e&&e.message||''))?409:400).json({ error:/UNIQUE/.test(String(e&&e.message||''))?'Cette grande catégorie existe déjà.':'Enregistrement de la catégorie impossible.' }); }
 });
 A.put('/grand-categories/:id', pdgOnly, (req,res) => {
   const old=db.prepare('SELECT * FROM grand_categories WHERE id=?').get(req.params.id); if(!old)return res.status(404).json({error:'Grande catégorie introuvable.'}); const b=req.body||{};
+  if (legacyRootName(old.name) && (b.active===true || b.active===1 || b.active==='1')) return res.status(400).json({error:'Cette ancienne grande catégorie est archivée par la réorganisation centrale et ne peut pas être réactivée.'});
   let imageUrl = old.image_url;
   if (b.image_url !== undefined) { try { imageUrl=cleanCategoryImageUrl(b.image_url); } catch(e) { return res.status(400).json({error:e.message}); } }
   const popular=b.popular===undefined?old.popular:(b.popular?1:0), imageChanged=(old.image_url||null)!==(imageUrl||null);
@@ -4444,7 +4450,7 @@ A.put('/grand-categories/:id', pdgOnly, (req,res) => {
       return {asset,category:db.prepare('SELECT * FROM grand_categories WHERE id=?').get(old.id)};
     })();
     logAction(req.user, imageChanged ? (imageUrl ? 'Remplacement photo grande catégorie' : 'Suppression photo grande catégorie') : 'Mise à jour grande catégorie', { target_type:'grand_category', target_id:old.id, target_name:b.name === undefined ? old.name : String(b.name).trim().slice(0,120), details:imageChanged ? (imageUrl ? 'Photo principale remplacée : nouvelle version publique et caches obsolètes invalidés.' : 'Photo principale retirée : les cartes publiques reviennent au visuel sans image.') : 'Informations de catégorie mises à jour.' });
-    if (imageChanged) catalogueImageBroadcast();
+    if (imageChanged) catalogueImageBroadcast(); catalogueBroadcast('grand-category-updated');
     res.json({ok:true,image_url:imageUrl,category:grandCategoryAdmin(saved.category),image_asset:publicImageAsset(saved.asset,'grand_category',old.id)});
   } catch { res.status(400).json({error:'Mise à jour de la catégorie impossible.'}); }
 });
@@ -4452,7 +4458,7 @@ A.delete('/grand-categories/:id', pdgOnly, (req,res) => {
   const used=db.prepare('SELECT COUNT(*) n FROM service_categories WHERE grand_category_id=?').get(req.params.id).n;
   if (used) return res.status(400).json({error:`Cette catégorie contient ${used} sous-catégorie(s)/métier(s). Réaffectez-les ou désactivez-la plutôt.`});
   const r=db.transaction(() => { const row=db.prepare('DELETE FROM grand_categories WHERE id=?').run(req.params.id); if(row.changes) db.prepare("UPDATE image_assets SET status='removed',retired_at=datetime('now'),updated_at=datetime('now') WHERE owner_type='grand_category' AND owner_id=? AND status='active'").run(req.params.id); return row; })();
-  if(!r.changes) return res.status(404).json({error:'Grande catégorie introuvable.'}); catalogueImageBroadcast(); res.json({ok:true});
+  if(!r.changes) return res.status(404).json({error:'Grande catégorie introuvable.'}); catalogueImageBroadcast(); catalogueBroadcast('grand-category-deleted'); res.json({ok:true});
 });
 // Dictionnaire de recherche multi-niveaux. Les cibles ne sont jamais du texte libre :
 // elles référencent directement le catalogue central (grande catégorie → métier → prestation → tâche).
@@ -4517,40 +4523,40 @@ A.delete('/categories/:id', pdgOnly, (req, res) => {
   const n = db.prepare(`SELECT COUNT(*) n FROM missions m JOIN services s ON s.id=m.service_id WHERE s.category_id=?`).get(req.params.id).n;
   if (n) return res.status(400).json({ error: `Impossible de supprimer : ${n} mission(s) utilisent ce métier. Désactivez-le plutôt.` });
   db.prepare('DELETE FROM service_categories WHERE id=?').run(req.params.id);
-  res.json({ ok: true });
+  catalogueBroadcast('category-deleted'); res.json({ ok: true });
 });
 // SOUS-CATÉGORIES
 A.post('/sous-categories', (req, res) => {
   if (!req.body.name || !req.body.metier_id) return res.status(400).json({ error: 'Nom et métier requis.' });
   const info = db.prepare('INSERT INTO sous_categories(metier_id, name, sort) VALUES(?,?,?)').run(req.body.metier_id, req.body.name, req.body.sort ?? 99);
-  res.json({ id: info.lastInsertRowid });
+  catalogueBroadcast('subcategory-created'); res.json({ id: info.lastInsertRowid });
 });
 A.put('/sous-categories/:id', (req, res) => {
   db.prepare('UPDATE sous_categories SET name=COALESCE(?,name), metier_id=COALESCE(?,metier_id), active=COALESCE(?,active), sort=COALESCE(?,sort) WHERE id=?')
     .run(req.body.name || null, req.body.metier_id || null, req.body.active ?? null, req.body.sort ?? null, req.params.id);
-  res.json({ ok: true });
+  catalogueBroadcast('subcategory-updated'); res.json({ ok: true });
 });
 A.delete('/sous-categories/:id', (req, res) => {
   const n = db.prepare('SELECT COUNT(*) n FROM services WHERE sub_id=?').get(req.params.id).n;
   if (n) return res.status(400).json({ error: `Impossible : ${n} service(s) sont rattachés à cette sous-catégorie.` });
   db.prepare('DELETE FROM sous_categories WHERE id=?').run(req.params.id);
-  res.json({ ok: true });
+  catalogueBroadcast('subcategory-deleted'); res.json({ ok: true });
 });
 // TÂCHES : la tâche reste toujours rattachée à une prestation puis à sa catégorie racine.
 A.post('/taches', pdgOnly, (req, res) => {
   const b=req.body||{}, service=db.prepare('SELECT id FROM services WHERE id=?').get(b.service_id);
   if (!b.name || !service) return res.status(400).json({ error: 'Nom et prestation requis.' });
   const info = db.prepare("INSERT INTO taches(service_id,name,description,sort,updated_at) VALUES(?,?,?,?,datetime('now'))").run(service.id,String(b.name).trim().slice(0,180),String(b.description||'').trim().slice(0,1000),b.sort ?? 99);
-  res.status(201).json({ id: info.lastInsertRowid });
+  catalogueBroadcast('task-created'); res.status(201).json({ id: info.lastInsertRowid });
 });
 A.put('/taches/:id', pdgOnly, (req, res) => {
   const old=db.prepare('SELECT * FROM taches WHERE id=?').get(req.params.id); if(!old)return res.status(404).json({error:'Tâche introuvable.'}); const b=req.body||{};
   const serviceId=b.service_id===undefined?old.service_id:Number(b.service_id); if(!db.prepare('SELECT 1 FROM services WHERE id=?').get(serviceId))return res.status(400).json({error:'Prestation de destination invalide.'});
   db.prepare("UPDATE taches SET service_id=?,name=COALESCE(?,name),description=COALESCE(?,description),active=COALESCE(?,active),sort=COALESCE(?,sort),updated_at=datetime('now') WHERE id=?")
     .run(serviceId,b.name===undefined?null:String(b.name).trim().slice(0,180),b.description===undefined?null:String(b.description).trim().slice(0,1000),b.active === undefined ? null : (b.active ? 1 : 0),b.sort??null,old.id);
-  res.json({ ok: true });
+  catalogueBroadcast('task-updated'); res.json({ ok: true });
 });
-A.delete('/taches/:id', pdgOnly, (req, res) => { const old=db.prepare('SELECT * FROM taches WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Tâche introuvable.'}); const n=db.prepare("SELECT COUNT(*) n FROM missions WHERE taches LIKE ? OR tache=?").get('%\"id\":'+old.id+'%',old.name).n; if(n)return res.status(409).json({error:`Cette tâche est liée à ${n} demande(s) historique(s). Désactivez-la plutôt.`}); db.prepare('DELETE FROM taches WHERE id=?').run(old.id);res.json({ ok: true }); });
+A.delete('/taches/:id', pdgOnly, (req, res) => { const old=db.prepare('SELECT * FROM taches WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Tâche introuvable.'}); const n=db.prepare("SELECT COUNT(*) n FROM missions WHERE taches LIKE ? OR tache=?").get('%\"id\":'+old.id+'%',old.name).n; if(n)return res.status(409).json({error:`Cette tâche est liée à ${n} demande(s) historique(s). Désactivez-la plutôt.`}); db.prepare('DELETE FROM taches WHERE id=?').run(old.id);catalogueBroadcast('task-deleted');res.json({ ok: true }); });
 A.get('/villes', (req, res) => res.json(frenchSort(db.prepare('SELECT * FROM villes').all())));
 A.post('/villes', (req, res) => {
   if (!req.body.name) return res.status(400).json({ error: 'Nom requis.' });
@@ -4572,20 +4578,20 @@ A.post('/categories', pdgOnly, (req, res) => {
   const domainId = req.body.grand_category_id ? Number(req.body.grand_category_id) : null;
   if (domainId && !db.prepare('SELECT 1 FROM grand_categories WHERE id=?').get(domainId)) return res.status(400).json({ error: 'Grande catégorie invalide.' });
   const info = db.prepare('INSERT INTO service_categories(name, icon, sort, grand_category_id) VALUES(?,?,?,?)').run(req.body.name, req.body.icon || '🔹', req.body.sort || 99, domainId);
-  res.json({ id: info.lastInsertRowid });
+  catalogueBroadcast('category-created'); res.json({ id: info.lastInsertRowid });
 });
 A.put('/categories/:id', pdgOnly, (req, res) => {
   const domainId = req.body.grand_category_id === undefined ? null : (req.body.grand_category_id ? Number(req.body.grand_category_id) : null);
   if (req.body.grand_category_id !== undefined && domainId && !db.prepare('SELECT 1 FROM grand_categories WHERE id=?').get(domainId)) return res.status(400).json({ error: 'Grande catégorie invalide.' });
   db.prepare('UPDATE service_categories SET name=COALESCE(?,name), icon=COALESCE(?,icon), active=COALESCE(?,active), sort=COALESCE(?,sort), grand_category_id=CASE WHEN ? THEN ? ELSE grand_category_id END WHERE id=?')
     .run(req.body.name || null, req.body.icon || null, req.body.active ?? null, req.body.sort ?? null, req.body.grand_category_id !== undefined ? 1 : 0, domainId, req.params.id);
-  res.json({ ok: true });
+  catalogueBroadcast('category-updated'); res.json({ ok: true });
 });
 A.post('/services', (req, res) => {
   if (!req.body.name || !req.body.category_id) return res.status(400).json({ error: 'Nom et catégorie requis.' });
   const info = db.prepare('INSERT INTO services(category_id, sub_id, name, keywords, sort) VALUES(?,?,?,?,?)')
     .run(req.body.category_id, req.body.sub_id || null, req.body.name, req.body.keywords || '', req.body.sort || 99);
-  res.json({ id: info.lastInsertRowid });
+  catalogueBroadcast('service-created'); res.json({ id: info.lastInsertRowid });
 });
 A.put('/services/:id', (req, res) => {
   db.prepare(`UPDATE services SET name=COALESCE(?,name), keywords=COALESCE(?,keywords), active=COALESCE(?,active), sort=COALESCE(?,sort),
@@ -4603,7 +4609,7 @@ A.put('/services/:id', (req, res) => {
   } else if (req.body.popular === 0) {
     db.prepare('UPDATE services SET popular_sort=NULL WHERE id=?').run(req.params.id);
   }
-  res.json({ ok: true });
+  catalogueBroadcast('service-updated'); res.json({ ok: true });
 });
 // Ordre des services populaires (affichage de l'accueil) — liste complète d'ids dans l'ordre voulu
 A.put('/services-populaires/ordre', (req, res) => {
@@ -4614,13 +4620,13 @@ A.put('/services-populaires/ordre', (req, res) => {
     ids.forEach((id, i) => db.prepare('UPDATE services SET popular=1, popular_sort=? WHERE id=?').run(i + 1, id));
   });
   tx();
-  res.json({ ok: true });
+  catalogueBroadcast('popular-services-updated'); res.json({ ok: true });
 });
 A.delete('/services/:id', (req, res) => {
   const n = db.prepare('SELECT COUNT(*) n FROM missions WHERE service_id=?').get(req.params.id).n;
   if (n) return res.status(400).json({ error: `Impossible de supprimer : ${n} mission(s) utilisent ce service. Désactivez-le plutôt.` });
   db.prepare('DELETE FROM services WHERE id=?').run(req.params.id);
-  res.json({ ok: true });
+  catalogueBroadcast('service-deleted'); res.json({ ok: true });
 });
 A.post('/questions', (req, res) => {
   const { service_id, label, type, options, required, sort } = req.body || {};

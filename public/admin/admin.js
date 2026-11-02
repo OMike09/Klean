@@ -384,11 +384,12 @@ views.catalog = async () => {
   if (!d.categories.some(c => c.id === sel)) sel = d.categories[0]?.id || 0;
 
   const nTaches = {}; d.taches.forEach(t => nTaches[t.service_id] = (nTaches[t.service_id] || 0) + 1);
-  const grandImages = (d.grand_categories || []).sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id).map(g => {
+  const grandImages = (d.grand_categories || []).filter(g=>g.active).sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id).map(g => {
     const photo = g.image_url ? `<img src="${esc(mediaUrl(g.image_url))}" alt="${esc(g.name)}" style="width:72px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #d3e4e0">` : '<span style="display:grid;place-items:center;width:72px;height:56px;border-radius:8px;background:#edf5f3">🖼️</span>';
     return `<div style="display:flex;align-items:center;gap:8px;padding:7px;border:1px solid #e2eeeb;border-radius:10px;min-width:245px;flex:1">${photo}<div style="min-width:0;flex:1"><b class="small" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.short_label || g.name)}</b><span class="small ${g.image_url ? 'muted' : 'bad'}">${g.image_url ? 'Photo principale publiée' : 'Photo manquante'}</span></div>${ME && ME.role==='pdg' ? `<button class="btn sm sec" onclick="A.grandCategoryForm(${g.id})">Photo</button>` : ''}</div>`;
   }).join('');
   const imagePanel = `<div class="panel"><div class="frow" style="align-items:center"><div><h2 style="margin:0">Photos des grandes catégories</h2><div class="small muted">Une source par identifiant de grande catégorie, partagée par les cartes publiques et le tableau PDG.</div></div>${ME && ME.role==='pdg' ? '<span class="pill ok">Modification réservée au PDG</span>' : ''}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:8px;margin-top:12px">${grandImages}</div></div>`;
+  const structurePanel = `<section class="panel"><div class="frow" style="align-items:center"><div class="grow"><h2 style="margin:0">Structure centrale synchronisée</h2><div class="small muted">Accueil, recherche, demandes, profils pro, affectation des missions et tableaux de bord lisent cette même hiérarchie.</div></div>${ME&&ME.role==='pdg'?'<button class="btn sm" onclick="A.grandCategoryForm(0)">＋ Grande catégorie</button><button class="btn sm sec" onclick="A.catalogueReviews()">Vérifications profils</button>':''}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:9px;margin-top:12px">${(d.grand_categories||[]).filter(g=>g.active).map(g=>{const children=(d.categories||[]).filter(c=>Number(c.grand_category_id)===Number(g.id)&&c.active);return `<article style="border:1px solid #dce9e6;border-radius:10px;padding:10px"><div class="frow" style="gap:6px"><b class="grow">${esc(g.icon||'🧩')} ${esc(g.name)}</b>${ME&&ME.role==='pdg'?`<button class="btn sm sec" onclick="A.grandCategoryForm(${g.id})">✏️</button>`:''}</div><div class="small muted" style="margin:5px 0 7px">${esc(g.description||'')}</div><div class="small">${children.length?children.map(c=>`<button class="btn sm sec" style="margin:2px" onclick="sessionStorage.setItem('adm_cat_sel',${c.id});render()">${esc(c.icon||'🔹')} ${esc(c.name)}</button>`).join(''):'Aucun métier actif.'}</div></article>`;}).join('')}</div></section>`;
   const svcRow = (s, path) => `<tr>
     <td><b>${esc(s.name)}</b>${path ? `<div class="small muted">${esc(path)}</div>` : ''}
       <div class="small" style="color:#111;font-weight:700">${s.price_show && s.price_from ? esc(s.price_prefix || 'Dès') + ' ' + Number(s.price_from).toLocaleString('fr-FR') + ' FCFA' : '<span class="muted" style="font-weight:400">prix masqué</span>'}</div>
@@ -433,6 +434,7 @@ views.catalog = async () => {
   }
 
   shell(`<h1>🗂️ Services & catégories</h1>
+  ${structurePanel}
   ${imagePanel}
   <div class="tabs">
     <button class="on">🗂️ Catalogue</button>
@@ -467,7 +469,7 @@ views.catalog = async () => {
 /* ---------- Photos des grandes catégories (source unique par identifiant) ---------- */
 views._grandPhotos = async () => {
   const d = CATD = await api('/admin/catalog');
-  const rows = (d.grand_categories || []).slice().sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id);
+  const rows = (d.grand_categories || []).filter(g=>g.active).slice().sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id);
   const cards = rows.map(g => {
     const publicUrl=g.image_public_url || g.image_url;
     const photo = g.image_url
@@ -520,7 +522,7 @@ views.estimates = async () => {
   shell(`<h1>🧠 Gestion des tarifs et estimations intelligentes</h1>
     <div class="panel small muted">Le moteur applique d’abord les règles explicites de la direction, puis les données locales vérifiées, ensuite l’historique suffisamment documenté, puis le tarif de référence autorisé. Sans donnée fiable, il affiche « Prix à confirmer ». Aucun prix de marché n’est inventé.</div>
     <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Grandes catégories centrales</h2><button class="btn sm" onclick="A.grandCategoryForm(0)">＋ Ajouter</button></div>
-      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">${catalog.grand_categories.map(g => `<span class="pill ${g.active ? 'ok' : 'off'}">${esc(g.icon || '🧩')} ${esc(g.name)} <button type="button" style="border:0;background:transparent;cursor:pointer" onclick="A.grandCategoryForm(${g.id})">✏️</button></span>`).join('')}</div></div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">${catalog.grand_categories.filter(g=>g.active).map(g => `<span class="pill ok">${esc(g.icon || '🧩')} ${esc(g.name)} <button type="button" style="border:0;background:transparent;cursor:pointer" onclick="A.grandCategoryForm(${g.id})">✏️</button></span>`).join('')}</div></div>
     <div class="panel"><h2 style="margin-top:0">Règles globales</h2><div class="frow">
       <label><input type="checkbox" id="est-geo" ${cfg.geo_enabled ? 'checked' : ''}> Ajustements géographiques par ville actifs</label>
       <label>Repli si aucune donnée locale <select id="est-fallback"><option value="reference" ${cfg.fallback === 'reference' ? 'selected' : ''}>Tarif de référence PDG (provisoire)</option><option value="confirmer" ${cfg.fallback === 'confirmer' ? 'selected' : ''}>Prix à confirmer</option></select></label>
@@ -1280,18 +1282,21 @@ const A = {
   },
   async proEligibility(id) {
     try {
-      const [u, catalog, villes] = await Promise.all([api('/admin/users/' + id), api('/admin/catalog'), api('/admin/villes')]);
+      const [u, catalog, villes, skillCatalogue] = await Promise.all([api('/admin/users/' + id), api('/admin/catalog'), api('/admin/villes'), api('/pro-skill-catalogue').catch(()=>[])]);
       if (!u.pro) return toast('Ce compte ne possède pas de profil professionnel.', 'err');
       const declared = (u.pro.services || []).map(Number), allowed = (u.pro.authorized_services || declared).map(Number);
       const declaredDomains = (u.pro.domain_categories || []).map(Number);
       const allowedDomains = (u.pro.authorized_domain_categories || declaredDomains).map(Number);
+      const declaredSubs=(u.pro.selected_subcategories || []).map(Number), allowedSubs=(u.pro.authorized_subcategories || declaredSubs).map(Number);
+      const skillsHtml=(skillCatalogue||[]).map(root=>`<details style="border-top:1px solid #edf2f1;padding:6px 0"><summary><b>${esc(root.icon||'🧩')} ${esc(root.short_label||root.name)}</b></summary>${(root.categories||[]).map(cat=>`<div style="margin:7px 0 7px 12px"><b class="small">${esc(cat.icon||'🔹')} ${esc(cat.name)}</b>${(cat.subcategories||[]).map(sub=>`<label class="check-line" style="display:block;margin:4px 0 0 10px"><input class="pe-sub" type="checkbox" value="${sub.id}" ${allowedSubs.includes(Number(sub.id))?'checked':''}> ${esc(sub.name)}</label>`).join('')}</div>`).join('')}</details>`).join('');
       const flat = (catalog.services || []).filter(s => declared.includes(+s.id));
-      const domains = (catalog.grand_categories || []);
+      const domains = (catalog.grand_categories || []).filter(g=>g.active);
       openModal(`<h3>🧰 Autorisations de ${esc(u.name)}</h3>
         <p class="small muted">Les domaines cochés sont contrôlés par le backend avant l’alerte et l’acceptation. Une tâche ajoutée ultérieurement dans un domaine autorisé devient automatiquement éligible.</p>
         <label class="small muted">Type de prestataire</label><select id="pe-type" style="width:100%;margin-bottom:10px"><option value="particulier" ${u.pro.pro_type !== 'entreprise' ? 'selected' : ''}>Un particulier</option><option value="entreprise" ${u.pro.pro_type === 'entreprise' ? 'selected' : ''}>Une entreprise</option></select>
         <label class="small muted">Capacité de mission</label><select id="pe-cap" style="width:100%;margin-bottom:10px"><option value="1" ${(+u.pro.capacity_level || 1) === 1 ? 'selected' : ''}>Standard</option><option value="2" ${(+u.pro.capacity_level || 1) === 2 ? 'selected' : ''}>Renforcée / gros travaux</option><option value="3" ${(+u.pro.capacity_level || 1) >= 3 ? 'selected' : ''}>Grande capacité</option></select>
         <label class="small muted">Domaines d’activité autorisés</label><div style="max-height:240px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${domains.map(g => `<label style="display:block;padding:5px 0"><input class="pe-domain" type="checkbox" value="${g.id}" ${allowedDomains.includes(+g.id) ? 'checked' : ''}> ${esc(g.icon || '🧩')} <b>${esc(g.name)}</b>${g.active ? '' : ' <span class="muted small">(inactive)</span>'}</label>`).join('') || '<span class="small muted">Aucune grande catégorie disponible.</span>'}</div>
+        <label class="small muted">Spécialités de sous-catégorie autorisées</label><div style="max-height:290px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${skillsHtml||'<span class="small muted">Aucune sous-catégorie active disponible.</span>'}</div>
         ${declaredDomains.length ? `<div class="small muted" style="margin:-7px 0 12px">Déclarés initialement : ${domains.filter(g=>declaredDomains.includes(+g.id)).map(g=>esc(g.name)).join(' • ') || '—'}</div>` : `<label class="small muted">Services autorisés (profil historique)</label><div style="max-height:160px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${flat.map(s => `<label style="display:block;padding:5px 0"><input class="pe-service" type="checkbox" value="${s.id}" ${allowed.includes(+s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('') || '<span class="small muted">Aucun service déclaré.</span>'}</div>`}
         <label class="small muted">Villes d’intervention autorisées</label><div class="small muted">Une seule ville est la règle normale. Plusieurs villes ou « toutes » sont réservées à un administrateur / PDG et appliquées au matching.</div><div style="max-height:180px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${(['pdg','admin'].includes(ME.role) ? `<label style="display:block;padding:5px 0"><input class="pe-city" type="checkbox" value="*" ${(u.pro.service_cities||[]).includes('*')?'checked':''}> Toutes les villes actives</label>` : '')}${villes.map(v=>`<label style="display:block;padding:5px 0"><input class="pe-city" type="checkbox" value="${esc(v.name)}" ${(u.pro.service_cities||[]).includes(v.name)?'checked':''}> ${esc(v.name)}</label>`).join('')}</div>
         <button class="btn" onclick="A.saveProEligibility(${id})">Enregistrer</button><button class="btn sec mt" onclick="A.userDetail(${id})">Annuler</button>`);
@@ -1306,10 +1311,15 @@ const A = {
   async saveProEligibility(id) {
     const authorized_services = [...document.querySelectorAll('.pe-service:checked')].map(el => +el.value);
     const authorized_domain_categories = [...document.querySelectorAll('.pe-domain:checked')].map(el => +el.value);
+    const authorized_subcategories = [...document.querySelectorAll('.pe-sub:checked')].map(el => +el.value);
     const service_cities = [...document.querySelectorAll('.pe-city:checked')].map(el => el.value);
-    try { await api('/admin/pros/' + id + '/eligibility', { method: 'PUT', body: { authorized_services, authorized_domain_categories, service_cities, pro_type: document.getElementById('pe-type').value, capacity_level: +document.getElementById('pe-cap').value } }); toast('Autorisations professionnelles enregistrées ✓', 'ok'); A.userDetail(id); }
+    try { await api('/admin/pros/' + id + '/eligibility', { method: 'PUT', body: { authorized_services, authorized_domain_categories, authorized_subcategories, service_cities, pro_type: document.getElementById('pe-type').value, capacity_level: +document.getElementById('pe-cap').value } }); toast('Autorisations professionnelles enregistrées ✓', 'ok'); A.userDetail(id); }
     catch (e) { toast(e.message, 'err'); }
   },
+  async catalogueReviews() {
+    try { const [items,catalog]=await Promise.all([api('/admin/pros/catalogue-reviews'),api('/admin/catalog')]); const options=(catalog.sous_categories||[]).filter(s=>s.active).map(s=>{const c=(catalog.categories||[]).find(x=>Number(x.id)===Number(s.metier_id))||{};const g=(catalog.grand_categories||[]).find(x=>Number(x.id)===Number(c.grand_category_id))||{};return `<option value="${s.id}">${esc([g.name,c.name,s.name].filter(Boolean).join(' › '))}</option>`;}).join(''); openModal(`<h3>Vérification des spécialités historiques</h3><p class="small muted">Ces profils n’ont pas pu être reclassés avec certitude. Corrigez-les ici sans effacer leur historique ; le choix rejoint immédiatement la structure centrale.</p><div style="max-height:55vh;overflow:auto">${items.map(r=>`<div class="panel compact-card"><b>${esc(r.user_name)}</b><div class="small muted">${esc(r.reason)}${r.legacy_service_name?' · ancienne prestation : '+esc(r.legacy_service_name):''}</div><select id="cr-sub-${r.id}" style="width:100%;margin-top:7px"><option value="">Choisir la sous-catégorie exacte…</option>${options}</select><div class="btn-row mt"><button class="btn sm" onclick="A.resolveCatalogueReview(${r.id},'corrige')">Corriger</button><button class="btn sm sec" onclick="A.resolveCatalogueReview(${r.id},'ignore')">Conserver pour le moment</button></div></div>`).join('')||'<div class="hint">Aucun profil ne nécessite de vérification.</div>'}</div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`); } catch(e){toast(e.message,'err');}
+  },
+  async resolveCatalogueReview(id,status) { const field=document.getElementById('cr-sub-'+id), sub_id=Number(field&&field.value||0); if(status==='corrige'&&!sub_id)return toast('Choisissez une sous-catégorie centrale.','err'); try { await api('/admin/pros/catalogue-reviews/'+id+'/resolve',{method:'POST',body:{status,sub_id,note:'Vérification depuis le tableau de bord'}}); toast(status==='corrige'?'Spécialité corrigée et synchronisée.':'Vérification conservée sans modification.','ok'); A.catalogueReviews(); } catch(e){toast(e.message,'err');} },
   async userEdit(id) {
     const u = await api('/admin/users/' + id);
     openModal(`<h3>✏️ Modifier le compte</h3>
@@ -1395,6 +1405,7 @@ const A = {
     const imageUrl=String(g.image_url || ''), imagePublicUrl=String(g.image_public_url || imageUrl || ''), imageAsset=g.image_asset || null;
     openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3>
       <label>Nom</label><input id="gc-name" style="width:100%" value="${esc(g.name||'')}">
+      <label>Libellé court (cartes / mobile)</label><input id="gc-short" maxlength="60" style="width:100%" value="${esc(g.short_label||'')}">
       <label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px">
       <label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea>
       <input id="gc-image-url" type="hidden" value="${esc(imageUrl)}">
@@ -1404,7 +1415,7 @@ const A = {
         <input id="gc-image-file" type="file" accept="image/jpeg,image/png,image/webp" style="max-width:100%">
         <div class="frow mt"><button id="gc-upload-btn" type="button" class="btn sm sec" onclick="A.uploadGrandCategoryImage()">Téléverser et remplacer</button><button id="gc-remove-btn" type="button" class="btn sm warn" onclick="A.clearGrandCategoryImage()" ${imageUrl?'':'disabled'}>Retirer la photo</button></div>
       </div>
-      <div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div>
+      <div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label><label class="check-line"><input id="gc-popular" type="checkbox" ${g.popular?'checked':''}> Catégorie populaire</label></div>
       <button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
   },
   // Entrée dédiée à la galerie PDG : elle réutilise la même fiche et la même source en base.
@@ -1434,7 +1445,7 @@ const A = {
   deleteGrandCategoryPhoto() { this.clearGrandCategoryImage(); },
   async saveGrandCategory(id) { 
     const image=document.getElementById('gc-image-url');
-    const body={name:document.getElementById('gc-name').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked,image_url:image && image.value.trim() ? image.value.trim() : null};
+    const body={name:document.getElementById('gc-name').value,short_label:document.getElementById('gc-short').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked,popular:document.getElementById('gc-popular').checked,image_url:image && image.value.trim() ? image.value.trim() : null};
     try { const saved=await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});
       if (saved && saved.category) { const c=saved.category; this.categoryImagePreview(c.image_public_url || c.image_url,'Photo publiée et synchronisée sur les appareils',c.image_asset); }
       closeModal();toast('Grande catégorie et photo enregistrées ✓ — version publique synchronisée.','ok');render(); } catch(e) { toast(e.message,'err'); }
@@ -1491,7 +1502,7 @@ const A = {
     openModal(`<h3>Modifier le métier</h3>
       <label class="small muted">Nom</label><input id="em-name" style="width:100%;margin-bottom:10px" value="${esc(c.name)}">
       <label class="small muted">Icône (émoji)</label><input id="em-icon" style="width:90px;margin-bottom:12px" value="${esc(c.icon || '')}">
-      <label class="small muted">Grande catégorie racine</label><select id="em-grand" style="width:100%;margin-bottom:12px"><option value="">Non classée</option>${(CATD.grand_categories || []).map(g => `<option value="${g.id}" ${Number(c.grand_category_id)===Number(g.id)?'selected':''}>${esc(g.icon || '')} ${esc(g.name)}</option>`).join('')}</select>
+      <label class="small muted">Grande catégorie racine</label><select id="em-grand" style="width:100%;margin-bottom:12px"><option value="">Non classée</option>${(CATD.grand_categories || []).filter(g=>g.active).map(g => `<option value="${g.id}" ${Number(c.grand_category_id)===Number(g.id)?'selected':''}>${esc(g.icon || '')} ${esc(g.name)}</option>`).join('')}</select>
       <div><button class="btn" onclick="A._metSave(${id})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
   },
   async _metSave(id) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { name: document.getElementById('em-name').value, icon: document.getElementById('em-icon').value, grand_category_id: document.getElementById('em-grand').value || null } }); closeModal(); toast('Catégorie modifiée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },

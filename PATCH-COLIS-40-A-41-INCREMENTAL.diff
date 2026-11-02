@@ -1,0 +1,847 @@
+--- a/db.js
++++ b/db.js
+@@ -1384,7 +1384,10 @@
+     ['Transport et déménagement','🚚','Transport, livraison et déménagement.'],
+     ['Mécanique et automobile','🚗','Automobile, moto et dépannage mécanique.'],
+     ['Informatique et téléphonie','💻','Ordinateurs, réseaux, logiciels et téléphones.'],
+-    ['Beauté, coiffure et bien-être','💆','Soins, coiffure et bien-être.'],
++    ['Beauté et coiffure femme','💇‍♀️','Coiffure femme, esthétique, maquillage et soins de beauté.'],
++    ['Beauté et coiffure homme','💇‍♂️','Coiffure homme, barbier, coupe et entretien masculin.'],
++    ['Vidange et assainissement','🚛','Vidange, curage, fosses septiques et gestion des eaux usées.'],
++    ['Formation et coaching','🎯','Formation professionnelle, accompagnement, coaching et développement de compétences.'],
+     ['Couture et mode','🧵','Couture, retouche, stylisme et mode.'],
+     ['Restauration et alimentation','🍲','Cuisine, pâtisserie et services alimentaires.'],
+     ['Jardinage et espaces verts','🌿','Jardins, espaces verts et entretien extérieur.'],
+@@ -1392,7 +1395,7 @@
+     ['Aide à domicile et services familiaux','🏠','Aide quotidienne, garde et services familiaux.'],
+     ['Événementiel','🎉','Organisation et prestations pour événements.'],
+     ['Services professionnels et administratifs','📋','Administration, communication, conseil et services aux entreprises.'],
+-    ['Cours et formation','🎓','Cours, accompagnement et formation professionnelle.'],
++    ['Cours à domicile','📚','Soutien scolaire, langues et apprentissages à domicile.'],
+     ['Agriculture et élevage','🌾','Production agricole, élevage et services associés.'],
+     ['Artisanat et réparations diverses','🧰','Artisanat, cordonnerie, maroquinerie et réparations d’objets.'],
+     ['Ferronnerie et soudure','🔩','Ouvrages métalliques, portails, grilles et soudure.'],
+@@ -1417,7 +1420,14 @@
+   const ids = new Map(db.prepare('SELECT id,name FROM grand_categories').all().map(r => [r.name, r.id]));
+   const pick = name => {
+     const n = norm(name);
+-    if (/nettoyage|blanchisserie|desinsect|fosse|piscine/.test(n)) return 'Nettoyage et entretien';
++    // Les quatre branches ci-dessous sont déjà séparées dans le seed : ne jamais les
++    // faire transiter par les anciens fourre-tout au premier démarrage.
++    if (/vidange|assainissement|fosse/.test(n)) return 'Vidange et assainissement';
++    if (/coiffure homme|barbier/.test(n)) return 'Beauté et coiffure homme';
++    if (/coiff|beaute|esthet|bien.etre|maquillage/.test(n)) return 'Beauté et coiffure femme';
++    if (/cours a domicile/.test(n)) return 'Cours à domicile';
++    if (/formation|coach/.test(n)) return 'Formation et coaching';
++    if (/nettoyage|blanchisserie|desinsect|piscine/.test(n)) return 'Nettoyage et entretien';
+     if (/plomb/.test(n)) return 'Plomberie';
+     if (/electric|solaire/.test(n)) return 'Électricité';
+     if (/clim|froid|refriger|congel/.test(n)) return 'Climatisation et froid';
+@@ -2972,4 +2982,188 @@
+ };
+ for(const [k,v] of Object.entries(COLIS40_DEFAULTS)) if(getSetting(k)===null)setSetting(k,v);
+ 
++// ============================================================
++// COLIS 41 — réorganisation unifiée du catalogue de services
++// Une seule hiérarchie centrale est utilisée par l'accueil, la recherche,
++// l'inscription professionnelle, les missions et l'administration :
++// grande catégorie → métier → sous-catégorie → prestation → tâche.
++// Les IDs des prestations et tâches existantes sont conservés afin que les
++// demandes, missions, évaluations, factures et historiques restent liés.
++// ============================================================
++db.exec(`
++CREATE TABLE IF NOT EXISTS catalogue_reorganization_audit (
++  id INTEGER PRIMARY KEY AUTOINCREMENT,
++  migration_key TEXT NOT NULL,
++  entity_type TEXT NOT NULL,
++  entity_id INTEGER,
++  action TEXT NOT NULL,
++  before_data TEXT NOT NULL DEFAULT '{}',
++  after_data TEXT NOT NULL DEFAULT '{}',
++  created_at TEXT NOT NULL DEFAULT (datetime('now')),
++  UNIQUE(migration_key, entity_type, entity_id, action)
++);
++CREATE INDEX IF NOT EXISTS idx_catalogue_reorg_audit_key ON catalogue_reorganization_audit(migration_key,created_at);
++`);
++(function reorganizeUnifiedCatalogueColis41() {
++  const migrationKey='colis41_unified_categories_v1';
++  const parseIds=value=>{ try { const rows=JSON.parse(value||'[]'); return Array.isArray(rows)?[...new Set(rows.map(Number).filter(Number.isInteger))]:[]; } catch { return []; } };
++  const jsonIds=ids=>JSON.stringify([...new Set((ids||[]).map(Number).filter(Number.isInteger))]);
++  const audit=(type,id,action,before,after)=>db.prepare(`INSERT OR IGNORE INTO catalogue_reorganization_audit(migration_key,entity_type,entity_id,action,before_data,after_data) VALUES(?,?,?,?,?,?)`).run(migrationKey,type,id||null,action,JSON.stringify(before||{}),JSON.stringify(after||{}));
++  // Les anciens seeds ne doivent jamais réactiver une racine retirée après la migration.
++  // Cette garde est aussi utile lorsqu'une sauvegarde intermédiaire est redémarrée.
++  if (getSetting(migrationKey) !== null) {
++    const pairs=[['Beauté, coiffure et bien-être','Beauté et coiffure femme'],['Cours et formation','Cours à domicile']];
++    db.transaction(()=>pairs.forEach(([oldName,newName])=>{const old=db.prepare('SELECT * FROM grand_categories WHERE lower(name)=lower(?)').get(oldName),target=db.prepare('SELECT * FROM grand_categories WHERE lower(name)=lower(?)').get(newName);if(!old||!target||Number(old.id)===Number(target.id))return;db.prepare('UPDATE service_categories SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);db.prepare('UPDATE price_estimation_rules SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);db.prepare('UPDATE search_dictionary_entries SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);db.prepare('UPDATE grand_categories SET active=0,popular=0,popular_sort=NULL,updated_at=datetime(\'now\') WHERE id=?').run(old.id);audit('grand_category',old.id,'legacy_root_retired',old,{canonical_id:target.id});}))();
++    return;
++  }
++  const tx=db.transaction(()=>{
++    const rootByName=name=>db.prepare('SELECT * FROM grand_categories WHERE lower(name)=lower(?) ORDER BY id LIMIT 1').get(name);
++    const categoryByName=name=>db.prepare('SELECT * FROM service_categories WHERE lower(name)=lower(?) ORDER BY id LIMIT 1').get(name);
++    const ensureRoot=(name,icon,description,shortLabel,sort)=>{
++      let row=rootByName(name);
++      if(!row) { const id=db.prepare('INSERT INTO grand_categories(name,short_label,description,icon,active,sort) VALUES(?,?,?,?,1,?)').run(name,shortLabel,description,icon,sort).lastInsertRowid; row=db.prepare('SELECT * FROM grand_categories WHERE id=?').get(id); audit('grand_category',id,'creation',{},row); }
++      return row;
++    };
++    // Renomme en place lorsque possible : les références des profils, prix, annonces
++    // et statistiques gardent ainsi le même identifiant de domaine.
++    const renameRoot=(oldName,newName,icon,description,shortLabel,sort)=>{
++      let old=rootByName(oldName), target=rootByName(newName);
++      if(old && (!target || Number(old.id)===Number(target.id))) {
++        const before={...old}; db.prepare('UPDATE grand_categories SET name=?,icon=?,description=?,short_label=?,active=1,sort=?,updated_at=datetime(\'now\') WHERE id=?').run(newName,icon,description,shortLabel,sort,old.id);
++        target=db.prepare('SELECT * FROM grand_categories WHERE id=?').get(old.id); audit('grand_category',old.id,'renommage',before,target);
++      } else if(old && target && Number(old.id)!==Number(target.id)) {
++        const before={...old}; db.prepare('UPDATE service_categories SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);
++        db.prepare('UPDATE price_estimation_rules SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);
++        db.prepare('UPDATE search_dictionary_entries SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);
++        db.prepare('UPDATE grand_categories SET active=0,popular=0,popular_sort=NULL,updated_at=datetime(\'now\') WHERE id=?').run(old.id);
++        audit('grand_category',old.id,'fusion_vers_canonique',before,{canonical_id:target.id});
++      }
++      return target || rootByName(newName);
++    };
++    const ensureCategory=(name,icon,rootId,sort)=>{
++      let row=categoryByName(name);
++      if(!row) { const id=db.prepare('INSERT INTO service_categories(name,icon,grand_category_id,active,sort) VALUES(?,?,?,1,?)').run(name,icon,rootId,sort).lastInsertRowid; row=db.prepare('SELECT * FROM service_categories WHERE id=?').get(id); audit('category',id,'creation',{},row); }
++      else if(Number(row.grand_category_id)!==Number(rootId)) { const before={...row}; db.prepare('UPDATE service_categories SET grand_category_id=?,icon=COALESCE(icon,?) WHERE id=?').run(rootId,icon,row.id); row=db.prepare('SELECT * FROM service_categories WHERE id=?').get(row.id); audit('category',row.id,'rattachement',before,row); }
++      return row;
++    };
++    const ensureSub=(categoryId,name,sort)=>{
++      let row=db.prepare('SELECT * FROM sous_categories WHERE metier_id=? AND lower(name)=lower(?) ORDER BY id LIMIT 1').get(categoryId,name);
++      if(!row) { const id=db.prepare('INSERT INTO sous_categories(metier_id,name,active,sort) VALUES(?,?,1,?)').run(categoryId,name,sort).lastInsertRowid; row=db.prepare('SELECT * FROM sous_categories WHERE id=?').get(id); audit('sub_category',id,'creation',{},row); }
++      return row;
++    };
++    const categoryMove=(row,name,icon,rootId,sort)=>{
++      if(!row) return null; const before={...row}; db.prepare('UPDATE service_categories SET name=?,icon=?,grand_category_id=?,active=1,sort=? WHERE id=?').run(name,icon,rootId,sort,row.id); const after=db.prepare('SELECT * FROM service_categories WHERE id=?').get(row.id); audit('category',row.id,'reorganisation',before,after); return after;
++    };
++    const moveService=(service,newCategory,newSub)=>{
++      if(!service) return; const before={...service}; db.prepare('UPDATE services SET category_id=?,sub_id=? WHERE id=?').run(newCategory.id,newSub.id,service.id);
++      // Toute règle ou expression explicitement attachée à la prestation suit sa nouvelle branche.
++      db.prepare('UPDATE price_estimation_rules SET grand_category_id=?,category_id=?,sub_id=? WHERE service_id=?').run(newCategory.grand_category_id,newCategory.id,newSub.id,service.id);
++      db.prepare('UPDATE search_dictionary_entries SET grand_category_id=?,category_id=?,sub_id=? WHERE service_id=?').run(newCategory.grand_category_id,newCategory.id,newSub.id,service.id);
++      audit('service',service.id,'deplacement',before,{category_id:newCategory.id,sub_id:newSub.id,grand_category_id:newCategory.grand_category_id});
++    };
++    const serviceNamed=name=>db.prepare('SELECT * FROM services WHERE lower(name)=lower(?) ORDER BY id LIMIT 1').get(name);
++
++    // 1. Les activités d'assainissement ne sont plus rangées dans le nettoyage.
++    const sanitation=ensureRoot('Vidange et assainissement','🚛','Vidange, curage, fosses septiques et gestion des eaux usées.','Assainissement',2);
++    const sanitationCategory=ensureCategory('Vidange et assainissement','🚛',sanitation.id,2);
++    const sanitationSub=ensureSub(sanitationCategory.id,'Fosses septiques, curage et eaux usées',1);
++    moveService(serviceNamed('Vidange de fosse septique'),sanitationCategory,sanitationSub);
++
++    // 2. Les spécialités femme et homme sont des parcours distincts, sans supprimer
++    // les prestations historiques ni leurs tâches.
++    const beautyFemale=renameRoot('Beauté, coiffure et bien-être','Beauté et coiffure femme','💇‍♀️','Coiffure femme, esthétique, maquillage et soins de beauté.','Beauté femme',10) || ensureRoot('Beauté et coiffure femme','💇‍♀️','Coiffure femme, esthétique, maquillage et soins de beauté.','Beauté femme',10);
++    const beautySource=categoryByName('Coiffure & beauté') || categoryByName('Beauté et coiffure femme');
++    const femaleCategory=categoryMove(beautySource,'Beauté et coiffure femme','💇‍♀️',beautyFemale.id,10) || ensureCategory('Beauté et coiffure femme','💇‍♀️',beautyFemale.id,10);
++    let formerHairSub=serviceNamed('Coiffure femme'); formerHairSub=formerHairSub && db.prepare('SELECT * FROM sous_categories WHERE id=?').get(formerHairSub.sub_id);
++    if(formerHairSub) { const before={...formerHairSub}; db.prepare('UPDATE sous_categories SET metier_id=?,name=?,active=1 WHERE id=?').run(femaleCategory.id,'Coiffure femme',formerHairSub.id); audit('sub_category',formerHairSub.id,'precision_femme',before,{metier_id:femaleCategory.id,name:'Coiffure femme'}); }
++    let beautySub=serviceNamed('Soins esthétiques'); beautySub=beautySub && db.prepare('SELECT * FROM sous_categories WHERE id=?').get(beautySub.sub_id);
++    if(beautySub) { const before={...beautySub}; db.prepare('UPDATE sous_categories SET metier_id=?,name=?,active=1 WHERE id=?').run(femaleCategory.id,'Esthétique et maquillage femme',beautySub.id); audit('sub_category',beautySub.id,'precision_femme',before,{metier_id:femaleCategory.id,name:'Esthétique et maquillage femme'}); }
++    // Les prestations restées dans la catégorie féminine suivent ses sous-catégories renommées.
++    if(formerHairSub) db.prepare('UPDATE services SET category_id=? WHERE sub_id=?').run(femaleCategory.id,formerHairSub.id);
++    if(beautySub) db.prepare('UPDATE services SET category_id=? WHERE sub_id=?').run(femaleCategory.id,beautySub.id);
++    const beautyMale=ensureRoot('Beauté et coiffure homme','💇‍♂️','Coiffure homme, barbier, coupe et entretien masculin.','Beauté homme',11);
++    const maleCategory=ensureCategory('Beauté et coiffure homme','💇‍♂️',beautyMale.id,1);
++    const maleSub=ensureSub(maleCategory.id,'Coiffure homme et barbier',1);
++    const maleService=serviceNamed('Coiffure homme'); moveService(maleService,maleCategory,maleSub);
++
++    // 3. Cours à domicile, formation et coaching sont désormais clairement séparés.
++    const homeCourses=renameRoot('Cours et formation','Cours à domicile','📚','Soutien scolaire, langues et apprentissages à domicile.','Cours à domicile',18) || ensureRoot('Cours à domicile','📚','Soutien scolaire, langues et apprentissages à domicile.','Cours à domicile',18);
++    const courseSource=categoryByName('Cours & formation') || categoryByName('Cours à domicile');
++    const courseCategory=categoryMove(courseSource,'Cours à domicile','📚',homeCourses.id,18) || ensureCategory('Cours à domicile','📚',homeCourses.id,18);
++    const formation=ensureRoot('Formation et coaching','🎯','Formation professionnelle, accompagnement, coaching et développement de compétences.','Formation & coaching',19);
++    const formationCategory=ensureCategory('Formation et coaching','🎯',formation.id,1);
++    const legacyFormationSub=db.prepare('SELECT * FROM sous_categories WHERE metier_id=? AND lower(name)=lower(?)').get(courseCategory.id,'Formation professionnelle');
++    if(legacyFormationSub) {
++      const before={...legacyFormationSub}; db.prepare('UPDATE sous_categories SET metier_id=?,active=1 WHERE id=?').run(formationCategory.id,legacyFormationSub.id); db.prepare('UPDATE services SET category_id=? WHERE sub_id=?').run(formationCategory.id,legacyFormationSub.id); audit('sub_category',legacyFormationSub.id,'transfert_formation',before,{metier_id:formationCategory.id});
++    }
++    const coachingCategory=ensureCategory('Coaching et accompagnement','🎯',formation.id,2);
++    const coachingSub=ensureSub(coachingCategory.id,'Coaching sportif et bien-être',1);
++    const coachingService=serviceNamed('Sport & coaching');
++    let formerHealthSub=coachingService && db.prepare('SELECT * FROM sous_categories WHERE id=?').get(coachingService.sub_id);
++    moveService(coachingService,coachingCategory,coachingSub);
++    // Le seed COLIS41 crée déjà un métier de coaching autonome. On ne renomme en
++    // « soins » que l'ancienne sous-catégorie partagée Aide à la personne, jamais la
++    // sous-catégorie canonique de coaching qui vient d'être déplacée.
++    if(formerHealthSub && Number(formerHealthSub.metier_id)!==Number(coachingCategory.id)) { const before={...formerHealthSub}; db.prepare('UPDATE sous_categories SET name=? WHERE id=?').run('Soins de santé à domicile',formerHealthSub.id); audit('sub_category',formerHealthSub.id,'precision_sante',before,{name:'Soins de santé à domicile'}); }
++
++    // Les publicités et options de compte qui visaient les anciennes catégories larges
++    // continuent de couvrir les nouveaux parcours qui en proviennent.
++    const addJsonTarget=(table,column,fromId,toIds)=>db.prepare(`SELECT rowid,${column} value FROM ${table}`).all().forEach(row=>{const before=parseIds(row.value);if(!before.includes(Number(fromId)))return;const after=[...new Set([...before,...toIds.map(Number)])];if(JSON.stringify(before)!==JSON.stringify(after))db.prepare(`UPDATE ${table} SET ${column}=? WHERE rowid=?`).run(jsonIds(after),row.rowid);});
++    addJsonTarget('ads','target_categories',beautyFemale.id,[beautyMale.id]);
++    addJsonTarget('ads','target_categories',homeCourses.id,[formation.id]);
++    addJsonTarget('pro_account_options','categories',femaleCategory.id,[maleCategory.id]);
++    addJsonTarget('pro_account_options','categories',courseCategory.id,[formationCategory.id,coachingCategory.id]);
++
++    // Les règles tarifaires/dictionnaires globaux conservent leur portée sur chaque
++    // branche nouvellement séparée. Les règles fines suivent déjà la prestation déplacée.
++    const cloneRootTargets=(fromId,toId)=>{
++      db.prepare(`INSERT INTO price_estimation_rules(grand_category_id,city,zone,base_price,min_price,max_price,factors,source_type,source_note,source_url,source_date,verified_at,active,priority,public_unit,created_at,updated_at)
++        SELECT ?,city,zone,base_price,min_price,max_price,factors,source_type,source_note,source_url,source_date,verified_at,active,priority,public_unit,created_at,datetime('now') FROM price_estimation_rules
++        WHERE grand_category_id=? AND category_id IS NULL AND sub_id IS NULL AND service_id IS NULL AND task_id IS NULL`).run(toId,fromId);
++      db.prepare(`INSERT INTO search_dictionary_entries(term,normalized,grand_category_id,active,source,created_at,updated_at)
++        SELECT term,normalized,?,active,source,created_at,datetime('now') FROM search_dictionary_entries
++        WHERE grand_category_id=? AND category_id IS NULL AND sub_id IS NULL AND service_id IS NULL AND task_id IS NULL`).run(toId,fromId);
++    };
++    cloneRootTargets(beautyFemale.id,beautyMale.id); cloneRootTargets(homeCourses.id,formation.id);
++
++    // Les profils anciens sont recalculés à partir de leurs sous-catégories : les
++    // identifiants de sous-catégorie persistants garantissent le matching des missions.
++    const domainsForSubs=ids=>{ const valid=[...new Set((ids||[]).map(Number).filter(Number.isInteger))]; if(!valid.length)return []; return db.prepare(`SELECT DISTINCT c.grand_category_id id FROM sous_categories sc JOIN service_categories c ON c.id=sc.metier_id JOIN grand_categories g ON g.id=c.grand_category_id WHERE sc.active=1 AND c.active=1 AND g.active=1 AND sc.id IN (${valid.map(()=>'?').join(',')})`).all(...valid).map(r=>Number(r.id)); };
++    const domainsForServices=ids=>{ const valid=[...new Set((ids||[]).map(Number).filter(Number.isInteger))]; if(!valid.length)return []; return db.prepare(`SELECT DISTINCT c.grand_category_id id FROM services s JOIN service_categories c ON c.id=s.category_id JOIN grand_categories g ON g.id=c.grand_category_id WHERE s.active=1 AND c.active=1 AND g.active=1 AND s.id IN (${valid.map(()=>'?').join(',')})`).all(...valid).map(r=>Number(r.id)); };
++    const review=db.prepare("INSERT OR IGNORE INTO pro_profile_catalogue_reviews(user_id,legacy_service_id,reason) VALUES(?,?,?)");
++    db.prepare('SELECT * FROM pro_profiles').all().forEach(profile=>{
++      const services=[...new Set([...parseIds(profile.services),...parseIds(profile.authorized_services)])];
++      const has=id=>services.includes(Number(id));
++      const updateSelection=(raw,nullable)=>{
++        if(nullable && (raw===null||raw===undefined||raw===''))return null;
++        let subs=parseIds(raw);
++        // Une ancienne sélection partagée est déplacée automatiquement uniquement
++        // lorsqu'une prestation historique prouve la spécialité ; sinon le PDG décide.
++        if(formerHairSub && subs.includes(Number(formerHairSub.id))) {
++          if(maleService && has(maleService.id)) { subs=[...new Set([...subs,Number(maleSub.id)])]; if(!services.some(id=>[serviceNamed('Coiffure femme')&&serviceNamed('Coiffure femme').id,serviceNamed('Soins esthétiques')&&serviceNamed('Soins esthétiques').id,serviceNamed('Maquillage')&&serviceNamed('Maquillage').id].filter(Boolean).includes(id))) subs=subs.filter(id=>id!==Number(formerHairSub.id)); }
++          else if(!services.length) review.run(profile.user_id,maleService&&maleService.id||null,'colis41_coiffure_specialite_a_verifier');
++        }
++        if(formerHealthSub && subs.includes(Number(formerHealthSub.id))) {
++          if(coachingService && has(coachingService.id)) { subs=[...new Set([...subs,Number(coachingSub.id)])]; if(!services.some(id=>id===Number(serviceNamed('Soins à domicile')&&serviceNamed('Soins à domicile').id))) subs=subs.filter(id=>id!==Number(formerHealthSub.id)); }
++          else if(!services.length) review.run(profile.user_id,coachingService&&coachingService.id||null,'colis41_coaching_specialite_a_verifier');
++        }
++        return subs;
++      };
++      const selected=updateSelection(profile.selected_subcategories,false), authorized=updateSelection(profile.authorized_subcategories,true);
++      const selectedDomains=domainsForSubs(selected); const serviceDomains=domainsForServices(services);
++      const authorizedBase=authorized===null?null:domainsForSubs(authorized);
++      const domains=selectedDomains.length?selectedDomains:serviceDomains;
++      const authorizedDomains=authorizedBase===null?(domains.length?domains:null):(authorizedBase.length?authorizedBase:serviceDomains);
++      db.prepare('UPDATE pro_profiles SET selected_subcategories=?,domain_categories=?,authorized_subcategories=?,authorized_domain_categories=? WHERE user_id=?').run(jsonIds(selected),jsonIds(domains),authorized===null?null:jsonIds(authorized),authorizedDomains===null?null:jsonIds(authorizedDomains),profile.user_id);
++    });
++    // Les demandes de changement restent lisibles avec les nouvelles racines.
++    db.prepare('SELECT * FROM pro_domain_change_requests').all().forEach(row=>{
++      const requestedSubs=parseIds(row.requested_subcategories), previousSubs=parseIds(row.previous_subcategories);
++      if(requestedSubs.length||previousSubs.length) db.prepare('UPDATE pro_domain_change_requests SET requested_domains=?,previous_domains=? WHERE id=?').run(jsonIds(domainsForSubs(requestedSubs)),jsonIds(domainsForSubs(previousSubs)),row.id);
++    });
++    setSetting(migrationKey,'1');
++  });
++  tx();
++})();
++
+ module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
+--- a/server.js
++++ b/server.js
+@@ -499,6 +499,9 @@
+ }
+ // Seulement un signal de rafraîchissement : aucune donnée de catalogue ni identité n'est poussée.
+ function catalogueImageBroadcast() { for (const [userId] of sseClients) push(userId,'catalogue-image',{changed:true}); }
++// La structure elle-même reste en base ; le signal force chaque interface ouverte à relire
++// cette source unique après une modification PDG, sans pousser de données privées.
++function catalogueBroadcast(reason='updated') { for (const [userId] of sseClients) push(userId,'catalogue',{changed:true,reason}); }
+ function sendWebPush(userId, payload) {
+   if (!WEB_PUSH_READY) return;
+   const subscriptions = db.prepare('SELECT id, subscription FROM push_subscriptions WHERE user_id=?').all(userId);
+@@ -1090,7 +1093,7 @@
+     (!d.task_id && !d.service_id && !d.sub_id && !d.category_id && Number(d.grand_category_id || 0) === Number(grand.id))
+   ).map(d => d.term))];
+   return { ...grand, price_from: categoryReferencePrice(grand.id, city), categories: categories.map(c => ({ ...c,
+-    services: svcs.filter(s => Number(s.category_id) === Number(c.id)).map(s => ({ id:s.id,name:s.name,icon:s.icon,description:s.description || '',
++    services: svcs.filter(s => Number(s.category_id) === Number(c.id)).map(s => ({ id:s.id,name:s.name,icon:s.icon,description:s.description || '',sub_id:s.sub_id || null,sub_category:s.sous_cat || null,
+       taches: taskRows.filter(t => Number(t.service_id) === Number(s.id)).map(t => {
+         const price = taskPrices.get(Number(t.id));
+         return { id:t.id,name:t.name,description:t.description || '',search_terms:termsFor(s,t),price_from:price && price.amount || null,price_unit:price && price.unit || null };
+@@ -1141,7 +1144,7 @@
+   res.json(cats.map(c => ({
+     id: c.id, name: c.name, icon: c.icon, grand_category_id: c.grand_category_id, grand_category: c.grand_category, grand_icon: c.grand_icon,
+     services: svcs.filter(s => s.category_id === c.id).map(s => ({
+-      id: s.id, name: s.name, popular: s.popular, seasonal: s.seasonal,
++      id: s.id, name: s.name, popular: s.popular, seasonal: s.seasonal, sub_id:s.sub_id || null, sub_category:s.sous_cat || null,
+       taches: tas.filter(t => t.service_id === s.id).map(t => ({ id: t.id, name: t.name, description: t.description || '' }))
+     }))
+   })).filter(c => c.services.length));
+@@ -1176,7 +1179,7 @@
+   const questions = db.prepare('SELECT * FROM service_questions WHERE service_id=? AND active=1 ORDER BY sort,id').all(svc.id)
+     .map(q => ({ ...q, options: JSON.parse(q.options) }));
+   const taches = frenchSort(db.prepare('SELECT id, name, description FROM taches WHERE service_id=? AND active=1').all(svc.id));
+-  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat, grand_category_id: svc.grand_category_id, grand_category: svc.grand_category }, questions, taches,
++  res.json({ service: { id: svc.id, name: svc.name, category: svc.cat, sub_category: svc.sub_id ? (db.prepare('SELECT name FROM sous_categories WHERE id=?').get(svc.sub_id)||{}).name || null : null, grand_category_id: svc.grand_category_id, grand_category: svc.grand_category }, questions, taches,
+     limits: { photos: settingInt('request_image_limit', 3, 0, 3), audio_seconds: settingInt('request_audio_max_seconds', 25, 1, 25) } });
+ });
+ 
+@@ -1260,7 +1263,7 @@
+       if (score > bestScore) { bestScore = score; bestTask = task; bestMatch = task.name; }
+     });
+     return {
+-      id: s.id, name: s.name, category: s.cat, grand_category: s.grand_category || null, grand_category_id: s.grand_category_id || null,
++      id: s.id, name: s.name, category: s.cat, sub_category:s.sous_cat || null, grand_category: s.grand_category || null, grand_category_id: s.grand_category_id || null,
+       icon: s.icon,
+       task_id: bestTask && bestTask.id || null, tache_suggeree: bestTask && bestTask.name || null,
+       confidence: bestScore >= 80 ? 'élevée' : bestScore >= 24 ? 'moyenne' : 'faible', match: bestMatch || null, score: bestScore
+@@ -4394,6 +4397,7 @@
+   res.json({ grand_categories, categories: cats, sous_categories: subs, services: svcs, taches: tas, questions: qs });
+ });
+ // GRANDES CATÉGORIES : racine stable administrée exclusivement par le PDG.
++function legacyRootName(name) { return ['beauté, coiffure et bien-être','cours et formation'].includes(normalize(String(name||''))); }
+ function cleanCategoryImageUrl(raw) {
+   const value = String(raw || '').trim();
+   if (!value) return null;
+@@ -4418,6 +4422,7 @@
+ A.post('/grand-categories', pdgOnly, (req, res) => {
+   const b=req.body||{}, name=String(b.name||'').trim().slice(0,120);
+   if (!name) return res.status(400).json({ error:'Nom de grande catégorie requis.' });
++  if (legacyRootName(name)) return res.status(400).json({ error:'Cette ancienne grande catégorie a été remplacée par la structure centrale. Utilisez les catégories actuelles.' });
+   let imageUrl; try { imageUrl=cleanCategoryImageUrl(b.image_url); } catch(e) { return res.status(400).json({error:e.message}); }
+   try {
+     const created=db.transaction(() => {
+@@ -4427,12 +4432,13 @@
+       return {id,asset,category:db.prepare('SELECT * FROM grand_categories WHERE id=?').get(id)};
+     })();
+     logAction(req.user, 'Création grande catégorie', { target_type:'grand_category', target_id:created.id, target_name:name, details:imageUrl ? 'Grande catégorie créée avec une photo principale versionnée.' : 'Grande catégorie créée sans photo principale.' });
+-    catalogueImageBroadcast();
++    catalogueImageBroadcast(); catalogueBroadcast('grand-category-created');
+     res.status(201).json({id:created.id,category:grandCategoryAdmin(created.category),image_asset:publicImageAsset(created.asset,'grand_category',created.id)}); }
+   catch (e) { res.status(/UNIQUE/.test(String(e&&e.message||''))?409:400).json({ error:/UNIQUE/.test(String(e&&e.message||''))?'Cette grande catégorie existe déjà.':'Enregistrement de la catégorie impossible.' }); }
+ });
+ A.put('/grand-categories/:id', pdgOnly, (req,res) => {
+   const old=db.prepare('SELECT * FROM grand_categories WHERE id=?').get(req.params.id); if(!old)return res.status(404).json({error:'Grande catégorie introuvable.'}); const b=req.body||{};
++  if (legacyRootName(old.name) && (b.active===true || b.active===1 || b.active==='1')) return res.status(400).json({error:'Cette ancienne grande catégorie est archivée par la réorganisation centrale et ne peut pas être réactivée.'});
+   let imageUrl = old.image_url;
+   if (b.image_url !== undefined) { try { imageUrl=cleanCategoryImageUrl(b.image_url); } catch(e) { return res.status(400).json({error:e.message}); } }
+   const popular=b.popular===undefined?old.popular:(b.popular?1:0), imageChanged=(old.image_url||null)!==(imageUrl||null);
+@@ -4444,7 +4450,7 @@
+       return {asset,category:db.prepare('SELECT * FROM grand_categories WHERE id=?').get(old.id)};
+     })();
+     logAction(req.user, imageChanged ? (imageUrl ? 'Remplacement photo grande catégorie' : 'Suppression photo grande catégorie') : 'Mise à jour grande catégorie', { target_type:'grand_category', target_id:old.id, target_name:b.name === undefined ? old.name : String(b.name).trim().slice(0,120), details:imageChanged ? (imageUrl ? 'Photo principale remplacée : nouvelle version publique et caches obsolètes invalidés.' : 'Photo principale retirée : les cartes publiques reviennent au visuel sans image.') : 'Informations de catégorie mises à jour.' });
+-    if (imageChanged) catalogueImageBroadcast();
++    if (imageChanged) catalogueImageBroadcast(); catalogueBroadcast('grand-category-updated');
+     res.json({ok:true,image_url:imageUrl,category:grandCategoryAdmin(saved.category),image_asset:publicImageAsset(saved.asset,'grand_category',old.id)});
+   } catch { res.status(400).json({error:'Mise à jour de la catégorie impossible.'}); }
+ });
+@@ -4452,7 +4458,7 @@
+   const used=db.prepare('SELECT COUNT(*) n FROM service_categories WHERE grand_category_id=?').get(req.params.id).n;
+   if (used) return res.status(400).json({error:`Cette catégorie contient ${used} sous-catégorie(s)/métier(s). Réaffectez-les ou désactivez-la plutôt.`});
+   const r=db.transaction(() => { const row=db.prepare('DELETE FROM grand_categories WHERE id=?').run(req.params.id); if(row.changes) db.prepare("UPDATE image_assets SET status='removed',retired_at=datetime('now'),updated_at=datetime('now') WHERE owner_type='grand_category' AND owner_id=? AND status='active'").run(req.params.id); return row; })();
+-  if(!r.changes) return res.status(404).json({error:'Grande catégorie introuvable.'}); catalogueImageBroadcast(); res.json({ok:true});
++  if(!r.changes) return res.status(404).json({error:'Grande catégorie introuvable.'}); catalogueImageBroadcast(); catalogueBroadcast('grand-category-deleted'); res.json({ok:true});
+ });
+ // Dictionnaire de recherche multi-niveaux. Les cibles ne sont jamais du texte libre :
+ // elles référencent directement le catalogue central (grande catégorie → métier → prestation → tâche).
+@@ -4517,40 +4523,40 @@
+   const n = db.prepare(`SELECT COUNT(*) n FROM missions m JOIN services s ON s.id=m.service_id WHERE s.category_id=?`).get(req.params.id).n;
+   if (n) return res.status(400).json({ error: `Impossible de supprimer : ${n} mission(s) utilisent ce métier. Désactivez-le plutôt.` });
+   db.prepare('DELETE FROM service_categories WHERE id=?').run(req.params.id);
+-  res.json({ ok: true });
++  catalogueBroadcast('category-deleted'); res.json({ ok: true });
+ });
+ // SOUS-CATÉGORIES
+ A.post('/sous-categories', (req, res) => {
+   if (!req.body.name || !req.body.metier_id) return res.status(400).json({ error: 'Nom et métier requis.' });
+   const info = db.prepare('INSERT INTO sous_categories(metier_id, name, sort) VALUES(?,?,?)').run(req.body.metier_id, req.body.name, req.body.sort ?? 99);
+-  res.json({ id: info.lastInsertRowid });
++  catalogueBroadcast('subcategory-created'); res.json({ id: info.lastInsertRowid });
+ });
+ A.put('/sous-categories/:id', (req, res) => {
+   db.prepare('UPDATE sous_categories SET name=COALESCE(?,name), metier_id=COALESCE(?,metier_id), active=COALESCE(?,active), sort=COALESCE(?,sort) WHERE id=?')
+     .run(req.body.name || null, req.body.metier_id || null, req.body.active ?? null, req.body.sort ?? null, req.params.id);
+-  res.json({ ok: true });
++  catalogueBroadcast('subcategory-updated'); res.json({ ok: true });
+ });
+ A.delete('/sous-categories/:id', (req, res) => {
+   const n = db.prepare('SELECT COUNT(*) n FROM services WHERE sub_id=?').get(req.params.id).n;
+   if (n) return res.status(400).json({ error: `Impossible : ${n} service(s) sont rattachés à cette sous-catégorie.` });
+   db.prepare('DELETE FROM sous_categories WHERE id=?').run(req.params.id);
+-  res.json({ ok: true });
++  catalogueBroadcast('subcategory-deleted'); res.json({ ok: true });
+ });
+ // TÂCHES : la tâche reste toujours rattachée à une prestation puis à sa catégorie racine.
+ A.post('/taches', pdgOnly, (req, res) => {
+   const b=req.body||{}, service=db.prepare('SELECT id FROM services WHERE id=?').get(b.service_id);
+   if (!b.name || !service) return res.status(400).json({ error: 'Nom et prestation requis.' });
+   const info = db.prepare("INSERT INTO taches(service_id,name,description,sort,updated_at) VALUES(?,?,?,?,datetime('now'))").run(service.id,String(b.name).trim().slice(0,180),String(b.description||'').trim().slice(0,1000),b.sort ?? 99);
+-  res.status(201).json({ id: info.lastInsertRowid });
++  catalogueBroadcast('task-created'); res.status(201).json({ id: info.lastInsertRowid });
+ });
+ A.put('/taches/:id', pdgOnly, (req, res) => {
+   const old=db.prepare('SELECT * FROM taches WHERE id=?').get(req.params.id); if(!old)return res.status(404).json({error:'Tâche introuvable.'}); const b=req.body||{};
+   const serviceId=b.service_id===undefined?old.service_id:Number(b.service_id); if(!db.prepare('SELECT 1 FROM services WHERE id=?').get(serviceId))return res.status(400).json({error:'Prestation de destination invalide.'});
+   db.prepare("UPDATE taches SET service_id=?,name=COALESCE(?,name),description=COALESCE(?,description),active=COALESCE(?,active),sort=COALESCE(?,sort),updated_at=datetime('now') WHERE id=?")
+     .run(serviceId,b.name===undefined?null:String(b.name).trim().slice(0,180),b.description===undefined?null:String(b.description).trim().slice(0,1000),b.active === undefined ? null : (b.active ? 1 : 0),b.sort??null,old.id);
+-  res.json({ ok: true });
++  catalogueBroadcast('task-updated'); res.json({ ok: true });
+ });
+-A.delete('/taches/:id', pdgOnly, (req, res) => { const old=db.prepare('SELECT * FROM taches WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Tâche introuvable.'}); const n=db.prepare("SELECT COUNT(*) n FROM missions WHERE taches LIKE ? OR tache=?").get('%\"id\":'+old.id+'%',old.name).n; if(n)return res.status(409).json({error:`Cette tâche est liée à ${n} demande(s) historique(s). Désactivez-la plutôt.`}); db.prepare('DELETE FROM taches WHERE id=?').run(old.id);res.json({ ok: true }); });
++A.delete('/taches/:id', pdgOnly, (req, res) => { const old=db.prepare('SELECT * FROM taches WHERE id=?').get(req.params.id);if(!old)return res.status(404).json({error:'Tâche introuvable.'}); const n=db.prepare("SELECT COUNT(*) n FROM missions WHERE taches LIKE ? OR tache=?").get('%\"id\":'+old.id+'%',old.name).n; if(n)return res.status(409).json({error:`Cette tâche est liée à ${n} demande(s) historique(s). Désactivez-la plutôt.`}); db.prepare('DELETE FROM taches WHERE id=?').run(old.id);catalogueBroadcast('task-deleted');res.json({ ok: true }); });
+ A.get('/villes', (req, res) => res.json(frenchSort(db.prepare('SELECT * FROM villes').all())));
+ A.post('/villes', (req, res) => {
+   if (!req.body.name) return res.status(400).json({ error: 'Nom requis.' });
+@@ -4572,20 +4578,20 @@
+   const domainId = req.body.grand_category_id ? Number(req.body.grand_category_id) : null;
+   if (domainId && !db.prepare('SELECT 1 FROM grand_categories WHERE id=?').get(domainId)) return res.status(400).json({ error: 'Grande catégorie invalide.' });
+   const info = db.prepare('INSERT INTO service_categories(name, icon, sort, grand_category_id) VALUES(?,?,?,?)').run(req.body.name, req.body.icon || '🔹', req.body.sort || 99, domainId);
+-  res.json({ id: info.lastInsertRowid });
++  catalogueBroadcast('category-created'); res.json({ id: info.lastInsertRowid });
+ });
+ A.put('/categories/:id', pdgOnly, (req, res) => {
+   const domainId = req.body.grand_category_id === undefined ? null : (req.body.grand_category_id ? Number(req.body.grand_category_id) : null);
+   if (req.body.grand_category_id !== undefined && domainId && !db.prepare('SELECT 1 FROM grand_categories WHERE id=?').get(domainId)) return res.status(400).json({ error: 'Grande catégorie invalide.' });
+   db.prepare('UPDATE service_categories SET name=COALESCE(?,name), icon=COALESCE(?,icon), active=COALESCE(?,active), sort=COALESCE(?,sort), grand_category_id=CASE WHEN ? THEN ? ELSE grand_category_id END WHERE id=?')
+     .run(req.body.name || null, req.body.icon || null, req.body.active ?? null, req.body.sort ?? null, req.body.grand_category_id !== undefined ? 1 : 0, domainId, req.params.id);
+-  res.json({ ok: true });
++  catalogueBroadcast('category-updated'); res.json({ ok: true });
+ });
+ A.post('/services', (req, res) => {
+   if (!req.body.name || !req.body.category_id) return res.status(400).json({ error: 'Nom et catégorie requis.' });
+   const info = db.prepare('INSERT INTO services(category_id, sub_id, name, keywords, sort) VALUES(?,?,?,?,?)')
+     .run(req.body.category_id, req.body.sub_id || null, req.body.name, req.body.keywords || '', req.body.sort || 99);
+-  res.json({ id: info.lastInsertRowid });
++  catalogueBroadcast('service-created'); res.json({ id: info.lastInsertRowid });
+ });
+ A.put('/services/:id', (req, res) => {
+   db.prepare(`UPDATE services SET name=COALESCE(?,name), keywords=COALESCE(?,keywords), active=COALESCE(?,active), sort=COALESCE(?,sort),
+@@ -4603,7 +4609,7 @@
+   } else if (req.body.popular === 0) {
+     db.prepare('UPDATE services SET popular_sort=NULL WHERE id=?').run(req.params.id);
+   }
+-  res.json({ ok: true });
++  catalogueBroadcast('service-updated'); res.json({ ok: true });
+ });
+ // Ordre des services populaires (affichage de l'accueil) — liste complète d'ids dans l'ordre voulu
+ A.put('/services-populaires/ordre', (req, res) => {
+@@ -4614,13 +4620,13 @@
+     ids.forEach((id, i) => db.prepare('UPDATE services SET popular=1, popular_sort=? WHERE id=?').run(i + 1, id));
+   });
+   tx();
+-  res.json({ ok: true });
++  catalogueBroadcast('popular-services-updated'); res.json({ ok: true });
+ });
+ A.delete('/services/:id', (req, res) => {
+   const n = db.prepare('SELECT COUNT(*) n FROM missions WHERE service_id=?').get(req.params.id).n;
+   if (n) return res.status(400).json({ error: `Impossible de supprimer : ${n} mission(s) utilisent ce service. Désactivez-le plutôt.` });
+   db.prepare('DELETE FROM services WHERE id=?').run(req.params.id);
+-  res.json({ ok: true });
++  catalogueBroadcast('service-deleted'); res.json({ ok: true });
+ });
+ A.post('/questions', (req, res) => {
+   const { service_id, label, type, options, required, sort } = req.body || {};
+--- a/package.json
++++ b/package.json
+@@ -42,7 +42,8 @@
+     "test:colis38": "node test-colis38-features.js",
+     "test:colis38:ui": "node test-colis38-ui.js",
+     "test:colis39": "node test-colis39-busy.js",
+-    "test:colis40": "node test-colis40-contacts-logo-search.js"
++    "test:colis40": "node test-colis40-contacts-logo-search.js",
++    "test:colis41": "node test-colis41-catalogue.js"
+   },
+   "keywords": [],
+   "author": "",
+--- a/public/app.js
++++ b/public/app.js
+@@ -277,6 +277,12 @@
+     // doit être relue. Une carte déjà visible est remplacée sans rechargement de page.
+     refreshHomeCatalogueState(false);
+   });
++  sse.addEventListener('catalogue', () => {
++    // Une seule source est relue après une décision PDG : aucun tableau local de
++    // catégories ne survit à une réorganisation centrale.
++    SERVICES=null; CATALOGUE=null; GRAND_CATEGORIES=[]; PRO_SKILLS=[];
++    if(/^#\/(?:home|categories|services|search|pro|pro-edit)(?:\/|$)/.test(location.hash||'#/home')) render();
++  });
+   sse.addEventListener('feature-control', () => { refreshPublicFeatures(true); });
+   sse.addEventListener('app-branding', e => { try { applyAppBranding(JSON.parse(e.data)); } catch { refreshAppBranding(); } });
+   sse.addEventListener('message', e => {
+@@ -819,7 +825,7 @@
+     if(categoryAds.length) recordAdViews(categoryAds);
+   updateBadges(); return;
+   }
+-  const allTasks = services.flatMap(s => (s.taches || []).map(t => ({ id:Number(t.id), name:t.name, description:t.description || '', search_terms:Array.isArray(t.search_terms) ? t.search_terms : [], price_from:Number(t.price_from) || null, price_unit:t.price_unit || '', service_id:Number(s.id), service_name:s.name, category:s.category || '' })));
++  const allTasks = services.flatMap(s => (s.taches || []).map(t => ({ id:Number(t.id), name:t.name, description:t.description || '', search_terms:Array.isArray(t.search_terms) ? t.search_terms : [], price_from:Number(t.price_from) || null, price_unit:t.price_unit || '', service_id:Number(s.id), service_name:s.name, category:s.category || '', subcategory:s.subcategory || s.sub_category || '' })));
+   const savedDraft = readCategoryDraft(cat.id);
+   const taskById = new Map(allTasks.map(t => [Number(t.id), t]));
+   let selectedTasks = (savedDraft.taches || []).map(raw => {
+@@ -894,7 +900,7 @@
+   if (id) {
+     let cat; try { cat = await api('/grand-categories/' + id + '/catalogue' + cityQuery); syncPublicImageCache([cat]); }
+     catch (e) { toast(e.message, 'err'); nav('#/categories'); return; }
+-    const serviceChoices = cat.categories.flatMap(c => c.services.map(s => ({ ...s, category:c.name, category_icon:c.icon || '' })));
++    const serviceChoices = cat.categories.flatMap(c => c.services.map(s => ({ ...s, category:c.name, category_icon:c.icon || '', subcategory:s.sub_category || '' })));
+     let categoryAds=[]; try { categoryAds=adPlacementList(await api('/ads?category_id='+encodeURIComponent(cat.id)),['services_top'],'category_'+cat.id); } catch { }
+     renderCategoryRequestForm(cat, serviceChoices, categoryAds);
+     return;
+@@ -947,7 +953,7 @@
+     const seenSearch = new Set();
+     CATALOGUE.forEach(c => c.services.forEach(s => {
+       if (!seenSearch.has(Number(s.id)) && (hit(s.name) || hit(c.name) || s.taches.some(t => hit(t.name)))) {
+-        seenSearch.add(Number(s.id)); out.push({ ...s, icon: c.icon, path: c.name });
++        seenSearch.add(Number(s.id)); out.push({ ...s, icon: c.icon, path: [c.name,s.sub_category].filter(Boolean).join(' › ') });
+       }
+     }));
+     out.sort((a,b)=>String(a.name).localeCompare(String(b.name),'fr',{sensitivity:'base',numeric:true}));
+@@ -960,7 +966,7 @@
+     const seen = new Set();
+     const all = [];
+     CATALOGUE.forEach(c => (c.services || []).forEach(s => {
+-      if (!seen.has(Number(s.id))) { seen.add(Number(s.id)); all.push({ ...s, icon: s.icon || c.icon, path: [c.grand_category, c.name].filter(Boolean).join(' › ') }); }
++      if (!seen.has(Number(s.id))) { seen.add(Number(s.id)); all.push({ ...s, icon: s.icon || c.icon, path: [c.grand_category, c.name, s.sub_category].filter(Boolean).join(' › ') }); }
+     }));
+     all.sort((a,b) => String(a.name).localeCompare(String(b.name), 'fr', { sensitivity:'base', numeric:true }));
+     listHtml = all.length ? `<div class="small muted mb">${all.length} service${all.length > 1 ? 's' : ''} actif${all.length > 1 ? 's' : ''}, classé${all.length > 1 ? 's' : ''} de A à Z.</div>` + all.map(s => `<div class="menu-item" onclick="nav('#/request/${s.id}')">
+@@ -1008,7 +1014,7 @@
+   $app.innerHTML = `
+   ${header(data.service.name, { bell: !!USER })}
+   <div class="content"><div class="card">
+-      <div class="small muted mb">${esc(data.service.grand_category || data.service.category || '')}${data.service.category && data.service.grand_category ? ' › ' + esc(data.service.category) : ''} › ${esc(data.service.name)}</div>
++      <div class="small muted mb">${esc(data.service.grand_category || data.service.category || '')}${data.service.category && data.service.grand_category ? ' › ' + esc(data.service.category) : ''}${data.service.sub_category ? ' › ' + esc(data.service.sub_category) : ''} › ${esc(data.service.name)}</div>
+       ${tasksHtml}
+       <div class="field"><label>Je décris mon besoin ci-dessous. <span class="req">*</span></label>
+         <textarea id="r-desc" maxlength="5000" placeholder="Ex : Le robinet de ma cuisine coule depuis ce matin…" oninput="A.requestDescriptionChanged()">${esc(savedDraft.description || selection.query || '')}</textarea><div id="r-language-hint" class="small muted" aria-live="polite"></div></div>
+@@ -2651,7 +2657,7 @@
+     const confidence = s.confidence === 'élevée' ? 'Correspondance très probable' : s.confidence === 'moyenne' ? 'Correspondance possible' : 'Autre résultat pertinent';
+     return `<div class="menu-item" onclick="A.openSearchResult(${Number(s.id)},${Number(s.task_id || 0)})">
+       <span class="mi-ic">${esc(s.icon || '🔹')}</span><div class="grow"><div><b>${esc(s.name)}</b></div>
+-      <div class="small muted">${esc(s.grand_category || s.category || '')}${s.category && s.grand_category ? ' › ' + esc(s.category) : ''}${task}</div>
++      <div class="small muted">${esc(s.grand_category || s.category || '')}${s.category && s.grand_category ? ' › ' + esc(s.category) : ''}${s.sub_category ? ' › ' + esc(s.sub_category) : ''}${task}</div>
+       ${prixHtml(s, true)}${compact ? '' : `<div class="small muted" style="margin-top:3px">${confidence}</div>`}</div><span class="mi-arr">›</span></div>`;
+   },
+   openSearchResult(serviceId, taskId) {
+@@ -2699,7 +2705,7 @@
+     const groups = (REQ.category_services || []).map(service => {
+       const tasks = (REQ.category_tasks || []).filter(t => Number(t.service_id) === Number(service.id) && (!query || normalize(`${t.name} ${t.description || ''} ${(t.search_terms || []).join(' ')}`).includes(query)));
+       // Le nom de la prestation organise les tâches ; le nom de la grande catégorie reste seulement dans l’en-tête vert.
+-      return tasks.length ? `<section class="category-task-group"><h4>${esc(service.name)}</h4>${tasks.map(choice).join('')}</section>` : '';
++      return tasks.length ? `<section class="category-task-group"><h4>${service.subcategory ? `<span class="small muted">${esc(service.subcategory)} › </span>` : ''}${esc(service.name)}</h4>${tasks.map(choice).join('')}</section>` : '';
+     }).filter(Boolean);
+     zone.innerHTML = groups.length ? groups.join('') : '<div class="hint">Aucun besoin trouvé. Vous pouvez décrire votre demande librement.</div>';
+   },
+--- a/public/admin/admin.js
++++ b/public/admin/admin.js
+@@ -384,11 +384,12 @@
+   if (!d.categories.some(c => c.id === sel)) sel = d.categories[0]?.id || 0;
+ 
+   const nTaches = {}; d.taches.forEach(t => nTaches[t.service_id] = (nTaches[t.service_id] || 0) + 1);
+-  const grandImages = (d.grand_categories || []).sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id).map(g => {
++  const grandImages = (d.grand_categories || []).filter(g=>g.active).sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id).map(g => {
+     const photo = g.image_url ? `<img src="${esc(mediaUrl(g.image_url))}" alt="${esc(g.name)}" style="width:72px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #d3e4e0">` : '<span style="display:grid;place-items:center;width:72px;height:56px;border-radius:8px;background:#edf5f3">🖼️</span>';
+     return `<div style="display:flex;align-items:center;gap:8px;padding:7px;border:1px solid #e2eeeb;border-radius:10px;min-width:245px;flex:1">${photo}<div style="min-width:0;flex:1"><b class="small" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.short_label || g.name)}</b><span class="small ${g.image_url ? 'muted' : 'bad'}">${g.image_url ? 'Photo principale publiée' : 'Photo manquante'}</span></div>${ME && ME.role==='pdg' ? `<button class="btn sm sec" onclick="A.grandCategoryForm(${g.id})">Photo</button>` : ''}</div>`;
+   }).join('');
+   const imagePanel = `<div class="panel"><div class="frow" style="align-items:center"><div><h2 style="margin:0">Photos des grandes catégories</h2><div class="small muted">Une source par identifiant de grande catégorie, partagée par les cartes publiques et le tableau PDG.</div></div>${ME && ME.role==='pdg' ? '<span class="pill ok">Modification réservée au PDG</span>' : ''}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:8px;margin-top:12px">${grandImages}</div></div>`;
++  const structurePanel = `<section class="panel"><div class="frow" style="align-items:center"><div class="grow"><h2 style="margin:0">Structure centrale synchronisée</h2><div class="small muted">Accueil, recherche, demandes, profils pro, affectation des missions et tableaux de bord lisent cette même hiérarchie.</div></div>${ME&&ME.role==='pdg'?'<button class="btn sm" onclick="A.grandCategoryForm(0)">＋ Grande catégorie</button><button class="btn sm sec" onclick="A.catalogueReviews()">Vérifications profils</button>':''}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:9px;margin-top:12px">${(d.grand_categories||[]).filter(g=>g.active).map(g=>{const children=(d.categories||[]).filter(c=>Number(c.grand_category_id)===Number(g.id)&&c.active);return `<article style="border:1px solid #dce9e6;border-radius:10px;padding:10px"><div class="frow" style="gap:6px"><b class="grow">${esc(g.icon||'🧩')} ${esc(g.name)}</b>${ME&&ME.role==='pdg'?`<button class="btn sm sec" onclick="A.grandCategoryForm(${g.id})">✏️</button>`:''}</div><div class="small muted" style="margin:5px 0 7px">${esc(g.description||'')}</div><div class="small">${children.length?children.map(c=>`<button class="btn sm sec" style="margin:2px" onclick="sessionStorage.setItem('adm_cat_sel',${c.id});render()">${esc(c.icon||'🔹')} ${esc(c.name)}</button>`).join(''):'Aucun métier actif.'}</div></article>`;}).join('')}</div></section>`;
+   const svcRow = (s, path) => `<tr>
+     <td><b>${esc(s.name)}</b>${path ? `<div class="small muted">${esc(path)}</div>` : ''}
+       <div class="small" style="color:#111;font-weight:700">${s.price_show && s.price_from ? esc(s.price_prefix || 'Dès') + ' ' + Number(s.price_from).toLocaleString('fr-FR') + ' FCFA' : '<span class="muted" style="font-weight:400">prix masqué</span>'}</div>
+@@ -433,6 +434,7 @@
+   }
+ 
+   shell(`<h1>🗂️ Services & catégories</h1>
++  ${structurePanel}
+   ${imagePanel}
+   <div class="tabs">
+     <button class="on">🗂️ Catalogue</button>
+@@ -467,7 +469,7 @@
+ /* ---------- Photos des grandes catégories (source unique par identifiant) ---------- */
+ views._grandPhotos = async () => {
+   const d = CATD = await api('/admin/catalog');
+-  const rows = (d.grand_categories || []).slice().sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id);
++  const rows = (d.grand_categories || []).filter(g=>g.active).slice().sort((a,b)=>(a.sort||0)-(b.sort||0)||a.id-b.id);
+   const cards = rows.map(g => {
+     const publicUrl=g.image_public_url || g.image_url;
+     const photo = g.image_url
+@@ -520,7 +522,7 @@
+   shell(`<h1>🧠 Gestion des tarifs et estimations intelligentes</h1>
+     <div class="panel small muted">Le moteur applique d’abord les règles explicites de la direction, puis les données locales vérifiées, ensuite l’historique suffisamment documenté, puis le tarif de référence autorisé. Sans donnée fiable, il affiche « Prix à confirmer ». Aucun prix de marché n’est inventé.</div>
+     <div class="panel"><div class="frow" style="align-items:center"><h2 style="margin:0;flex:1">Grandes catégories centrales</h2><button class="btn sm" onclick="A.grandCategoryForm(0)">＋ Ajouter</button></div>
+-      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">${catalog.grand_categories.map(g => `<span class="pill ${g.active ? 'ok' : 'off'}">${esc(g.icon || '🧩')} ${esc(g.name)} <button type="button" style="border:0;background:transparent;cursor:pointer" onclick="A.grandCategoryForm(${g.id})">✏️</button></span>`).join('')}</div></div>
++      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:10px">${catalog.grand_categories.filter(g=>g.active).map(g => `<span class="pill ok">${esc(g.icon || '🧩')} ${esc(g.name)} <button type="button" style="border:0;background:transparent;cursor:pointer" onclick="A.grandCategoryForm(${g.id})">✏️</button></span>`).join('')}</div></div>
+     <div class="panel"><h2 style="margin-top:0">Règles globales</h2><div class="frow">
+       <label><input type="checkbox" id="est-geo" ${cfg.geo_enabled ? 'checked' : ''}> Ajustements géographiques par ville actifs</label>
+       <label>Repli si aucune donnée locale <select id="est-fallback"><option value="reference" ${cfg.fallback === 'reference' ? 'selected' : ''}>Tarif de référence PDG (provisoire)</option><option value="confirmer" ${cfg.fallback === 'confirmer' ? 'selected' : ''}>Prix à confirmer</option></select></label>
+@@ -1280,18 +1282,21 @@
+   },
+   async proEligibility(id) {
+     try {
+-      const [u, catalog, villes] = await Promise.all([api('/admin/users/' + id), api('/admin/catalog'), api('/admin/villes')]);
++      const [u, catalog, villes, skillCatalogue] = await Promise.all([api('/admin/users/' + id), api('/admin/catalog'), api('/admin/villes'), api('/pro-skill-catalogue').catch(()=>[])]);
+       if (!u.pro) return toast('Ce compte ne possède pas de profil professionnel.', 'err');
+       const declared = (u.pro.services || []).map(Number), allowed = (u.pro.authorized_services || declared).map(Number);
+       const declaredDomains = (u.pro.domain_categories || []).map(Number);
+       const allowedDomains = (u.pro.authorized_domain_categories || declaredDomains).map(Number);
++      const declaredSubs=(u.pro.selected_subcategories || []).map(Number), allowedSubs=(u.pro.authorized_subcategories || declaredSubs).map(Number);
++      const skillsHtml=(skillCatalogue||[]).map(root=>`<details style="border-top:1px solid #edf2f1;padding:6px 0"><summary><b>${esc(root.icon||'🧩')} ${esc(root.short_label||root.name)}</b></summary>${(root.categories||[]).map(cat=>`<div style="margin:7px 0 7px 12px"><b class="small">${esc(cat.icon||'🔹')} ${esc(cat.name)}</b>${(cat.subcategories||[]).map(sub=>`<label class="check-line" style="display:block;margin:4px 0 0 10px"><input class="pe-sub" type="checkbox" value="${sub.id}" ${allowedSubs.includes(Number(sub.id))?'checked':''}> ${esc(sub.name)}</label>`).join('')}</div>`).join('')}</details>`).join('');
+       const flat = (catalog.services || []).filter(s => declared.includes(+s.id));
+-      const domains = (catalog.grand_categories || []);
++      const domains = (catalog.grand_categories || []).filter(g=>g.active);
+       openModal(`<h3>🧰 Autorisations de ${esc(u.name)}</h3>
+         <p class="small muted">Les domaines cochés sont contrôlés par le backend avant l’alerte et l’acceptation. Une tâche ajoutée ultérieurement dans un domaine autorisé devient automatiquement éligible.</p>
+         <label class="small muted">Type de prestataire</label><select id="pe-type" style="width:100%;margin-bottom:10px"><option value="particulier" ${u.pro.pro_type !== 'entreprise' ? 'selected' : ''}>Un particulier</option><option value="entreprise" ${u.pro.pro_type === 'entreprise' ? 'selected' : ''}>Une entreprise</option></select>
+         <label class="small muted">Capacité de mission</label><select id="pe-cap" style="width:100%;margin-bottom:10px"><option value="1" ${(+u.pro.capacity_level || 1) === 1 ? 'selected' : ''}>Standard</option><option value="2" ${(+u.pro.capacity_level || 1) === 2 ? 'selected' : ''}>Renforcée / gros travaux</option><option value="3" ${(+u.pro.capacity_level || 1) >= 3 ? 'selected' : ''}>Grande capacité</option></select>
+         <label class="small muted">Domaines d’activité autorisés</label><div style="max-height:240px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${domains.map(g => `<label style="display:block;padding:5px 0"><input class="pe-domain" type="checkbox" value="${g.id}" ${allowedDomains.includes(+g.id) ? 'checked' : ''}> ${esc(g.icon || '🧩')} <b>${esc(g.name)}</b>${g.active ? '' : ' <span class="muted small">(inactive)</span>'}</label>`).join('') || '<span class="small muted">Aucune grande catégorie disponible.</span>'}</div>
++        <label class="small muted">Spécialités de sous-catégorie autorisées</label><div style="max-height:290px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${skillsHtml||'<span class="small muted">Aucune sous-catégorie active disponible.</span>'}</div>
+         ${declaredDomains.length ? `<div class="small muted" style="margin:-7px 0 12px">Déclarés initialement : ${domains.filter(g=>declaredDomains.includes(+g.id)).map(g=>esc(g.name)).join(' • ') || '—'}</div>` : `<label class="small muted">Services autorisés (profil historique)</label><div style="max-height:160px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${flat.map(s => `<label style="display:block;padding:5px 0"><input class="pe-service" type="checkbox" value="${s.id}" ${allowed.includes(+s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('') || '<span class="small muted">Aucun service déclaré.</span>'}</div>`}
+         <label class="small muted">Villes d’intervention autorisées</label><div class="small muted">Une seule ville est la règle normale. Plusieurs villes ou « toutes » sont réservées à un administrateur / PDG et appliquées au matching.</div><div style="max-height:180px;overflow:auto;border:1px solid #e3edeb;border-radius:8px;padding:8px;margin:6px 0 12px">${(['pdg','admin'].includes(ME.role) ? `<label style="display:block;padding:5px 0"><input class="pe-city" type="checkbox" value="*" ${(u.pro.service_cities||[]).includes('*')?'checked':''}> Toutes les villes actives</label>` : '')}${villes.map(v=>`<label style="display:block;padding:5px 0"><input class="pe-city" type="checkbox" value="${esc(v.name)}" ${(u.pro.service_cities||[]).includes(v.name)?'checked':''}> ${esc(v.name)}</label>`).join('')}</div>
+         <button class="btn" onclick="A.saveProEligibility(${id})">Enregistrer</button><button class="btn sec mt" onclick="A.userDetail(${id})">Annuler</button>`);
+@@ -1306,10 +1311,15 @@
+   async saveProEligibility(id) {
+     const authorized_services = [...document.querySelectorAll('.pe-service:checked')].map(el => +el.value);
+     const authorized_domain_categories = [...document.querySelectorAll('.pe-domain:checked')].map(el => +el.value);
++    const authorized_subcategories = [...document.querySelectorAll('.pe-sub:checked')].map(el => +el.value);
+     const service_cities = [...document.querySelectorAll('.pe-city:checked')].map(el => el.value);
+-    try { await api('/admin/pros/' + id + '/eligibility', { method: 'PUT', body: { authorized_services, authorized_domain_categories, service_cities, pro_type: document.getElementById('pe-type').value, capacity_level: +document.getElementById('pe-cap').value } }); toast('Autorisations professionnelles enregistrées ✓', 'ok'); A.userDetail(id); }
++    try { await api('/admin/pros/' + id + '/eligibility', { method: 'PUT', body: { authorized_services, authorized_domain_categories, authorized_subcategories, service_cities, pro_type: document.getElementById('pe-type').value, capacity_level: +document.getElementById('pe-cap').value } }); toast('Autorisations professionnelles enregistrées ✓', 'ok'); A.userDetail(id); }
+     catch (e) { toast(e.message, 'err'); }
+   },
++  async catalogueReviews() {
++    try { const [items,catalog]=await Promise.all([api('/admin/pros/catalogue-reviews'),api('/admin/catalog')]); const options=(catalog.sous_categories||[]).filter(s=>s.active).map(s=>{const c=(catalog.categories||[]).find(x=>Number(x.id)===Number(s.metier_id))||{};const g=(catalog.grand_categories||[]).find(x=>Number(x.id)===Number(c.grand_category_id))||{};return `<option value="${s.id}">${esc([g.name,c.name,s.name].filter(Boolean).join(' › '))}</option>`;}).join(''); openModal(`<h3>Vérification des spécialités historiques</h3><p class="small muted">Ces profils n’ont pas pu être reclassés avec certitude. Corrigez-les ici sans effacer leur historique ; le choix rejoint immédiatement la structure centrale.</p><div style="max-height:55vh;overflow:auto">${items.map(r=>`<div class="panel compact-card"><b>${esc(r.user_name)}</b><div class="small muted">${esc(r.reason)}${r.legacy_service_name?' · ancienne prestation : '+esc(r.legacy_service_name):''}</div><select id="cr-sub-${r.id}" style="width:100%;margin-top:7px"><option value="">Choisir la sous-catégorie exacte…</option>${options}</select><div class="btn-row mt"><button class="btn sm" onclick="A.resolveCatalogueReview(${r.id},'corrige')">Corriger</button><button class="btn sm sec" onclick="A.resolveCatalogueReview(${r.id},'ignore')">Conserver pour le moment</button></div></div>`).join('')||'<div class="hint">Aucun profil ne nécessite de vérification.</div>'}</div><button class="btn sec mt" onclick="closeModal()">Fermer</button>`); } catch(e){toast(e.message,'err');}
++  },
++  async resolveCatalogueReview(id,status) { const field=document.getElementById('cr-sub-'+id), sub_id=Number(field&&field.value||0); if(status==='corrige'&&!sub_id)return toast('Choisissez une sous-catégorie centrale.','err'); try { await api('/admin/pros/catalogue-reviews/'+id+'/resolve',{method:'POST',body:{status,sub_id,note:'Vérification depuis le tableau de bord'}}); toast(status==='corrige'?'Spécialité corrigée et synchronisée.':'Vérification conservée sans modification.','ok'); A.catalogueReviews(); } catch(e){toast(e.message,'err');} },
+   async userEdit(id) {
+     const u = await api('/admin/users/' + id);
+     openModal(`<h3>✏️ Modifier le compte</h3>
+@@ -1395,6 +1405,7 @@
+     const imageUrl=String(g.image_url || ''), imagePublicUrl=String(g.image_public_url || imageUrl || ''), imageAsset=g.image_asset || null;
+     openModal(`<h3>${id?'Modifier':'Nouvelle'} grande catégorie</h3>
+       <label>Nom</label><input id="gc-name" style="width:100%" value="${esc(g.name||'')}">
++      <label>Libellé court (cartes / mobile)</label><input id="gc-short" maxlength="60" style="width:100%" value="${esc(g.short_label||'')}">
+       <label>Icône</label><input id="gc-icon" value="${esc(g.icon||'🧩')}" style="width:90px">
+       <label>Description courte</label><textarea id="gc-desc" rows="3">${esc(g.description||'')}</textarea>
+       <input id="gc-image-url" type="hidden" value="${esc(imageUrl)}">
+@@ -1404,7 +1415,7 @@
+         <input id="gc-image-file" type="file" accept="image/jpeg,image/png,image/webp" style="max-width:100%">
+         <div class="frow mt"><button id="gc-upload-btn" type="button" class="btn sm sec" onclick="A.uploadGrandCategoryImage()">Téléverser et remplacer</button><button id="gc-remove-btn" type="button" class="btn sm warn" onclick="A.clearGrandCategoryImage()" ${imageUrl?'':'disabled'}>Retirer la photo</button></div>
+       </div>
+-      <div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label></div>
++      <div class="frow"><label>Ordre <input id="gc-sort" type="number" value="${g.sort||99}" style="width:70px"></label><label class="check-line"><input id="gc-active" type="checkbox" ${g.active?'checked':''}> Active</label><label class="check-line"><input id="gc-popular" type="checkbox" ${g.popular?'checked':''}> Catégorie populaire</label></div>
+       <button class="btn" onclick="A.saveGrandCategory(${id||0})">Enregistrer</button><button class="btn sec mt" onclick="closeModal()">Annuler</button>`);
+   },
+   // Entrée dédiée à la galerie PDG : elle réutilise la même fiche et la même source en base.
+@@ -1434,7 +1445,7 @@
+   deleteGrandCategoryPhoto() { this.clearGrandCategoryImage(); },
+   async saveGrandCategory(id) { 
+     const image=document.getElementById('gc-image-url');
+-    const body={name:document.getElementById('gc-name').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked,image_url:image && image.value.trim() ? image.value.trim() : null};
++    const body={name:document.getElementById('gc-name').value,short_label:document.getElementById('gc-short').value,icon:document.getElementById('gc-icon').value,description:document.getElementById('gc-desc').value,sort:document.getElementById('gc-sort').value,active:document.getElementById('gc-active').checked,popular:document.getElementById('gc-popular').checked,image_url:image && image.value.trim() ? image.value.trim() : null};
+     try { const saved=await api('/admin/grand-categories'+(id?'/'+id:''),{method:id?'PUT':'POST',body});
+       if (saved && saved.category) { const c=saved.category; this.categoryImagePreview(c.image_public_url || c.image_url,'Photo publiée et synchronisée sur les appareils',c.image_asset); }
+       closeModal();toast('Grande catégorie et photo enregistrées ✓ — version publique synchronisée.','ok');render(); } catch(e) { toast(e.message,'err'); }
+@@ -1491,7 +1502,7 @@
+     openModal(`<h3>Modifier le métier</h3>
+       <label class="small muted">Nom</label><input id="em-name" style="width:100%;margin-bottom:10px" value="${esc(c.name)}">
+       <label class="small muted">Icône (émoji)</label><input id="em-icon" style="width:90px;margin-bottom:12px" value="${esc(c.icon || '')}">
+-      <label class="small muted">Grande catégorie racine</label><select id="em-grand" style="width:100%;margin-bottom:12px"><option value="">Non classée</option>${(CATD.grand_categories || []).map(g => `<option value="${g.id}" ${Number(c.grand_category_id)===Number(g.id)?'selected':''}>${esc(g.icon || '')} ${esc(g.name)}</option>`).join('')}</select>
++      <label class="small muted">Grande catégorie racine</label><select id="em-grand" style="width:100%;margin-bottom:12px"><option value="">Non classée</option>${(CATD.grand_categories || []).filter(g=>g.active).map(g => `<option value="${g.id}" ${Number(c.grand_category_id)===Number(g.id)?'selected':''}>${esc(g.icon || '')} ${esc(g.name)}</option>`).join('')}</select>
+       <div><button class="btn" onclick="A._metSave(${id})">Enregistrer</button> <button class="btn sec" onclick="closeModal()">Annuler</button></div>`);
+   },
+   async _metSave(id) { try { await api('/admin/categories/' + id, { method: 'PUT', body: { name: document.getElementById('em-name').value, icon: document.getElementById('em-icon').value, grand_category_id: document.getElementById('em-grand').value || null } }); closeModal(); toast('Catégorie modifiée ✓', 'ok'); render(); } catch (e) { toast(e.message, 'err'); } },
+--- a/seed-metiers.js
++++ b/seed-metiers.js
+@@ -21,7 +21,6 @@
+   { n:'Spécialisé', sv:[
+     { n:'Nettoyage de vitres', k:'vitres,fenetres,baies', t:['Lavage de vitres intérieures','Lavage de vitres extérieures','Vitres en hauteur'] },
+     { n:'Désinfection & désinsectisation', k:'desinfection,cafards,moustiques,punaises,rats,deratisation', t:['Désinsectisation (cafards, punaises)','Dératisation','Désinfection de locaux','Traitement anti-moustiques'] },
+-    { n:'Vidange de fosse septique', k:'fosse,septique,vidange,wc', t:['Vidange de fosse septique','Curage de canalisations'] },
+     { n:'Entretien de piscine', k:'piscine,traitement eau', t:['Nettoyage de piscine','Traitement de l\u2019eau'] } ] } ] },
+ 
+ { m:'Plomberie', i:'🔧', sc:[
+@@ -167,14 +166,17 @@
+   { n:'Mode & accessoires', sv:[
+     { n:'Stylisme & accessoires', k:'styliste,mode,sac,perles,accessoires', t:['Création de collection','Confection d\u2019accessoires','Conseil en style'] } ] } ] },
+ 
+-{ m:'Coiffure & beauté', i:'💇', sc:[
+-  { n:'Coiffure', sv:[
+-    { n:'Coiffure femme', k:'coiffure,tresses,meches,tissage,perruque,nattes', t:['Tresses','Tissage','Pose de perruque','Défrisage','Coupe et brushing','Coiffure à domicile'] },
+-    { n:'Coiffure homme', k:'coiffeur,barbier,degrade,barbe', t:['Coupe homme','Dégradé','Taille de barbe','Coiffure enfant'] } ] },
+-  { n:'Esthétique', sv:[
++{ m:'Beauté et coiffure femme', i:'💇‍♀️', sc:[
++  { n:'Coiffure femme', sv:[
++    { n:'Coiffure femme', k:'coiffure,tresses,meches,tissage,perruque,nattes', t:['Tresses','Tissage','Pose de perruque','Défrisage','Coupe et brushing','Coiffure à domicile'] } ] },
++  { n:'Esthétique et maquillage femme', sv:[
+     { n:'Soins esthétiques', k:'esthetique,manucure,pedicure,ongles,soins visage,epilation', t:['Manucure','Pédicure','Pose d\u2019ongles','Soin du visage','Épilation','Massage bien-être'] },
+     { n:'Maquillage', k:'maquillage,makeup,mariee', t:['Maquillage de mariée','Maquillage événement','Cours d\u2019auto-maquillage'] } ] } ] },
+ 
++{ m:'Beauté et coiffure homme', i:'💇‍♂️', sc:[
++  { n:'Coiffure homme et barbier', sv:[
++    { n:'Coiffure homme', k:'coiffeur,barbier,degrade,barbe', t:['Coupe homme','Dégradé','Taille de barbe','Coiffure enfant'] } ] } ] },
++
+ { m:'Photo & vidéo', i:'📸', sc:[
+   { n:'Prestations', sv:[
+     { n:'Photographie', k:'photographe,photo,shooting,mariage,portrait', t:['Reportage mariage','Shooting portrait','Photos d\u2019événement','Photos produits','Photos d\u2019identité à domicile'] },
+@@ -194,15 +196,25 @@
+   { n:'Pâtisserie', sv:[
+     { n:'Gâteaux & pâtisserie', k:'patisserie,gateau,anniversaire,mariage', t:['Gâteau d\u2019anniversaire','Gâteau de mariage','Pâtisseries assorties'] } ] } ] },
+ 
+-{ m:'Cours & formation', i:'📚', sc:[
++{ m:'Cours à domicile', i:'📚', sc:[
+   { n:'Cours à domicile', sv:[
+     { n:'Soutien scolaire', k:'cours,repetiteur,maths,francais,anglais,physique,domicile', t:['Mathématiques','Français','Anglais','Physique-Chimie','Préparation BEPC','Préparation BAC','Aide aux devoirs (primaire)'] },
+     { n:'Cours de langues', k:'anglais,allemand,espagnol,langue', t:['Anglais','Espagnol','Allemand','Chinois'] },
+-    { n:'Cours d\u2019informatique', k:'informatique,bureautique,word,excel', t:['Initiation à l\u2019ordinateur','Word / Excel / PowerPoint','Internet et e-mail'] } ] },
++    { n:'Cours d\u2019informatique', k:'informatique,bureautique,word,excel', t:['Initiation à l\u2019ordinateur','Word / Excel / PowerPoint','Internet et e-mail'] } ] } ] },
++
++{ m:'Formation et coaching', i:'🎯', sc:[
+   { n:'Formation professionnelle', sv:[
+     { n:'Formations métiers', k:'formation,apprentissage,metier', t:['Formation en couture','Formation en coiffure','Formation en pâtisserie','Formation en informatique','Permis de conduire (accompagnement)'] },
+     { n:'Musique & arts', k:'musique,piano,guitare,chant,danse,dessin', t:['Cours de piano','Cours de guitare','Cours de chant','Cours de danse','Cours de dessin'] } ] } ] },
+ 
++{ m:'Coaching et accompagnement', i:'🎯', sc:[
++  { n:'Coaching sportif et bien-être', sv:[
++    { n:'Sport & coaching', k:'coach,sport,fitness,gym', t:['Coach sportif personnel','Cours de fitness en groupe','Programme de remise en forme'] } ] } ] }, 
++
++{ m:'Vidange et assainissement', i:'🚛', sc:[
++  { n:'Fosses septiques, curage et eaux usées', sv:[
++    { n:'Vidange de fosse septique', k:'fosse,septique,vidange,wc', t:['Vidange de fosse septique','Curage de canalisations'] } ] } ] },
++
+ { m:'Rédaction & traduction', i:'✍️', sc:[
+   { n:'Services linguistiques', sv:[
+     { n:'Traduction', k:'traduction,traducteur,anglais,documents', t:['Traduction de documents','Interprétariat','Traduction certifiée'] },
+@@ -233,7 +245,7 @@
+     { n:'Aide ménagère familiale', k:'aide menagere,domestique,maison', t:['Aide ménagère à temps plein','Aide ménagère à temps partiel'] } ] },
+   { n:'Santé & bien-être', sv:[
+     { n:'Soins à domicile', k:'infirmier,soins,injection,pansement,tension', t:['Soins infirmiers à domicile','Injections et pansements','Suivi de tension / diabète'] },
+-    { n:'Sport & coaching', k:'coach,sport,fitness,gym', t:['Coach sportif personnel','Cours de fitness en groupe','Programme de remise en forme'] } ] } ] },
++    ] } ] },
+ 
+ { m:'Animaux', i:'🐾', sc:[
+   { n:'Services animaliers', sv:[
+@@ -346,8 +358,8 @@
+   'Informatique': 10000, 'Téléphones & électronique': 5000, 'Réseaux & internet': 15000,
+   'Mécanique automobile': 15000, 'Moto & engins 2 roues': 5000, 'Lavage auto & moto': 2000,
+   'Transport & livraison': 2000, 'Jardinage & espaces verts': 10000, 'Agriculture & élevage': 15000,
+-  'Couture & mode': 5000, 'Coiffure & beauté': 5000, 'Photo & vidéo': 25000, 'Événementiel': 50000,
+-  'Cuisine & traiteur': 25000, 'Cours & formation': 10000, 'Rédaction & traduction': 10000,
++  'Couture & mode': 5000, 'Beauté et coiffure femme': 5000, 'Beauté et coiffure homme': 1500, 'Photo & vidéo': 25000, 'Événementiel': 50000,
++  'Cuisine & traiteur': 25000, 'Cours à domicile': 10000, 'Formation et coaching': 10000, 'Vidange et assainissement': 35000, 'Rédaction & traduction': 10000,
+   'Administratif & comptabilité': 15000, 'Marketing & communication': 25000, 'Sécurité & gardiennage': 50000,
+   'Aide à la personne': 40000, 'Animaux': 5000, 'Services funéraires': 50000, 'Commerce & vente': 10000,
+   'Artisanat & réparations diverses': 5000, 'Services aux entreprises': 50000,
+--- a/test-colis41-catalogue.js
++++ b/test-colis41-catalogue.js
+@@ -0,0 +1,133 @@
++/* COLIS 41 — réorganisation centrale des catégories, parcours et synchronisation. */
++'use strict';
++const fs=require('fs'), os=require('os'), path=require('path'), {execFileSync}=require('child_process');
++const {chromium}=require('playwright');
++const {db}=require('./db');
++const BASE=process.env.TEST_BASE_URL||'http://127.0.0.1:3000', API=BASE+'/api';
++let pass=0,fail=0,browser;
++const saved={users:[],missions:[],root:null,metier:null,sub:null,service:null,adminLog:0};
++function ok(value,label){if(value){pass++;console.log('✓',label);}else{fail++;console.error('✗',label);}}
++function assert(value,label){ok(value,label);if(!value)throw new Error(label);}
++async function api(token,route,method='GET',body){
++  const res=await fetch(API+route,{method,headers:{...(token?{authorization:'Bearer '+token}:{}),...(body!==undefined?{'content-type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body)});
++  const data=await res.json().catch(()=>({})); return {res,data};
++}
++function testPhone(tag){return '07'+tag+String(Date.now()).slice(-6);}
++function tableExists(name){return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);}
++function cleanup(){
++  try {
++    // Les éléments temporaires du catalogue sont retirés dans l'ordre des dépendances.
++    if(saved.service) db.prepare('DELETE FROM services WHERE id=?').run(saved.service);
++    if(saved.sub) db.prepare('DELETE FROM sous_categories WHERE id=?').run(saved.sub);
++    if(saved.metier) db.prepare('DELETE FROM service_categories WHERE id=?').run(saved.metier);
++    if(saved.root) db.prepare('DELETE FROM grand_categories WHERE id=?').run(saved.root);
++    for(const id of saved.missions){
++      ['mission_messages','mission_events','mission_candidates','mission_price_changes','mission_files','mission_status_history'].forEach(t=>{if(tableExists(t))try{db.prepare(`DELETE FROM ${t} WHERE mission_id=?`).run(id)}catch{}});
++      try{db.prepare('DELETE FROM missions WHERE id=?').run(id)}catch{}
++    }
++    for(const id of saved.users){
++      // Les tests ne suppriment jamais de comptes de production : uniquement les ids créés dans ce script.
++      ['notifications','user_sessions','pro_domain_change_requests','pro_option_usage','availability_slots','service_availability','voice_search_events'].forEach(t=>{if(tableExists(t))try{db.prepare(`DELETE FROM ${t} WHERE user_id=?`).run(id)}catch{}});
++      try{db.prepare('DELETE FROM users WHERE id=?').run(id)}catch{}
++    }
++    if(saved.adminLog) db.prepare('DELETE FROM admin_log WHERE id>?').run(saved.adminLog);
++  }catch(e){console.error('Restauration COLIS41:',e.message);}
++}
++function freshMigrationCheck(){
++  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ks-colis41-fresh-'));
++  try{
++    const code=`const {db}=require(${JSON.stringify(path.join(__dirname,'db.js'))});\nconst roots=db.prepare(\"SELECT name FROM grand_categories WHERE active=1\").all().map(x=>x.name);\nconst legacy=db.prepare(\"SELECT COUNT(*) n FROM grand_categories WHERE active=1 AND name IN ('Beauté, coiffure et bien-être','Cours et formation')\").get().n;\nconst paths=db.prepare(\"SELECT s.name,g.name grand,sc.name sub FROM services s JOIN service_categories c ON c.id=s.category_id LEFT JOIN grand_categories g ON g.id=c.grand_category_id LEFT JOIN sous_categories sc ON sc.id=s.sub_id WHERE lower(s.name) LIKE '%vidange%fosse%' OR lower(s.name) LIKE '%coiffure homme%' OR lower(s.name) LIKE '%soutien scolaire%' OR lower(s.name) LIKE '%sport%'\").all();\nconsole.log('COLIS41_JSON:'+JSON.stringify({roots,legacy,paths}));`;
++    const out=execFileSync(process.execPath,['-e',code],{cwd:__dirname,env:{...process.env,DATA_DIR:dir},encoding:'utf8',timeout:120000});
++    const row=out.split(/\r?\n/).find(x=>x.startsWith('COLIS41_JSON:'));
++    const r=JSON.parse(row.slice('COLIS41_JSON:'.length));
++    const required=['Vidange et assainissement','Beauté et coiffure femme','Beauté et coiffure homme','Cours à domicile','Formation et coaching'];
++    assert(required.every(x=>r.roots.includes(x))&&r.legacy===0,'base neuve : migration COLIS41 crée seulement les racines canoniques actives');
++    const has=(word,root)=>r.paths.some(x=>x.name.toLowerCase().includes(word)&&x.grand===root&&x.sub);
++    assert(has('vidange','Vidange et assainissement')&&has('coiffure homme','Beauté et coiffure homme')&&has('soutien scolaire','Cours à domicile')&&has('sport','Formation et coaching'),'base neuve : prestations critiques rattachées à une sous-catégorie et à la bonne racine');
++  } finally { fs.rmSync(dir,{recursive:true,force:true}); }
++}
++async function register(name,tag){
++  const phone=testPhone(tag),r=await api(null,'/auth/register','POST',{name,phone,password:'Colis41!2026',address:'Cocody, Abidjan',ville:'Abidjan',quartier:'Cocody',accept_rules:true});
++  assert(r.res.status===200&&r.data.token&&r.data.user&&r.data.user.id,`inscription API du compte temporaire ${tag}`); saved.users.push(r.data.user.id); return r.data;
++}
++function waitSse(token){
++  return new Promise((resolve,reject)=>{
++    const controller=new AbortController(); let text='',done=false;
++    const timer=setTimeout(()=>{controller.abort();reject(new Error('événement SSE catalogue absent'));},7000);
++    fetch(API+'/stream?token='+encodeURIComponent(token),{signal:controller.signal,headers:{accept:'text/event-stream'}}).then(async res=>{
++      const reader=res.body.getReader();
++      while(!done){const {value,done:ended}=await reader.read();if(ended)break;text+=Buffer.from(value).toString('utf8');
++        if(/event: catalogue\ndata:/.test(text)){done=true;clearTimeout(timer);controller.abort();resolve(text);}
++      }
++    }).catch(e=>{if(!done&&e.name!=='AbortError'){clearTimeout(timer);reject(e);}});
++  });
++}
++(async()=>{try{
++  saved.adminLog=db.prepare('SELECT COALESCE(MAX(id),0) n FROM admin_log').get().n;
++  freshMigrationCheck();
++
++  let x=await api(null,'/auth/login','POST',{phone:'admin',password:'Klean@2026'}); assert(x.res.status===200&&x.data.user.role==='pdg','connexion direction pour les contrôles COLIS41'); const pdg=x.data.token;
++  const [roots,catalogue]=await Promise.all([api(null,'/grand-categories'),api(null,'/catalogue')]);
++  const canonical=['Vidange et assainissement','Beauté et coiffure femme','Beauté et coiffure homme','Cours à domicile','Formation et coaching'];
++  assert(roots.res.status===200&&canonical.every(n=>roots.data.some(g=>g.name===n))&&!roots.data.some(g=>['Beauté, coiffure et bien-être','Cours et formation'].includes(g.name)),'API publique : cinq branches canoniques et aucune racine historique active');
++  const catalogueServices=catalogue.data.flatMap(category=>category.services.map(service=>({...service,grand_category:category.grand_category,category:category.name,category_id:category.id})));
++  const findService=(n)=>catalogueServices.find(s=>Number(s.id)===n);
++  assert([25,85,86,16,100,116].every(id=>{const s=findService(id);return s&&s.sub_id&&s.sub_category&&s.grand_category;}),'catalogue public : chaque service critique expose le chemin de sous-catégorie');
++  assert(findService(25).grand_category==='Vidange et assainissement'&&findService(85).grand_category==='Beauté et coiffure femme'&&findService(86).grand_category==='Beauté et coiffure homme'&&findService(16).grand_category==='Cours à domicile'&&findService(100).grand_category==='Formation et coaching'&&findService(116).grand_category==='Formation et coaching','catalogue public : vidange, coiffure, cours et coaching suivent les racines imposées');
++  for(const [query,grand] of [['vidange','Vidange et assainissement'],['coiffeur homme','Beauté et coiffure homme'],['cours a domicile','Cours à domicile'],['coach sportif','Formation et coaching']]){
++    x=await api(null,'/search?q='+encodeURIComponent(query)); assert(x.res.status===200&&Array.isArray(x.data.results)&&x.data.results.some(s=>s.grand_category===grand&&s.sub_category),`recherche « ${query} » utilise le catalogue central et sa sous-catégorie`);
++  }
++
++  // Direction : une modification passe par l'API puis devient publique et est signalée en SSE.
++  const beforeSse=waitSse(pdg);
++  x=await api(pdg,'/admin/grand-categories','POST',{name:'Contrôle temporaire COLIS41',short_label:'Contrôle 41',description:'Créé uniquement pour la vérification automatisée.',icon:'🧪',sort:999});
++  assert(x.res.status===201&&Number.isInteger(Number(x.data.id)),'direction : création d’une grande catégorie depuis l’API'); saved.root=x.data.id;
++  await beforeSse; ok(true,'SSE : création de catégorie notifiée aux clients connectés');
++  x=await api(pdg,'/admin/categories','POST',{name:'Métier temporaire COLIS41',icon:'🧪',sort:999,grand_category_id:saved.root}); assert(x.res.status===200&&x.data.id,'direction : création du métier lié à sa racine'); saved.metier=x.data.id;
++  x=await api(pdg,'/admin/sous-categories','POST',{name:'Spécialité temporaire COLIS41',metier_id:saved.metier,sort:999}); assert(x.res.status===200&&x.data.id,'direction : création de la sous-catégorie centrale'); saved.sub=x.data.id;
++  x=await api(pdg,'/admin/services','POST',{name:'Prestation temporaire COLIS41',category_id:saved.metier,sub_id:saved.sub,keywords:'colis41 test',sort:999}); assert(x.res.status===200&&x.data.id,'direction : création d’une prestation rattachée à la sous-catégorie'); saved.service=x.data.id;
++  x=await api(pdg,'/admin/grand-categories/'+saved.root,'PUT',{name:'Contrôle COLIS41 synchronisé'}); assert(x.res.status===200,'direction : renommage central enregistré');
++  x=await api(null,'/catalogue'); const temporary=x.data.flatMap(category=>category.services.map(service=>({...service,grand_category:category.grand_category,category:category.name}))).find(s=>Number(s.id)===Number(saved.service)); assert(temporary&&temporary.grand_category==='Contrôle COLIS41 synchronisé'&&temporary.category==='Métier temporaire COLIS41'&&temporary.sub_category==='Spécialité temporaire COLIS41','modification direction répercutée dans l’API publique sans taxonomie parallèle');
++
++  // Professionnel : spécialité déclarée, validation, autorisation fine et matching réel.
++  const pro=await register('Pro coiffure homme COLIS41','41');
++  const skill=await api(pro.token,'/pro-skill-catalogue'); const male=skill.data.find(g=>g.name==='Beauté et coiffure homme');
++  const maleMetier=male&&male.categories.find(c=>c.name&&/coiffure homme|barbier/i.test(c.name)); const maleSub=maleMetier&&maleMetier.subcategories[0];
++  assert(skill.res.status===200&&male&&maleMetier&&maleSub,'formulaire professionnel : catalogue de spécialités contient la branche coiffure homme');
++  x=await api(pro.token,'/pro/apply','POST',{profession:'Barbier COLIS41',description:'Coupe et barbe homme.',experience:'3 ans',zone:'Abidjan',services:[86],domain_categories:[male.id],selected_subcategories:[maleSub.id],documents:[],accept_rules:true});
++  assert(x.res.status===200&&x.data.pro_status==='pending','candidature pro : sous-catégorie homme obligatoire et acceptée');
++  x=await api(pdg,'/admin/pros/'+pro.user.id+'/approve','POST',{}); assert(x.res.status===200,'validation d’un professionnel coiffure homme');
++  x=await api(pdg,'/admin/pros/'+pro.user.id+'/eligibility','PUT',{authorized_domain_categories:[male.id],authorized_subcategories:[maleSub.id],authorized_services:[],pro_type:'particulier',capacity_level:1,service_cities:['Abidjan']});
++  assert(x.res.status===200&&x.data.authorized_subcategories.includes(Number(maleSub.id))&&x.data.authorized_domain_categories.includes(Number(male.id)),'direction : autorisation professionnelle affinée par sous-catégorie');
++  x=await api(pro.token,'/pro/dashboard'); assert(x.res.status===200&&x.data.profile&&x.data.profile.authorized_subcategories.includes(Number(maleSub.id)),'espace professionnel : spécialité autorisée synchronisée depuis la direction');
++
++  const client=await register('Client matching COLIS41','42');
++  x=await api(client.token,'/missions','POST',{service_id:86,description:'Coupe homme classique, besoin aujourd’hui.',address:'Cocody Angré',intervention_city:'Abidjan',intervention_commune:'Cocody',schedule_type:'today',provider_type:'particulier',answers:{}});
++  assert(x.res.status===200&&x.data.id&&x.data.status==='recherche','création d’une demande coiffure homme depuis le parcours client'); saved.missions.push(x.data.id);
++  const candidate=db.prepare('SELECT * FROM mission_candidates WHERE mission_id=? AND pro_id=?').get(x.data.id,pro.user.id);
++  assert(!!candidate&&candidate.status==='offered','matching : seul profil validé avec spécialité homme reçoit l’offre correspondante');
++
++  // Les comptes équipe relisent bien la source catalogue ; les écritures restent contrôlées par permissions.
++  const staff=[];
++  for(const [role,tag] of [['gestionnaire','43'],['agent','44']]){
++    const r=await api(pdg,'/admin/staff','POST',{name:`${role} COLIS41`,phone:testPhone(tag),role}); assert(r.res.status===201&&r.data.temporary_code,'direction : création contrôlée du compte '+role); saved.users.push(r.data.id);
++    const login=await api(null,'/auth/login','POST',{phone:r.data.phone,password:r.data.temporary_code}); assert(login.res.status===200&&login.data.user.role===role,'connexion '+role+' avec accès provisoire'); staff.push(login.data);
++  }
++  for(const member of staff){x=await api(member.token,'/catalogue'); assert(x.res.status===200&&x.data.some(category=>category.grand_category==='Beauté et coiffure homme'&&category.services.some(s=>Number(s.id)===86&&s.sub_category)),'équipe '+member.user.role+' : lecture du même catalogue central');}
++  x=await api(staff.find(s=>s.user.role==='agent').token,'/admin/services','POST',{name:'Interdit',category_id:saved.metier}); assert(x.res.status===403,'agent : écriture catalogue refusée sans permission dédiée');
++
++  // Contrôles UI : les vues client, pro et direction consomment les réponses réelles du serveur.
++  browser=await chromium.launch({headless:true});
++  const publicCtx=await browser.newContext({viewport:{width:390,height:844},isMobile:true}),publicPage=await publicCtx.newPage(),publicErrors=[]; publicPage.on('pageerror',e=>publicErrors.push(e.message));
++  await publicPage.goto(BASE+'/#/home'); await publicPage.waitForSelector('#home-q');
++  await publicPage.getByText('Voir tous les services',{exact:true}).click(); await publicPage.waitForTimeout(350);
++  const homeText=await publicPage.locator('#app').innerText(); assert(homeText.includes('Assainissement')&&homeText.includes('Beauté homme')&&homeText.includes('Cours à domicile')&&homeText.includes('Formation & coaching')&&!homeText.includes('Beauté, coiffure et bien-être'),'interface client mobile : racines réorganisées rendues depuis l’API');
++  await publicPage.goto(BASE+'/#/home'); await publicPage.waitForSelector('#home-q'); await publicPage.locator('#home-q').fill('coiffeur homme'); await publicPage.keyboard.press('Enter'); await publicPage.waitForTimeout(450); assert((await publicPage.locator('#app').innerText()).includes('Beauté et coiffure homme'),'interface client : recherche affiche la branche homme'); assert(!publicErrors.length,'interface client : aucun échec JavaScript de catalogue'); await publicCtx.close();
++  const proCtx=await browser.newContext({viewport:{width:1280,height:850}}); await proCtx.addInitScript(t=>localStorage.setItem('ks_token',t),pro.token); const proPage=await proCtx.newPage(),proErrors=[];proPage.on('pageerror',e=>proErrors.push(e.message)); await proPage.goto(BASE+'/#/pro'); await proPage.waitForTimeout(500); assert((await proPage.locator('#app').innerText()).includes('Barbier COLIS41')||!proErrors.length,'interface professionnel : profil spécialisé charge sans rupture'); await proCtx.close();
++  const adminCtx=await browser.newContext({viewport:{width:1280,height:850}});await adminCtx.addInitScript(t=>localStorage.setItem('ks_admin_token',t),pdg);const adminPage=await adminCtx.newPage(),adminErrors=[];adminPage.on('pageerror',e=>adminErrors.push(e.message));await adminPage.goto(BASE+'/admin/#catalog');await adminPage.waitForTimeout(600);const adminText=await adminPage.locator('#root').innerText();assert(adminText.includes('Structure centrale synchronisée')&&adminText.includes('Beauté et coiffure homme'),'interface direction : structure centrale et branche homme administrables');assert(!adminErrors.length,'interface direction : catalogue sans erreur JavaScript');await adminCtx.close();
++}catch(e){fail++;console.error(e.stack||e);}finally{
++  try{if(browser)await browser.close();}catch{}
++  cleanup();
++  console.log(`COLIS 41 catalogue : ${pass}/${pass+fail}`);
++  process.exitCode=fail?1:0;
++}})();

@@ -1384,7 +1384,10 @@ ensureColumn('missions', 'estimate_meta', "TEXT NOT NULL DEFAULT '{}'");
     ['Transport et déménagement','🚚','Transport, livraison et déménagement.'],
     ['Mécanique et automobile','🚗','Automobile, moto et dépannage mécanique.'],
     ['Informatique et téléphonie','💻','Ordinateurs, réseaux, logiciels et téléphones.'],
-    ['Beauté, coiffure et bien-être','💆','Soins, coiffure et bien-être.'],
+    ['Beauté et coiffure femme','💇‍♀️','Coiffure femme, esthétique, maquillage et soins de beauté.'],
+    ['Beauté et coiffure homme','💇‍♂️','Coiffure homme, barbier, coupe et entretien masculin.'],
+    ['Vidange et assainissement','🚛','Vidange, curage, fosses septiques et gestion des eaux usées.'],
+    ['Formation et coaching','🎯','Formation professionnelle, accompagnement, coaching et développement de compétences.'],
     ['Couture et mode','🧵','Couture, retouche, stylisme et mode.'],
     ['Restauration et alimentation','🍲','Cuisine, pâtisserie et services alimentaires.'],
     ['Jardinage et espaces verts','🌿','Jardins, espaces verts et entretien extérieur.'],
@@ -1392,7 +1395,7 @@ ensureColumn('missions', 'estimate_meta', "TEXT NOT NULL DEFAULT '{}'");
     ['Aide à domicile et services familiaux','🏠','Aide quotidienne, garde et services familiaux.'],
     ['Événementiel','🎉','Organisation et prestations pour événements.'],
     ['Services professionnels et administratifs','📋','Administration, communication, conseil et services aux entreprises.'],
-    ['Cours et formation','🎓','Cours, accompagnement et formation professionnelle.'],
+    ['Cours à domicile','📚','Soutien scolaire, langues et apprentissages à domicile.'],
     ['Agriculture et élevage','🌾','Production agricole, élevage et services associés.'],
     ['Artisanat et réparations diverses','🧰','Artisanat, cordonnerie, maroquinerie et réparations d’objets.'],
     ['Ferronnerie et soudure','🔩','Ouvrages métalliques, portails, grilles et soudure.'],
@@ -1417,7 +1420,14 @@ ensureColumn('missions', 'estimate_meta', "TEXT NOT NULL DEFAULT '{}'");
   const ids = new Map(db.prepare('SELECT id,name FROM grand_categories').all().map(r => [r.name, r.id]));
   const pick = name => {
     const n = norm(name);
-    if (/nettoyage|blanchisserie|desinsect|fosse|piscine/.test(n)) return 'Nettoyage et entretien';
+    // Les quatre branches ci-dessous sont déjà séparées dans le seed : ne jamais les
+    // faire transiter par les anciens fourre-tout au premier démarrage.
+    if (/vidange|assainissement|fosse/.test(n)) return 'Vidange et assainissement';
+    if (/coiffure homme|barbier/.test(n)) return 'Beauté et coiffure homme';
+    if (/coiff|beaute|esthet|bien.etre|maquillage/.test(n)) return 'Beauté et coiffure femme';
+    if (/cours a domicile/.test(n)) return 'Cours à domicile';
+    if (/formation|coach/.test(n)) return 'Formation et coaching';
+    if (/nettoyage|blanchisserie|desinsect|piscine/.test(n)) return 'Nettoyage et entretien';
     if (/plomb/.test(n)) return 'Plomberie';
     if (/electric|solaire/.test(n)) return 'Électricité';
     if (/clim|froid|refriger|congel/.test(n)) return 'Climatisation et froid';
@@ -2971,5 +2981,189 @@ const COLIS40_DEFAULTS={
   app_logo_version:crypto.randomBytes(12).toString('hex')
 };
 for(const [k,v] of Object.entries(COLIS40_DEFAULTS)) if(getSetting(k)===null)setSetting(k,v);
+
+// ============================================================
+// COLIS 41 — réorganisation unifiée du catalogue de services
+// Une seule hiérarchie centrale est utilisée par l'accueil, la recherche,
+// l'inscription professionnelle, les missions et l'administration :
+// grande catégorie → métier → sous-catégorie → prestation → tâche.
+// Les IDs des prestations et tâches existantes sont conservés afin que les
+// demandes, missions, évaluations, factures et historiques restent liés.
+// ============================================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS catalogue_reorganization_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  migration_key TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id INTEGER,
+  action TEXT NOT NULL,
+  before_data TEXT NOT NULL DEFAULT '{}',
+  after_data TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(migration_key, entity_type, entity_id, action)
+);
+CREATE INDEX IF NOT EXISTS idx_catalogue_reorg_audit_key ON catalogue_reorganization_audit(migration_key,created_at);
+`);
+(function reorganizeUnifiedCatalogueColis41() {
+  const migrationKey='colis41_unified_categories_v1';
+  const parseIds=value=>{ try { const rows=JSON.parse(value||'[]'); return Array.isArray(rows)?[...new Set(rows.map(Number).filter(Number.isInteger))]:[]; } catch { return []; } };
+  const jsonIds=ids=>JSON.stringify([...new Set((ids||[]).map(Number).filter(Number.isInteger))]);
+  const audit=(type,id,action,before,after)=>db.prepare(`INSERT OR IGNORE INTO catalogue_reorganization_audit(migration_key,entity_type,entity_id,action,before_data,after_data) VALUES(?,?,?,?,?,?)`).run(migrationKey,type,id||null,action,JSON.stringify(before||{}),JSON.stringify(after||{}));
+  // Les anciens seeds ne doivent jamais réactiver une racine retirée après la migration.
+  // Cette garde est aussi utile lorsqu'une sauvegarde intermédiaire est redémarrée.
+  if (getSetting(migrationKey) !== null) {
+    const pairs=[['Beauté, coiffure et bien-être','Beauté et coiffure femme'],['Cours et formation','Cours à domicile']];
+    db.transaction(()=>pairs.forEach(([oldName,newName])=>{const old=db.prepare('SELECT * FROM grand_categories WHERE lower(name)=lower(?)').get(oldName),target=db.prepare('SELECT * FROM grand_categories WHERE lower(name)=lower(?)').get(newName);if(!old||!target||Number(old.id)===Number(target.id))return;db.prepare('UPDATE service_categories SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);db.prepare('UPDATE price_estimation_rules SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);db.prepare('UPDATE search_dictionary_entries SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);db.prepare('UPDATE grand_categories SET active=0,popular=0,popular_sort=NULL,updated_at=datetime(\'now\') WHERE id=?').run(old.id);audit('grand_category',old.id,'legacy_root_retired',old,{canonical_id:target.id});}))();
+    return;
+  }
+  const tx=db.transaction(()=>{
+    const rootByName=name=>db.prepare('SELECT * FROM grand_categories WHERE lower(name)=lower(?) ORDER BY id LIMIT 1').get(name);
+    const categoryByName=name=>db.prepare('SELECT * FROM service_categories WHERE lower(name)=lower(?) ORDER BY id LIMIT 1').get(name);
+    const ensureRoot=(name,icon,description,shortLabel,sort)=>{
+      let row=rootByName(name);
+      if(!row) { const id=db.prepare('INSERT INTO grand_categories(name,short_label,description,icon,active,sort) VALUES(?,?,?,?,1,?)').run(name,shortLabel,description,icon,sort).lastInsertRowid; row=db.prepare('SELECT * FROM grand_categories WHERE id=?').get(id); audit('grand_category',id,'creation',{},row); }
+      return row;
+    };
+    // Renomme en place lorsque possible : les références des profils, prix, annonces
+    // et statistiques gardent ainsi le même identifiant de domaine.
+    const renameRoot=(oldName,newName,icon,description,shortLabel,sort)=>{
+      let old=rootByName(oldName), target=rootByName(newName);
+      if(old && (!target || Number(old.id)===Number(target.id))) {
+        const before={...old}; db.prepare('UPDATE grand_categories SET name=?,icon=?,description=?,short_label=?,active=1,sort=?,updated_at=datetime(\'now\') WHERE id=?').run(newName,icon,description,shortLabel,sort,old.id);
+        target=db.prepare('SELECT * FROM grand_categories WHERE id=?').get(old.id); audit('grand_category',old.id,'renommage',before,target);
+      } else if(old && target && Number(old.id)!==Number(target.id)) {
+        const before={...old}; db.prepare('UPDATE service_categories SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);
+        db.prepare('UPDATE price_estimation_rules SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);
+        db.prepare('UPDATE search_dictionary_entries SET grand_category_id=? WHERE grand_category_id=?').run(target.id,old.id);
+        db.prepare('UPDATE grand_categories SET active=0,popular=0,popular_sort=NULL,updated_at=datetime(\'now\') WHERE id=?').run(old.id);
+        audit('grand_category',old.id,'fusion_vers_canonique',before,{canonical_id:target.id});
+      }
+      return target || rootByName(newName);
+    };
+    const ensureCategory=(name,icon,rootId,sort)=>{
+      let row=categoryByName(name);
+      if(!row) { const id=db.prepare('INSERT INTO service_categories(name,icon,grand_category_id,active,sort) VALUES(?,?,?,1,?)').run(name,icon,rootId,sort).lastInsertRowid; row=db.prepare('SELECT * FROM service_categories WHERE id=?').get(id); audit('category',id,'creation',{},row); }
+      else if(Number(row.grand_category_id)!==Number(rootId)) { const before={...row}; db.prepare('UPDATE service_categories SET grand_category_id=?,icon=COALESCE(icon,?) WHERE id=?').run(rootId,icon,row.id); row=db.prepare('SELECT * FROM service_categories WHERE id=?').get(row.id); audit('category',row.id,'rattachement',before,row); }
+      return row;
+    };
+    const ensureSub=(categoryId,name,sort)=>{
+      let row=db.prepare('SELECT * FROM sous_categories WHERE metier_id=? AND lower(name)=lower(?) ORDER BY id LIMIT 1').get(categoryId,name);
+      if(!row) { const id=db.prepare('INSERT INTO sous_categories(metier_id,name,active,sort) VALUES(?,?,1,?)').run(categoryId,name,sort).lastInsertRowid; row=db.prepare('SELECT * FROM sous_categories WHERE id=?').get(id); audit('sub_category',id,'creation',{},row); }
+      return row;
+    };
+    const categoryMove=(row,name,icon,rootId,sort)=>{
+      if(!row) return null; const before={...row}; db.prepare('UPDATE service_categories SET name=?,icon=?,grand_category_id=?,active=1,sort=? WHERE id=?').run(name,icon,rootId,sort,row.id); const after=db.prepare('SELECT * FROM service_categories WHERE id=?').get(row.id); audit('category',row.id,'reorganisation',before,after); return after;
+    };
+    const moveService=(service,newCategory,newSub)=>{
+      if(!service) return; const before={...service}; db.prepare('UPDATE services SET category_id=?,sub_id=? WHERE id=?').run(newCategory.id,newSub.id,service.id);
+      // Toute règle ou expression explicitement attachée à la prestation suit sa nouvelle branche.
+      db.prepare('UPDATE price_estimation_rules SET grand_category_id=?,category_id=?,sub_id=? WHERE service_id=?').run(newCategory.grand_category_id,newCategory.id,newSub.id,service.id);
+      db.prepare('UPDATE search_dictionary_entries SET grand_category_id=?,category_id=?,sub_id=? WHERE service_id=?').run(newCategory.grand_category_id,newCategory.id,newSub.id,service.id);
+      audit('service',service.id,'deplacement',before,{category_id:newCategory.id,sub_id:newSub.id,grand_category_id:newCategory.grand_category_id});
+    };
+    const serviceNamed=name=>db.prepare('SELECT * FROM services WHERE lower(name)=lower(?) ORDER BY id LIMIT 1').get(name);
+
+    // 1. Les activités d'assainissement ne sont plus rangées dans le nettoyage.
+    const sanitation=ensureRoot('Vidange et assainissement','🚛','Vidange, curage, fosses septiques et gestion des eaux usées.','Assainissement',2);
+    const sanitationCategory=ensureCategory('Vidange et assainissement','🚛',sanitation.id,2);
+    const sanitationSub=ensureSub(sanitationCategory.id,'Fosses septiques, curage et eaux usées',1);
+    moveService(serviceNamed('Vidange de fosse septique'),sanitationCategory,sanitationSub);
+
+    // 2. Les spécialités femme et homme sont des parcours distincts, sans supprimer
+    // les prestations historiques ni leurs tâches.
+    const beautyFemale=renameRoot('Beauté, coiffure et bien-être','Beauté et coiffure femme','💇‍♀️','Coiffure femme, esthétique, maquillage et soins de beauté.','Beauté femme',10) || ensureRoot('Beauté et coiffure femme','💇‍♀️','Coiffure femme, esthétique, maquillage et soins de beauté.','Beauté femme',10);
+    const beautySource=categoryByName('Coiffure & beauté') || categoryByName('Beauté et coiffure femme');
+    const femaleCategory=categoryMove(beautySource,'Beauté et coiffure femme','💇‍♀️',beautyFemale.id,10) || ensureCategory('Beauté et coiffure femme','💇‍♀️',beautyFemale.id,10);
+    let formerHairSub=serviceNamed('Coiffure femme'); formerHairSub=formerHairSub && db.prepare('SELECT * FROM sous_categories WHERE id=?').get(formerHairSub.sub_id);
+    if(formerHairSub) { const before={...formerHairSub}; db.prepare('UPDATE sous_categories SET metier_id=?,name=?,active=1 WHERE id=?').run(femaleCategory.id,'Coiffure femme',formerHairSub.id); audit('sub_category',formerHairSub.id,'precision_femme',before,{metier_id:femaleCategory.id,name:'Coiffure femme'}); }
+    let beautySub=serviceNamed('Soins esthétiques'); beautySub=beautySub && db.prepare('SELECT * FROM sous_categories WHERE id=?').get(beautySub.sub_id);
+    if(beautySub) { const before={...beautySub}; db.prepare('UPDATE sous_categories SET metier_id=?,name=?,active=1 WHERE id=?').run(femaleCategory.id,'Esthétique et maquillage femme',beautySub.id); audit('sub_category',beautySub.id,'precision_femme',before,{metier_id:femaleCategory.id,name:'Esthétique et maquillage femme'}); }
+    // Les prestations restées dans la catégorie féminine suivent ses sous-catégories renommées.
+    if(formerHairSub) db.prepare('UPDATE services SET category_id=? WHERE sub_id=?').run(femaleCategory.id,formerHairSub.id);
+    if(beautySub) db.prepare('UPDATE services SET category_id=? WHERE sub_id=?').run(femaleCategory.id,beautySub.id);
+    const beautyMale=ensureRoot('Beauté et coiffure homme','💇‍♂️','Coiffure homme, barbier, coupe et entretien masculin.','Beauté homme',11);
+    const maleCategory=ensureCategory('Beauté et coiffure homme','💇‍♂️',beautyMale.id,1);
+    const maleSub=ensureSub(maleCategory.id,'Coiffure homme et barbier',1);
+    const maleService=serviceNamed('Coiffure homme'); moveService(maleService,maleCategory,maleSub);
+
+    // 3. Cours à domicile, formation et coaching sont désormais clairement séparés.
+    const homeCourses=renameRoot('Cours et formation','Cours à domicile','📚','Soutien scolaire, langues et apprentissages à domicile.','Cours à domicile',18) || ensureRoot('Cours à domicile','📚','Soutien scolaire, langues et apprentissages à domicile.','Cours à domicile',18);
+    const courseSource=categoryByName('Cours & formation') || categoryByName('Cours à domicile');
+    const courseCategory=categoryMove(courseSource,'Cours à domicile','📚',homeCourses.id,18) || ensureCategory('Cours à domicile','📚',homeCourses.id,18);
+    const formation=ensureRoot('Formation et coaching','🎯','Formation professionnelle, accompagnement, coaching et développement de compétences.','Formation & coaching',19);
+    const formationCategory=ensureCategory('Formation et coaching','🎯',formation.id,1);
+    const legacyFormationSub=db.prepare('SELECT * FROM sous_categories WHERE metier_id=? AND lower(name)=lower(?)').get(courseCategory.id,'Formation professionnelle');
+    if(legacyFormationSub) {
+      const before={...legacyFormationSub}; db.prepare('UPDATE sous_categories SET metier_id=?,active=1 WHERE id=?').run(formationCategory.id,legacyFormationSub.id); db.prepare('UPDATE services SET category_id=? WHERE sub_id=?').run(formationCategory.id,legacyFormationSub.id); audit('sub_category',legacyFormationSub.id,'transfert_formation',before,{metier_id:formationCategory.id});
+    }
+    const coachingCategory=ensureCategory('Coaching et accompagnement','🎯',formation.id,2);
+    const coachingSub=ensureSub(coachingCategory.id,'Coaching sportif et bien-être',1);
+    const coachingService=serviceNamed('Sport & coaching');
+    let formerHealthSub=coachingService && db.prepare('SELECT * FROM sous_categories WHERE id=?').get(coachingService.sub_id);
+    moveService(coachingService,coachingCategory,coachingSub);
+    // Le seed COLIS41 crée déjà un métier de coaching autonome. On ne renomme en
+    // « soins » que l'ancienne sous-catégorie partagée Aide à la personne, jamais la
+    // sous-catégorie canonique de coaching qui vient d'être déplacée.
+    if(formerHealthSub && Number(formerHealthSub.metier_id)!==Number(coachingCategory.id)) { const before={...formerHealthSub}; db.prepare('UPDATE sous_categories SET name=? WHERE id=?').run('Soins de santé à domicile',formerHealthSub.id); audit('sub_category',formerHealthSub.id,'precision_sante',before,{name:'Soins de santé à domicile'}); }
+
+    // Les publicités et options de compte qui visaient les anciennes catégories larges
+    // continuent de couvrir les nouveaux parcours qui en proviennent.
+    const addJsonTarget=(table,column,fromId,toIds)=>db.prepare(`SELECT rowid,${column} value FROM ${table}`).all().forEach(row=>{const before=parseIds(row.value);if(!before.includes(Number(fromId)))return;const after=[...new Set([...before,...toIds.map(Number)])];if(JSON.stringify(before)!==JSON.stringify(after))db.prepare(`UPDATE ${table} SET ${column}=? WHERE rowid=?`).run(jsonIds(after),row.rowid);});
+    addJsonTarget('ads','target_categories',beautyFemale.id,[beautyMale.id]);
+    addJsonTarget('ads','target_categories',homeCourses.id,[formation.id]);
+    addJsonTarget('pro_account_options','categories',femaleCategory.id,[maleCategory.id]);
+    addJsonTarget('pro_account_options','categories',courseCategory.id,[formationCategory.id,coachingCategory.id]);
+
+    // Les règles tarifaires/dictionnaires globaux conservent leur portée sur chaque
+    // branche nouvellement séparée. Les règles fines suivent déjà la prestation déplacée.
+    const cloneRootTargets=(fromId,toId)=>{
+      db.prepare(`INSERT INTO price_estimation_rules(grand_category_id,city,zone,base_price,min_price,max_price,factors,source_type,source_note,source_url,source_date,verified_at,active,priority,public_unit,created_at,updated_at)
+        SELECT ?,city,zone,base_price,min_price,max_price,factors,source_type,source_note,source_url,source_date,verified_at,active,priority,public_unit,created_at,datetime('now') FROM price_estimation_rules
+        WHERE grand_category_id=? AND category_id IS NULL AND sub_id IS NULL AND service_id IS NULL AND task_id IS NULL`).run(toId,fromId);
+      db.prepare(`INSERT INTO search_dictionary_entries(term,normalized,grand_category_id,active,source,created_at,updated_at)
+        SELECT term,normalized,?,active,source,created_at,datetime('now') FROM search_dictionary_entries
+        WHERE grand_category_id=? AND category_id IS NULL AND sub_id IS NULL AND service_id IS NULL AND task_id IS NULL`).run(toId,fromId);
+    };
+    cloneRootTargets(beautyFemale.id,beautyMale.id); cloneRootTargets(homeCourses.id,formation.id);
+
+    // Les profils anciens sont recalculés à partir de leurs sous-catégories : les
+    // identifiants de sous-catégorie persistants garantissent le matching des missions.
+    const domainsForSubs=ids=>{ const valid=[...new Set((ids||[]).map(Number).filter(Number.isInteger))]; if(!valid.length)return []; return db.prepare(`SELECT DISTINCT c.grand_category_id id FROM sous_categories sc JOIN service_categories c ON c.id=sc.metier_id JOIN grand_categories g ON g.id=c.grand_category_id WHERE sc.active=1 AND c.active=1 AND g.active=1 AND sc.id IN (${valid.map(()=>'?').join(',')})`).all(...valid).map(r=>Number(r.id)); };
+    const domainsForServices=ids=>{ const valid=[...new Set((ids||[]).map(Number).filter(Number.isInteger))]; if(!valid.length)return []; return db.prepare(`SELECT DISTINCT c.grand_category_id id FROM services s JOIN service_categories c ON c.id=s.category_id JOIN grand_categories g ON g.id=c.grand_category_id WHERE s.active=1 AND c.active=1 AND g.active=1 AND s.id IN (${valid.map(()=>'?').join(',')})`).all(...valid).map(r=>Number(r.id)); };
+    const review=db.prepare("INSERT OR IGNORE INTO pro_profile_catalogue_reviews(user_id,legacy_service_id,reason) VALUES(?,?,?)");
+    db.prepare('SELECT * FROM pro_profiles').all().forEach(profile=>{
+      const services=[...new Set([...parseIds(profile.services),...parseIds(profile.authorized_services)])];
+      const has=id=>services.includes(Number(id));
+      const updateSelection=(raw,nullable)=>{
+        if(nullable && (raw===null||raw===undefined||raw===''))return null;
+        let subs=parseIds(raw);
+        // Une ancienne sélection partagée est déplacée automatiquement uniquement
+        // lorsqu'une prestation historique prouve la spécialité ; sinon le PDG décide.
+        if(formerHairSub && subs.includes(Number(formerHairSub.id))) {
+          if(maleService && has(maleService.id)) { subs=[...new Set([...subs,Number(maleSub.id)])]; if(!services.some(id=>[serviceNamed('Coiffure femme')&&serviceNamed('Coiffure femme').id,serviceNamed('Soins esthétiques')&&serviceNamed('Soins esthétiques').id,serviceNamed('Maquillage')&&serviceNamed('Maquillage').id].filter(Boolean).includes(id))) subs=subs.filter(id=>id!==Number(formerHairSub.id)); }
+          else if(!services.length) review.run(profile.user_id,maleService&&maleService.id||null,'colis41_coiffure_specialite_a_verifier');
+        }
+        if(formerHealthSub && subs.includes(Number(formerHealthSub.id))) {
+          if(coachingService && has(coachingService.id)) { subs=[...new Set([...subs,Number(coachingSub.id)])]; if(!services.some(id=>id===Number(serviceNamed('Soins à domicile')&&serviceNamed('Soins à domicile').id))) subs=subs.filter(id=>id!==Number(formerHealthSub.id)); }
+          else if(!services.length) review.run(profile.user_id,coachingService&&coachingService.id||null,'colis41_coaching_specialite_a_verifier');
+        }
+        return subs;
+      };
+      const selected=updateSelection(profile.selected_subcategories,false), authorized=updateSelection(profile.authorized_subcategories,true);
+      const selectedDomains=domainsForSubs(selected); const serviceDomains=domainsForServices(services);
+      const authorizedBase=authorized===null?null:domainsForSubs(authorized);
+      const domains=selectedDomains.length?selectedDomains:serviceDomains;
+      const authorizedDomains=authorizedBase===null?(domains.length?domains:null):(authorizedBase.length?authorizedBase:serviceDomains);
+      db.prepare('UPDATE pro_profiles SET selected_subcategories=?,domain_categories=?,authorized_subcategories=?,authorized_domain_categories=? WHERE user_id=?').run(jsonIds(selected),jsonIds(domains),authorized===null?null:jsonIds(authorized),authorizedDomains===null?null:jsonIds(authorizedDomains),profile.user_id);
+    });
+    // Les demandes de changement restent lisibles avec les nouvelles racines.
+    db.prepare('SELECT * FROM pro_domain_change_requests').all().forEach(row=>{
+      const requestedSubs=parseIds(row.requested_subcategories), previousSubs=parseIds(row.previous_subcategories);
+      if(requestedSubs.length||previousSubs.length) db.prepare('UPDATE pro_domain_change_requests SET requested_domains=?,previous_domains=? WHERE id=?').run(jsonIds(domainsForSubs(requestedSubs)),jsonIds(domainsForSubs(previousSubs)),row.id);
+    });
+    setSetting(migrationKey,'1');
+  });
+  tx();
+})();
 
 module.exports = { db, hashPassword, getSetting, setSetting, DB_PATH };
